@@ -127,16 +127,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: gitleaks (working tree)
-        run: >-
-          docker run --rm -v "$GITHUB_WORKSPACE:/repo"
-          ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055
-          dir /repo --config /repo/.gitleaks.toml --redact --exit-code 1
-      - name: gitleaks (full git history)
-        run: >-
-          docker run --rm -v "$GITHUB_WORKSPACE:/repo"
-          ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055
-          git /repo --config /repo/.gitleaks.toml --redact --exit-code 1
+      # history + tracked-tree scans + canary regression proving the
+      # negative-fixture directory is NOT allowlisted. Image digest is pinned
+      # inside the script (single source of truth with local runs).
+      - name: gitleaks (history + tree + canary)
+        run: bash scripts/secret-scan.sh all
 
   dependency-scan:
     name: dependency scan (osv-scanner)

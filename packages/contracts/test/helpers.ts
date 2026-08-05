@@ -1,6 +1,7 @@
-# Must be rejected: credential-style assignment embedded in a manifest value.
-# The value below is a DELIBERATELY FAKE test credential, not a real secret.
-apiVersion: drake.duosis.com/v1alpha1
+/** Shared test helpers (not a test file). */
+
+export function manifestWithSelectorValue(value: string): string {
+  return `apiVersion: drake.duosis.com/v1alpha1
 kind: ProjectObservability
 metadata: {name: alpha}
 spec:
@@ -14,5 +15,7 @@ spec:
       runtime: fastapi
       metricsProfile: fastapi-v1
       workloadSelector:
-        bootstrap: "password=fake-test-value-not-real"
+        value: ${JSON.stringify(value)}
   tenantModel: {mode: none}
+`;
+}

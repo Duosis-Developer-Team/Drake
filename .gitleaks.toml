@@ -1,20 +1,17 @@
 # Gitleaks configuration.
 #
-# The default ruleset stays fully enabled. The only allowlisted paths are the
-# contract validator's NEGATIVE fixtures, which contain deliberately fake,
-# non-functional credential shapes that exist precisely to prove the validator
-# rejects them. Nothing else is exempt — do not widen this list to silence a
-# finding; fix the finding.
+# The default ruleset is fully enabled and there are NO path allowlists:
+# no source, test, fixture, docs, or contracts directory is excluded from
+# scanning. Credential-shaped test values are generated at test runtime from
+# concatenated parts and are never committed as scannable literals, so the
+# scanner needs no exemptions. A canary regression test
+# (scripts/secret-scan.sh canary) plants a temporary high-confidence fake
+# credential inside the negative-fixture directory and asserts the scanner
+# detects it — proving that directory is NOT exempt.
+#
+# Do not add path allowlists to silence a finding; fix the finding. If an
+# exemption is ever truly unavoidable, it must be a single-finding
+# fingerprint with a written justification.
 
 [extend]
 useDefault = true
-
-[allowlist]
-description = "Deliberately fake credential fixtures used by validator rejection tests"
-paths = [
-  '''packages/contracts/fixtures/invalid/.*\.yaml''',
-  # Generated, gitignored build caches: Next.js writes random preview-mode
-  # keys into .next/. Never committed; excluded so local dir scans stay
-  # meaningful. CI checkouts contain no build output.
-  '''apps/web/\.next/.*''',
-]

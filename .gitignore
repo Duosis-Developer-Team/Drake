@@ -58,6 +58,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# --- Secret-scan transient workdir (script-managed, never committed) ---
+/.secret-scan-tree/
+
 # --- Logs & local artifacts ---
 *.log
 logs/

@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+
+import { manifestWithSelectorValue } from "./helpers.js";
 
 const CLI = join(__dirname, "..", "dist", "cli.js");
 const FIXTURES = join(__dirname, "..", "fixtures");
@@ -21,6 +25,24 @@ function runCli(args: string[]): CliRun {
   }
 }
 
+/**
+ * Credential test files are written to a NON-COMMITTED temp directory at
+ * runtime, from concatenated parts. Nothing credential-shaped is ever a
+ * committed literal, so the secret scanner needs no fixture allowlists.
+ * Cleanup is guaranteed by afterAll (runs on failure too).
+ */
+const tempDir = mkdtempSync(join(tmpdir(), "drake-cli-fixtures-"));
+
+afterAll(() => {
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+function writeRuntimeFixture(name: string, selectorValue: string): string {
+  const file = join(tempDir, name);
+  writeFileSync(file, manifestWithSelectorValue(selectorValue), "utf8");
+  return file;
+}
+
 describe("drake-validate CLI", () => {
   it("exits 0 for all valid fixtures", () => {
     const files = ["project-alpha", "project-beta", "project-gamma", "project-delta"].map((n) =>
@@ -38,14 +60,21 @@ describe("drake-validate CLI", () => {
     expect(run.stdout).toContain("autoRemediation");
   });
 
-  it("never prints the fake credential value from fixtures", () => {
-    const run = runCli([
-      join(FIXTURES, "invalid", "credential-url.yaml"),
-      join(FIXTURES, "invalid", "credential-assignment.yaml"),
-    ]);
+  it("rejects runtime-generated credential fixtures without echoing values", () => {
+    const urlValue = ["postgresql://svc:", "fake-", "cli-", "credential", "@db.example.test/x"].join(
+      "",
+    );
+    const assignmentValue = ["pass", "word=", "fake-", "cli-", "value"].join("");
+    const files = [
+      writeRuntimeFixture("credential-url.yaml", urlValue),
+      writeRuntimeFixture("credential-assignment.yaml", assignmentValue),
+    ];
+    const run = runCli(files);
     expect(run.status).toBe(1);
-    expect(run.stdout).not.toContain("fake-test-password-not-real");
-    expect(run.stdout).not.toContain("fake-test-value-not-real");
+    expect(run.stdout.match(/^INVALID /gm)).toHaveLength(2);
+    expect(run.stdout).toContain("credential-in-url");
+    expect(run.stdout).toContain("credential-assignment");
+    expect(run.stdout).not.toContain("fake-cli");
   });
 
   it("exits 2 without arguments", () => {
@@ -57,7 +86,11 @@ describe("drake-validate CLI", () => {
   });
 
   it("validates tenant snapshots with --schema", () => {
-    const run = runCli(["--schema", "tenant-snapshot", join(FIXTURES, "valid", "project-alpha.yaml")]);
+    const run = runCli([
+      "--schema",
+      "tenant-snapshot",
+      join(FIXTURES, "valid", "project-alpha.yaml"),
+    ]);
     expect(run.status).toBe(1); // a project manifest is NOT a valid snapshot
   });
 });

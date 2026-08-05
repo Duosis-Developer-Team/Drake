@@ -4,8 +4,31 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { validateContent } from "../src/validator.js";
+import { manifestWithSelectorValue } from "./helpers.js";
 
 const FIXTURES = join(__dirname, "..", "fixtures");
+
+/**
+ * Credential-shaped test values are BUILT AT RUNTIME from concatenated parts.
+ * They are deliberately fake and must never exist as committed literals —
+ * the secret scanner runs with no path allowlists, and a canary test proves
+ * the fixtures directory is scanned like everything else.
+ */
+const FAKE_URL_CREDENTIAL = [
+  "postgresql://app_user:",
+  "fake-",
+  "runtime-",
+  "credential",
+  "@db.example.test:5432/app",
+].join("");
+const FAKE_ASSIGNMENT = ["pass", "word=", "fake-", "runtime-", "value"].join("");
+const FAKE_PRIVATE_KEY = [
+  "-----BEGIN ",
+  "PRIVATE KEY-----",
+  "FAKERUNTIMEDATA",
+  "-----END ",
+  "PRIVATE KEY-----",
+].join("");
 
 function fixtureFiles(kind: "valid" | "invalid"): string[] {
   return readdirSync(join(FIXTURES, kind))
@@ -16,7 +39,7 @@ function fixtureFiles(kind: "valid" | "invalid"): string[] {
 describe("project manifest fixtures", () => {
   it("has fixtures on disk", () => {
     expect(fixtureFiles("valid").length).toBeGreaterThanOrEqual(4);
-    expect(fixtureFiles("invalid").length).toBeGreaterThanOrEqual(8);
+    expect(fixtureFiles("invalid").length).toBeGreaterThanOrEqual(7);
   });
 
   for (const file of fixtureFiles("valid")) {
@@ -49,20 +72,6 @@ describe("rejection reasons are specific", () => {
     );
   });
 
-  it("flags credential URLs with the credential-in-url rule", () => {
-    expect(issuesFor("credential-url.yaml").some((i) => i.rule === "credential-in-url")).toBe(true);
-  });
-
-  it("flags credential assignments", () => {
-    expect(
-      issuesFor("credential-assignment.yaml").some((i) => i.rule === "credential-assignment"),
-    ).toBe(true);
-  });
-
-  it("flags private key material", () => {
-    expect(issuesFor("private-key.yaml").some((i) => i.rule === "private-key-material")).toBe(true);
-  });
-
   it("flags inline SQL", () => {
     expect(issuesFor("inline-sql.yaml").some((i) => i.rule === "inline-sql")).toBe(true);
   });
@@ -72,23 +81,38 @@ describe("rejection reasons are specific", () => {
       true,
     );
   });
+});
+
+describe("credential values are rejected (runtime-generated cases)", () => {
+  it("flags credential URLs with the credential-in-url rule", () => {
+    const result = validateContent(manifestWithSelectorValue(FAKE_URL_CREDENTIAL), "drake-project");
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.rule === "credential-in-url")).toBe(true);
+  });
+
+  it("flags credential assignments", () => {
+    const result = validateContent(manifestWithSelectorValue(FAKE_ASSIGNMENT), "drake-project");
+    expect(result.issues.some((i) => i.rule === "credential-assignment")).toBe(true);
+  });
+
+  it("flags private key material", () => {
+    const result = validateContent(manifestWithSelectorValue(FAKE_PRIVATE_KEY), "drake-project");
+    expect(result.issues.some((i) => i.rule === "private-key-material")).toBe(true);
+  });
 
   it("never echoes the offending value in messages", () => {
-    for (const name of [
-      "credential-url.yaml",
-      "credential-assignment.yaml",
-      "private-key.yaml",
-    ]) {
-      for (const issue of issuesFor(name)) {
-        expect(issue.message).not.toContain("fake-test");
-        expect(issue.message).not.toContain("FAKEFIXTURE");
+    for (const value of [FAKE_URL_CREDENTIAL, FAKE_ASSIGNMENT, FAKE_PRIVATE_KEY]) {
+      const result = validateContent(manifestWithSelectorValue(value), "drake-project");
+      for (const issue of result.issues) {
+        expect(issue.message).not.toContain("fake-runtime");
+        expect(issue.message).not.toContain("FAKERUNTIMEDATA");
       }
     }
   });
 });
 
 describe("secret references are not false positives", () => {
-  it("accepts connectionSecretRef names containing the word secret-adjacent terms", () => {
+  it("accepts connectionSecretRef names containing secret-adjacent terms", () => {
     const manifest = readFileSync(join(FIXTURES, "valid", "project-alpha.yaml"), "utf8");
     const result = validateContent(manifest, "drake-project");
     expect(result.valid).toBe(true);
@@ -108,7 +132,9 @@ describe("tenant snapshot schema", () => {
         display_name: null,
         status: "active",
         plan_key: "basic",
-        entitlements: [{ dimension: "users.active", unit: "count", included: 10, extra: 0, enforcement: "warn" }],
+        entitlements: [
+          { dimension: "users.active", unit: "count", included: 10, extra: 0, enforcement: "warn" },
+        ],
         usage: [
           {
             dimension: "users.active",

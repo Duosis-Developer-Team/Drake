@@ -26,12 +26,20 @@ Notes:
 - Two vulnerable transitive npm packages surfaced during Sprint 0 were fixed
   by pnpm version overrides to their patched releases (verified by re-scan),
   not by suppressing the scanner.
-- The only gitleaks allowlist entries are (a) the validator's *negative*
-  fixtures, which contain deliberately fake, non-functional credential
-  shapes that exist to prove rejection, and (b) gitignored Next.js build
-  caches. Default rules remain fully enabled for all committed content.
-- A deliberately fake cloud-key test value is constructed by string
-  concatenation at runtime so it never appears as a scannable literal.
+- **The gitleaks configuration contains no path allowlists.** No source,
+  test, fixture, docs, or contracts directory is excluded from scanning.
+  Credential-shaped rejection test cases are generated at test runtime from
+  concatenated parts and written only to non-committed temp locations, so
+  nothing scanner-detectable is ever a committed literal.
+- The tree scan runs over a clean copy of exactly the tracked/staged file
+  set, so gitignored build output can neither mask findings nor add noise —
+  scan scope equals what is or would be committed.
+- A **canary regression test** (`scripts/secret-scan.sh canary`, part of the
+  CI secret-scan job) plants a temporary, non-committed, high-confidence
+  fake credential inside the negative-fixture directory and requires the
+  scanner to detect it — continuously proving that fixture directories are
+  not exempt. The planted value is generated per run, never printed, and
+  always cleaned up.
 
 ## 3. Enforced security boundaries (tested, not just documented)
 

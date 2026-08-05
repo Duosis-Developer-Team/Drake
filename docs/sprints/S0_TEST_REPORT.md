@@ -57,8 +57,9 @@ Stack: Compose PostgreSQL 16 + Redis 7, loopback-only, health-checked.
 
 | Check | Result | Status |
 |---|---|---|
-| Secret scan — full git history (gitleaks, digest-pinned) | no leaks found | PASS |
-| Secret scan — working tree (gitleaks dir) | no leaks found | PASS |
+| Secret scan — full git history (gitleaks, digest-pinned, **no path allowlists**) | no leaks found | PASS |
+| Secret scan — tracked/staged tree copy (gitleaks dir) | no leaks found | PASS |
+| Secret-scan canary regression (planted fake credential inside the fixtures directory must be detected) | detected as required; value never printed; cleanup verified | PASS |
 | Dependency scan (osv-scanner over pnpm-lock/uv.lock/go.mod) | no issues (after overriding two vulnerable transitive npm packages) | PASS |
 | Forbidden metric-label guard | catalog clean; negative cases rejected | PASS |
 | Browser provider-access guard | 0 violations across scanned web sources | PASS |
