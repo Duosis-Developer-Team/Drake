@@ -8,12 +8,19 @@ requires-python = ">=3.13,<3.14"
 package = false
 
 [tool.uv.workspace]
-members = []
+members = ["apps/api"]
 
 [dependency-groups]
 dev = [
     "ruff>=0.8",
     "mypy>=1.13",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["apps/api/tests"]
+markers = [
+    "integration: requires the local Compose stack (disposable PostgreSQL/Redis)",
 ]
 
 [tool.ruff]
