@@ -17,6 +17,7 @@ from drake_api.db import dispose_engines
 from drake_api.errors import register_error_handlers
 from drake_api.health import router as health_router
 from drake_api.logging import configure_logging
+from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
 from drake_api.settings import Settings, get_settings
 
@@ -70,6 +71,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(rbac_router)
+    app.include_router(rbac_options_router)
     app.include_router(audit_router)
     return app
 

@@ -43,10 +43,12 @@ def _set_session_cookie(response: Response, settings: Settings, session_id: str)
 
 
 @router.get("/auth/login")
-async def login(request: Request, redirect: str | None = None) -> RedirectResponse:
+async def login(
+    request: Request, redirect: str | None = None, login_hint: str | None = None
+) -> RedirectResponse:
     flows: AuthFlows = request.app.state.auth_flows
     try:
-        target = await flows.begin_login(redirect)
+        target = await flows.begin_login(redirect, login_hint=login_hint)
     except SessionBackendUnavailableError as error:
         raise HTTPException(status_code=503, detail="authentication backend unavailable") from error
     except OidcError as error:

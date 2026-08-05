@@ -190,6 +190,10 @@ class RbacService:
             if grant.scope_id in ancestor_ids
         }
 
+    async def actor_permissions_at(self, actor: Principal, scope_id: uuid.UUID) -> set[str]:
+        """Public read helper: the actor's effective permission set at a scope."""
+        return await self._actor_permissions_at(actor, scope_id)
+
     async def create_role(
         self, actor: Principal, name: str, description: str, correlation_id: str
     ) -> dict[str, Any]:

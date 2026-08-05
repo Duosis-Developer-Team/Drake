@@ -50,7 +50,9 @@ class AuthFlows:
         self._oidc = oidc
         self._sessions = sessions
 
-    async def begin_login(self, post_login_redirect: str | None) -> LoginRedirect:
+    async def begin_login(
+        self, post_login_redirect: str | None, login_hint: str | None = None
+    ) -> LoginRedirect:
         state = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(32)
         verifier, challenge = _pkce_pair()
@@ -63,18 +65,21 @@ class AuthFlows:
             },
         )
         authorize = await self._oidc.authorization_url()
-        query = urlencode(
-            {
-                "response_type": "code",
-                "client_id": self._settings.oidc_client_id,
-                "redirect_uri": self._settings.oidc_redirect_url,
-                "scope": "openid profile email",
-                "state": state,
-                "nonce": nonce,
-                "code_challenge": challenge,
-                "code_challenge_method": "S256",
-            }
-        )
+        params = {
+            "response_type": "code",
+            "client_id": self._settings.oidc_client_id,
+            "redirect_uri": self._settings.oidc_redirect_url,
+            "scope": "openid profile email",
+            "state": state,
+            "nonce": nonce,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+        # Standard OIDC login_hint pass-through (used by tests/E2E to pick a
+        # fake-provider user; harmless for real providers).
+        if login_hint:
+            params["login_hint"] = login_hint
+        query = urlencode(params)
         return LoginRedirect(url=f"{authorize}?{query}")
 
     async def complete_login(
