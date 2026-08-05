@@ -143,3 +143,62 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/src"
           ghcr.io/google/osv-scanner@sha256:385ff9dd9d50a573766fc226f24da1d61cd5843542ff7e04c563561bbd918e30
           scan source -r /src
+
+  e2e:
+    name: e2e (browser acceptance, OIDC + RBAC)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # postgres:16 pinned by digest
+        image: postgres@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+        env:
+          POSTGRES_USER: drake
+          POSTGRES_PASSWORD: ci_local_only
+          POSTGRES_DB: drake
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drake -d drake"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        # redis:7 pinned by digest
+        image: redis@sha256:e9b2e45ecd47fbb69b877cf8d045d5cccaaaed52524b6e098b4abe8212994f73
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      E2E_DB_URL: postgresql+psycopg://drake:ci_local_only@127.0.0.1:5432/drake
+      E2E_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @drake/web exec playwright install --with-deps chromium
+      # Migrations + catalog seed + first Platform Owner for the fake user.
+      - run: bash scripts/e2e-setup.sh
+        env:
+          DRAKE_DATABASE_URL: ${{ env.E2E_DB_URL }}
+      # Playwright boots the fake OIDC provider (test-only), the FastAPI
+      # process, and the production Next.js build, then drives Chromium.
+      # No secrets are used or required; nothing is uploaded on failure —
+      # traces stay on the ephemeral runner (they can contain session
+      # cookies, so they are deliberately not exported).
+      - run: pnpm --filter @drake/web exec playwright test
+        env:
+          DRAKE_E2E_DATABASE_URL: ${{ env.E2E_DB_URL }}
+          DRAKE_E2E_REDIS_URL: ${{ env.E2E_REDIS_URL }}
+          DRAKE_E2E_REDIS_PORT: "6379"

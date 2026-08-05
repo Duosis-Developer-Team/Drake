@@ -47,8 +47,10 @@ export function GrantsPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setGrants({ state: "loading" });
-    setOptions({ state: "loading" });
+    // Keep previously loaded data on refresh: the create form must not
+    // unmount (and lose its success/error feedback) while lists reload.
+    setGrants((current) => (current.state === "ready" ? current : { state: "loading" }));
+    setOptions((current) => (current.state === "ready" ? current : { state: "loading" }));
     try {
       const [grantsBody, optionsBody] = await Promise.all([
         apiGet<{ grants: Grant[] }>("/v1/grants"),

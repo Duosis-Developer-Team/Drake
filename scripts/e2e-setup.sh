@@ -4,7 +4,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export DRAKE_DATABASE_URL="postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake"
+# Local Compose default; CI overrides with its service-container URL.
+: "${DRAKE_DATABASE_URL:=postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake}"
+export DRAKE_DATABASE_URL
 
 cd "$REPO_ROOT/apps/api"
 uv run alembic upgrade head

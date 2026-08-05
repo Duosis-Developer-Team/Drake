@@ -1,5 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
+// Disposable-stack endpoints: local Compose defaults, overridable for CI
+// service containers.
+const databaseUrl =
+  process.env.DRAKE_E2E_DATABASE_URL ??
+  "postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake";
+const redisUrl = process.env.DRAKE_E2E_REDIS_URL ?? "redis://127.0.0.1:56379/0";
+
 /**
  * E2E against the REAL stack: fake OIDC provider (test-only), the FastAPI
  * control plane on the disposable local database/Redis, and the Next.js app.
@@ -42,9 +49,8 @@ export default defineConfig({
         DRAKE_OIDC_ISSUER: "http://127.0.0.1:9556",
         DRAKE_OIDC_CLIENT_ID: "drake-test-client",
         DRAKE_OIDC_REDIRECT_URL: "http://127.0.0.1:3456/v1/auth/callback",
-        DRAKE_DATABASE_URL:
-          "postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake",
-        DRAKE_REDIS_URL: "redis://127.0.0.1:56379/0",
+        DRAKE_DATABASE_URL: databaseUrl,
+        DRAKE_REDIS_URL: redisUrl,
         DRAKE_ALLOWED_WEB_ORIGINS: '["http://127.0.0.1:3456"]',
       },
     },
