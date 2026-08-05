@@ -1,0 +1,19 @@
+# Fictional example: platform product whose tenant facts come from an external provider adapter.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata: {name: gamma, displayName: Gamma}
+spec:
+  repository: {provider: github, owner: example-org, name: gamma, defaultBranch: main}
+  owners: [{team: platform, role: primary}]
+  environments:
+    - {name: prod, runtime: kubernetes, branch: main, clusterRef: cluster-a, namespace: gamma-prod, criticality: critical}
+  services:
+    - {name: webui, component: web, runtime: dash-flask, metricsProfile: flask-v1}
+    - {name: inventory-api, component: api, runtime: fastapi, metricsProfile: fastapi-v1}
+    - {name: customer-api, component: api, runtime: fastapi, metricsProfile: fastapi-v1}
+    - {name: query-api, component: api, runtime: fastapi, metricsProfile: fastapi-v1}
+  tenantModel: {mode: external, adapter: gamma-customer-v1, snapshotFreshnessSeconds: 3600}
+  dataStores:
+    - {name: gamma-postgres, engine: postgresql, scope: project, measurementProfile: postgres-external-v1, connectionSecretRef: gamma-monitoring}
+    - {name: redis, engine: redis, scope: environment, measurementProfile: redis-v1}
+  dashboards: [kubernetes-service-v1, fastapi-v1]

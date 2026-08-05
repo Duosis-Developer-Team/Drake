@@ -1,0 +1,17 @@
+# Gitleaks configuration.
+#
+# The default ruleset is fully enabled and there are NO path allowlists:
+# no source, test, fixture, docs, or contracts directory is excluded from
+# scanning. Credential-shaped test values are generated at test runtime from
+# concatenated parts and are never committed as scannable literals, so the
+# scanner needs no exemptions. A canary regression test
+# (scripts/secret-scan.sh canary) plants a temporary high-confidence fake
+# credential inside the negative-fixture directory and asserts the scanner
+# detects it — proving that directory is NOT exempt.
+#
+# Do not add path allowlists to silence a finding; fix the finding. If an
+# exemption is ever truly unavoidable, it must be a single-finding
+# fingerprint with a written justification.
+
+[extend]
+useDefault = true

@@ -1,0 +1,17 @@
+# Must be rejected: raw SQL embedded in a manifest value.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata: {name: alpha}
+spec:
+  repository: {provider: github, owner: example-org, name: alpha}
+  owners: [{team: platform}]
+  environments:
+    - {name: dev, runtime: kubernetes, branch: dev, clusterRef: cluster-a, namespace: alpha-dev, criticality: medium}
+  services:
+    - name: api
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector:
+        report: "SELECT tenant_id, count(*) FROM appointments GROUP BY tenant_id"
+  tenantModel: {mode: none}

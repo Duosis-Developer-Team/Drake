@@ -1,0 +1,12 @@
+# Must be rejected: unsupported schema/apiVersion for this validator generation.
+apiVersion: drake.duosis.com/v9
+kind: ProjectObservability
+metadata: {name: alpha}
+spec:
+  repository: {provider: github, owner: example-org, name: alpha}
+  owners: [{team: platform}]
+  environments:
+    - {name: dev, runtime: kubernetes, branch: dev, clusterRef: cluster-a, namespace: alpha-dev, criticality: medium}
+  services:
+    - {name: api, component: api, runtime: fastapi, metricsProfile: fastapi-v1}
+  tenantModel: {mode: none}

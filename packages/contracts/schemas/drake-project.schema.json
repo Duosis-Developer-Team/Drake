@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://drake.duosis.com/schemas/project-v1alpha1.json",
+  "title": "Drake Project Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "drake.duosis.com/v1alpha1"},
+    "kind": {"const": "ProjectObservability"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63},
+        "displayName": {"type": "string", "minLength": 1, "maxLength": 120}
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "owners", "environments", "services", "tenantModel"],
+      "properties": {
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "owner", "name"],
+          "properties": {
+            "provider": {"const": "github"},
+            "owner": {"type": "string", "minLength": 1},
+            "name": {"type": "string", "minLength": 1},
+            "defaultBranch": {"type": "string", "minLength": 1}
+          }
+        },
+        "owners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["team"],
+            "properties": {
+              "team": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+              "role": {"enum": ["primary", "secondary"]}
+            }
+          }
+        },
+        "environments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/environment"}
+        },
+        "services": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/service"}
+        },
+        "tenantModel": {"$ref": "#/$defs/tenantModel"},
+        "dataStores": {"type": "array", "items": {"$ref": "#/$defs/dataStore"}},
+        "backup": {"type": "array", "items": {"$ref": "#/$defs/backupPolicy"}},
+        "slos": {"type": "array", "items": {"$ref": "#/$defs/slo"}},
+        "dashboards": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "runtime", "branch", "criticality"],
+      "properties": {
+        "name": {"enum": ["local", "dev", "test", "staging", "prod"]},
+        "runtime": {"enum": ["kubernetes", "external"]},
+        "branch": {"type": "string", "minLength": 1},
+        "clusterRef": {"type": "string"},
+        "namespace": {"type": "string"},
+        "criticality": {"enum": ["low", "medium", "high", "critical"]},
+        "active": {"type": "boolean", "default": true}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"runtime": {"const": "kubernetes"}}},
+          "then": {"required": ["clusterRef", "namespace"]}
+        }
+      ]
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "component", "runtime", "metricsProfile"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "component": {"enum": ["web", "api", "worker", "agent", "database", "cache", "job", "mcp", "other"]},
+        "runtime": {"type": "string", "minLength": 1},
+        "workloadSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+        "metricsProfile": {"type": "string", "minLength": 1},
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "livePath": {"type": "string", "pattern": "^/"},
+            "readyPath": {"type": "string", "pattern": "^/"},
+            "metricsPath": {"type": "string", "pattern": "^/"}
+          }
+        }
+      }
+    },
+    "tenantModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["none", "shared_table", "schema_per_tenant", "database_per_tenant", "external"]},
+        "adapter": {"type": "string"},
+        "snapshotFreshnessSeconds": {"type": "integer", "minimum": 60, "maximum": 86400}
+      }
+    },
+    "dataStore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "engine", "scope", "measurementProfile"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "engine": {"enum": ["postgresql", "redis", "object-storage", "other"]},
+        "scope": {"enum": ["project", "environment", "tenant"]},
+        "measurementProfile": {"type": "string"},
+        "connectionSecretRef": {"type": "string", "description": "Reference name only; never a credential value"}
+      }
+    },
+    "backupPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dataStoreRef", "rpoSeconds", "rtoSeconds", "reporter"],
+      "properties": {
+        "name": {"type": "string"},
+        "dataStoreRef": {"type": "string"},
+        "rpoSeconds": {"type": "integer", "minimum": 60},
+        "rtoSeconds": {"type": "integer", "minimum": 60},
+        "reporter": {"type": "string"},
+        "offsiteRequired": {"type": "boolean"},
+        "restoreDrillMaxAgeDays": {"type": "integer", "minimum": 1}
+      }
+    },
+    "slo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "serviceRef", "indicator", "objective", "windowDays"],
+      "properties": {
+        "name": {"type": "string"},
+        "serviceRef": {"type": "string"},
+        "indicator": {"enum": ["availability", "latency"]},
+        "objective": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+        "windowDays": {"type": "integer", "minimum": 1, "maximum": 90}
+      }
+    }
+  }
+}

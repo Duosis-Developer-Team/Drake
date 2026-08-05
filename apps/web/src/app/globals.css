@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Drake design tokens.
+ * Dark mode is first-class (NOC/SRE usage); light mode is a full equivalent.
+ * Semantic status colors are the single source of truth for health states —
+ * the same red is never reused for selection, and color is never the only
+ * indicator (components pair it with icons and labels).
+ */
+:root {
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --surface-sunken: #eef0f4;
+  --border: #e3e6ec;
+  --border-strong: #c9cfda;
+  --ink: #171c26;
+  --ink-secondary: #4c5565;
+  --ink-muted: #8b94a7;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --accent-ink: #3730a3;
+
+  --status-healthy: #0f9960;
+  --status-warning: #b7791f;
+  --status-critical: #d92d20;
+  --status-unknown: #667085;
+  --status-stale: #92700c;
+  --status-maintenance: #175cd3;
+
+  --status-healthy-soft: #e7f6ef;
+  --status-warning-soft: #fdf3e0;
+  --status-critical-soft: #feeceb;
+  --status-unknown-soft: #eef1f5;
+  --status-stale-soft: #faf3d9;
+  --status-maintenance-soft: #e8f0fd;
+}
+
+.dark {
+  --background: #0b0e14;
+  --surface: #121722;
+  --surface-sunken: #0e1219;
+  --border: #202839;
+  --border-strong: #33405a;
+  --ink: #e7ebf3;
+  --ink-secondary: #a6b0c3;
+  --ink-muted: #6b7691;
+  --accent: #818cf8;
+  --accent-soft: #1c2038;
+  --accent-ink: #c7d2fe;
+
+  --status-healthy: #34d399;
+  --status-warning: #fbbf24;
+  --status-critical: #f87171;
+  --status-unknown: #94a3b8;
+  --status-stale: #d9b64a;
+  --status-maintenance: #60a5fa;
+
+  --status-healthy-soft: #0c2a1f;
+  --status-warning-soft: #2d2410;
+  --status-critical-soft: #331413;
+  --status-unknown-soft: #1a2130;
+  --status-stale-soft: #2b2510;
+  --status-maintenance-soft: #12233c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-healthy: var(--status-healthy);
+  --color-warning: var(--status-warning);
+  --color-critical: var(--status-critical);
+  --color-unknown: var(--status-unknown);
+  --color-stale: var(--status-stale);
+  --color-maintenance: var(--status-maintenance);
+
+  --color-healthy-soft: var(--status-healthy-soft);
+  --color-warning-soft: var(--status-warning-soft);
+  --color-critical-soft: var(--status-critical-soft);
+  --color-unknown-soft: var(--status-unknown-soft);
+  --color-stale-soft: var(--status-stale-soft);
+  --color-maintenance-soft: var(--status-maintenance-soft);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background-color: var(--background);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
