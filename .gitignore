@@ -1,0 +1,65 @@
+# --- Internal documents (never published) ---
+/drake_cto_pack*/
+
+# --- Secrets & credentials (never committed) ---
+/.env
+/.env.*
+!/.env.example
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*kubeconfig*
+*.keystore
+id_rsa*
+id_ed25519*
+*.tfstate
+*.tfstate.*
+credentials.json
+service-account*.json
+
+# --- Node / web ---
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.turbo/
+.eslintcache
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# --- Go ---
+apps/cluster-agent/bin/
+*.test
+*.out
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Logs & local artifacts ---
+*.log
+logs/
+tmp/
+.cache/
