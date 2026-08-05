@@ -18,3 +18,4 @@ or operational details.
 | [ADR-0010](ADR-0010-deny-by-default-rbac.md) | Deny-by-default scoped RBAC |
 | [ADR-0011](ADR-0011-state-semantics.md) | Unknown/stale/partial state semantics |
 | [ADR-0012](ADR-0012-no-early-microservices.md) | No early microservices |
+| [ADR-0013](ADR-0013-auth-session-architecture.md) | Authentication and session architecture |
