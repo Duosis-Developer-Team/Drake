@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Integer, Text
+from sqlalchemy import CheckConstraint, Integer, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,8 +18,12 @@ class AuditEvent(Base):
         CheckConstraint("result IN ('success', 'failure', 'denied')", name="ck_audit_result"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    occurred_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
     actor_type: Mapped[str] = mapped_column(Text, nullable=False)
     actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
