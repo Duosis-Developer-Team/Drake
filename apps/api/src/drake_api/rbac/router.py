@@ -1,32 +1,39 @@
 """RBAC API: permission catalog, roles, grants.
 
 Contract for mutations:
-- ``Idempotency-Key`` header required (replayed keys return the stored result).
+- ``Idempotency-Key`` header required. Idempotency is TRANSACTIONAL in
+  PostgreSQL: the claim, the domain mutation, the audit row, and the stored
+  response commit together. Replays return the stored response; the same key
+  with a different payload/precondition is a stable ``409
+  idempotency_conflict``. Redis holds no authority here.
 - ``If-Match`` (role version ETag) required on role updates: missing → 428,
   stale → 412.
 - CSRF + Origin checks apply (cookie-authenticated).
-- Every mutation and its audit row commit in one transaction (fail-closed).
 
 Denial semantics: 401 unauthenticated; 403 missing global capability;
 consistent 404 for anything outside the caller's scope (anti-enumeration).
 """
 
-import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 
 from drake_api.audit.service import AuditEventData, record_audit_event
 from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
+from drake_api.rbac.idempotency import (
+    IdempotencyConflictError,
+    IdempotencyGuard,
+    request_fingerprint,
+)
 from drake_api.rbac.service import (
     AuthorizationDeniedError,
     InvariantViolationError,
@@ -39,8 +46,6 @@ from drake_api.settings import Settings
 logger = logging.getLogger("drake_api.rbac")
 
 router = APIRouter(prefix="/v1", tags=["rbac"])
-
-_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 
 
 class RoleCreate(BaseModel):
@@ -63,6 +68,13 @@ class GrantCreate(BaseModel):
     group_mapping_id: uuid.UUID | None = None
     valid_from: datetime | None = None
     valid_to: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validity_interval(self) -> Self:
+        if self.valid_from is not None and self.valid_to is not None:
+            if self.valid_to <= self.valid_from:
+                raise ValueError("valid_to must be after valid_from")
+        return self
 
 
 def _map_service_errors(error: Exception) -> HTTPException:
@@ -90,6 +102,12 @@ def _parse_if_match(if_match: str | None) -> int:
         raise HTTPException(status_code=428, detail="If-Match header malformed") from error
 
 
+def _require_idempotency_key(idempotency_key: str | None) -> str:
+    if not idempotency_key or not (8 <= len(idempotency_key) <= 200):
+        raise HTTPException(status_code=428, detail="Idempotency-Key header required")
+    return idempotency_key
+
+
 async def _audit_denial(request: Request, auth: AuthContext, action: str) -> None:
     """Best-effort denial audit; a broken audit store never hides the denial."""
     settings: Settings = request.app.state.settings
@@ -108,54 +126,55 @@ async def _audit_denial(request: Request, auth: AuthContext, action: str) -> Non
         logger.warning("denial audit write did not persist")
 
 
-class _Idempotency:
-    """Redis-backed idempotency for mutations (fail-closed when Redis is down)."""
+Mutation = Callable[[RbacService], Awaitable[tuple[int, dict[str, Any]]]]
 
-    def __init__(self, settings: Settings) -> None:
-        self._client: aioredis.Redis = aioredis.from_url(
-            settings.redis_url,
-            socket_connect_timeout=settings.ready_check_timeout_seconds,
-            socket_timeout=settings.ready_check_timeout_seconds,
-        )
 
-    async def replay(self, actor_id: str, key: str) -> dict[str, Any] | None:
-        try:
-            raw = await self._client.get(f"drake:idem:{actor_id}:{key}")
-        except Exception as error:
-            raise HTTPException(
-                status_code=503, detail="idempotency backend unavailable"
-            ) from error
-        if raw is None:
-            return None
-        result: dict[str, Any] = json.loads(raw)
-        return result
+async def _idempotent_mutation(
+    request: Request,
+    auth: AuthContext,
+    *,
+    operation: str,
+    idempotency_key: str,
+    fingerprint: str,
+    mutate: Mutation,
+) -> JSONResponse:
+    """Run one RBAC mutation with transactional idempotency.
 
-    async def store(self, actor_id: str, key: str, status_code: int, body: dict[str, Any]) -> None:
-        try:
-            await self._client.set(
-                f"drake:idem:{actor_id}:{key}",
-                json.dumps({"status_code": status_code, "body": body}),
-                ex=_IDEMPOTENCY_TTL_SECONDS,
-                nx=True,
+    Claim, mutation, audit, and stored response commit in ONE PostgreSQL
+    transaction; any failure rolls everything back, leaving the key
+    retryable. Committed keys replay their stored response.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+    try:
+        async with engine.begin() as connection:
+            guard = IdempotencyGuard(
+                connection,
+                auth.session.identity_id,
+                operation,
+                idempotency_key,
+                fingerprint,
             )
-        except Exception as error:
-            raise HTTPException(
-                status_code=503, detail="idempotency backend unavailable"
-            ) from error
+            replay = await guard.claim()
+            if replay is not None:
+                status_code, body = replay
+                return JSONResponse(status_code=status_code, content=body)
 
-
-def get_idempotency(request: Request) -> _Idempotency:
-    idem: _Idempotency | None = getattr(request.app.state, "idempotency", None)
-    if idem is None:
-        idem = _Idempotency(request.app.state.settings)
-        request.app.state.idempotency = idem
-    return idem
-
-
-def _require_idempotency_key(idempotency_key: str | None) -> str:
-    if not idempotency_key or not (8 <= len(idempotency_key) <= 200):
-        raise HTTPException(status_code=428, detail="Idempotency-Key header required")
-    return idempotency_key
+            service = RbacService(connection)
+            status_code, body = await mutate(service)
+            await guard.complete(status_code, body)
+        return JSONResponse(status_code=status_code, content=body)
+    except IdempotencyConflictError:
+        raise HTTPException(status_code=409, detail="idempotency_conflict") from None
+    except (
+        AuthorizationDeniedError,
+        ScopedResourceHiddenError,
+        PreconditionFailedError,
+        InvariantViolationError,
+    ) as error:
+        if isinstance(error, AuthorizationDeniedError):
+            await _audit_denial(request, auth, error.audit_action)
+        raise _map_service_errors(error) from error
 
 
 # ------------------------------------------------------------------ catalog
@@ -234,32 +253,22 @@ async def create_role(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     key = _require_idempotency_key(idempotency_key)
-    idem = get_idempotency(request)
-    replayed = await idem.replay(auth.session.identity_id, key)
-    if replayed is not None:
-        return JSONResponse(status_code=replayed["status_code"], content=replayed["body"])
+    fingerprint = request_fingerprint({}, body.model_dump(mode="json"))
 
-    settings: Settings = request.app.state.settings
-    engine = get_engine(settings)
-    try:
-        async with engine.begin() as connection:
-            service = RbacService(connection)
-            result = await service.create_role(
-                auth.principal, body.name, body.description, correlation_id_var.get()
-            )
-    except (
-        AuthorizationDeniedError,
-        ScopedResourceHiddenError,
-        PreconditionFailedError,
-        InvariantViolationError,
-    ) as error:
-        if isinstance(error, AuthorizationDeniedError):
-            await _audit_denial(request, auth, error.audit_action)
-        raise _map_service_errors(error) from error
+    async def mutate(service: RbacService) -> tuple[int, dict[str, Any]]:
+        result = await service.create_role(
+            auth.principal, body.name, body.description, correlation_id_var.get()
+        )
+        return 201, {"id": str(result["id"]), "version": result["version"]}
 
-    payload = {"id": str(result["id"]), "version": result["version"]}
-    await idem.store(auth.session.identity_id, key, 201, payload)
-    return JSONResponse(status_code=201, content=payload)
+    return await _idempotent_mutation(
+        request,
+        auth,
+        operation="rbac.roles.create",
+        idempotency_key=key,
+        fingerprint=fingerprint,
+        mutate=mutate,
+    )
 
 
 @router.put("/roles/{role_id}")
@@ -273,37 +282,28 @@ async def update_role(
 ) -> JSONResponse:
     key = _require_idempotency_key(idempotency_key)
     expected_version = _parse_if_match(if_match)
-    idem = get_idempotency(request)
-    replayed = await idem.replay(auth.session.identity_id, key)
-    if replayed is not None:
-        return JSONResponse(status_code=replayed["status_code"], content=replayed["body"])
+    fingerprint = request_fingerprint(
+        {"role_id": str(role_id)}, body.model_dump(mode="json"), precondition=if_match
+    )
 
-    settings: Settings = request.app.state.settings
-    engine = get_engine(settings)
-    try:
-        async with engine.begin() as connection:
-            service = RbacService(connection)
-            result = await service.update_role(
-                auth.principal,
-                role_id,
-                expected_version,
-                body.description,
-                correlation_id_var.get(),
-            )
-    except (
-        AuthorizationDeniedError,
-        ScopedResourceHiddenError,
-        PreconditionFailedError,
-        InvariantViolationError,
-    ) as error:
-        if isinstance(error, AuthorizationDeniedError):
-            await _audit_denial(request, auth, error.audit_action)
-        raise _map_service_errors(error) from error
+    async def mutate(service: RbacService) -> tuple[int, dict[str, Any]]:
+        result = await service.update_role(
+            auth.principal,
+            role_id,
+            expected_version,
+            body.description,
+            correlation_id_var.get(),
+        )
+        return 200, {"id": str(result["id"]), "version": result["version"]}
 
-    payload = {"id": str(result["id"]), "version": result["version"]}
-    await idem.store(auth.session.identity_id, key, 200, payload)
-    response = JSONResponse(status_code=200, content=payload)
-    response.headers["ETag"] = _role_etag(result["version"])
+    response = await _idempotent_mutation(
+        request,
+        auth,
+        operation="rbac.roles.update",
+        idempotency_key=key,
+        fingerprint=fingerprint,
+        mutate=mutate,
+    )
     return response
 
 
@@ -317,32 +317,22 @@ async def archive_role(
 ) -> JSONResponse:
     key = _require_idempotency_key(idempotency_key)
     expected_version = _parse_if_match(if_match)
-    idem = get_idempotency(request)
-    replayed = await idem.replay(auth.session.identity_id, key)
-    if replayed is not None:
-        return JSONResponse(status_code=replayed["status_code"], content=replayed["body"])
+    fingerprint = request_fingerprint({"role_id": str(role_id)}, None, precondition=if_match)
 
-    settings: Settings = request.app.state.settings
-    engine = get_engine(settings)
-    try:
-        async with engine.begin() as connection:
-            service = RbacService(connection)
-            await service.archive_role(
-                auth.principal, role_id, expected_version, correlation_id_var.get()
-            )
-    except (
-        AuthorizationDeniedError,
-        ScopedResourceHiddenError,
-        PreconditionFailedError,
-        InvariantViolationError,
-    ) as error:
-        if isinstance(error, AuthorizationDeniedError):
-            await _audit_denial(request, auth, error.audit_action)
-        raise _map_service_errors(error) from error
+    async def mutate(service: RbacService) -> tuple[int, dict[str, Any]]:
+        await service.archive_role(
+            auth.principal, role_id, expected_version, correlation_id_var.get()
+        )
+        return 200, {"id": str(role_id), "status": "archived"}
 
-    payload = {"id": str(role_id), "status": "archived"}
-    await idem.store(auth.session.identity_id, key, 200, payload)
-    return JSONResponse(status_code=200, content=payload)
+    return await _idempotent_mutation(
+        request,
+        auth,
+        operation="rbac.roles.archive",
+        idempotency_key=key,
+        fingerprint=fingerprint,
+        mutate=mutate,
+    )
 
 
 @router.put("/roles/{role_id}/permissions")
@@ -356,38 +346,28 @@ async def set_role_permissions(
 ) -> JSONResponse:
     key = _require_idempotency_key(idempotency_key)
     expected_version = _parse_if_match(if_match)
-    idem = get_idempotency(request)
-    replayed = await idem.replay(auth.session.identity_id, key)
-    if replayed is not None:
-        return JSONResponse(status_code=replayed["status_code"], content=replayed["body"])
+    fingerprint = request_fingerprint(
+        {"role_id": str(role_id)}, body.model_dump(mode="json"), precondition=if_match
+    )
 
-    settings: Settings = request.app.state.settings
-    engine = get_engine(settings)
-    try:
-        async with engine.begin() as connection:
-            service = RbacService(connection)
-            result = await service.set_role_permissions(
-                auth.principal,
-                role_id,
-                expected_version,
-                body.permissions,
-                correlation_id_var.get(),
-            )
-    except (
-        AuthorizationDeniedError,
-        ScopedResourceHiddenError,
-        PreconditionFailedError,
-        InvariantViolationError,
-    ) as error:
-        if isinstance(error, AuthorizationDeniedError):
-            await _audit_denial(request, auth, error.audit_action)
-        raise _map_service_errors(error) from error
+    async def mutate(service: RbacService) -> tuple[int, dict[str, Any]]:
+        result = await service.set_role_permissions(
+            auth.principal,
+            role_id,
+            expected_version,
+            body.permissions,
+            correlation_id_var.get(),
+        )
+        return 200, {"id": str(result["id"]), "version": result["version"]}
 
-    payload = {"id": str(result["id"]), "version": result["version"]}
-    await idem.store(auth.session.identity_id, key, 200, payload)
-    response = JSONResponse(status_code=200, content=payload)
-    response.headers["ETag"] = _role_etag(result["version"])
-    return response
+    return await _idempotent_mutation(
+        request,
+        auth,
+        operation="rbac.roles.permissions",
+        idempotency_key=key,
+        fingerprint=fingerprint,
+        mutate=mutate,
+    )
 
 
 # ------------------------------------------------------------------- grants
@@ -460,39 +440,29 @@ async def create_grant(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     key = _require_idempotency_key(idempotency_key)
-    idem = get_idempotency(request)
-    replayed = await idem.replay(auth.session.identity_id, key)
-    if replayed is not None:
-        return JSONResponse(status_code=replayed["status_code"], content=replayed["body"])
+    fingerprint = request_fingerprint({}, body.model_dump(mode="json"))
 
-    settings: Settings = request.app.state.settings
-    engine = get_engine(settings)
-    try:
-        async with engine.begin() as connection:
-            service = RbacService(connection)
-            grant_id = await service.create_grant(
-                auth.principal,
-                role_id=body.role_id,
-                scope_id=body.scope_id,
-                identity_id=body.identity_id,
-                group_mapping_id=body.group_mapping_id,
-                valid_from=body.valid_from,
-                valid_to=body.valid_to,
-                correlation_id=correlation_id_var.get(),
-            )
-    except (
-        AuthorizationDeniedError,
-        ScopedResourceHiddenError,
-        PreconditionFailedError,
-        InvariantViolationError,
-    ) as error:
-        if isinstance(error, AuthorizationDeniedError):
-            await _audit_denial(request, auth, error.audit_action)
-        raise _map_service_errors(error) from error
+    async def mutate(service: RbacService) -> tuple[int, dict[str, Any]]:
+        grant_id = await service.create_grant(
+            auth.principal,
+            role_id=body.role_id,
+            scope_id=body.scope_id,
+            identity_id=body.identity_id,
+            group_mapping_id=body.group_mapping_id,
+            valid_from=body.valid_from,
+            valid_to=body.valid_to,
+            correlation_id=correlation_id_var.get(),
+        )
+        return 201, {"id": str(grant_id)}
 
-    payload = {"id": str(grant_id)}
-    await idem.store(auth.session.identity_id, key, 201, payload)
-    return JSONResponse(status_code=201, content=payload)
+    return await _idempotent_mutation(
+        request,
+        auth,
+        operation="rbac.grants.create",
+        idempotency_key=key,
+        fingerprint=fingerprint,
+        mutate=mutate,
+    )
 
 
 @router.delete("/grants/{grant_id}")
@@ -503,27 +473,17 @@ async def revoke_grant(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     key = _require_idempotency_key(idempotency_key)
-    idem = get_idempotency(request)
-    replayed = await idem.replay(auth.session.identity_id, key)
-    if replayed is not None:
-        return JSONResponse(status_code=replayed["status_code"], content=replayed["body"])
+    fingerprint = request_fingerprint({"grant_id": str(grant_id)}, None)
 
-    settings: Settings = request.app.state.settings
-    engine = get_engine(settings)
-    try:
-        async with engine.begin() as connection:
-            service = RbacService(connection)
-            await service.revoke_grant(auth.principal, grant_id, correlation_id_var.get())
-    except (
-        AuthorizationDeniedError,
-        ScopedResourceHiddenError,
-        PreconditionFailedError,
-        InvariantViolationError,
-    ) as error:
-        if isinstance(error, AuthorizationDeniedError):
-            await _audit_denial(request, auth, error.audit_action)
-        raise _map_service_errors(error) from error
+    async def mutate(service: RbacService) -> tuple[int, dict[str, Any]]:
+        await service.revoke_grant(auth.principal, grant_id, correlation_id_var.get())
+        return 200, {"id": str(grant_id), "status": "revoked"}
 
-    payload = {"id": str(grant_id), "status": "revoked"}
-    await idem.store(auth.session.identity_id, key, 200, payload)
-    return JSONResponse(status_code=200, content=payload)
+    return await _idempotent_mutation(
+        request,
+        auth,
+        operation="rbac.grants.revoke",
+        idempotency_key=key,
+        fingerprint=fingerprint,
+        mutate=mutate,
+    )
