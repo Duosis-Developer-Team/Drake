@@ -45,7 +45,10 @@ describe("policy engine", () => {
     expect(
       checkPolicy({ header: "Bearer abcdefghijklmnopqrstuvwxyz0123456789" }).map((f) => f.rule),
     ).toContain("bearer-token");
-    expect(checkPolicy({ keyId: "AKIA" + "ABCDEFGHIJ" + "KLMNOP" }).map((f) => f.rule)).toContain(
+    // Built via concatenation so this deliberately fake, sequential test
+    // value never appears as a literal to secret scanners.
+    const fakeSequentialKeyId = "AKIA" + "ABCDEFGHIJ" + "KLMNOP";
+    expect(checkPolicy({ keyId: fakeSequentialKeyId }).map((f) => f.rule)).toContain(
       "cloud-access-key-id",
     );
   });

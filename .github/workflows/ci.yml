@@ -1,0 +1,150 @@
+# Drake CI — quality and security gates.
+#
+# - Every action is pinned to an immutable commit SHA (version noted inline).
+# - Scanner images are pinned by digest.
+# - No secrets are used anywhere: safe for a public repository and fork PRs.
+# - Workflow permissions are read-only.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # Local-only credentials for disposable CI service containers.
+  CI_DB_URL: postgresql+psycopg://drake:ci_local_only@127.0.0.1:5432/drake
+  CI_REDIS_URL: redis://127.0.0.1:6379/0
+
+jobs:
+  contracts:
+    name: contracts (schema + fixtures + CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @drake/contracts lint
+      - run: pnpm --filter @drake/contracts typecheck
+      - run: pnpm --filter @drake/contracts test
+
+  web:
+    name: web (lint + typecheck + tests + build + provider guard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @drake/web lint
+      - run: pnpm --filter @drake/web typecheck
+      # Includes the static browser provider-access guard test.
+      - run: pnpm --filter @drake/web test
+      - run: pnpm --filter @drake/web build
+
+  python:
+    name: python (format + lint + typecheck + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy apps/api/src apps/worker/src
+      - run: uv run pytest -m "not integration" -q
+
+  integration:
+    name: integration (migrations + audit append-only + queue)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: drake
+          POSTGRES_PASSWORD: ci_local_only
+          POSTGRES_DB: drake
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drake -d drake"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: uv run pytest -m integration -q
+        env:
+          DRAKE_IT_DATABASE_URL: ${{ env.CI_DB_URL }}
+          DRAKE_IT_REDIS_URL: ${{ env.CI_REDIS_URL }}
+
+  go-agent:
+    name: go agent (fmt + vet + build + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/cluster-agent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: apps/cluster-agent/go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+  secret-scan:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (working tree)
+        run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo"
+          ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055
+          dir /repo --config /repo/.gitleaks.toml --redact --exit-code 1
+      - name: gitleaks (full git history)
+        run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo"
+          ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055
+          git /repo --config /repo/.gitleaks.toml --redact --exit-code 1
+
+  dependency-scan:
+    name: dependency scan (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: osv-scanner (lockfiles)
+        run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/src"
+          ghcr.io/google/osv-scanner@sha256:385ff9dd9d50a573766fc226f24da1d61cd5843542ff7e04c563561bbd918e30
+          scan source -r /src

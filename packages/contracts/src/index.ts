@@ -1,3 +1,9 @@
+export {
+  FORBIDDEN_METRIC_LABELS,
+  checkMetricLabels,
+  type MetricCatalog,
+  type MetricDefinition,
+} from "./metric-policy.js";
 export { checkPolicy, type PolicyFinding } from "./policy.js";
 export {
   parseDocument,

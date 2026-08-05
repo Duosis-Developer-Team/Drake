@@ -1,0 +1,20 @@
+# Gitleaks configuration.
+#
+# The default ruleset stays fully enabled. The only allowlisted paths are the
+# contract validator's NEGATIVE fixtures, which contain deliberately fake,
+# non-functional credential shapes that exist precisely to prove the validator
+# rejects them. Nothing else is exempt — do not widen this list to silence a
+# finding; fix the finding.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Deliberately fake credential fixtures used by validator rejection tests"
+paths = [
+  '''packages/contracts/fixtures/invalid/.*\.yaml''',
+  # Generated, gitignored build caches: Next.js writes random preview-mode
+  # keys into .next/. Never committed; excluded so local dir scans stay
+  # meaningful. CI checkouts contain no build output.
+  '''apps/web/\.next/.*''',
+]
