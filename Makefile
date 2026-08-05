@@ -16,7 +16,7 @@ lint: ## Lint JS and Python sources
 
 typecheck: ## Typecheck JS and Python sources
 	pnpm typecheck
-	uv run mypy apps/api/src
+	uv run mypy apps/api/src apps/worker/src
 
 test: ## Run all test suites
 	pnpm test
