@@ -8,9 +8,9 @@ surrounding mutation) is applied when real mutations arrive in Sprint 1.
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import insert
+from sqlalchemy import Table, insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from drake_api.audit.models import AuditEvent
@@ -77,8 +77,9 @@ def validate_event(event: AuditEventData) -> dict[str, Any]:
 async def record_audit_event(engine: AsyncEngine, event: AuditEventData) -> uuid.UUID:
     """Insert an audit event and return its id. Raises on failure."""
     values = validate_event(event)
+    # Insert via the table (not the ORM entity): the "metadata" column key
+    # would otherwise collide with the declarative Base.metadata attribute.
+    table = cast(Table, AuditEvent.__table__)
     async with engine.begin() as connection:
-        result = await connection.execute(
-            insert(AuditEvent).values(**values).returning(AuditEvent.id)
-        )
-        return result.scalar_one()
+        result = await connection.execute(insert(table).values(**values).returning(table.c.id))
+        return cast(uuid.UUID, result.scalar_one())
