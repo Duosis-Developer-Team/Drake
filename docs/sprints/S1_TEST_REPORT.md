@@ -23,7 +23,8 @@ guard, audit writer validation, job envelope/queue/runner (Sprint 0 suite).
 
 ## 2. Integration (live disposable local stack)
 
-`make integration-test` — **28 passed**.
+`make integration-test` — **43 passed** (28 original + 10 transactional
+idempotency + 5 grant-options visibility).
 
 | Area | Evidence | Status |
 |---|---|---|
@@ -49,7 +50,9 @@ guard, audit writer validation, job envelope/queue/runner (Sprint 0 suite).
 | Transactional audit (fail-closed) | forced audit failure rolls the role mutation back | PASS |
 | IDOR: Project A → Project B | list absence, guessed-UUID consistent 404s, cross-scope create 404, no leakage in bodies | PASS |
 | Audit query | scope filtering, unscoped platform events only at root, cursor pagination without overlap, invalid cursor 422, cross-scope filter 404 | PASS |
-| Migrations | `upgrade head → downgrade base → upgrade head` (0001+0002) on disposable DB | PASS |
+| **Transactional idempotency** | sequential replay (byte-identical), same-key/different-payload → 409 `idempotency_conflict`, same key across operations independent, **concurrent identical requests → one mutation + one success audit** (roles AND grants), audit-failure rolls back mutation *and* claim, safe retry after failure, lost-response replay, per-actor key independence, expired-record reclaim, stored responses credential-free | PASS |
+| **Grant options visibility** | org manager sees directory minus self (opaque id+display only); narrow manager sees only own subtree + principals already granted there; superset/archived roles never offered; forged scope → 404, forged superset role → 403; invalid validity interval → 422 | PASS |
+| Migrations | `upgrade head → downgrade base → upgrade head` (0001+0002+0003) on disposable DB | PASS |
 | Audit append-only | UPDATE/DELETE/TRUNCATE rejected by trigger | PASS |
 | Worker queue on real Redis | roundtrip, idempotency, dead-letter | PASS |
 
@@ -57,24 +60,29 @@ guard, audit writer validation, job envelope/queue/runner (Sprint 0 suite).
 
 | Check | Command | Result | Status |
 |---|---|---|---|
-| Unit/component tests | `pnpm --filter @drake/web test` | 24 passed (6 files) | PASS |
+| Unit/component tests | `pnpm --filter @drake/web test` | 30 passed (7 files, incl. grant-create form: payload/headers, double-submit collapse, client-side interval validation, principal-type switch, error states) | PASS |
 | Lint / typecheck | eslint, `tsc --noEmit` | clean | PASS |
 | Production build | `pnpm --filter @drake/web build` | compiled successfully | PASS |
 | Provider-access guard | part of the test suite | 0 violations | PASS |
 
-## 4. Browser E2E (real stack: fake OIDC + API + production web build)
+## 4. Browser E2E (real stack: fake OIDC + API + PostgreSQL + Redis + production web build)
 
-`npx playwright test` — **7 passed** (two consecutive full runs).
+`make e2e-test` — **10 passed**. Also enforced as the CI job
+`e2e (browser acceptance, OIDC + RBAC)` with digest-pinned disposable
+service containers; no mocked network routes anywhere.
 
 | Scenario | Status |
 |---|---|
 | Signed-out → fake OIDC login → signed-in shell with identity | PASS |
+| Unauthorized user: no Access Control nav; direct /admin → permission denied | PASS |
 | Permission-aware navigation + role create/permission edit + live audit rows | PASS |
+| Grant lifecycle: create via form → visible in list → repeat-submit safe → revoke | PASS |
 | Logout invalidates; protected route stays locked | PASS |
+| Server-side session expiry signs the browser out | PASS |
 | Mobile (390px) drawer navigation | PASS |
 | Dark/light theme toggle | PASS |
 | Keyboard reachability of sign-in | PASS |
-| Accessibility smoke (axe): no critical violations, signed-out + shell | PASS |
+| Accessibility smoke (axe): no critical violations — signed-out, shell, grant form | PASS |
 
 ## 5. Unchanged Sprint 0 gates (re-verified)
 
@@ -91,6 +99,6 @@ guard, audit writer validation, job envelope/queue/runner (Sprint 0 suite).
 | Item | Status | Reason |
 |---|---|---|
 | Real Entra ID smoke test | BLOCKED | no tenant/app registration provided; harness-only by design |
-| E2E in CI | NOT RUN | E2E runs locally via `make e2e-test`; CI wiring is a Sprint 2 item |
 | Full WCAG 2.2 AA audit | MANUAL | axe smoke passed; formal audit deferred |
+| Session inactivity timeout / auth rate limiting | NOT RUN | known hardening items, deliberately out of this closure round |
 | Load/scale tests | NOT RUN | Sprint 12 scope |

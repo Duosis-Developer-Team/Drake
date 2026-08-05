@@ -49,6 +49,23 @@ Everything listed as enforced is backed by executed tests
   (permission-based invariant, not name-based).
 - Denial semantics resist enumeration: outside-scope resources are
   consistent 404s with identical bodies for existing and non-existing IDs.
+- **Mutation idempotency is transactional in PostgreSQL** — the claim
+  (unique per actor + operation + key), the domain mutation, the audit row,
+  and the stored response commit in one transaction. Concurrent identical
+  requests are serialized by the database (correct across replicas) and
+  both receive the single committed result; a different payload on the same
+  key is a stable 409; failures roll the claim back leaving the key
+  retryable. Redis holds no business idempotency authority; stored
+  responses pass a credential-shape guard and never contain cookies,
+  tokens, or session material.
+- **Grant-creation options are visibility-scoped**: the endpoint returns
+  only the caller's manageable subtree, per-scope delegable (subset-only,
+  active) roles, and principal candidates limited to the caller's
+  visibility — org-root managers see the directory (minus themselves),
+  narrow managers only principals already granted in their subtree. Only
+  opaque IDs and display names are exposed (no issuer/subject/email), and
+  the create endpoint re-validates everything regardless of the options
+  list (forged requests negative-tested).
 
 ## 3. Audit
 
@@ -76,6 +93,12 @@ Everything listed as enforced is backed by executed tests
   API (negative-tested at the API layer).
 - No fake identities, roles, or audit rows anywhere in the product UI;
   test fixtures stay in test code.
+- The full identity/RBAC browser flow is a CI gate: the `e2e` job runs the
+  fake provider (test-only; plaintext issuers cannot boot outside
+  local/test), the real API, and the production web build against
+  digest-pinned disposable services — no secrets, and failure traces are
+  deliberately never uploaded (they can contain session cookies; they stay
+  on the ephemeral runner).
 
 ## 5. Known security work ahead
 
