@@ -12,6 +12,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -35,6 +36,8 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: "loading" });
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const refresh = useCallback(async () => {
     try {
@@ -56,13 +59,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    setState((previous) => {
-      if (previous.status !== "authenticated") return previous;
-      void apiMutate("/v1/auth/logout", { csrfToken: previous.me.csrf_token })
-        .catch(() => undefined)
-        .then(() => setState({ status: "signed-out" }));
-      return { status: "loading" };
-    });
+    const current = stateRef.current;
+    if (current.status !== "authenticated") return;
+    setState({ status: "loading" });
+    try {
+      await apiMutate("/v1/auth/logout", { csrfToken: current.me.csrf_token });
+    } catch {
+      // Server-side invalidation already happened or the backend is down;
+      // either way the client treats itself as signed out.
+    }
+    setState({ status: "signed-out" });
   }, []);
 
   useEffect(() => {

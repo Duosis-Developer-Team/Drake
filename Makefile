@@ -4,7 +4,7 @@ COMPOSE := docker compose -f deploy/local/docker-compose.yml
 LOCAL_DB_URL := postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake
 LOCAL_REDIS_URL := redis://127.0.0.1:56379/0
 
-.PHONY: install lint fmt typecheck test build up down integration-test destroy-local-data secret-scan
+.PHONY: install lint fmt typecheck test build up down integration-test destroy-local-data secret-scan e2e-test
 
 secret-scan: ## Run gitleaks over history + tracked tree + canary regression
 	bash scripts/secret-scan.sh all
@@ -50,3 +50,7 @@ test: ## Run all test suites
 
 build: ## Build all buildable workspaces
 	pnpm build
+
+e2e-test: ## Run browser E2E against the local stack (requires make up)
+	bash scripts/e2e-setup.sh
+	pnpm --filter @drake/web exec playwright test

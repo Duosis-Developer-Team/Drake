@@ -1,0 +1,63 @@
+import { defineConfig } from "@playwright/test";
+
+/**
+ * E2E against the REAL stack: fake OIDC provider (test-only), the FastAPI
+ * control plane on the disposable local database/Redis, and the Next.js app.
+ * Prerequisite: `make up` + `bash scripts/e2e-setup.sh` from the repo root.
+ *
+ * The OIDC redirect URL goes through the WEB origin (/v1 rewrite), so the
+ * session cookie is issued same-origin — exactly like a real deployment
+ * behind one host.
+ */
+export default defineConfig({
+  testDir: "./e2e",
+  // Dev-mode servers cold-compile routes on first hit; timeouts are sized
+  // for that, not for application latency.
+  timeout: 90_000,
+  expect: { timeout: 30_000 },
+  retries: 0,
+  workers: 1,
+  reporter: [["list"]],
+  use: {
+    baseURL: "http://127.0.0.1:3456",
+    trace: "retain-on-failure",
+  },
+  webServer: [
+    {
+      command: "uv run python apps/api/tests/fake_oidc.py --port 9556",
+      cwd: "../..",
+      url: "http://127.0.0.1:9556/.well-known/openid-configuration",
+      reuseExistingServer: true,
+      timeout: 30_000,
+    },
+    {
+      command:
+        "uv run uvicorn drake_api.main:create_app --factory --host 127.0.0.1 --port 8123",
+      cwd: "../..",
+      url: "http://127.0.0.1:8123/health/live",
+      reuseExistingServer: true,
+      timeout: 30_000,
+      env: {
+        DRAKE_ENV: "local",
+        DRAKE_OIDC_ISSUER: "http://127.0.0.1:9556",
+        DRAKE_OIDC_CLIENT_ID: "drake-test-client",
+        DRAKE_OIDC_REDIRECT_URL: "http://127.0.0.1:3456/v1/auth/callback",
+        DRAKE_DATABASE_URL:
+          "postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake",
+        DRAKE_REDIS_URL: "redis://127.0.0.1:56379/0",
+        DRAKE_ALLOWED_WEB_ORIGINS: '["http://127.0.0.1:3456"]',
+      },
+    },
+    {
+      // Production build: deterministic E2E without dev-mode cold-compile
+      // stalls, and closer to real deployment behavior.
+      command: "pnpm build && pnpm start --port 3456",
+      url: "http://127.0.0.1:3456",
+      reuseExistingServer: true,
+      timeout: 180_000,
+      env: {
+        DRAKE_API_URL: "http://127.0.0.1:8123",
+      },
+    },
+  ],
+});
