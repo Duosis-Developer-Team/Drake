@@ -10,6 +10,7 @@ import os
 from alembic import context
 from drake_api.audit import models as audit_models  # noqa: F401  (registers tables)
 from drake_api.db import Base
+from drake_api.rbac import models as rbac_models  # noqa: F401  (registers tables)
 from sqlalchemy import engine_from_config, pool
 
 config = context.config
