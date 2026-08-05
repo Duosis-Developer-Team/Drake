@@ -1,0 +1,30 @@
+# Fictional example: internal tool without business tenants (tenantModel: none).
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata:
+  name: alpha
+  displayName: Alpha
+spec:
+  repository: {provider: github, owner: example-org, name: alpha, defaultBranch: dev}
+  owners: [{team: platform, role: primary}]
+  environments:
+    - {name: dev, runtime: kubernetes, branch: dev, clusterRef: cluster-a, namespace: alpha-dev, criticality: medium}
+    - {name: test, runtime: kubernetes, branch: test, clusterRef: cluster-a, namespace: alpha-test, criticality: high}
+  services:
+    - name: core-api
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector: {app.kubernetes.io/name: alpha-core}
+      health: {livePath: /health/live, readyPath: /health/ready, metricsPath: /metrics}
+    - name: auth-api
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+  tenantModel: {mode: none}
+  dataStores:
+    - {name: core-db, engine: postgresql, scope: environment, measurementProfile: postgres-v1, connectionSecretRef: alpha-core-monitoring}
+    - {name: auth-db, engine: postgresql, scope: environment, measurementProfile: postgres-v1, connectionSecretRef: alpha-auth-monitoring}
+  backup:
+    - {name: alpha-weekly, dataStoreRef: core-db, rpoSeconds: 604800, rtoSeconds: 14400, reporter: object-storage-v1, offsiteRequired: true, restoreDrillMaxAgeDays: 30}
+  dashboards: [kubernetes-service-v1, fastapi-v1, postgres-v1, backup-postgres-v1]

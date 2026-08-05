@@ -1,0 +1,10 @@
+# Must be rejected: spec.tenantModel and spec.owners are required.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata: {name: alpha}
+spec:
+  repository: {provider: github, owner: example-org, name: alpha}
+  environments:
+    - {name: dev, runtime: kubernetes, branch: dev, clusterRef: cluster-a, namespace: alpha-dev, criticality: medium}
+  services:
+    - {name: api, component: api, runtime: fastapi, metricsProfile: fastapi-v1}

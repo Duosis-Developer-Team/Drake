@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://drake.duosis.com/schemas/backup-event-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["specversion", "type", "source", "id", "time", "subject", "data"],
+  "properties": {
+    "specversion": {"const": "1.0"},
+    "type": {"enum": ["drake.backup.run.completed.v1", "drake.backup.run.failed.v1", "drake.restore.drill.completed.v1"]},
+    "source": {"type": "string", "pattern": "^project/"},
+    "id": {"type": "string", "format": "uuid"},
+    "time": {"type": "string", "format": "date-time"},
+    "subject": {"type": "string", "pattern": "^(datastore|backup-policy)/"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_key", "status", "started_at", "finished_at"],
+      "properties": {
+        "policy_key": {"type": "string"},
+        "status": {"enum": ["succeeded", "failed", "partial"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "artifact_key": {"type": ["string", "null"]},
+        "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "checksum_algorithm": {"type": ["string", "null"]},
+        "checksum_verified": {"type": ["boolean", "null"]},
+        "storage_site": {"type": ["string", "null"]},
+        "offsite": {"type": ["boolean", "null"]},
+        "error_code": {"type": ["string", "null"]},
+        "restore_validation": {"type": ["object", "null"]}
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://drake.duosis.com/schemas/tenant-snapshot-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "snapshot_id", "generated_at", "complete", "tenants"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string", "format": "uuid"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "complete": {"type": "boolean"},
+    "next_cursor": {"type": ["string", "null"]},
+    "tenants": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tenant_key", "status", "quality", "usage", "storage"],
+        "properties": {
+          "tenant_key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "display_name": {"type": ["string", "null"], "maxLength": 255},
+          "status": {"type": "string", "maxLength": 64},
+          "plan_key": {"type": ["string", "null"], "maxLength": 128},
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dimension", "unit"],
+              "properties": {
+                "dimension": {"type": "string"},
+                "unit": {"type": "string"},
+                "included": {"type": ["number", "null"]},
+                "extra": {"type": ["number", "null"]},
+                "enforcement": {"enum": ["none", "warn", "soft", "hard"]}
+              }
+            }
+          },
+          "usage": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dimension", "value", "unit", "window_start", "window_end", "source"],
+              "properties": {
+                "dimension": {"type": "string"},
+                "value": {"type": "number"},
+                "unit": {"type": "string"},
+                "window_start": {"type": "string", "format": "date-time"},
+                "window_end": {"type": "string", "format": "date-time"},
+                "source": {"type": "string"}
+              }
+            }
+          },
+          "storage": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["store_key", "method", "confidence", "as_of"],
+              "properties": {
+                "store_key": {"type": "string"},
+                "bytes": {"type": ["integer", "null"], "minimum": 0},
+                "rows": {"type": ["integer", "null"], "minimum": 0},
+                "method": {"enum": ["physical_database_exact", "physical_schema_exact", "logical_rollup_exact", "logical_sampled_estimate", "row_count_only", "unavailable"]},
+                "confidence": {"enum": ["exact", "estimated", "partial", "unknown"]},
+                "as_of": {"type": "string", "format": "date-time"}
+              }
+            }
+          },
+          "quality": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"enum": ["complete", "partial", "stale", "estimated", "unattributed", "schema_mismatch", "source_error"]}
+          }
+        }
+      }
+    }
+  }
+}

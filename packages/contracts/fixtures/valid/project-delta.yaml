@@ -1,0 +1,21 @@
+# Fictional example: single-service web product migrating onto Kubernetes.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata: {name: delta, displayName: Delta}
+spec:
+  repository: {provider: github, owner: example-org, name: delta, defaultBranch: main}
+  owners: [{team: product, role: primary}, {team: platform, role: secondary}]
+  environments:
+    - {name: prod, runtime: kubernetes, branch: main, clusterRef: cluster-a, namespace: delta-prod, criticality: high}
+  services:
+    - name: web
+      component: web
+      runtime: nextjs
+      metricsProfile: nextjs-v1
+      health: {livePath: /health/live, readyPath: /health/ready, metricsPath: /metrics}
+  tenantModel: {mode: shared_table, adapter: delta-tenant-v1, snapshotFreshnessSeconds: 3600}
+  dataStores:
+    - {name: postgres-main, engine: postgresql, scope: project, measurementProfile: postgres-shared-table-v1, connectionSecretRef: delta-monitoring}
+  slos:
+    - {name: web-availability, serviceRef: web, indicator: availability, objective: 99.9, windowDays: 30}
+  dashboards: [kubernetes-service-v1, nextjs-v1, tenant-saas-v1, postgres-v1]

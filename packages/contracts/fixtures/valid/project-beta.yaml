@@ -1,0 +1,22 @@
+# Fictional example: multi-tenant SaaS with shared-table tenancy.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata: {name: beta, displayName: Beta}
+spec:
+  repository: {provider: github, owner: example-org, name: beta, defaultBranch: dev}
+  owners: [{team: platform, role: primary}]
+  environments:
+    - {name: dev, runtime: kubernetes, branch: dev, clusterRef: cluster-a, namespace: beta-dev, criticality: medium}
+    - {name: prod, runtime: kubernetes, branch: prod, clusterRef: cluster-a, namespace: beta-prod, criticality: critical}
+  services:
+    - {name: api, component: api, runtime: fastapi, metricsProfile: fastapi-v1}
+    - {name: web, component: web, runtime: nextjs, metricsProfile: nextjs-v1}
+    - {name: scheduler, component: worker, runtime: python, metricsProfile: worker-v1}
+  tenantModel: {mode: shared_table, adapter: beta-tenant-v1, snapshotFreshnessSeconds: 3600}
+  dataStores:
+    - {name: postgres-main, engine: postgresql, scope: environment, measurementProfile: postgres-shared-table-v1, connectionSecretRef: beta-monitoring}
+  backup:
+    - {name: nightly-postgres, dataStoreRef: postgres-main, rpoSeconds: 86400, rtoSeconds: 14400, reporter: pgdump-v1, offsiteRequired: true, restoreDrillMaxAgeDays: 7}
+  slos:
+    - {name: api-availability, serviceRef: api, indicator: availability, objective: 99.9, windowDays: 30}
+  dashboards: [kubernetes-service-v1, fastapi-v1, tenant-saas-v1, postgres-v1, backup-postgres-v1]
