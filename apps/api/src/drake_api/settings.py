@@ -32,6 +32,33 @@ class Settings(BaseSettings):
 
     ready_check_timeout_seconds: float = 1.5
 
+    # --- OIDC / sessions (values come from the environment; never secrets in code) ---
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    # Optional confidential-client secret, provided only via environment /
+    # external secret store. Empty means public client + PKCE.
+    oidc_client_secret: str = ""
+    # Where the provider redirects back to (this API's callback endpoint).
+    oidc_redirect_url: str = "http://127.0.0.1:8000/v1/auth/callback"
+    session_cookie_name: str = "drake_session"
+    session_ttl_seconds: int = 8 * 60 * 60
+    login_state_ttl_seconds: int = 600
+    # Origins allowed to perform cookie-authenticated mutations (CSRF layer 2).
+    allowed_web_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    def validate_runtime_security(self) -> None:
+        """Reject insecure identity configuration outside local/test.
+
+        A plaintext (http) issuer — including any fake/test provider — must
+        never be usable in a production-like environment.
+        """
+        if self.env in ("local", "test"):
+            return
+        if self.oidc_issuer.startswith("http://"):
+            raise RuntimeError("plaintext OIDC issuer is not allowed outside local/test")
+        if self.oidc_redirect_url.startswith("http://"):
+            raise RuntimeError("plaintext OIDC redirect URL is not allowed outside local/test")
+
 
 @lru_cache
 def get_settings() -> Settings:
