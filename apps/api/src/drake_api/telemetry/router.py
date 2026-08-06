@@ -138,6 +138,13 @@ async def dashboard_template(
     return {"dashboard": dashboard.raw, "registry_hash": _registry(request).content_hash}
 
 
+# Strong references for broker tasks still cleaning up while their
+# endpoint task is being torn down (a repeated endpoint cancellation can
+# interrupt the awaited cleanup; without a reference the running task could
+# be garbage-collected before its finally releases leases).
+_CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
+
+
 async def _watch_disconnect(request: Request) -> None:
     """Event-driven http.disconnect watcher (no busy polling).
 
@@ -197,7 +204,11 @@ async def telemetry_query(
         if not query_task.done():
             query_task.cancel()
             # The endpoint's outcome is already decided; the broker task's
-            # own finally releases provider resources and leases.
+            # own finally releases provider resources and leases. The strong
+            # reference guarantees that cleanup completes even if a repeated
+            # endpoint cancellation interrupts this await.
+            _CLEANUP_TASKS.add(query_task)
+            query_task.add_done_callback(_CLEANUP_TASKS.discard)
             with contextlib.suppress(BaseException):
                 await query_task
 

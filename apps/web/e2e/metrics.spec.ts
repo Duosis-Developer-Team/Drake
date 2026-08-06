@@ -368,11 +368,15 @@ test("real end-to-end cancellation: rapid changes stay bounded and disconnects f
     };
     const inflight = http.request(requestOptions);
     inflight.on("error", () => {});
+    inflight.on("socket", (socket) => {
+      // RST (resetAndDestroy), not FIN: a plain destroy() half-closes the
+      // connection, which HTTP servers may legitimately treat as "client
+      // finished sending" and keep serving — only a reset is an
+      // unambiguous, deterministic client disconnect.
+      setTimeout(() => (socket as net.Socket).resetAndDestroy(), 800);
+    });
     inflight.write(body);
     inflight.end();
-    // Destroy the raw socket well before the 3s slow response (and far
-    // before the 5s provider timeout): a REAL client disconnect.
-    setTimeout(() => inflight.destroy(), 800);
   }
 
   // Leases were held, then vanish promptly after the disconnects — their
@@ -380,21 +384,21 @@ test("real end-to-end cancellation: rapid changes stay bounded and disconnects f
   await expect.poll(() => redisEval(TOTAL_LEASES), { timeout: 3_000 }).toBeGreaterThan(0);
   await expect.poll(() => redisEval(TOTAL_LEASES), { timeout: 5_000 }).toBe(0);
 
-  // Provider-boundary proof over REAL HTTP: at least one slow provider
-  // call ended as a client disconnect — its delayed response hit a closed
-  // connection at ~3s, well before the 5s provider timeout, so cancelled
-  // work did not run out its clock. The accounting must also CLOSE
-  // (started == completed + disconnected): nothing hangs. Exhaustive
-  // task-level cancellation semantics (transport CancelledError, immediate
-  // own-token lease release, untouched observation, no orphan tasks) are
-  // separately proven by the API disconnect integration test.
+  // STRICT provider-boundary contract over REAL HTTP: every provider call
+  // that started in this window ended as a client disconnect — its delayed
+  // response hit a CLOSED connection at ~3s, well before the 5s provider
+  // timeout — and NONE ran to completion. (A socket destroyed before its
+  // query reached the provider simply never starts a call, which is even
+  // earlier cancellation.) Determinism: slow mode is pinned, the quiet gate
+  // above silenced all prior traffic, the counters were reset just before
+  // firing, and the three ranges are guaranteed cache misses.
   await expect
     .poll(async () => {
       const stats = await providerStats(page);
       const started = stats.started - statsBefore.started;
       const disconnected = stats.disconnected - statsBefore.disconnected;
       const completed = stats.completed - statsBefore.completed;
-      return started >= 1 && disconnected >= 1 && completed + disconnected === started;
+      return started >= 1 && completed === 0 && disconnected === started;
     }, { timeout: 10_000 })
     .toBe(true);
 

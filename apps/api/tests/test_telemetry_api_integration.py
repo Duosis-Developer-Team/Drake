@@ -1050,3 +1050,223 @@ async def test_future_window_never_shares_relative_last_good(engine: AsyncEngine
         )
         assert stale.status_code == 200
         assert stale.json()["data_state"] == "stale"
+
+
+# --- Final closure: deterministic cancellation-race proofs ------------------
+
+
+class GatedRedis:
+    """Delegates to a real Redis client, but parks selected command replies
+    at a gate AFTER the server has executed them — deterministically
+    reproducing 'command committed server-side, caller cancelled before the
+    reply was consumed'."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+        self.hold_eval_at: int | None = None
+        self.hold_zrem = False
+        self.eval_calls = 0
+        self.reached = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+    async def eval(self, *args: Any) -> Any:
+        self.eval_calls += 1
+        result = await self._real.eval(*args)
+        if self.hold_eval_at is not None and self.eval_calls == self.hold_eval_at:
+            self.reached.set()
+            await self.gate.wait()
+        return result
+
+    async def zrem(self, *args: Any) -> Any:
+        result = await self._real.zrem(*args)
+        if self.hold_zrem:
+            self.reached.set()
+            await self.gate.wait()
+        return result
+
+
+async def test_acquire_cancellation_race_releases_landed_tokens(engine: AsyncEngine) -> None:
+    """Cancellation arrives while the SECOND lease EVAL is committed
+    server-side but its reply is unread: the code must learn the outcome,
+    release the landed token AND the previously held partial token."""
+    from drake_api.telemetry.budgets import ConcurrencyLeases
+
+    settings = require_it_settings()
+    real = aioredis.from_url(settings.redis_url)
+    gated = GatedRedis(real)
+    gated.hold_eval_at = 2  # park the target-key EVAL after it executed
+    principal_key = "telemetry:lease:principal:race-test"
+    target_key = "telemetry:lease:target:race-test"
+    try:
+        await real.delete(principal_key, target_key)
+        leases = ConcurrencyLeases(gated)  # type: ignore[arg-type]
+        acquire_task = asyncio.create_task(
+            leases.acquire([principal_key, target_key], int(datetime.now(UTC).timestamp() * 1000))
+        )
+        await asyncio.wait_for(gated.reached.wait(), timeout=5)
+        # Both tokens are IN Redis right now; the caller holds only one.
+        assert await real.zcard(principal_key) == 1
+        assert await real.zcard(target_key) == 1
+
+        acquire_task.cancel()
+        await asyncio.sleep(0.05)
+        gated.gate.set()  # the parked reply arrives; the outcome is learned
+        with pytest.raises(asyncio.CancelledError):
+            await acquire_task
+
+        # NOTHING remains: the landed token and the partial token were both
+        # released by their own removal, not by TTL.
+        assert await real.zcard(principal_key) == 0
+        assert await real.zcard(target_key) == 0
+    finally:
+        await real.delete(principal_key, target_key)
+        await real.aclose()
+
+
+async def test_release_cancellation_race_completes_own_removals(engine: AsyncEngine) -> None:
+    """The release task is cancelled after both ZREMs started: the
+    cancellation is re-raised only AFTER both own-token removals completed,
+    and a foreign token in the same zset is untouched."""
+    from drake_api.telemetry.budgets import ConcurrencyLeases
+
+    settings = require_it_settings()
+    real = aioredis.from_url(settings.redis_url)
+    gated = GatedRedis(real)
+    principal_key = "telemetry:lease:principal:release-race"
+    target_key = "telemetry:lease:target:release-race"
+    try:
+        await real.delete(principal_key, target_key)
+        leases = ConcurrencyLeases(gated)  # type: ignore[arg-type]
+        held = await leases.acquire(
+            [principal_key, target_key], int(datetime.now(UTC).timestamp() * 1000)
+        )
+        foreign_score = int(datetime.now(UTC).timestamp() * 1000) + 30_000
+        await real.zadd(principal_key, {"foreign-token": foreign_score})
+
+        gated.hold_zrem = True
+        release_task = asyncio.create_task(leases.release(held))
+        await asyncio.wait_for(gated.reached.wait(), timeout=5)
+        release_task.cancel()
+        await asyncio.sleep(0.05)
+        gated.gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await release_task
+
+        # Own tokens are gone from BOTH sets; the foreign token survives.
+        assert await real.zcard(target_key) == 0
+        members = await real.zrange(principal_key, 0, -1)
+        assert members == [b"foreign-token"]
+    finally:
+        await real.delete(principal_key, target_key)
+        await real.aclose()
+
+
+async def test_endpoint_task_cancellation_is_orphan_proof(engine: AsyncEngine) -> None:
+    """The server runtime cancelling the ENDPOINT task directly (not an
+    http.disconnect message) must still close the provider stream, free
+    both leases immediately, leave no orphan task, and record nothing on
+    the integration observation."""
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    transport = HangingTransport()
+    settings = require_it_settings().model_copy(
+        update={"telemetry_connectors": {"it-fake": TelemetryConnector(url=FAKE_CONNECTOR_URL)}}
+    )
+    harness = build_harness(settings, telemetry_transport=transport)
+    user_type = type(harness.provider.users["user-owner"])
+    harness.provider.users.setdefault(
+        "user-plain", user_type("user-plain", "Plain", "user-plain@example.test")
+    )
+    integration_id = await configure_alpha_prometheus(engine, world)
+
+    async with harness.api_client() as client:
+        me = await harness.login(client, "user-plain")
+        session_cookie = client.cookies.get(harness.settings.session_cookie_name)
+        csrf = me["csrf_token"]
+
+    async with engine.connect() as connection:
+        identity_id = (
+            await connection.execute(text("SELECT id FROM identities WHERE subject = 'user-plain'"))
+        ).scalar_one()
+    principal_key = f"telemetry:lease:principal:{identity_id}"
+    target_key = f"telemetry:lease:target:{world['alpha'].scope_id}"
+
+    body = json.dumps(
+        query_body("service.request-rate.v1", "service", str(world["dev_api"].id), hours=13)
+    ).encode()
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/v1/telemetry/query",
+        "raw_path": b"/v1/telemetry/query",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+            (b"cookie", f"{harness.settings.session_cookie_name}={session_cookie}".encode()),
+            (b"x-csrf-token", csrf.encode()),
+            (b"origin", harness.settings.allowed_web_origins[0].encode()),
+        ],
+        "client": ("127.0.0.1", 51001),
+        "server": ("127.0.0.1", 8123),
+    }
+    messages: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    await messages.put({"type": "http.request", "body": body, "more_body": False})
+
+    async def receive() -> dict[str, Any]:
+        return await messages.get()
+
+    async def send(message: dict[str, Any]) -> None:
+        del message
+
+    tasks_before = len(asyncio.all_tasks())
+    app_task = asyncio.create_task(harness.app(scope, receive, send))
+    await asyncio.wait_for(transport.started.wait(), timeout=5)
+
+    redis = aioredis.from_url(require_it_settings().redis_url)
+    try:
+        assert await redis.zcard(principal_key) == 1
+        assert await redis.zcard(target_key) == 1
+
+        # The runtime cancels the APP task itself:
+        app_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(app_task, timeout=5)
+
+        assert transport.cancelled == 1  # provider stream closed
+        # The broker task's cleanup may outlive the endpoint task by a tick
+        # (it is strongly referenced until done): both leases must drain
+        # within a bounded moment — own-token release, far below the 30s TTL.
+        for _ in range(40):
+            if await redis.zcard(principal_key) == 0 and await redis.zcard(target_key) == 0:
+                break
+            await asyncio.sleep(0.05)
+        assert await redis.zcard(principal_key) == 0
+        assert await redis.zcard(target_key) == 0
+    finally:
+        await redis.aclose()
+
+    for _ in range(20):
+        if len(asyncio.all_tasks()) <= tasks_before:
+            break
+        await asyncio.sleep(0.05)
+    assert len(asyncio.all_tasks()) <= tasks_before  # no orphan watcher/query task
+
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT observed_state, last_error_code, last_sync_attempt_at "
+                    "FROM integrations WHERE id = :id"
+                ),
+                {"id": integration_id},
+            )
+        ).first()
+    assert row is not None and row[0] == "unknown" and row[1] is None and row[2] is None

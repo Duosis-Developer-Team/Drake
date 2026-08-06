@@ -45,6 +45,26 @@ def _bump(counter: str) -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _client_gone(self) -> bool:
+        """Non-blocking EOF probe: a cancelled Drake API call has CLOSED its
+        connection by the time the delayed response is ready — a bare write
+        can falsely 'succeed' into a FIN-closed socket, so the probe is the
+        reliable disconnect signal."""
+        try:
+            self.connection.setblocking(False)
+            try:
+                chunk = self.connection.recv(1)
+            except BlockingIOError:
+                return False  # open and quietly waiting for the response
+            except OSError:
+                return True
+            return chunk == b""  # EOF: the peer closed
+        finally:
+            try:
+                self.connection.setblocking(True)
+            except OSError:
+                pass
+
     def _respond(self, status: int, body: bytes, content_type: str = "text/plain") -> bool:
         try:
             self.send_response(status)
@@ -97,6 +117,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if MODE["value"] == "slow":
             time.sleep(SLOW_DELAY_SECONDS)
+        if self._client_gone():
+            _bump("disconnected")
+            return
         request = urllib.request.Request(  # noqa: S310 - fixed local upstream
             f"{UPSTREAM}{self.path}",
             data=body,
