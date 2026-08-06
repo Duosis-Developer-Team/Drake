@@ -69,5 +69,10 @@ infrastructure.
 
 ## Status
 
-Sprint 0 — foundation. Application skeletons, contracts, local environment,
-and CI gates. No production features yet.
+Sprints 0–2 delivered: foundation (contracts, local environment, CI/security
+gates), identity (OIDC + server-side sessions, dynamic scoped RBAC,
+transactional idempotency, append-only audit), and the catalog control plane
+(project/environment/service/cluster catalog with scoped read APIs, global
+authorized search, and the premium web experience). Operational data planes
+(telemetry, Kubernetes inventory, GitHub, tenants, backups) are not yet
+connected and are honestly presented as not_configured.
