@@ -165,10 +165,12 @@ class TelemetryBroker:
             return {**envelope, "correlation_id": correlation_id}
 
         # Align the window to the effective step so close-together requests
-        # share cache entries deterministically.
+        # share cache entries deterministically: `from` floors, `to` CEILS —
+        # flooring the end would drop up to one step of the freshest samples
+        # (visible as a false "empty" against a recently started provider).
         step = effective.effective_step_seconds
         aligned_from = (effective.from_ts // step) * step
-        aligned_to = (effective.to_ts // step) * step
+        aligned_to = -(-effective.to_ts // step) * step
         # Cache identity follows the integration's CONFIGURATION (id +
         # hashed config_ref) — reconfiguration invalidates cache entries,
         # observation-projection version bumps do not. The ref itself is

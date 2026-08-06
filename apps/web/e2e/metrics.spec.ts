@@ -193,6 +193,11 @@ test("mobile 390px: dashboards render without horizontal overflow", async ({ pag
   await page.goto("/projects");
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   await expect(page.getByTestId("project-metrics")).toBeVisible();
+  // The range control is hidden below sm — URL state still works (and keeps
+  // the window tight for a freshly started fixture Prometheus in CI).
+  const mobileUrl = new URL(page.url());
+  mobileUrl.searchParams.set("range", "1h");
+  await page.goto(mobileUrl.toString());
   await expect(
     page.getByTestId("project-metrics").getByTestId("widget-scrape-state"),
   ).toContainText("Being scraped");
