@@ -480,8 +480,7 @@ async def test_environment_pagination_filters_and_archived_default(
         async with engine.begin() as connection:
             await connection.execute(
                 text(
-                    "UPDATE environments SET lifecycle='archived', archived_at=now() "
-                    "WHERE id = :id"
+                    "UPDATE environments SET lifecycle='archived', archived_at=now() WHERE id = :id"
                 ),
                 {"id": world["alpha_prod"].id},
             )
@@ -560,10 +559,7 @@ async def test_cluster_search_and_lifecycle_default(engine: AsyncEngine) -> None
 
         async with engine.begin() as connection:
             await connection.execute(
-                text(
-                    "UPDATE clusters SET lifecycle='archived', archived_at=now() "
-                    "WHERE id = :id"
-                ),
+                text("UPDATE clusters SET lifecycle='archived', archived_at=now() WHERE id = :id"),
                 {"id": world["cluster_b"].id},
             )
         default = (await viewer.get("/v1/clusters")).json()
@@ -594,9 +590,7 @@ async def test_integration_pagination_filters_and_determinism(
             url = f"/v1/integrations/health?limit=1{cursor}"
             body = (await owner.get(url)).json()
             assert len(body["integrations"]) <= 1
-            seen.extend(
-                (e["scope"]["ref"], e["integration_type"]) for e in body["integrations"]
-            )
+            seen.extend((e["scope"]["ref"], e["integration_type"]) for e in body["integrations"])
             if not body["next_cursor"]:
                 break
             cursor = f"&cursor={body['next_cursor']}"
@@ -608,18 +602,14 @@ async def test_integration_pagination_filters_and_determinism(
         ]
         assert len(seen) == len(set(seen))
 
-        filtered = (
-            await owner.get("/v1/integrations/health?integration_type=prometheus")
-        ).json()
+        filtered = (await owner.get("/v1/integrations/health?integration_type=prometheus")).json()
         assert {e["integration_type"] for e in filtered["integrations"]} == {"prometheus"}
         assert len(filtered["integrations"]) == 2
         by_state = (
             await owner.get("/v1/integrations/health?configuration_state=configured")
         ).json()
         assert by_state["integrations"] == []
-        by_observed = (
-            await owner.get("/v1/integrations/health?observed_state=unknown")
-        ).json()
+        by_observed = (await owner.get("/v1/integrations/health?observed_state=unknown")).json()
         assert len(by_observed["integrations"]) == 4
 
         # Bounded filter inputs and cursors reject invalid values.
