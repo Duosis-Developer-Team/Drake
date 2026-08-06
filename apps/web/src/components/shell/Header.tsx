@@ -1,7 +1,9 @@
 "use client";
 
-import { Clock, Menu, Search } from "lucide-react";
+import { Clock, Menu } from "lucide-react";
+import { usePathname } from "next/navigation";
 
+import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { IdentityMenu } from "@/components/shell/IdentityMenu";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
@@ -22,25 +24,10 @@ export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
         <Menu className="h-4 w-4" />
       </button>
 
-      <div className="hidden items-center gap-2 text-sm text-ink-muted sm:flex">
-        <span className="font-medium text-ink-secondary">Organization</span>
-        <span aria-hidden>/</span>
-        <span
-          className="rounded border border-dashed border-border px-2 py-0.5 text-xs"
-          title="Scope switching arrives with the catalog sprint"
-        >
-          scope not configured
-        </span>
-      </div>
+      <RouteBreadcrumb />
 
       <div className="ml-auto flex items-center gap-2">
-        <div
-          className="hidden h-9 w-64 cursor-not-allowed items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-sm text-ink-muted md:flex"
-          title="Search arrives with the catalog sprint"
-        >
-          <Search className="h-4 w-4" aria-hidden />
-          <span>Search — not configured</span>
-        </div>
+        <CatalogSearch />
         <button
           type="button"
           disabled
@@ -54,5 +41,35 @@ export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
         <IdentityMenu />
       </div>
     </header>
+  );
+}
+
+const SEGMENT_LABELS: Record<string, string> = {
+  projects: "Projects",
+  clusters: "Clusters",
+  integrations: "Integrations",
+  environments: "Environments",
+  services: "Services",
+  admin: "Access Control",
+};
+
+/** Route-derived breadcrumb: honest scope context from the URL structure. */
+function RouteBreadcrumb() {
+  const pathname = usePathname();
+  const segments = (pathname || "/").split("/").filter(Boolean);
+  const label =
+    segments.length === 0 ? "Command Center" : SEGMENT_LABELS[segments[0]] ?? segments[0];
+  const depth = segments.length;
+  return (
+    <div className="hidden items-center gap-2 text-sm text-ink-muted sm:flex">
+      <span className="font-medium text-ink-secondary">Organization</span>
+      <span aria-hidden>/</span>
+      <span className="text-ink">{label}</span>
+      {depth > 1 ? (
+        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+          detail
+        </span>
+      ) : null}
+    </div>
   );
 }

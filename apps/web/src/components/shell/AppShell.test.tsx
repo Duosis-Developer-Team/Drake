@@ -7,6 +7,8 @@ import { installFetchMock, makeMe } from "@/test/mock-api";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 async function renderAuthenticated(permissions: string[] = ["rbac.manage"]) {
@@ -55,9 +57,13 @@ describe("AppShell (authenticated)", () => {
     expect(localStorage.getItem("drake-theme")).toBe("dark");
   });
 
-  it("placeholder controls are disabled, not fake-functional", async () => {
+  it("keeps unfinished controls disabled while search is real", async () => {
     await renderAuthenticated();
+    // Time range is still honestly disabled (telemetry sprint):
     expect(screen.getByTitle(/time range control arrives/i)).toBeDisabled();
-    expect(screen.getByText(/search — not configured/i)).toBeInTheDocument();
+    // Catalog search is now a real, enabled control:
+    const searchButtons = screen.getAllByRole("button", { name: /search catalog/i });
+    expect(searchButtons.length).toBeGreaterThan(0);
+    expect(searchButtons[0]).toBeEnabled();
   });
 });

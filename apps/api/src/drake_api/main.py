@@ -12,10 +12,12 @@ from drake_api.auth.flows import AuthFlows
 from drake_api.auth.oidc import OidcClient
 from drake_api.auth.router import router as auth_router
 from drake_api.auth.sessions import SessionStore
+from drake_api.catalog.router import router as catalog_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines
 from drake_api.errors import register_error_handlers
 from drake_api.health import router as health_router
+from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
@@ -73,6 +75,8 @@ def create_app(
     app.include_router(rbac_router)
     app.include_router(rbac_options_router)
     app.include_router(audit_router)
+    app.include_router(catalog_router)
+    app.include_router(integrations_router)
     return app
 
 

@@ -108,8 +108,27 @@ def build_harness(settings: Settings | None = None) -> S1Harness:
 
 
 async def reset_rbac_state(engine: AsyncEngine) -> None:
-    """Clean RBAC tables between tests (audit is append-only and stays)."""
+    """Clean RBAC tables between tests (audit is append-only and stays).
+
+    Catalog tables (0004) reference scopes with RESTRICT, so they are
+    cleared first whenever they exist — keeps resets order-independent
+    across test files.
+    """
     async with engine.begin() as connection:
+        for table in (
+            "integrations",
+            "environment_services",
+            "service_definitions",
+            "environments",
+            "project_owners",
+            "projects",
+            "clusters",
+        ):
+            exists = (
+                await connection.execute(text("SELECT to_regclass(:name)"), {"name": table})
+            ).scalar_one()
+            if exists is not None:
+                await connection.execute(text(f"DELETE FROM {table}"))  # noqa: S608
         await connection.execute(text("DELETE FROM grants"))
         await connection.execute(text("DELETE FROM group_mappings"))
         await connection.execute(text("DELETE FROM identities"))
