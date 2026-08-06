@@ -69,10 +69,18 @@ infrastructure.
 
 ## Status
 
-Sprints 0–2 delivered: foundation (contracts, local environment, CI/security
+Sprints 0–3 delivered: foundation (contracts, local environment, CI/security
 gates), identity (OIDC + server-side sessions, dynamic scoped RBAC,
-transactional idempotency, append-only audit), and the catalog control plane
+transactional idempotency, append-only audit), the catalog control plane
 (project/environment/service/cluster catalog with scoped read APIs, global
-authorized search, and the premium web experience). Operational data planes
-(telemetry, Kubernetes inventory, GitHub, tenants, backups) are not yet
-connected and are honestly presented as not_configured.
+authorized search, and the premium web experience), and the metrics
+foundation: versioned metric/query/dashboard registries, a server-side
+Query Broker (authorization before cache/provider, fail-closed budgets,
+Redis-backed cache with honest stale semantics, SSRF-bounded Prometheus
+adapter), a digest-pinned local Prometheus fixture stack, and real golden
+signals on the project and service screens. Drake stores no raw samples,
+the browser never talks to a provider, and users cannot submit PromQL —
+queries exist only as repository-controlled templates. The
+kube-prometheus-stack dev package is rendered and policy-checked in CI
+only; no cluster deployment has happened. Kubernetes inventory, GitHub,
+tenants, and backups remain honestly not_configured.
