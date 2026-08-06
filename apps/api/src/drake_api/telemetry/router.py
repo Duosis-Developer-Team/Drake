@@ -181,19 +181,25 @@ async def telemetry_query(
     try:
         await asyncio.wait({query_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED)
         if not query_task.done():
-            # Client gone before the query finished: cancel and AWAIT the
-            # broker task so no orphan work or held lease survives.
-            query_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await query_task
-            # Nobody is listening; the response is never delivered.
+            # Client gone before the query finished. Cleanup happens in the
+            # finally below; nobody is listening for this response.
             raise HTTPException(status_code=499, detail="client disconnected")
         return query_task.result()
     finally:
-        # The watcher is cancelled and awaited on EVERY path — no orphans.
+        # BOTH tasks are cancelled and AWAITED on EVERY exit path — including
+        # the server runtime cancelling this endpoint task itself on client
+        # disconnect (asyncio.wait never cancels its children, and an
+        # unreferenced task could be garbage-collected without running its
+        # finally, leaking held leases).
         disconnect_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await disconnect_task
+        if not query_task.done():
+            query_task.cancel()
+            # The endpoint's outcome is already decided; the broker task's
+            # own finally releases provider resources and leases.
+            with contextlib.suppress(BaseException):
+                await query_task
 
 
 # Registered ONLY when settings allow it (local/test + explicit enable):
