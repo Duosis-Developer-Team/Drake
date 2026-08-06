@@ -85,7 +85,12 @@ interface PendingQuery {
 /** Deferred telemetry-query fetch mock with concurrency accounting. */
 function installTelemetryMock(definition: unknown) {
   const pending: PendingQuery[] = [];
-  const counters = { inFlight: 0, maxInFlight: 0, started: 0 };
+  const counters = {
+    inFlight: 0,
+    maxInFlight: 0,
+    started: 0,
+    startsByTemplate: {} as Record<string, number>,
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -111,6 +116,8 @@ function installTelemetryMock(definition: unknown) {
         counters.inFlight += 1;
         counters.maxInFlight = Math.max(counters.maxInFlight, counters.inFlight);
         const body = JSON.parse(String(init?.body)) as { template_key: string };
+        counters.startsByTemplate[body.template_key] =
+          (counters.startsByTemplate[body.template_key] ?? 0) + 1;
         return new Promise<Response>((resolve, reject) => {
           const entry: PendingQuery = {
             template: body.template_key,
@@ -325,5 +332,161 @@ describe("dashboard query scheduling", () => {
     );
     expect(screen.queryByText(/telemetry source unavailable/i)).not.toBeInTheDocument();
     expect(screen.getByText(/ref: ref-429/)).toBeInTheDocument();
+  });
+});
+
+import { THROTTLE_RETRY_DELAY_MS } from "@/components/telemetry/DashboardRenderer";
+
+async function flushMicrotasks() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+describe("throttle retries stay inside the concurrency budget (fake timers)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("retry timers wake the pump but can never exceed the budget", async () => {
+    vi.useFakeTimers();
+    const { pending, counters } = installTelemetryMock(dashboardDefinition(SIX));
+    renderBoard({ profile: "kubernetes-service-v1" });
+    await flushMicrotasks();
+    expect(counters.started).toBe(MAX_CONCURRENT_QUERIES);
+    const firstThree = pending.splice(0, MAX_CONCURRENT_QUERIES);
+    const throttledTemplates = firstThree.map((entry) => entry.template);
+
+    // All three answered 429 → three retry timers armed; the scheduler
+    // starts the next three NORMAL queue jobs (slow, left unresolved).
+    for (const entry of firstThree) {
+      await act(async () => {
+        entry.resolve(429);
+        await Promise.resolve();
+      });
+    }
+    await flushMicrotasks();
+    expect(counters.started).toBe(6);
+    expect(counters.inFlight).toBe(MAX_CONCURRENT_QUERIES);
+
+    // Retry delay elapses while all three slots are BUSY: the timers only
+    // re-enqueue — not a single retry may start.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(THROTTLE_RETRY_DELAY_MS + 10);
+    });
+    expect(counters.started).toBe(6);
+    expect(counters.inFlight).toBe(MAX_CONCURRENT_QUERIES);
+    expect(counters.maxInFlight).toBe(MAX_CONCURRENT_QUERIES);
+
+    // Completing ONE slow query frees exactly one slot → exactly one retry
+    // enters it.
+    await act(async () => {
+      pending.shift()?.resolve();
+      await Promise.resolve();
+    });
+    await flushMicrotasks();
+    expect(counters.started).toBe(7);
+    expect(counters.inFlight).toBe(MAX_CONCURRENT_QUERIES);
+
+    // Drain everything (retries succeed).
+    while (pending.length > 0) {
+      await act(async () => {
+        pending.shift()?.resolve();
+        await Promise.resolve();
+      });
+      await flushMicrotasks();
+    }
+    // Each throttled template got exactly ONE automatic retry (2 starts):
+    for (const template of throttledTemplates) {
+      expect(counters.startsByTemplate[template]).toBe(2);
+    }
+    // ...and never a second one, even after another retry-delay window:
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(THROTTLE_RETRY_DELAY_MS + 10);
+    });
+    await flushMicrotasks();
+    expect(counters.started).toBe(9); // 6 initial slots + 3 retries, nothing more
+    expect(counters.inFlight).toBe(0);
+    expect(counters.maxInFlight).toBe(MAX_CONCURRENT_QUERIES);
+    expect(vi.getTimerCount()).toBe(0); // no pending retry timers or queued work
+  });
+
+  it("a 429'd template that gets throttled again is not auto-retried twice", async () => {
+    vi.useFakeTimers();
+    const { pending, counters } = installTelemetryMock(dashboardDefinition(["t.one"]));
+    renderBoard();
+    await flushMicrotasks();
+    await act(async () => {
+      pending.shift()?.resolve(429);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(THROTTLE_RETRY_DELAY_MS + 10);
+    });
+    await flushMicrotasks();
+    expect(counters.started).toBe(2); // the single automatic retry started
+    await act(async () => {
+      pending.shift()?.resolve(429); // the retry is throttled again
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(THROTTLE_RETRY_DELAY_MS + 10);
+    });
+    await flushMicrotasks();
+    expect(counters.started).toBe(2); // no second automatic retry, ever
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("unmount clears pending retry timers — advancing time starts nothing", async () => {
+    vi.useFakeTimers();
+    const { pending, counters } = installTelemetryMock(dashboardDefinition(["t.one"]));
+    const view = renderBoard();
+    await flushMicrotasks();
+    await act(async () => {
+      pending.shift()?.resolve(429);
+      await Promise.resolve();
+    });
+    view.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(THROTTLE_RETRY_DELAY_MS * 2);
+    });
+    expect(counters.started).toBe(1); // the retry never fired
+  });
+
+  it("a stale generation's retry cannot leak into the next range", async () => {
+    vi.useFakeTimers();
+    const { pending, counters } = installTelemetryMock(dashboardDefinition(["t.one"]));
+    const view = renderBoard({ preset: "1h" });
+    await flushMicrotasks();
+    await act(async () => {
+      pending.shift()?.resolve(429);
+      await Promise.resolve();
+    });
+    // Range changes BEFORE the retry timer fires:
+    view.rerender(
+      <SessionProvider>
+        <DashboardRenderer
+          templateKey="test-board-v1"
+          scopeType="service"
+          scopeId="s1"
+          preset="7d"
+          profile="fastapi-v1"
+        />
+      </SessionProvider>,
+    );
+    await flushMicrotasks();
+    expect(counters.started).toBe(2); // old initial + new generation's own query
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(THROTTLE_RETRY_DELAY_MS * 2);
+    });
+    await flushMicrotasks();
+    expect(counters.started).toBe(2); // the stale retry never started
+    await act(async () => {
+      pending.shift()?.resolve();
+      await Promise.resolve();
+    });
   });
 });

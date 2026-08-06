@@ -101,53 +101,64 @@ export function DashboardRenderer({
     setStates(Object.fromEntries(queue.map((key) => [key, { kind: "loading" as const }])));
 
     const csrfToken = me.csrf_token;
+    // TRUE capacity-accounted scheduler: `active` is the single source of
+    // truth for in-flight queries. NOTHING — initial work, queued work, or
+    // a throttle retry — may start a fetch unless active < the budget.
+    // Retry timers only re-enqueue and wake the pump; they can never start
+    // a fetch themselves.
     let next = 0;
+    let active = 0;
     const retried = new Set<string>();
     const retryTimers: ReturnType<typeof setTimeout>[] = [];
-    const runNext = (): void => {
+    const pump = (): void => {
       // A stale generation must not start queued work.
       if (generation !== generationRef.current || controller.signal.aborted) return;
-      if (next >= queue.length) return;
-      const key = queue[next];
-      next += 1;
-      queryTelemetry(
-        csrfToken,
-        { templateKey: key, scopeType, scopeId, preset },
-        controller.signal,
-      )
-        .then((envelope) => {
-          if (generation === generationRef.current) {
-            setStates((previous) => ({ ...previous, [key]: { kind: "ready", envelope } }));
-          }
-        })
-        .catch((error: unknown) => {
-          // Abort of an outdated generation is not an error state.
-          if (generation !== generationRef.current || controller.signal.aborted) return;
-          const state = classifyError(error);
-          if (state.kind === "throttled" && !retried.has(key)) {
-            retried.add(key);
-            retryTimers.push(
-              setTimeout(() => {
-                if (generation !== generationRef.current || controller.signal.aborted) return;
-                queue.push(key);
-                setStates((previous) => ({ ...previous, [key]: { kind: "loading" } }));
-                runNext();
-              }, THROTTLE_RETRY_DELAY_MS),
-            );
-          }
-          setStates((previous) => ({ ...previous, [key]: state }));
-        })
-        .finally(() => {
-          runNext();
-        });
+      while (active < MAX_CONCURRENT_QUERIES && next < queue.length) {
+        const key = queue[next];
+        next += 1;
+        active += 1; // incremented exactly once per started query
+        queryTelemetry(
+          csrfToken,
+          { templateKey: key, scopeType, scopeId, preset },
+          controller.signal,
+        )
+          .then((envelope) => {
+            if (generation === generationRef.current) {
+              setStates((previous) => ({ ...previous, [key]: { kind: "ready", envelope } }));
+            }
+          })
+          .catch((error: unknown) => {
+            // Abort of an outdated generation is not an error state.
+            if (generation !== generationRef.current || controller.signal.aborted) return;
+            const state = classifyError(error);
+            if (state.kind === "throttled" && !retried.has(key)) {
+              retried.add(key); // at most ONE automatic retry per template
+              retryTimers.push(
+                setTimeout(() => {
+                  if (generation !== generationRef.current || controller.signal.aborted) {
+                    return;
+                  }
+                  // Re-enqueue only — the pump enforces capacity.
+                  queue.push(key);
+                  setStates((previous) => ({ ...previous, [key]: { kind: "loading" } }));
+                  pump();
+                }, THROTTLE_RETRY_DELAY_MS),
+              );
+            }
+            setStates((previous) => ({ ...previous, [key]: state }));
+          })
+          .finally(() => {
+            active -= 1; // decremented exactly once on every settle path
+            pump();
+          });
+      }
     };
-    for (let worker = 0; worker < MAX_CONCURRENT_QUERIES; worker += 1) {
-      runNext();
-    }
+    pump();
 
     return () => {
       // In-flight requests are truly cancelled, not just ignored; pending
-      // throttle retries die with their generation.
+      // throttle retries die with their generation and queued retries can
+      // never start (generation guard in pump).
       for (const timer of retryTimers) clearTimeout(timer);
       controller.abort();
     };
