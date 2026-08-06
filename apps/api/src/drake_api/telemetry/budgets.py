@@ -94,20 +94,38 @@ class ConcurrencyLeases:
         try:
             for key, limit in keys_with_limits(keys):
                 token = uuid.uuid4().hex
-                granted = await self._redis.eval(
-                    _ACQUIRE, 1, key, token, str(now_ms), str(_LEASE_TTL_SECONDS * 1000), str(limit)
+                # The EVAL is shielded: if the caller is cancelled while the
+                # command is executing server-side, the command still
+                # finishes and (below) we LEARN whether the token landed —
+                # otherwise a cancellation racing the reply could leak a
+                # token until the TTL sweep.
+                eval_task = asyncio.ensure_future(
+                    self._redis.eval(
+                        _ACQUIRE,
+                        1,
+                        key,
+                        token,
+                        str(now_ms),
+                        str(_LEASE_TTL_SECONDS * 1000),
+                        str(limit),
+                    )
                 )
+                try:
+                    granted = await asyncio.shield(eval_task)
+                except asyncio.CancelledError:
+                    try:
+                        granted = await eval_task
+                    except Exception:
+                        granted = 0
+                    if int(granted):
+                        held.append((key, token))
+                    await self._release(held)
+                    raise
                 if not int(granted):
                     await self._release(held)
                     raise ConcurrencyRejectedError("concurrent query budget exhausted")
                 held.append((key, token))
-        except ConcurrencyRejectedError:
-            raise
-        except asyncio.CancelledError:
-            # Client disconnected mid-acquire: release any partially held
-            # tokens (own tokens only), then let the cancellation propagate.
-            # The bounded lease TTL remains the backstop if Redis fails here.
-            await self._release(held)
+        except (ConcurrencyRejectedError, asyncio.CancelledError):
             raise
         except Exception as error:
             # Redis down mid-acquire: clean up best-effort, then FAIL CLOSED.
