@@ -11,6 +11,7 @@ import asyncio
 import ipaddress
 import json
 import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -78,7 +79,18 @@ def _check_address(
     return False
 
 
-async def validate_connector(connector: TelemetryConnector, settings: Settings) -> str:
+Resolver = Callable[[str, int], Awaitable[list[str]]]
+
+
+async def _default_resolver(hostname: str, port: int) -> list[str]:
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+async def validate_connector(
+    connector: TelemetryConnector, settings: Settings, resolver: Resolver | None = None
+) -> str:
     """SSRF boundary for server-owned connectors (never caller input)."""
     parts = urlsplit(connector.url)
     _refuse(parts.scheme not in ("http", "https"), "connector_scheme_refused")
@@ -113,13 +125,12 @@ async def validate_connector(connector: TelemetryConnector, settings: Settings) 
     _refuse(settings.env not in ("local", "test"), "connector_hostname_unpinned")
 
     try:
-        loop = asyncio.get_running_loop()
-        infos = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        addresses = await (resolver or _default_resolver)(hostname, port)
     except socket.gaierror as error:
         raise ConnectorRefusedError("connector_unresolvable") from error
-    _refuse(not infos, "connector_unresolvable")
+    _refuse(not addresses, "connector_unresolvable")
     verdicts = [
-        _check_address(ipaddress.ip_address(info[4][0]), settings, connector) for info in infos
+        _check_address(ipaddress.ip_address(address), settings, connector) for address in addresses
     ]
     # Mixed public/private answer sets are a rebinding smell: refuse outright.
     _refuse(any(verdicts) and not all(verdicts), "connector_mixed_answers_refused")

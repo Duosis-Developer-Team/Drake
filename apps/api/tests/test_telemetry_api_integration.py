@@ -702,3 +702,172 @@ async def test_real_prometheus_query_smoke(engine: AsyncEngine) -> None:
         latest = envelope["series"][0]["points"][-1][1]
         assert latest == 1.0  # the fixture targets are being scraped
         assert envelope["source_type"] == "prometheus"
+
+
+# --- Sprint 3 hardening: authorization order, UTC contract, last-good -------
+
+
+async def test_unauthorized_sees_no_template_oracle_and_no_lookups(
+    engine: AsyncEngine,
+) -> None:
+    """Template existence must not be observable before authorization, and an
+    unauthorized query performs ZERO cache/connector/integration lookups."""
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    harness, provider = telemetry_harness()
+    await configure_alpha_prometheus(engine, world)
+    broker = harness.app.state.telemetry_broker
+
+    counters = {"cache": 0, "connector": 0, "integration": 0}
+    original_cache_get = broker._cache.get
+    original_resolve = broker._adapter.resolve_connector
+    original_lookup = broker._lookup_integration
+
+    async def spy_cache(key: str) -> Any:
+        counters["cache"] += 1
+        return await original_cache_get(key)
+
+    def spy_connector(config_ref: str) -> Any:
+        counters["connector"] += 1
+        return original_resolve(config_ref)
+
+    async def spy_integration(connection: Any, provider_scope_id: Any) -> Any:
+        counters["integration"] += 1
+        return await original_lookup(connection, provider_scope_id)
+
+    broker._cache.get = spy_cache
+    broker._adapter.resolve_connector = spy_connector
+    broker._lookup_integration = spy_integration
+
+    async with harness.api_client() as b_user:
+        await harness.login(b_user, "user-b-only")  # no grant on alpha
+        target = str(world["dev_api"].id)
+        known = await post_query(b_user, query_body("service.request-rate.v1", "service", target))
+        unknown = await post_query(b_user, query_body("ghost.template.v9", "service", target))
+        # Known vs unknown template: identical behavior for the unauthorized
+        # caller — one uniform 404, no oracle.
+        assert known.status_code == unknown.status_code == 404
+        assert known.json()["error"]["code"] == unknown.json()["error"]["code"]
+        # Incompatible scope type is equally invisible pre-authorization:
+        wrong_scope = await post_query(
+            b_user, query_body("environment.request-rate.v1", "service", target)
+        )
+        assert wrong_scope.status_code == 404
+
+    assert provider.calls == 0
+    assert counters == {"cache": 0, "connector": 0, "integration": 0}
+
+
+async def test_utc_contract_naive_rejected_offsets_normalized(engine: AsyncEngine) -> None:
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    harness, provider = telemetry_harness(fresh_ttl=60)
+    await configure_alpha_prometheus(engine, world)
+    service_id = str(world["dev_api"].id)
+
+    async with harness.api_client() as plain:
+        await harness.login(plain, "user-plain")
+
+        # Naive timestamps violate the UTC ISO-8601 contract: 422.
+        body = query_body("service.request-rate.v1", "service", service_id)
+        body["range"]["from"] = "2026-08-06T00:00:00"
+        assert (await post_query(plain, body)).status_code == 422
+
+        # The same instant in two offsets is ONE query: identical range in
+        # the response (explicit UTC) and a fresh cache hit on the second.
+        base = datetime(2026, 8, 6, 10, 0, tzinfo=UTC)
+        zulu = query_body("service.request-rate.v1", "service", service_id)
+        zulu["range"] = {
+            "from": (base - timedelta(hours=1)).isoformat(),
+            "to": base.isoformat(),
+            "step_seconds": 60,
+        }
+        first = await post_query(plain, zulu)
+        assert first.status_code == 200
+        assert first.json()["range"]["to"].endswith("+00:00")
+
+        offset = query_body("service.request-rate.v1", "service", service_id)
+        offset["range"] = {
+            "from": "2026-08-06T12:00:00+03:00",
+            "to": "2026-08-06T13:00:00+03:00",
+            "step_seconds": 60,
+        }
+        second = await post_query(plain, offset)
+        assert second.status_code == 200
+        envelope = second.json()
+        assert envelope["cache_state"] == "fresh_hit"  # same UTC instant, same identity
+        assert envelope["range"] == first.json()["range"]
+    assert provider.calls == 1
+
+
+async def test_historical_windows_never_share_last_good(engine: AsyncEngine) -> None:
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    harness, provider = telemetry_harness(fresh_ttl=1)
+    await configure_alpha_prometheus(engine, world)
+    service_id = str(world["dev_api"].id)
+
+    def historical(hours_back: int) -> dict[str, Any]:
+        end = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=hours_back)
+        body = query_body("service.request-rate.v1", "service", service_id)
+        body["range"] = {
+            "from": (end - timedelta(hours=1)).isoformat(),
+            "to": end.isoformat(),
+            "step_seconds": 60,
+        }
+        return body
+
+    async with harness.api_client() as plain:
+        await harness.login(plain, "user-plain")
+        window_a = historical(72)
+        assert (await post_query(plain, window_a)).status_code == 200
+
+        provider.mode = "fail"
+        await asyncio.sleep(1.2)
+        # Same duration/step, unrelated absolute window: NO stale reuse.
+        window_b = historical(48)
+        unavailable = await post_query(plain, window_b)
+        assert unavailable.status_code == 503
+
+        # The exact same historical window may still serve its own last-good,
+        # clearly separating requested range, data range, and as_of.
+        stale = await post_query(plain, window_a)
+        assert stale.status_code == 200
+        envelope = stale.json()
+        assert envelope["data_state"] == "stale"
+        assert envelope["data_range"]["to"] == envelope["range"]["to"]
+        assert envelope["data_range"] == envelope["range"]  # identical window here
+        assert envelope["as_of"] < datetime.now(UTC).isoformat()
+
+
+async def test_near_now_stale_discloses_requested_vs_data_range(
+    engine: AsyncEngine,
+) -> None:
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    harness, provider = telemetry_harness(fresh_ttl=1)
+    await configure_alpha_prometheus(engine, world)
+    service_id = str(world["dev_api"].id)
+
+    async with harness.api_client() as plain:
+        await harness.login(plain, "user-plain")
+        first = await post_query(
+            plain, query_body("service.request-rate.v1", "service", service_id)
+        )
+        assert first.status_code == 200
+        data_range = first.json()["range"]
+
+        provider.mode = "fail"
+        await asyncio.sleep(1.2)
+        # A new near-now request (moving window) may reuse the last-good
+        # payload — but the response must distinguish what was REQUESTED
+        # from what the data actually covers.
+        stale = await post_query(
+            plain, query_body("service.request-rate.v1", "service", service_id)
+        )
+        assert stale.status_code == 200
+        envelope = stale.json()
+        assert envelope["data_state"] == "stale"
+        assert envelope["data_range"] == data_range
+        assert envelope["range"]["requested_step_seconds"] == 60
+        assert "provider_unavailable" in envelope["warnings"]
