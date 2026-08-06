@@ -230,10 +230,13 @@ func nested(obj *unstructured.Unstructured, fields ...string) (any, bool) {
 func specSummary(kind string, obj *unstructured.Unstructured) map[string]any {
 	out := map[string]any{}
 	switch kind {
-	case "Deployment", "ReplicaSet", "StatefulSet":
+	case "Deployment", "ReplicaSet", "StatefulSet", "DaemonSet":
 		if v, ok := nested(obj, "spec", "replicas"); ok {
 			putSummary(out, "replicas", v)
 		}
+		// metadata.generation vs status.observedGeneration exposes rollout
+		// lag deterministically — no name guessing involved.
+		putSummary(out, "generation", obj.GetGeneration())
 	case "CronJob":
 		if v, ok := nested(obj, "spec", "schedule"); ok {
 			putSummary(out, "schedule", v)
@@ -290,6 +293,8 @@ func statusSummary(kind string, obj *unstructured.Unstructured) (map[string]any,
 		for source, target := range map[string]string{
 			"replicas": "replicas", "availableReplicas": "available_replicas",
 			"readyReplicas": "ready_replicas", "updatedReplicas": "updated_replicas",
+			"unavailableReplicas": "unavailable_replicas",
+			"observedGeneration":  "observed_generation",
 		} {
 			if v, ok := nested(obj, "status", source); ok {
 				putSummary(out, target, v)
@@ -299,7 +304,10 @@ func statusSummary(kind string, obj *unstructured.Unstructured) (map[string]any,
 		for source, target := range map[string]string{
 			"replicas": "replicas", "readyReplicas": "ready_replicas",
 			"currentReplicas": "current_replicas", "updatedReplicas": "updated_replicas",
-			"availableReplicas": "available_replicas",
+			"availableReplicas":  "available_replicas",
+			"observedGeneration": "observed_generation",
+			"currentRevision":    "current_revision",
+			"updateRevision":     "update_revision",
 		} {
 			if v, ok := nested(obj, "status", source); ok {
 				putSummary(out, target, v)
@@ -309,6 +317,7 @@ func statusSummary(kind string, obj *unstructured.Unstructured) (map[string]any,
 		for source, target := range map[string]string{
 			"desiredNumberScheduled": "desired", "numberReady": "ready",
 			"numberAvailable": "available", "numberMisscheduled": "misscheduled",
+			"observedGeneration": "observed_generation", "updatedNumberScheduled": "updated",
 		} {
 			if v, ok := nested(obj, "status", source); ok {
 				putSummary(out, target, v)
@@ -355,6 +364,8 @@ func statusSummary(kind string, obj *unstructured.Unstructured) (map[string]any,
 		if v, ok := nested(obj, "status", "phase"); ok {
 			putSummary(out, "phase", v)
 		}
+	case "ResourceQuota":
+		quotaSummary(obj, out)
 	case "Event":
 		if v, ok := nested(obj, "reason"); ok {
 			putSummary(out, "reason", v)
@@ -371,6 +382,38 @@ func statusSummary(kind string, obj *unstructured.Unstructured) (map[string]any,
 		return nil, conditions
 	}
 	return out, conditions
+}
+
+// quotaSummary emits bounded hard/used pairs for a ResourceQuota: the
+// first few sorted resource names, values as their canonical strings.
+func quotaSummary(obj *unstructured.Unstructured, out map[string]any) {
+	hardRaw, hardOK := nested(obj, "status", "hard")
+	usedRaw, usedOK := nested(obj, "status", "used")
+	if !hardOK || !usedOK {
+		return
+	}
+	hard, hardIsMap := hardRaw.(map[string]any)
+	used, usedIsMap := usedRaw.(map[string]any)
+	if !hardIsMap || !usedIsMap {
+		return
+	}
+	keys := make([]string, 0, len(hard))
+	for key := range hard {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > 8 {
+		keys = keys[:8]
+	}
+	for _, key := range keys {
+		safe := strings.ReplaceAll(key, "/", "_")
+		if value, isStr := hard[key].(string); isStr {
+			putSummary(out, "hard_"+safe, value)
+		}
+		if value, isStr := used[key].(string); isStr {
+			putSummary(out, "used_"+safe, value)
+		}
+	}
 }
 
 func podContainerFacts(obj *unstructured.Unstructured) (int64, bool, bool, string) {

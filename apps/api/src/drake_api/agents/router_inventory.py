@@ -112,6 +112,29 @@ async def inventory_summary(
             )
         ).scalar_one()
 
+        rollup_signal_rows = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT
+                        count(*) FILTER (
+                            WHERE kind = 'ResourceQuota'
+                              AND (health_reasons @> '["quota_exhausted"]'::jsonb
+                                   OR health_reasons @> '["quota_near_limit"]'::jsonb)
+                        ),
+                        count(*) FILTER (
+                            WHERE kind = 'PersistentVolumeClaim'
+                              AND health IN ('degraded', 'unhealthy')
+                              AND payload->'owners' @> '[{"kind": "StatefulSet"}]'::jsonb
+                        )
+                    FROM inventory_resources
+                    WHERE cluster_id = :cluster_id AND lifecycle = 'active'
+                    """
+                ),
+                {"cluster_id": cluster_id},
+            )
+        ).one()
+
         pod_signal_rows = (
             await connection.execute(
                 text(
@@ -157,7 +180,13 @@ async def inventory_summary(
             "missing_resources": int(missing_count),
         },
         "nodes": _rollup("Node"),
-        "namespaces": _rollup("Namespace"),
+        "namespaces": {
+            **_rollup("Namespace"),
+            # Quota pressure surfaces at the namespace rollup: it counts
+            # ResourceQuota objects with explicit exhausted/near-limit
+            # reasons — never a guess from names.
+            "quota_alerts": int(rollup_signal_rows[0]),
+        },
         "pods": {
             **_rollup("Pod"),
             "crashloop": int(pod_signal_rows[0]),
@@ -165,7 +194,13 @@ async def inventory_summary(
             "restarts": int(pod_signal_rows[2]),
         },
         "workloads": workloads,
-        "persistent_volume_claims": _rollup("PersistentVolumeClaim"),
+        "persistent_volume_claims": {
+            **_rollup("PersistentVolumeClaim"),
+            # PVC alerts tied to workloads via EXPLICIT owner references
+            # only (typically StatefulSet volume retention) — name-pattern
+            # guessing is deliberately absent.
+            "workload_owned_alerts": int(rollup_signal_rows[1]),
+        },
         "by_kind": {kind: entry for kind, entry in sorted(by_kind.items())},
         "as_of": _as_of(),
     }
