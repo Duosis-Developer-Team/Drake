@@ -21,3 +21,6 @@ or operational details.
 | [ADR-0013](ADR-0013-auth-session-architecture.md) | Authentication and session architecture |
 | [ADR-0014](ADR-0014-catalog-authority-and-scope-topology.md) | Catalog authority and scope topology |
 | [ADR-0015](ADR-0015-metrics-registry-and-query-broker-runtime.md) | Metrics registry and Query Broker runtime |
+| [ADR-0016](ADR-0016-agent-enrollment-and-mtls-trust-boundary.md) | Agent enrollment and the mTLS trust boundary |
+| [ADR-0017](ADR-0017-snapshot-watch-ordering-and-atomic-projection.md) | Snapshot/watch ordering and atomic inventory projection |
+| [ADR-0018](ADR-0018-inventory-allowlist-bounded-metadata-and-health.md) | Inventory allowlist, bounded metadata, and health derivation |
