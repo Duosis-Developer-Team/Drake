@@ -14,6 +14,7 @@ func valid() Config {
 		ClusterID:        "5f0c9a4e-8f19-4a52-9d5e-2f6f5b3f9a11",
 		StateDir:         "/var/lib/drake-agent",
 		ServerCAFile:     "/etc/drake-agent/tls/server-ca.pem",
+		HeartbeatSeconds: 30,
 	}
 }
 
@@ -103,6 +104,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	cfg := FromEnv()
 	if cfg.StateDir != "/var/lib/drake-agent" {
 		t.Fatalf("expected default state dir, got %q", cfg.StateDir)
+	}
+	if cfg.HeartbeatSeconds != 30 {
+		t.Fatalf("expected default heartbeat interval, got %d", cfg.HeartbeatSeconds)
 	}
 	if cfg.HealthListenAddr != "127.0.0.1:8090" {
 		t.Fatalf("expected loopback default health addr, got %q", cfg.HealthListenAddr)

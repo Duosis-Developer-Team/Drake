@@ -67,6 +67,10 @@ export default defineConfig({
         DRAKE_TELEMETRY_CONNECTORS:
           '{"e2e-prometheus":{"url":"http://127.0.0.1:59191"}}',
         DRAKE_TELEMETRY_FRESH_TTL_OVERRIDE_SECONDS: "2",
+        // Agent observation windows shrunk so disconnect→stale transitions
+        // are observable in seconds (local/E2E only; defaults are 90/900).
+        DRAKE_AGENT_HEARTBEAT_STALE_SECONDS: "6",
+        DRAKE_AGENT_INVENTORY_STALE_SECONDS: "60",
       },
     },
     {

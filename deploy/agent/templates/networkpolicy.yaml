@@ -1,0 +1,42 @@
+{{- if .Values.networkPolicy.enabled }}
+# Outbound-only scaffold: ALL ingress denied (the agent has no inbound
+# surface at all), egress limited to DNS, the Kubernetes API, and the Drake
+# internal endpoint. Operators tighten CIDRs/ports per topology.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake-agent.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "drake-agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake-agent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 6443
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.apiEndpointCIDR }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.apiEndpointPort }}
+{{- end }}

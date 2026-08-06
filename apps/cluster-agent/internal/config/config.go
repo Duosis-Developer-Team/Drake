@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -38,6 +39,9 @@ type Config struct {
 	// Kubeconfig switches from in-cluster config to an explicit file —
 	// local development and disposable test clusters only.
 	Kubeconfig string
+	// HeartbeatSeconds paces the liveness heartbeat (default 30; E2E uses
+	// small values to observe disconnect transitions quickly).
+	HeartbeatSeconds int
 }
 
 var clusterNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
@@ -63,6 +67,12 @@ func FromEnv() Config {
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = "/var/lib/drake-agent"
+	}
+	cfg.HeartbeatSeconds = 30
+	if raw := os.Getenv("DRAKE_AGENT_HEARTBEAT_SECONDS"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			cfg.HeartbeatSeconds = parsed
+		}
 	}
 	return cfg
 }
@@ -121,6 +131,9 @@ func (c Config) Validate() error {
 	}
 	if c.StateDir == "" {
 		return fmt.Errorf("state dir is required")
+	}
+	if c.HeartbeatSeconds < 1 || c.HeartbeatSeconds > 300 {
+		return fmt.Errorf("heartbeat interval must be within [1, 300] seconds")
 	}
 	return nil
 }

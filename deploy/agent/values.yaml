@@ -1,0 +1,50 @@
+# Drake cluster agent — reusable, UNAPPLIED template.
+# This chart is rendered and policy-checked in CI; it is never installed on
+# a real or shared cluster by the repository itself. Disposable test
+# clusters are the only sanctioned apply target during acceptance runs.
+
+image:
+  repository: ghcr.io/duosis-developer-team/drake-cluster-agent
+  # Digest-pinned at deploy time by the operator; the empty default keeps
+  # accidental installs from pulling a floating tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Drake cluster identity (UUID from the Drake catalog).
+clusterId: ""
+clusterName: ""
+
+# Outbound-only internal API endpoint (HTTPS).
+apiBaseUrl: ""
+
+# Existing Secrets ONLY — this chart never templates credential material.
+# Each secret is created out-of-band by the operator.
+serverCA:
+  existingSecret: ""   # secret with the internal listener CA bundle
+  key: ca.pem
+enrollmentToken:
+  existingSecret: ""   # one-time token; consumed at first start, then inert
+  key: token
+
+logLevel: info
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Loopback liveness probe port (never exposed via Service; no Service exists).
+healthPort: 8090
+
+networkPolicy:
+  enabled: true
+  # Egress scaffold: DNS + the Drake API endpoint + the Kubernetes API.
+  # Operators tighten the CIDRs/ports for their topology.
+  apiEndpointCIDR: 0.0.0.0/0
+  apiEndpointPort: 443
+
+serviceAccount:
+  name: drake-cluster-agent

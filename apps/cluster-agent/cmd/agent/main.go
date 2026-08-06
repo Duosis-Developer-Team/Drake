@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/collector"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/config"
@@ -85,13 +86,14 @@ func main() {
 	_ = registry
 
 	syncEngine, err := engine.New(engine.Options{
-		ClusterID:    cfg.ClusterID,
-		AgentID:      id.AgentID,
-		AgentVersion: agentVersion,
-		Dynamic:      clients.Dynamic,
-		Sender:       sender,
-		CRDPresent:   clients.CRDPresent,
-		Logger:       logger,
+		ClusterID:         cfg.ClusterID,
+		AgentID:           id.AgentID,
+		AgentVersion:      agentVersion,
+		Dynamic:           clients.Dynamic,
+		Sender:            sender,
+		CRDPresent:        clients.CRDPresent,
+		Logger:            logger,
+		HeartbeatInterval: time.Duration(cfg.HeartbeatSeconds) * time.Second,
 	})
 	if err != nil {
 		logger.Error("engine setup failed", "error", err.Error())

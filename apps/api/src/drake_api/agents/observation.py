@@ -7,17 +7,28 @@ inventory fresh; a fresh-looking state older than the staleness bound is
 reported stale; no agent at all is `not_configured` — never unknown-as-ok.
 """
 
+import os
 import uuid
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-# Connectivity/freshness bounds. Deterministic module constants: heartbeats
-# are expected every 30s (3 missed → disconnected); inventory activity is
-# expected continuously (15 min silence → stale).
-HEARTBEAT_STALE_SECONDS = 90
-INVENTORY_STALE_SECONDS = 900
+
+def _bound(name: str, default: int) -> int:
+    """Deterministic default with an ops override; E2E shrinks the windows
+    to observe disconnect/stale transitions in seconds instead of minutes."""
+    try:
+        return max(1, int(os.environ.get(name, str(default))))
+    except ValueError:
+        return default
+
+
+# Connectivity/freshness bounds: heartbeats are expected every 30s
+# (3 missed → disconnected); inventory activity is expected continuously
+# (15 min silence → stale).
+HEARTBEAT_STALE_SECONDS = _bound("DRAKE_AGENT_HEARTBEAT_STALE_SECONDS", 90)
+INVENTORY_STALE_SECONDS = _bound("DRAKE_AGENT_INVENTORY_STALE_SECONDS", 900)
 CERT_EXPIRY_WARNING_SECONDS = 5 * 24 * 3600
 
 
