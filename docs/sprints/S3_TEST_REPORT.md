@@ -69,7 +69,7 @@ injected transport; real local Prometheus for the smoke.
 
 ## 6. Browser E2E (real stack, no route mocking)
 
-`make e2e-test` — **25 passed** in **three consecutive runs** (16
+`make e2e-test` — **25 passed** in **four consecutive runs** (16
 existing S1/S2 scenarios kept + 9 metrics scenarios). Fake OIDC
 (test-only), FastAPI, PostgreSQL, Redis, local fixture Prometheus behind
 the E2E flaky proxy, production Next.js build, Chromium.
@@ -136,6 +136,7 @@ with follow-up commits on the same branch (no history rewrite):
 | Client aborts were browser-side only; the endpoint awaited the broker directly and could leave provider work + Redis leases running | `POST /v1/telemetry/query` runs the broker as a supervised task racing an event-driven `http.disconnect` watcher (no busy polling): disconnect cancels AND awaits the broker; provider stream/client close; both leases release immediately with own tokens; the watcher itself is cancelled+awaited on every path; mid-acquire cancellation releases partial tokens; cancellation is never recorded as a provider failure, never mints stale fallbacks, never maps to provider-unavailable | PASS |
 | No end-to-end cancellation proof | Manual-ASGI integration test (real Redis): provider transport observes exactly one CancelledError, leases vanish immediately, observation untouched, zero orphan tasks. E2E over the full stack: real-HTTP disconnects against the browser's own uvicorn register closed connections at the provider proxy before any timeout; accounting closes; leases drain. Frontend scheduling test honestly re-scoped to client-scheduler evidence with a real 1h→24h→7d walk | PASS |
 | Near-now accepted future-ending windows | Two-sided policy with one step of forward skew tolerance; future windows are historical (never share relative last-good) — integration-tested | PASS |
+| Cancellation races found by the E2E and fixed at the root | Endpoint lifecycle is orphan-proof (finally cancels AND awaits the broker task on every path — asyncio.wait never cancels children); lease ACQUIRE is outcome-exact under cancellation (shielded EVAL, landed tokens learned and released); lease RELEASE is cancellation-proof (shielded concurrent ZREMs, cancellation re-raised only after completion); the relative last-good identity keys on the REQUESTED duration (alignment phase can no longer split it). Verified by four consecutive clean full E2E runs | PASS |
 | **Platform finding (documented deployment requirement)** | Next's proxy hop does not reliably propagate client aborts upstream (drains pooled responses; Route Handler + `request.signal` behaves the same). Browser-driven server-side cancellation therefore requires the deployment ingress to route `/v1` DIRECTLY to the API; the local rewrite is dev/E2E-only. Recorded in `next.config.ts` and the security report | NOTED |
 
 Observed bounds in the cancellation E2E: client concurrency ≤3 (component
