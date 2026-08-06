@@ -19,9 +19,13 @@ newlines, operator smuggling) are neutralized or refused — negative-tested.
 Client disconnects cancel server work: the query endpoint supervises the
 broker task against an event-driven `http.disconnect` watcher — the
 provider stream closes, both concurrency leases release immediately with
-their own tokens (partial acquires included), no orphan tasks survive,
-and a cancellation is never recorded as a provider failure or served as
-stale data. Deployment requirement (verified platform finding): Next's
+their own tokens (partial acquires included, outcome-exact under
+cancellation races), no orphan tasks survive, and a cancellation is
+never recorded as a provider failure or served as stale data. The
+correlation middleware is a pure ASGI passthrough so disconnect delivery
+cannot be swallowed by middleware buffering. Browser-side, dashboards
+run a capacity-accounted scheduler (≤3 concurrent, single bounded retry
+through the same queue) so a screen can never exhaust its own budget. Deployment requirement (verified platform finding): Next's
 proxy hop does not propagate client aborts, so the ingress must route
 `/v1` directly to the API for browser-driven cancellation to reach it —
 the local rewrite exists only for dev/E2E.

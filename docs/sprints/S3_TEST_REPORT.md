@@ -22,8 +22,8 @@ adapter contract failures, SSRF refusals, broker-metrics hygiene.
 
 ## 2. Integration (live disposable local stack)
 
-`uv run pytest -m integration` — **96 passed** (78 S0–S2 regression +
-18 telemetry). Real PostgreSQL + Redis; deterministic fake Prometheus via
+`uv run pytest -m integration` — **99 passed** (78 S0–S2 regression +
+21 telemetry). Real PostgreSQL + Redis; deterministic fake Prometheus via
 injected transport; real local Prometheus for the smoke.
 
 | Area | Evidence | Status |
@@ -61,7 +61,7 @@ injected transport; real local Prometheus for the smoke.
 
 | Check | Command | Result | Status |
 |---|---|---|---|
-| Unit/component | `pnpm --filter @drake/web test` | **48 passed** (11 files, incl. the dashboard scheduling suite) | PASS |
+| Unit/component | `pnpm --filter @drake/web test` | **52 passed** (11 files, incl. the fake-timer scheduler suite) | PASS |
 | Lint / typecheck | eslint, `tsc --noEmit` | clean | PASS |
 | Production build | `pnpm --filter @drake/web build` | compiled | PASS |
 | Provider guard | part of the suite | extended: `/api/v1/query*`, provider port, config refs, PromQL mentions now fail the build if present in browser code — 0 violations | PASS |
@@ -142,3 +142,12 @@ with follow-up commits on the same branch (no history rewrite):
 Observed bounds in the cancellation E2E: client concurrency ≤3 (component
 suite: exactly 3 under a slow provider), principal leases ≤4, target
 leases ≤8 on live Redis; lease drain to 0 in ≤5s (TTL backstop 30s).
+
+## 11. Final retry/concurrency closure (post-cancellation review)
+
+| Finding | Closure | Status |
+|---|---|---|
+| A throttle-retry timer could start a fetch outside the bounded queue (client concurrency could reach 6) | True capacity-accounted scheduler: one active counter gates EVERY start (initial/queued/retry identically, +1 exactly once per start, −1 exactly once per settle); retry timers only re-enqueue and wake the pump. Deterministic fake-timer proof: with all slots busy, elapsed timers start NOTHING; freeing one slot admits exactly one retry; one auto-retry per template, never two; max client concurrency 3; zero pending timers/queued work at the end; unmount and stale generations start nothing | PASS |
+| Raw-socket E2E contract weaker than reported | STRICT contract enforced: `started ≥ 1 ∧ completed = 0 ∧ disconnected = started`. Determinized at the root (client RST instead of FIN half-close; proxy EOF-probe before write), verified 5/5 manual rounds at exactly 3/0/3 and 25/25 in three consecutive full E2E runs | PASS |
+| Cancellation races proven only via repeated E2E | Deterministic proofs with gated Redis commands: acquire-race (landed + partial tokens both released, zero remain), release-race (cancellation re-raised only after both own-token removals; foreign token untouched), and direct endpoint-task cancellation (provider stream closed, leases drained bounded, no orphans, observation untouched) | PASS |
+| **Root cause found by these proofs** | `CorrelationIdMiddleware` (BaseHTTPMiddleware) could swallow `http.disconnect` delivery through its queue-bridged receive — rewritten as a pure ASGI middleware passing `receive` through untouched; disconnect delivery measured 18/18 | PASS |
