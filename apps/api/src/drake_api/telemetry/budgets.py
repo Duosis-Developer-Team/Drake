@@ -4,6 +4,7 @@ The lease layer is fail-closed: if Redis is unavailable the query is
 refused with a typed retryable error — budgets are never bypassed.
 """
 
+import asyncio
 import math
 import uuid
 from dataclasses import dataclass
@@ -101,6 +102,12 @@ class ConcurrencyLeases:
                     raise ConcurrencyRejectedError("concurrent query budget exhausted")
                 held.append((key, token))
         except ConcurrencyRejectedError:
+            raise
+        except asyncio.CancelledError:
+            # Client disconnected mid-acquire: release any partially held
+            # tokens (own tokens only), then let the cancellation propagate.
+            # The bounded lease TTL remains the backstop if Redis fails here.
+            await self._release(held)
             raise
         except Exception as error:
             # Redis down mid-acquire: clean up best-effort, then FAIL CLOSED.

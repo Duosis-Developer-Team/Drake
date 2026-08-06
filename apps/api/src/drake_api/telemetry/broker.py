@@ -172,9 +172,12 @@ class TelemetryBroker:
         integration_identity = hashlib.sha256(
             f"{integration[0]}:{integration[1]}".encode()
         ).hexdigest()
-        # A query whose end sits within ~2 steps of now is a moving
-        # dashboard window; anything older is a historical absolute window.
-        near_now = int(time.time()) - effective.to_ts <= max(2 * step, 120)
+        # A query whose end sits within ~2 steps BEHIND now is a moving
+        # dashboard window; anything older — or ending in the future — is a
+        # historical absolute window (two-sided check: a future-ending
+        # window must never share the relative last-good identity).
+        now_delta = int(time.time()) - effective.to_ts
+        near_now = 0 <= now_delta <= max(2 * step, 120)
         keys = build_cache_keys(
             registry_hash=self._registry.content_hash,
             template_key=template.key,

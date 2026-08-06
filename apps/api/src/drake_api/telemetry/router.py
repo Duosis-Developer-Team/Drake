@@ -8,8 +8,10 @@
   and operators have no field to arrive in and 422 if attempted.
 """
 
+import asyncio
 import base64
 import binascii
+import contextlib
 import json
 import re
 import uuid
@@ -136,25 +138,62 @@ async def dashboard_template(
     return {"dashboard": dashboard.raw, "registry_hash": _registry(request).content_hash}
 
 
+async def _watch_disconnect(request: Request) -> None:
+    """Event-driven http.disconnect watcher (no busy polling).
+
+    The request body is fully consumed before the handler runs, so the next
+    ASGI receive() resolves only when the client connection closes.
+    """
+    while True:
+        message = await request.receive()
+        if message["type"] == "http.disconnect":
+            return
+
+
 @router.post("/telemetry/query")
 async def telemetry_query(
     request: Request,
     body: QueryRequest,
     auth: AuthContext = Depends(require_csrf),
-) -> dict[str, Any]:
+) -> Any:
     broker = _broker(request)
-    return await broker.query(
-        auth.principal,
-        QueryInput(
-            template_key=body.template_key,
-            scope_type=body.scope.type,
-            scope_id=body.scope.id,
-            from_dt=body.range.from_,
-            to_dt=body.range.to,
-            step_seconds=body.range.step_seconds,
-            parameters=body.parameters,
-        ),
+    # The broker runs as a SUPERVISED task tied to the client connection:
+    # if the client disconnects first, the task is cancelled AND awaited —
+    # the provider stream closes and both Redis leases are released with
+    # their own tokens immediately (see TelemetryBroker.query's finally and
+    # ConcurrencyLeases cancellation safety). Cancellation is never recorded
+    # as a provider failure and never produces stale fallbacks.
+    query_task = asyncio.create_task(
+        broker.query(
+            auth.principal,
+            QueryInput(
+                template_key=body.template_key,
+                scope_type=body.scope.type,
+                scope_id=body.scope.id,
+                from_dt=body.range.from_,
+                to_dt=body.range.to,
+                step_seconds=body.range.step_seconds,
+                parameters=body.parameters,
+            ),
+        )
     )
+    disconnect_task = asyncio.create_task(_watch_disconnect(request))
+    try:
+        await asyncio.wait({query_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED)
+        if not query_task.done():
+            # Client gone before the query finished: cancel and AWAIT the
+            # broker task so no orphan work or held lease survives.
+            query_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await query_task
+            # Nobody is listening; the response is never delivered.
+            raise HTTPException(status_code=499, detail="client disconnected")
+        return query_task.result()
+    finally:
+        # The watcher is cancelled and awaited on EVERY path — no orphans.
+        disconnect_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await disconnect_task
 
 
 # Registered ONLY when settings allow it (local/test + explicit enable):
