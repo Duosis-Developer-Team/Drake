@@ -51,9 +51,10 @@ test("owner: full catalog walk — projects → overview → environment → ser
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
   await expect(page.getByText("github:example-org/alpha", { exact: false })).toBeVisible();
-  // Operational capability cards are honestly not configured:
+  // Operational capability cards: telemetry is configured since Sprint 3
+  // (fixture Prometheus), the other three stay honestly not configured.
   const grid = page.getByTestId("operational-grid");
-  await expect(grid.getByTestId("state-not-configured")).toHaveCount(4);
+  await expect(grid.getByTestId("state-not-configured")).toHaveCount(3);
 
   await page.getByTestId("environment-list").getByText("dev", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "dev" })).toBeVisible();

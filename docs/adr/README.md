@@ -20,3 +20,4 @@ or operational details.
 | [ADR-0012](ADR-0012-no-early-microservices.md) | No early microservices |
 | [ADR-0013](ADR-0013-auth-session-architecture.md) | Authentication and session architecture |
 | [ADR-0014](ADR-0014-catalog-authority-and-scope-topology.md) | Catalog authority and scope topology |
+| [ADR-0015](ADR-0015-metrics-registry-and-query-broker-runtime.md) | Metrics registry and Query Broker runtime |

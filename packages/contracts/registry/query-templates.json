@@ -1,0 +1,462 @@
+{
+  "apiVersion": "drake.duosis.com/v1alpha1",
+  "kind": "QueryTemplateRegistry",
+  "templates": [
+    {
+      "key": "environment.error-ratio.v1",
+      "version": 1,
+      "metricKey": "service.error_ratio",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(http_server_requests_total{ status_class=\"5xx\",{{matchers}} }[{{window}}])) / sum(rate(http_server_requests_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_traffic",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.latency-p95.v1",
+      "version": 1,
+      "metricKey": "service.latency.p95",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{ {{matchers}} }[{{window}}])))",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "seconds",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.request-rate.v1",
+      "version": 1,
+      "metricKey": "service.request_rate",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum by (service) (rate(http_server_requests_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 50,
+        "maxPoints": 8000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "requests_per_second",
+        "labels": [
+          "service"
+        ]
+      },
+      "semantics": {
+        "empty": "no_traffic",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.scrape-up.v1",
+      "version": 1,
+      "metricKey": "service.scrape_up",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "min(up{ {{matchers}} })",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 5,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "service.error-ratio.v1",
+      "version": 1,
+      "metricKey": "service.error_ratio",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(http_server_requests_total{ status_class=\"5xx\",{{matchers}} }[{{window}}])) / sum(rate(http_server_requests_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "service"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        },
+        {
+          "label": "service",
+          "source": "service_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_traffic",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "service.latency-p95.v1",
+      "version": 1,
+      "metricKey": "service.latency.p95",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{ {{matchers}} }[{{window}}])))",
+      "scopeTypes": [
+        "service"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        },
+        {
+          "label": "service",
+          "source": "service_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "seconds",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "service.request-rate.v1",
+      "version": 1,
+      "metricKey": "service.request_rate",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(http_server_requests_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "service"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        },
+        {
+          "label": "service",
+          "source": "service_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "requests_per_second",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_traffic",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "service.scrape-up.v1",
+      "version": 1,
+      "metricKey": "service.scrape_up",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "max(up{ {{matchers}} })",
+      "scopeTypes": [
+        "service"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        },
+        {
+          "label": "service",
+          "source": "service_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 5,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.container-restarts.v1",
+      "version": 1,
+      "metricKey": "workload.container_restarts",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(increase(container_restarts_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "service"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        },
+        {
+          "label": "service",
+          "source": "service_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 5,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "restarts",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.cpu-utilization.v1",
+      "version": 1,
+      "metricKey": "workload.cpu.utilization",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(container_cpu_usage_cores{ {{matchers}} })",
+      "scopeTypes": [
+        "service"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "project",
+          "source": "project_key"
+        },
+        {
+          "label": "environment",
+          "source": "environment_key"
+        },
+        {
+          "label": "service",
+          "source": "service_key"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 604800,
+        "minStepSeconds": 30,
+        "maxSeries": 5,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 import {
   LifecycleBadge,
@@ -12,8 +13,10 @@ import {
   useApi,
 } from "@/components/catalog/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
+import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
 import { Card } from "@/components/ui/Card";
 import type { ServiceDetail } from "@/lib/catalog";
+import { parseRangePreset } from "@/lib/telemetry";
 
 const OPERATIONAL_LABELS = {
   metrics: "Golden signals",
@@ -31,6 +34,8 @@ export default function ServiceDetailPage() {
   const [service, retry] = useApi<ServiceDetail>(
     `/v1/projects/${projectId}/environments/${environmentId}/services/${serviceId}`,
   );
+  const searchParams = useSearchParams();
+  const preset = parseRangePreset(searchParams.get("range"));
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -113,6 +118,19 @@ export default function ServiceDetailPage() {
                   </dl>
                 </Card>
               </div>
+
+              <section aria-label="Golden signals" className="space-y-3">
+                <h2 className="text-sm font-semibold text-ink">Golden signals</h2>
+                <Suspense fallback={null}>
+                  <DashboardRenderer
+                    templateKey="service-golden-signals-v1"
+                    scopeType="service"
+                    scopeId={serviceId}
+                    preset={preset}
+                    profile={data.metrics_profile}
+                  />
+                </Suspense>
+              </section>
 
               <section aria-label="Operational capabilities">
                 <h2 className="mb-3 text-sm font-semibold text-ink">

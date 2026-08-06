@@ -221,6 +221,7 @@ def main() -> None:
     for subject, name in (
         ("user-env", "Env User"),
         ("user-cluster", "Cluster User"),
+        ("user-beta", "Beta User"),
     ):
         provider.users[subject] = FakeUser(subject, name, f"{subject}@example.test")
     uvicorn.run(provider.build_app(), host="127.0.0.1", port=args.port, log_level="warning")

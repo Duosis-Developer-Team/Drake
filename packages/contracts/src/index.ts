@@ -6,6 +6,11 @@ export {
 } from "./metric-policy.js";
 export { checkPolicy, type PolicyFinding } from "./policy.js";
 export {
+  checkRegistryIntegrity,
+  registryContentHash,
+  type TelemetryRegistry,
+} from "./registry.js";
+export {
   parseDocument,
   validateContent,
   validateDocument,

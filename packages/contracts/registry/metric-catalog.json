@@ -1,0 +1,243 @@
+{
+  "apiVersion": "drake.duosis.com/v1alpha1",
+  "kind": "MetricCatalog",
+  "metrics": [
+    {
+      "key": "service.error_ratio",
+      "version": 1,
+      "type": "ratio",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_requests_total",
+      "allowedInputLabels": [
+        "project",
+        "environment",
+        "service"
+      ],
+      "allowedOutputLabels": [
+        "service"
+      ],
+      "forbiddenLabels": [
+        "route",
+        "path",
+        "raw_path",
+        "url"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Share of requests answered with a 5xx status.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "service.latency.p95",
+      "version": 1,
+      "type": "histogram_quantile",
+      "unit": "seconds",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_request_duration_seconds_bucket",
+      "quantile": 0.95,
+      "allowedInputLabels": [
+        "project",
+        "environment",
+        "service"
+      ],
+      "allowedOutputLabels": [
+        "service"
+      ],
+      "forbiddenLabels": [
+        "route",
+        "path",
+        "raw_path",
+        "url"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "95th percentile request latency.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "service.request_rate",
+      "version": 1,
+      "type": "counter_rate",
+      "unit": "requests_per_second",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_requests_total",
+      "allowedInputLabels": [
+        "project",
+        "environment",
+        "service"
+      ],
+      "allowedOutputLabels": [
+        "service",
+        "route_template",
+        "status_class"
+      ],
+      "forbiddenLabels": [
+        "route",
+        "path",
+        "raw_path",
+        "url"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "HTTP request throughput per second, aggregated over route templates.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "service.scrape_up",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "up",
+      "allowedInputLabels": [
+        "project",
+        "environment",
+        "service"
+      ],
+      "allowedOutputLabels": [
+        "service"
+      ],
+      "forbiddenLabels": [
+        "instance_id"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Whether the service's telemetry target is being scraped (1) or not (0).",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "tenant.storage.logical_bytes",
+      "version": 1,
+      "type": "snapshot",
+      "unit": "bytes",
+      "sourceType": "snapshot",
+      "sourceFamily": "tenant_snapshot",
+      "allowedInputLabels": [
+        "project",
+        "tenant_key"
+      ],
+      "allowedOutputLabels": [
+        "tenant_key"
+      ],
+      "forbiddenLabels": [
+        "tenant_name",
+        "display_name"
+      ],
+      "capability": "tenant",
+      "profiles": [
+        "tenant-snapshot-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Logical tenant storage from authoritative application snapshots. Snapshot-sourced: never served through the Prometheus query broker.",
+      "requiredMetadata": [
+        "method",
+        "confidence",
+        "as_of"
+      ],
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.container_restarts",
+      "version": 1,
+      "type": "counter_rate",
+      "unit": "restarts",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_restarts_total",
+      "allowedInputLabels": [
+        "project",
+        "environment",
+        "service"
+      ],
+      "allowedOutputLabels": [
+        "service"
+      ],
+      "forbiddenLabels": [
+        "pod_name",
+        "container_id"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Container restarts over the selected window.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.cpu.utilization",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_cpu_usage_cores",
+      "allowedInputLabels": [
+        "project",
+        "environment",
+        "service"
+      ],
+      "allowedOutputLabels": [
+        "service"
+      ],
+      "forbiddenLabels": [
+        "pod_name",
+        "container_id"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU cores in use by the service's workload.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-3",
+        "revision": "1"
+      }
+    }
+  ]
+}

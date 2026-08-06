@@ -8,7 +8,13 @@ import { parse as parseYaml } from "yaml";
 
 import { checkPolicy, type PolicyFinding } from "./policy.js";
 
-export type SchemaName = "drake-project" | "tenant-snapshot" | "backup-event";
+export type SchemaName =
+  | "drake-project"
+  | "tenant-snapshot"
+  | "backup-event"
+  | "metric-catalog"
+  | "query-template"
+  | "dashboard-template";
 
 export interface ValidationIssue {
   /** Instance path of the problem ("" = document root). */
@@ -29,6 +35,9 @@ const SCHEMA_FILES: Record<SchemaName, string> = {
   "drake-project": "drake-project.schema.json",
   "tenant-snapshot": "tenant-snapshot.schema.json",
   "backup-event": "backup-event.schema.json",
+  "metric-catalog": "metric-catalog.schema.json",
+  "query-template": "query-template.schema.json",
+  "dashboard-template": "dashboard-template.schema.json",
 };
 
 // CJS/ESM interop under NodeNext: the default import of these CommonJS

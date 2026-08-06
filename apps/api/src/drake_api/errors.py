@@ -37,6 +37,7 @@ _STATUS_CODES: dict[int, str] = {
     422: "validation_error",
     428: "precondition_required",
     429: "rate_limited",
+    502: "provider_contract",
     503: "dependency_unavailable",
 }
 

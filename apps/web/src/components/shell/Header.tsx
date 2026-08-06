@@ -1,18 +1,29 @@
 "use client";
 
-import { Clock, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { IdentityMenu } from "@/components/shell/IdentityMenu";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { TimeRangeControl } from "@/components/telemetry/TimeRangeControl";
 
 /**
- * Top bar: scope context, search and time range are honest placeholders —
- * disabled and labeled as not configured until their sprints land. No fake
- * controls pretending to work.
+ * Top bar: scope context and search everywhere; the time-range control is
+ * REAL and appears only on telemetry-capable screens (project overview and
+ * service detail) — catalog/admin screens show no misleading control.
  */
+
+function isTelemetryRoute(pathname: string): boolean {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments[0] !== "projects") return false;
+  // /projects/{id} (overview with environment selector) or a service detail.
+  return segments.length === 2 || segments.includes("services");
+}
+
 export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
+  const pathname = usePathname() || "/";
   return (
     <header className="flex h-16 items-center gap-3 border-b border-border bg-surface px-4 lg:px-6">
       <button
@@ -28,15 +39,11 @@ export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
 
       <div className="ml-auto flex items-center gap-2">
         <CatalogSearch />
-        <button
-          type="button"
-          disabled
-          title="Time range control arrives with the telemetry sprint"
-          className="hidden h-9 cursor-not-allowed items-center gap-2 rounded-lg border border-border px-3 text-sm text-ink-muted sm:inline-flex"
-        >
-          <Clock className="h-4 w-4" aria-hidden />
-          <span>Last 24h</span>
-        </button>
+        {isTelemetryRoute(pathname) ? (
+          <Suspense fallback={null}>
+            <TimeRangeControl />
+          </Suspense>
+        ) : null}
         <ThemeToggle />
         <IdentityMenu />
       </div>

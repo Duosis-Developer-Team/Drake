@@ -57,11 +57,13 @@ describe("AppShell (authenticated)", () => {
     expect(localStorage.getItem("drake-theme")).toBe("dark");
   });
 
-  it("keeps unfinished controls disabled while search is real", async () => {
+  it("shows no time-range control off telemetry screens while search is real", async () => {
     await renderAuthenticated();
-    // Time range is still honestly disabled (telemetry sprint):
-    expect(screen.getByTitle(/time range control arrives/i)).toBeDisabled();
-    // Catalog search is now a real, enabled control:
+    // The time-range control is real now but appears ONLY on telemetry
+    // screens (project overview / service detail) — never as a misleading
+    // control on the Command Center:
+    expect(screen.queryByRole("group", { name: /time range/i })).not.toBeInTheDocument();
+    // Catalog search is a real, enabled control:
     const searchButtons = screen.getAllByRole("button", { name: /search catalog/i });
     expect(searchButtons.length).toBeGreaterThan(0);
     expect(searchButtons[0]).toBeEnabled();

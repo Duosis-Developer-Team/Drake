@@ -9,9 +9,11 @@
 # credential inside the negative-fixture directory and asserts the scanner
 # detects it — proving that directory is NOT exempt.
 #
-# Do not add path allowlists to silence a finding; fix the finding. If an
-# exemption is ever truly unavoidable, it must be a single-finding
-# fingerprint with a written justification.
+# Do not add path allowlists or value-shape allowlists to silence a
+# finding; fix the finding. The ONLY sanctioned exemption mechanism is an
+# exact single-finding fingerprint in .gitleaksignore with a written
+# justification — shape rules were removed after review because a
+# credential COULD be committed inside an innocuous-looking field shape.
 
 [extend]
 useDefault = true

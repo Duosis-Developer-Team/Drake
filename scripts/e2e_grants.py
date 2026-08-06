@@ -21,12 +21,16 @@ IDENTITIES = (
     ("user-plain", "Plain User"),
     ("user-env", "Env User"),
     ("user-cluster", "Cluster User"),
+    # Dedicated metrics-suite user: the S1 grant-lifecycle scenario revokes
+    # Plain User's Developer grants, so beta metrics get their own subject.
+    ("user-beta", "Beta User"),
 )
 
 GRANTS = (
     ("user-plain", "Developer", "project", "beta"),
     ("user-env", "Developer", "environment", "alpha/dev"),
     ("user-cluster", "E2E Cluster Viewer", "organization", "root"),
+    ("user-beta", "Developer", "project", "beta"),
 )
 
 

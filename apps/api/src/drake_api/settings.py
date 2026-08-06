@@ -7,7 +7,21 @@ localhost and no credential values are embedded in code.
 
 from functools import lru_cache
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class TelemetryConnector(BaseModel):
+    """Server-owned provider connector configuration.
+
+    ``allow_private`` is the EXPLICIT opt-in required before a connector may
+    resolve to private-network targets in a production-like environment
+    (ADR-0015: "private networks only via explicitly allowed server-owned
+    connectors"). Being present in the map is not enough on its own.
+    """
+
+    url: str
+    allow_private: bool = False
 
 
 class Settings(BaseSettings):
@@ -46,6 +60,22 @@ class Settings(BaseSettings):
     # Origins allowed to perform cookie-authenticated mutations (CSRF layer 2).
     allowed_web_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
+    # --- Telemetry (Query Broker) ---
+    # Server-owned connector resolver: config_ref -> typed connector
+    # configuration. Values come from the environment / external secret
+    # store (JSON object), never from requests and never exposed through
+    # the API.
+    telemetry_connectors: dict[str, TelemetryConnector] = {}
+    telemetry_max_timeout_seconds: float = 10.0
+    # Local/test-only override so E2E can exercise stale/last-good flows
+    # without waiting out production TTLs. Ignored outside local/test.
+    telemetry_fresh_ttl_override_seconds: int | None = None
+    # Drake's own broker metrics exposition. OFF by default; may only be
+    # enabled in local/test — the public API listener never serves it in a
+    # production-like environment (a future real scrape needs a separate
+    # internal listener/service/network policy, not this flag).
+    internal_metrics_enabled: bool = False
+
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
 
@@ -58,6 +88,10 @@ class Settings(BaseSettings):
             raise RuntimeError("plaintext OIDC issuer is not allowed outside local/test")
         if self.oidc_redirect_url.startswith("http://"):
             raise RuntimeError("plaintext OIDC redirect URL is not allowed outside local/test")
+        if self.internal_metrics_enabled:
+            raise RuntimeError(
+                "internal metrics cannot be enabled on the public API outside local/test"
+            )
 
 
 @lru_cache

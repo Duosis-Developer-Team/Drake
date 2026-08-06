@@ -1,0 +1,21 @@
+{
+  "apiVersion": "drake.duosis.com/v1alpha1",
+  "kind": "MetricCatalog",
+  "metrics": [
+    {
+      "key": "service.request_rate",
+      "version": 1,
+      "type": "made_up_type",
+      "unit": "furlongs_per_fortnight",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_requests_total",
+      "allowedInputLabels": ["project"],
+      "allowedOutputLabels": [],
+      "capability": "telemetry",
+      "profiles": ["fastapi-v1"],
+      "lifecycle": "active",
+      "description": "unsupported type and unit",
+      "provenance": {"kind": "registry", "ref": "test", "revision": "1"}
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "apiVersion": "drake.duosis.com/v1alpha1",
+  "kind": "DashboardTemplateRegistry",
+  "dashboards": [
+    {
+      "key": "project-environment-overview-v1",
+      "version": 1,
+      "title": "Environment overview",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "scopeTypes": [
+        "environment"
+      ],
+      "summary": "Golden-signal overview for one authorized environment: request throughput, error share, p95 latency, and telemetry source state.",
+      "sections": [
+        {
+          "key": "signals",
+          "title": "Golden signals",
+          "widgets": [
+            {
+              "key": "request-rate-kpi",
+              "title": "Request rate",
+              "display": "kpi",
+              "queryTemplateKey": "environment.request-rate.v1",
+              "reducer": "latest",
+              "unit": "requests_per_second",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Current total request throughput across the environment's services."
+            },
+            {
+              "key": "error-ratio-kpi",
+              "title": "Error ratio",
+              "display": "kpi",
+              "queryTemplateKey": "environment.error-ratio.v1",
+              "reducer": "latest",
+              "unit": "ratio",
+              "thresholds": {
+                "warn": 0.01,
+                "critical": 0.05,
+                "direction": "above"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Share of requests currently failing with server errors."
+            },
+            {
+              "key": "latency-p95-kpi",
+              "title": "p95 latency",
+              "display": "kpi",
+              "queryTemplateKey": "environment.latency-p95.v1",
+              "reducer": "latest",
+              "unit": "seconds",
+              "thresholds": {
+                "warn": 0.5,
+                "critical": 2,
+                "direction": "above"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "95th percentile request latency across the environment."
+            },
+            {
+              "key": "scrape-state",
+              "title": "Telemetry source",
+              "display": "status",
+              "queryTemplateKey": "environment.scrape-up.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Whether the environment's telemetry targets are currently being scraped."
+            }
+          ]
+        },
+        {
+          "key": "trends",
+          "title": "Trends",
+          "widgets": [
+            {
+              "key": "request-rate-by-service",
+              "title": "Request rate by service",
+              "display": "timeseries",
+              "queryTemplateKey": "environment.request-rate.v1",
+              "reducer": "latest",
+              "unit": "requests_per_second",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Request throughput over time, one series per service.",
+              "drilldownRoute": "/projects/{projectId}/environments/{environmentId}/services/{serviceId}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "service-golden-signals-v1",
+      "version": 1,
+      "title": "Service golden signals",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "scopeTypes": [
+        "service"
+      ],
+      "summary": "Golden signals for one service binding: request rate, error ratio, p95 latency, telemetry source state, and workload signals where the runtime profile provides them.",
+      "sections": [
+        {
+          "key": "signals",
+          "title": "Golden signals",
+          "widgets": [
+            {
+              "key": "request-rate-trend",
+              "title": "Request rate",
+              "display": "timeseries",
+              "queryTemplateKey": "service.request-rate.v1",
+              "reducer": "latest",
+              "unit": "requests_per_second",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Request throughput for this service over the selected range."
+            },
+            {
+              "key": "error-ratio-trend",
+              "title": "Error ratio",
+              "display": "timeseries",
+              "queryTemplateKey": "service.error-ratio.v1",
+              "reducer": "latest",
+              "unit": "ratio",
+              "thresholds": {
+                "warn": 0.01,
+                "critical": 0.05,
+                "direction": "above"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Share of this service's requests failing with server errors over time."
+            },
+            {
+              "key": "latency-p95-trend",
+              "title": "p95 latency",
+              "display": "timeseries",
+              "queryTemplateKey": "service.latency-p95.v1",
+              "reducer": "latest",
+              "unit": "seconds",
+              "thresholds": {
+                "warn": 0.5,
+                "critical": 2,
+                "direction": "above"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "95th percentile latency for this service over the selected range."
+            },
+            {
+              "key": "scrape-state",
+              "title": "Telemetry source",
+              "display": "status",
+              "queryTemplateKey": "service.scrape-up.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Whether this service's telemetry target is currently being scraped."
+            }
+          ]
+        },
+        {
+          "key": "workload",
+          "title": "Workload",
+          "widgets": [
+            {
+              "key": "container-restarts",
+              "title": "Container restarts",
+              "display": "kpi",
+              "queryTemplateKey": "workload.container-restarts.v1",
+              "reducer": "latest",
+              "unit": "restarts",
+              "thresholds": {
+                "warn": 1,
+                "critical": 5,
+                "direction": "above"
+              },
+              "requiredProfile": "kubernetes-service-v1",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Container restarts in the selected window."
+            },
+            {
+              "key": "cpu-utilization",
+              "title": "CPU in use",
+              "display": "kpi",
+              "queryTemplateKey": "workload.cpu-utilization.v1",
+              "reducer": "latest",
+              "unit": "cores",
+              "requiredProfile": "kubernetes-service-v1",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "CPU cores currently used by this service's workload."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
