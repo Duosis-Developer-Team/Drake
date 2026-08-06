@@ -1,0 +1,444 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://drake.duosis.com/schemas/agent-inventory-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "kind"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "drake.duosis.com/agent/v1"
+    },
+    "kind": {
+      "enum": [
+        "enrollment_request",
+        "heartbeat",
+        "snapshot_begin",
+        "snapshot_page",
+        "snapshot_complete",
+        "watch_events"
+      ]
+    },
+    "token": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128
+    },
+    "csr_pem": {
+      "type": "string",
+      "minLength": 200,
+      "maxLength": 8192
+    },
+    "cluster_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "agent_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "agent_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "snapshot_uid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "page_number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "total_pages": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "total_resources": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 500000
+    },
+    "inventory_state": {
+      "enum": [
+        "empty",
+        "reconciling",
+        "fresh",
+        "stale",
+        "reconcile_required"
+      ]
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/watchEvent"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "enrollment_request"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "token",
+          "csr_pem",
+          "cluster_id",
+          "agent_version"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "heartbeat"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cluster_id",
+          "agent_id",
+          "agent_version",
+          "request_id",
+          "source_time",
+          "sequence",
+          "inventory_state"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "snapshot_begin"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cluster_id",
+          "agent_id",
+          "agent_version",
+          "request_id",
+          "source_time",
+          "sequence",
+          "snapshot_uid"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "snapshot_page"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cluster_id",
+          "agent_id",
+          "request_id",
+          "source_time",
+          "sequence",
+          "snapshot_uid",
+          "page_number",
+          "resources"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "snapshot_complete"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cluster_id",
+          "agent_id",
+          "request_id",
+          "source_time",
+          "sequence",
+          "snapshot_uid",
+          "total_pages",
+          "total_resources"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "watch_events"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cluster_id",
+          "agent_id",
+          "request_id",
+          "source_time",
+          "sequence",
+          "events"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "resourceKind": {
+      "enum": [
+        "Namespace",
+        "Node",
+        "Pod",
+        "Service",
+        "EndpointSlice",
+        "Deployment",
+        "ReplicaSet",
+        "StatefulSet",
+        "DaemonSet",
+        "Job",
+        "CronJob",
+        "PersistentVolumeClaim",
+        "PersistentVolume",
+        "StorageClass",
+        "HorizontalPodAutoscaler",
+        "PodDisruptionBudget",
+        "ResourceQuota",
+        "LimitRange",
+        "Event",
+        "ServiceMonitor",
+        "PodMonitor",
+        "PrometheusRule"
+      ]
+    },
+    "boundedMap": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "maxLength": 317
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "summaryMap": {
+      "type": "object",
+      "maxProperties": 24,
+      "propertyNames": {
+        "pattern": "^[a-zA-Z][a-zA-Z0-9_./-]{0,62}$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 256
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "status"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    },
+    "ownerRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "uid"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "uid": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api_group",
+        "api_version",
+        "kind",
+        "name",
+        "uid",
+        "resource_version",
+        "observed_at"
+      ],
+      "properties": {
+        "api_group": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "api_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "kind": {
+          "$ref": "#/$defs/resourceKind"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 63
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64
+        },
+        "resource_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "labels": {
+          "$ref": "#/$defs/boundedMap"
+        },
+        "annotations": {
+          "$ref": "#/$defs/boundedMap"
+        },
+        "owners": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ownerRef"
+          }
+        },
+        "spec_summary": {
+          "$ref": "#/$defs/summaryMap"
+        },
+        "status_summary": {
+          "$ref": "#/$defs/summaryMap"
+        },
+        "conditions": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "watchEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "change_type",
+        "resource"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "change_type": {
+          "enum": [
+            "added",
+            "updated",
+            "deleted"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/resource"
+        }
+      }
+    }
+  }
+}

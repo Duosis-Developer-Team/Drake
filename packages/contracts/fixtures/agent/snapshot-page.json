@@ -1,0 +1,34 @@
+{
+  "api_version": "drake.duosis.com/agent/v1",
+  "kind": "snapshot_page",
+  "cluster_id": "0d4de44a-4dd8-45d8-8c65-e8b69029ea01",
+  "agent_id": "1b5ef55b-5ee9-46e9-9d76-f9c7a13afb02",
+  "request_id": "2c6f066c-6ffa-47fa-ae87-0ad8b24b0c03",
+  "source_time": "2026-08-06T12:00:00Z",
+  "sequence": 12,
+  "snapshot_uid": "3d70177d-700b-480b-bf98-1be9c35c1d04",
+  "page_number": 1,
+  "resources": [
+    {
+      "api_group": "apps",
+      "api_version": "v1",
+      "kind": "Deployment",
+      "namespace": "alpha-dev",
+      "name": "core-api",
+      "uid": "4e81288e-811c-491c-c0a9-2cfad46e2e05",
+      "resource_version": "812431",
+      "labels": {
+        "app.kubernetes.io/name": "core-api",
+        "drake.duosis.com/project": "alpha"
+      },
+      "owners": [],
+      "spec_summary": {"replicas": 3, "strategy": "RollingUpdate"},
+      "status_summary": {"available_replicas": 3, "ready_replicas": 3, "updated_replicas": 3},
+      "conditions": [
+        {"type": "Available", "status": "True"},
+        {"type": "Progressing", "status": "True", "reason": "NewReplicaSetAvailable"}
+      ],
+      "observed_at": "2026-08-06T11:59:58Z"
+    }
+  ]
+}

@@ -24,6 +24,7 @@ const SCHEMAS: SchemaName[] = [
   "metric-catalog",
   "query-template",
   "dashboard-template",
+  "agent-inventory",
 ];
 
 function usage(): void {

@@ -76,6 +76,18 @@ class Settings(BaseSettings):
     # internal listener/service/network policy, not this flag).
     internal_metrics_enabled: bool = False
 
+    # --- Cluster agent internal API (ADR-0016) ---
+    # File/external-secret REFERENCES only; key material never lives in the
+    # repository, database, logs, or responses.
+    agent_ca_cert_file: str = ""
+    agent_ca_key_file: str = ""
+    agent_cert_ttl_days: int = 14
+    # The internal agent listener's own TLS identity (server cert) and the
+    # client-CA used for CERT_REQUIRED verification are configured on the
+    # listener (scripts/run_internal_agent_api.py); these settings gate the
+    # fail-closed production boot below.
+    internal_agent_api_enabled: bool = False
+
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
 
@@ -92,6 +104,10 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "internal metrics cannot be enabled on the public API outside local/test"
             )
+        if self.internal_agent_api_enabled and not (
+            self.agent_ca_cert_file and self.agent_ca_key_file
+        ):
+            raise RuntimeError("internal agent API requires Agent CA material outside local/test")
 
 
 @lru_cache

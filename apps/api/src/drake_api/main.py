@@ -9,6 +9,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from drake_api.agents.router_tokens import router as agent_tokens_router
 from drake_api.audit.router import router as audit_router
 from drake_api.auth.flows import AuthFlows
 from drake_api.auth.oidc import OidcClient
@@ -99,6 +100,7 @@ def create_app(
     app.include_router(rbac_router)
     app.include_router(rbac_options_router)
     app.include_router(audit_router)
+    app.include_router(agent_tokens_router)
     app.include_router(catalog_router)
     app.include_router(integrations_router)
     app.include_router(telemetry_router)
