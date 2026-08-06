@@ -8,6 +8,19 @@ enforced is backed by executed tests (see S2_TEST_REPORT).
 - `CatalogService` is the only write path; the entity and its RBAC scope
   node commit in one transaction (rollback-together proven by fault
   injection). No API/UI mutation surface exists in Sprint 2.
+- Cross-project binding is impossible at two layers: the service validates
+  environment vs service project identity from authoritative rows, and
+  PostgreSQL enforces it with an authoritative `project_id` on bindings
+  plus composite RESTRICT foreign keys to both parents (migration 0005,
+  fail-closed backfill — pre-existing invalid rows abort the migration).
+- Scope refs derive from authoritative records only — callers can no
+  longer supply a parallel key identity for a relationship they name by
+  id, and `ScopeResolver.ensure` fails closed if an existing scope sits
+  under a different parent.
+- `last_error_code` is a bounded machine-readable code (DB CHECK + app
+  validation): no free text, URLs, newlines, or provider bodies can be
+  stored; external stable refs (keys, cluster refs, integration types)
+  carry DB-level shape checks.
 - Bounded, credential-free metadata: workload selectors and health paths are
   size-limited JSON that reject credential shapes, URLs-as-paths, and
   unknown fields. No secrets, manifests, or environment dumps are storable.
@@ -23,6 +36,11 @@ enforced is backed by executed tests (see S2_TEST_REPORT).
   per permission (`project.view`, `environment.view`, `cluster.view`) —
   before search, counts, and pagination. Unauthorized rows cannot leak
   through totals, cursors, suggestions, or aggregates (negative-tested).
+- Every collection (projects, environments, services, clusters,
+  integrations) is bounded: keyset cursors with deterministic unique
+  ordering, capped limits, bounded search/filters — no offset pagination.
+  Integration-health authorization is itself a SQL predicate; unauthorized
+  rows never leave the database and cannot influence cursors or filters.
 - Out-of-scope details are consistent 404s (anti-enumeration); collections
   return authorized-only 200 with honest empty states (policy recorded in
   ADR-0014 and negative-tested).
