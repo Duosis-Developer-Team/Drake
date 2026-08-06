@@ -394,7 +394,7 @@ async def list_services(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
-        _row, project_key = await _authorized_environment(
+        _row, _project_key = await _authorized_environment(
             connection, auth, project_id, environment_id
         )
         rows = (
