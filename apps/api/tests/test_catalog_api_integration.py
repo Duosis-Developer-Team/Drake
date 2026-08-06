@@ -446,3 +446,239 @@ async def test_unauthenticated_is_401(engine: AsyncEngine) -> None:
         assert (await anonymous.get("/v1/projects")).status_code == 401
         assert (await anonymous.get("/v1/clusters")).status_code == 401
         assert (await anonymous.get("/v1/catalog/search?q=alpha")).status_code == 401
+
+
+# --- Sprint 2 closure: bounded collections & SQL-boundary authorization -----
+
+
+async def test_environment_pagination_filters_and_archived_default(
+    engine: AsyncEngine,
+) -> None:
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    alpha_id = str(world["alpha"].id)
+
+    async with harness.api_client() as owner:
+        await harness.login(owner, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+        base = f"/v1/projects/{alpha_id}/environments"
+
+        first = (await owner.get(f"{base}?limit=1")).json()
+        assert [e["environment_key"] for e in first["environments"]] == ["dev"]
+        assert first["next_cursor"]
+        second = (await owner.get(f"{base}?limit=1&cursor={first['next_cursor']}")).json()
+        assert [e["environment_key"] for e in second["environments"]] == ["prod"]
+        assert second["next_cursor"] is None
+        assert (await owner.get(f"{base}?cursor=garbage")).status_code == 422
+
+        search = (await owner.get(f"{base}?search=de")).json()
+        assert [e["environment_key"] for e in search["environments"]] == ["dev"]
+        critical = (await owner.get(f"{base}?criticality=critical")).json()
+        assert [e["environment_key"] for e in critical["environments"]] == ["prod"]
+
+        # Archived rows are hidden by default and reachable only explicitly.
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE environments SET lifecycle='archived', archived_at=now() "
+                    "WHERE id = :id"
+                ),
+                {"id": world["alpha_prod"].id},
+            )
+        default = (await owner.get(base)).json()
+        assert [e["environment_key"] for e in default["environments"]] == ["dev"]
+        everything = (await owner.get(f"{base}?lifecycle=all")).json()
+        assert [e["environment_key"] for e in everything["environments"]] == ["dev", "prod"]
+        archived = (await owner.get(f"{base}?lifecycle=archived")).json()
+        assert [e["environment_key"] for e in archived["environments"]] == ["prod"]
+
+
+async def test_environment_unauthorized_rows_cannot_extend_cursor(
+    engine: AsyncEngine,
+) -> None:
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    alpha_id = str(world["alpha"].id)
+
+    async with harness.api_client() as env_user:
+        await harness.login(env_user, "user-env")
+        # alpha has two environments but the caller may see only dev: the
+        # invisible prod row must not produce a next page.
+        page = (await env_user.get(f"/v1/projects/{alpha_id}/environments?limit=1")).json()
+        assert [e["environment_key"] for e in page["environments"]] == ["dev"]
+        assert page["next_cursor"] is None
+
+
+async def test_service_pagination_provenance_and_archived_default(
+    engine: AsyncEngine,
+) -> None:
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    base = f"/v1/projects/{world['alpha'].id}/environments/{world['alpha_dev'].id}/services"
+
+    async with harness.api_client() as plain:
+        await harness.login(plain, "user-plain")
+        first = (await plain.get(f"{base}?limit=1")).json()
+        assert [s["service_key"] for s in first["services"]] == ["api"]
+        assert first["next_cursor"]
+        second = (await plain.get(f"{base}?limit=1&cursor={first['next_cursor']}")).json()
+        assert [s["service_key"] for s in second["services"]] == ["web"]
+        assert second["next_cursor"] is None
+        assert (await plain.get(f"{base}?cursor=garbage")).status_code == 422
+
+        # Items carry safe scope/version/source — and nothing else.
+        item = first["services"][0]
+        assert item["scope"] == {"type": "service", "ref": "alpha/dev/api"}
+        assert isinstance(item["version"], int)
+        assert item["source"]["kind"] == "fixture"
+        assert "config_ref" not in str(first)
+
+        search = (await plain.get(f"{base}?search=we")).json()
+        assert [s["service_key"] for s in search["services"]] == ["web"]
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("UPDATE environment_services SET lifecycle='archived' WHERE id = :id"),
+                {"id": world["dev_web"].id},
+            )
+        default = (await plain.get(base)).json()
+        assert [s["service_key"] for s in default["services"]] == ["api"]
+        everything = (await plain.get(f"{base}?lifecycle=all")).json()
+        assert [s["service_key"] for s in everything["services"]] == ["api", "web"]
+
+
+async def test_cluster_search_and_lifecycle_default(engine: AsyncEngine) -> None:
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+
+    async with harness.api_client() as viewer:
+        await harness.login(viewer, "user-cluster")
+        hits = (await viewer.get("/v1/clusters?search=cluster-a")).json()
+        assert [c["cluster_ref"] for c in hits["clusters"]] == ["cluster-a"]
+        # Wildcards are literals:
+        assert (await viewer.get("/v1/clusters?search=%25%25")).json()["clusters"] == []
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE clusters SET lifecycle='archived', archived_at=now() "
+                    "WHERE id = :id"
+                ),
+                {"id": world["cluster_b"].id},
+            )
+        default = (await viewer.get("/v1/clusters")).json()
+        assert [c["cluster_ref"] for c in default["clusters"]] == ["cluster-a"]
+        everything = (await viewer.get("/v1/clusters?lifecycle=all")).json()
+        assert [c["cluster_ref"] for c in everything["clusters"]] == [
+            "cluster-a",
+            "cluster-b",
+        ]
+        archived = (await viewer.get("/v1/clusters?lifecycle=archived")).json()
+        assert [c["cluster_ref"] for c in archived["clusters"]] == ["cluster-b"]
+
+
+async def test_integration_pagination_filters_and_determinism(
+    engine: AsyncEngine,
+) -> None:
+    await seed_catalog_world(engine)
+    harness = await build_users(engine)
+
+    async with harness.api_client() as owner:
+        await harness.login(owner, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+
+        # Keyset walk: bounded pages, no duplicates, deterministic order.
+        seen: list[tuple[str, str]] = []
+        cursor = ""
+        for _ in range(10):
+            url = f"/v1/integrations/health?limit=1{cursor}"
+            body = (await owner.get(url)).json()
+            assert len(body["integrations"]) <= 1
+            seen.extend(
+                (e["scope"]["ref"], e["integration_type"]) for e in body["integrations"]
+            )
+            if not body["next_cursor"]:
+                break
+            cursor = f"&cursor={body['next_cursor']}"
+        assert seen == [
+            ("alpha", "github"),
+            ("alpha", "prometheus"),
+            ("beta", "github"),
+            ("beta", "prometheus"),
+        ]
+        assert len(seen) == len(set(seen))
+
+        filtered = (
+            await owner.get("/v1/integrations/health?integration_type=prometheus")
+        ).json()
+        assert {e["integration_type"] for e in filtered["integrations"]} == {"prometheus"}
+        assert len(filtered["integrations"]) == 2
+        by_state = (
+            await owner.get("/v1/integrations/health?configuration_state=configured")
+        ).json()
+        assert by_state["integrations"] == []
+        by_observed = (
+            await owner.get("/v1/integrations/health?observed_state=unknown")
+        ).json()
+        assert len(by_observed["integrations"]) == 4
+
+        # Bounded filter inputs and cursors reject invalid values.
+        assert (
+            await owner.get("/v1/integrations/health?integration_type=BAD%20TYPE")
+        ).status_code == 422
+        assert (
+            await owner.get("/v1/integrations/health?configuration_state=weird")
+        ).status_code == 422
+        assert (await owner.get("/v1/integrations/health?cursor=garbage")).status_code == 422
+
+
+async def test_integration_authorization_is_a_sql_boundary(engine: AsyncEngine) -> None:
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    # Attach an integration at cluster scope as well.
+    async with engine.begin() as connection:
+        await CatalogService(connection).register_integration(
+            "cluster-agent", world["cluster_a"].scope_id
+        )
+
+    async with harness.api_client() as plain:
+        await harness.login(plain, "user-plain")
+        # Project grant: alpha rows only — never beta, never cluster scopes,
+        # regardless of filters or page walking.
+        body = (await plain.get("/v1/integrations/health?limit=100")).json()
+        assert {e["scope"]["ref"] for e in body["integrations"]} == {"alpha"}
+        assert body["next_cursor"] is None
+        filtered = (
+            await plain.get("/v1/integrations/health?integration_type=cluster-agent")
+        ).json()
+        assert filtered["integrations"] == []
+
+    async with harness.api_client() as viewer:
+        await harness.login(viewer, "user-cluster")
+        # Cluster grant: the cluster-scope row only — no project metadata.
+        body = (await viewer.get("/v1/integrations/health?limit=100")).json()
+        assert [(e["scope"]["type"], e["scope"]["ref"]) for e in body["integrations"]] == [
+            ("cluster", "cluster-a")
+        ]
+
+
+async def test_search_deterministic_order_across_projects(engine: AsyncEngine) -> None:
+    """alpha and beta both define service 'api' and environment 'dev' — the
+    tie-breaker (kind, project_key, key, id) must give one stable order."""
+    await seed_catalog_world(engine)
+    harness = await build_users(engine)
+
+    async with harness.api_client() as owner:
+        await harness.login(owner, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+        runs = []
+        for _ in range(3):
+            hits = (await owner.get("/v1/catalog/search?q=api")).json()["results"]
+            runs.append([(h["kind"], h["project_key"], h["key"], h["id"]) for h in hits])
+        assert runs[0] == runs[1] == runs[2]
+        service_projects = [h[1] for h in runs[0] if h[0] == "service"]
+        assert service_projects == sorted(service_projects)  # alpha before beta
+
+        dev_hits = (await owner.get("/v1/catalog/search?q=dev")).json()["results"]
+        env_projects = [h["project_key"] for h in dev_hits if h["kind"] == "environment"]
+        assert env_projects == ["alpha", "beta"]
