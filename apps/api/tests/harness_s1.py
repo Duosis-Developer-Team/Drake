@@ -121,6 +121,7 @@ async def reset_rbac_state(engine: AsyncEngine) -> None:
         for table in (
             # Sprint 4 agent/inventory tables reference clusters AND
             # identities with RESTRICT — cleared first when they exist.
+            "cluster_inventory_state",
             "inventory_change_events",
             "inventory_resources",
             "inventory_staging_resources",

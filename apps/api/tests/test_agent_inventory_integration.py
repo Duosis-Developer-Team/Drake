@@ -92,6 +92,19 @@ async def enroll_agent(
             ),
             {"id": agent_id, "cluster_id": cluster_id, "public_key": public_pem},
         )
+        # Mirror the enrollment endpoint: the newest agent becomes the ONE
+        # active inventory writer for the cluster.
+        await connection.execute(
+            text(
+                """
+                INSERT INTO cluster_inventory_state (cluster_id, active_agent_id)
+                VALUES (:cluster_id, :agent_id)
+                ON CONFLICT (cluster_id) DO UPDATE
+                SET active_agent_id = EXCLUDED.active_agent_id, updated_at = now()
+                """
+            ),
+            {"cluster_id": cluster_id, "agent_id": agent_id},
+        )
     return agent_id, key
 
 
@@ -434,15 +447,28 @@ async def test_sequence_gaps_duplicates_and_restart_rebase(
         assert gap.status_code == 409
         assert "reconcile_required" in gap.text
 
-        # The agent obeys: fresh snapshot, restarted counter (crash-safe).
+        # The agent obeys: crash-safe restart resumes from the PERSISTED
+        # sequence (never a blind re-base) and opens a fresh snapshot —
+        # a begin may jump the sequence forward, it IS the reconcile.
         restarted = AgentDriver(client, key, agent_id, cluster_a)
+        restarted.sequence = driver.sequence  # persisted last-ACK cursor
         new_uid = str(uuidlib.uuid4())
-        assert (await restarted.begin(new_uid)).status_code == 200  # seq re-bases at 1
-        page_one = await restarted.page(new_uid, 1, healthy_world())
+        assert (await restarted.begin(new_uid)).status_code == 200
+        world_page = healthy_world()
+        page_one = await restarted.page(new_uid, 1, world_page)
         assert page_one.status_code == 200, page_one.text
 
-        # An exact page replay (same sequence, same page) is a no-op.
-        replay = await restarted.page(new_uid, 1, healthy_world(), sequence=restarted.sequence)
+        # A DELAYED begin from the past (stale sequence, new uid) opens
+        # nothing and regresses nothing.
+        stale_begin = AgentDriver(client, key, agent_id, cluster_a)
+        stale_begin.sequence = 0
+        delayed = await stale_begin.begin(str(uuidlib.uuid4()))
+        assert delayed.status_code == 200
+        assert delayed.json()["result"] == "stale"
+
+        # An exact page replay (same sequence, same page, SAME content)
+        # is an idempotent no-op.
+        replay = await restarted.page(new_uid, 1, world_page, sequence=restarted.sequence)
         assert replay.json()["result"] == "duplicate"
 
         done = await restarted.complete(new_uid, 1, 3)

@@ -25,6 +25,7 @@ async def main() -> None:
                 # Sprint 4 agent/inventory tables reference clusters with
                 # RESTRICT — cleared first (guarded: they may not exist yet
                 # on a database migrated only part-way).
+                "cluster_inventory_state",
                 "inventory_change_events",
                 "inventory_resources",
                 "inventory_staging_resources",

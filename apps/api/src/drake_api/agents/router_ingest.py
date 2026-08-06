@@ -10,18 +10,20 @@ by ONE transaction per completed snapshot.
 """
 
 import datetime as dt
+import hashlib
 import json
 import re
 import uuid
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from drake_api.agents.health_rules import derive_health
 from drake_api.agents.identity import AgentPrincipal, authenticate_agent
+from drake_api.agents.maintenance import run_inventory_maintenance
 from drake_api.db import get_engine
 from drake_api.settings import Settings
 
@@ -173,6 +175,11 @@ class _SequenceGapError(Exception):
     reconcile_required mark survives the rollback of the refused work."""
 
 
+class _StaleSnapshotError(Exception):
+    """A page/complete referenced an unknown or superseded snapshot; the
+    reconcile demand must be committed outside the rolled-back request."""
+
+
 class _TornSnapshotError(Exception):
     def __init__(self, snapshot_id: uuid.UUID) -> None:
         self.snapshot_id = snapshot_id
@@ -193,6 +200,47 @@ async def _demand_reconcile(
             text("UPDATE cluster_agents SET inventory_state = 'reconcile_required' WHERE id = :id"),
             {"id": agent_id},
         )
+
+
+async def _lock_writer_state(connection: AsyncConnection, cluster_id: uuid.UUID) -> Any:
+    """Upsert-then-lock the per-cluster inventory writer row — the single
+    serialization point for every inventory write (ADR-0017). Lock order
+    is always writer state FIRST, then the agent row."""
+    await connection.execute(
+        text(
+            "INSERT INTO cluster_inventory_state (cluster_id) VALUES (:cluster_id) "
+            "ON CONFLICT (cluster_id) DO NOTHING"
+        ),
+        {"cluster_id": cluster_id},
+    )
+    return (
+        await connection.execute(
+            text(
+                """
+                SELECT active_agent_id, current_generation, applied_generation,
+                       applied_snapshot_id, pending_snapshot_id
+                FROM cluster_inventory_state WHERE cluster_id = :cluster_id
+                FOR UPDATE
+                """
+            ),
+            {"cluster_id": cluster_id},
+        )
+    ).one()
+
+
+def _require_active_writer(state: Any, principal: AgentPrincipal) -> None:
+    """Only ONE agent may write inventory for a cluster: the most recently
+    enrolled one. A superseded agent gets the generic refusal — it must
+    not learn who replaced it."""
+    if state[0] != principal.agent_id:
+        raise HTTPException(status_code=403, detail="agent authentication failed")
+
+
+def _page_content_hash(resources: list[ResourceRecord]) -> str:
+    canonical = json.dumps(
+        [resource.model_dump(mode="json") for resource in resources], sort_keys=True
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _validate_resource(resource: ResourceRecord) -> None:
@@ -248,10 +296,15 @@ def _payload_column(resource: ResourceRecord) -> str:
 async def _sequence_gate(
     connection: AsyncConnection, principal: AgentPrincipal, sequence: int
 ) -> str:
-    """Returns 'apply' | 'duplicate'; a gap refuses with reconcile_required.
+    """Returns 'apply' | 'duplicate'.
 
-    The row is locked FOR UPDATE so concurrent messages from a restarted
-    duplicate agent serialize instead of racing.
+    A gap raises ONLY the internal `_SequenceGapError`: the refused
+    request's transaction must roll back completely, and the durable
+    `reconcile_required` mark is committed by the endpoint's handler in a
+    SEPARATE transaction (`_demand_reconcile`) — never in here, where the
+    rollback would silently erase it. The row is locked FOR UPDATE so
+    concurrent messages from a restarted duplicate agent serialize
+    instead of racing.
     """
     row = (
         await connection.execute(
@@ -265,11 +318,7 @@ async def _sequence_gate(
     if sequence <= last_sequence:
         return "duplicate"
     if sequence > last_sequence + 1:
-        await connection.execute(
-            text("UPDATE cluster_agents SET inventory_state = 'reconcile_required' WHERE id = :id"),
-            {"id": principal.agent_id},
-        )
-        raise _reconcile_required()
+        raise _SequenceGapError
     await connection.execute(
         text("UPDATE cluster_agents SET last_sequence = :sequence WHERE id = :id"),
         {"sequence": sequence, "id": principal.agent_id},
@@ -303,19 +352,55 @@ async def heartbeat(
 async def snapshot_begin(
     request: Request,
     body: SnapshotBeginMessage,
+    background: BackgroundTasks,
     principal: AgentPrincipal = Depends(authenticate_agent),
 ) -> dict[str, Any]:
     _check_claims(principal, body)
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
+    # Housekeeping rides on the reconcile boundary, AFTER the response:
+    # bounded batches, advisory-locked, never touching the projection.
+    background.add_task(run_inventory_maintenance, engine, settings, principal.cluster_id)
     async with engine.begin() as connection:
+        # ALL checks precede ANY mutation. Lock order: writer state → agent.
+        state = await _lock_writer_state(connection, principal.cluster_id)
+        _require_active_writer(state, principal)
+        known = (
+            await connection.execute(
+                text(
+                    "SELECT id FROM inventory_snapshots "
+                    "WHERE cluster_id = :cluster_id AND snapshot_uid = :snapshot_uid"
+                ),
+                {"cluster_id": principal.cluster_id, "snapshot_uid": body.snapshot_uid},
+            )
+        ).first()
+        if known is not None:
+            # Exact replay of an already-registered begin: idempotent.
+            return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
+        last_sequence = int(
+            (
+                await connection.execute(
+                    text("SELECT last_sequence FROM cluster_agents WHERE id = :id FOR UPDATE"),
+                    {"id": principal.agent_id},
+                )
+            ).scalar_one()
+        )
+        if body.sequence <= last_sequence:
+            # A DELAYED begin from the past (or a lost-ACK collision): it
+            # opens nothing, regresses nothing, and changes no state. The
+            # agent's follow-up pages will miss their snapshot and trigger
+            # a clean reconcile with a fresh sequence.
+            return {"api_version": _API_VERSION, "kind": "ack", "result": "stale"}
+        # A begin IS the reconcile action, so it may jump the sequence
+        # forward (unlike pages/completes/events, which must be gapless).
+        new_generation = int(state[1]) + 1
         inserted = (
             await connection.execute(
                 text(
                     """
-                    INSERT INTO inventory_snapshots (cluster_id, agent_id, snapshot_uid)
-                    VALUES (:cluster_id, :agent_id, :snapshot_uid)
-                    ON CONFLICT (cluster_id, snapshot_uid) DO NOTHING
+                    INSERT INTO inventory_snapshots
+                        (cluster_id, agent_id, snapshot_uid, generation)
+                    VALUES (:cluster_id, :agent_id, :snapshot_uid, :generation)
                     RETURNING id
                     """
                 ),
@@ -323,23 +408,34 @@ async def snapshot_begin(
                     "cluster_id": principal.cluster_id,
                     "agent_id": principal.agent_id,
                     "snapshot_uid": body.snapshot_uid,
+                    "generation": new_generation,
                 },
             )
-        ).first()
-        if inserted is None:
-            return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
-        # Any older pending snapshot is now abandoned; the projection stays.
+        ).one()
+        # The new snapshot supersedes any pending one; the projection stays.
+        if state[4] is not None:
+            await connection.execute(
+                text(
+                    "UPDATE inventory_snapshots SET status = 'discarded' "
+                    "WHERE id = :id AND status = 'pending'"
+                ),
+                {"id": state[4]},
+            )
         await connection.execute(
             text(
                 """
-                UPDATE inventory_snapshots SET status = 'discarded'
-                WHERE cluster_id = :cluster_id AND status = 'pending' AND id != :id
+                UPDATE cluster_inventory_state
+                SET current_generation = :generation, pending_snapshot_id = :snapshot_id,
+                    updated_at = now()
+                WHERE cluster_id = :cluster_id
                 """
             ),
-            {"cluster_id": principal.cluster_id, "id": inserted[0]},
+            {
+                "generation": new_generation,
+                "snapshot_id": inserted[0],
+                "cluster_id": principal.cluster_id,
+            },
         )
-        # A new snapshot opens a new sync generation: the sequence counter
-        # re-bases here, which is what makes agent restarts crash-safe.
         await connection.execute(
             text(
                 """
@@ -370,12 +466,20 @@ async def snapshot_page(
     except _SequenceGapError:
         await _demand_reconcile(engine, principal.agent_id)
         raise _reconcile_required() from None
+    except _StaleSnapshotError:
+        await _demand_reconcile(engine, principal.agent_id)
+        raise _reconcile_required() from None
+    except _TornSnapshotError as torn:
+        await _demand_reconcile(engine, principal.agent_id, discard_snapshot=torn.snapshot_id)
+        raise _reconcile_required() from None
 
 
 async def _snapshot_page_txn(
     engine: Any, principal: AgentPrincipal, body: SnapshotPageMessage
 ) -> dict[str, Any]:
     async with engine.begin() as connection:
+        state = await _lock_writer_state(connection, principal.cluster_id)
+        _require_active_writer(state, principal)
         snapshot = (
             await connection.execute(
                 text(
@@ -388,11 +492,28 @@ async def _snapshot_page_txn(
             )
         ).first()
         if snapshot is None or snapshot[1] == "discarded":
-            raise _reconcile_required()
+            # Unknown or superseded snapshot: the agent must run a fresh
+            # full reconcile, and the demand must survive this rollback.
+            raise _StaleSnapshotError
         if snapshot[1] == "complete":
             return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
+        content_hash = _page_content_hash(body.resources)
         gate = await _sequence_gate(connection, principal, body.sequence)
         if gate == "duplicate":
+            # Replays are no-ops only when the content matches what was
+            # stored; the same page number with DIFFERENT content is a
+            # torn stream, not a retry.
+            existing_hash = (
+                await connection.execute(
+                    text(
+                        "SELECT content_hash FROM inventory_snapshot_pages "
+                        "WHERE snapshot_id = :snapshot_id AND page_number = :page_number"
+                    ),
+                    {"snapshot_id": snapshot[0], "page_number": body.page_number},
+                )
+            ).first()
+            if existing_hash is not None and existing_hash[0] != content_hash:
+                raise _TornSnapshotError(snapshot[0])
             return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
 
         page = (
@@ -400,8 +521,8 @@ async def _snapshot_page_txn(
                 text(
                     """
                     INSERT INTO inventory_snapshot_pages
-                        (snapshot_id, page_number, resource_count)
-                    VALUES (:snapshot_id, :page_number, :resource_count)
+                        (snapshot_id, page_number, resource_count, content_hash)
+                    VALUES (:snapshot_id, :page_number, :resource_count, :content_hash)
                     ON CONFLICT (snapshot_id, page_number) DO NOTHING
                     RETURNING id
                     """
@@ -410,10 +531,22 @@ async def _snapshot_page_txn(
                     "snapshot_id": snapshot[0],
                     "page_number": body.page_number,
                     "resource_count": len(body.resources),
+                    "content_hash": content_hash,
                 },
             )
         ).first()
         if page is None:
+            existing_hash = (
+                await connection.execute(
+                    text(
+                        "SELECT content_hash FROM inventory_snapshot_pages "
+                        "WHERE snapshot_id = :snapshot_id AND page_number = :page_number"
+                    ),
+                    {"snapshot_id": snapshot[0], "page_number": body.page_number},
+                )
+            ).scalar_one()
+            if existing_hash != content_hash:
+                raise _TornSnapshotError(snapshot[0])
             return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
         for resource in body.resources:
             await connection.execute(
@@ -462,8 +595,11 @@ async def snapshot_complete(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     try:
-        return await _snapshot_complete_txn(engine, principal, body)
+        return await _snapshot_complete_txn(engine, principal, body, settings)
     except _SequenceGapError:
+        await _demand_reconcile(engine, principal.agent_id)
+        raise _reconcile_required() from None
+    except _StaleSnapshotError:
         await _demand_reconcile(engine, principal.agent_id)
         raise _reconcile_required() from None
     except _TornSnapshotError as torn:
@@ -474,14 +610,16 @@ async def snapshot_complete(
 
 
 async def _snapshot_complete_txn(
-    engine: Any, principal: AgentPrincipal, body: SnapshotCompleteMessage
+    engine: Any, principal: AgentPrincipal, body: SnapshotCompleteMessage, settings: Settings
 ) -> dict[str, Any]:
     async with engine.begin() as connection:
+        state = await _lock_writer_state(connection, principal.cluster_id)
+        _require_active_writer(state, principal)
         snapshot = (
             await connection.execute(
                 text(
                     """
-                    SELECT id, status, received_pages, resource_count
+                    SELECT id, status, received_pages, resource_count, generation
                     FROM inventory_snapshots
                     WHERE cluster_id = :cluster_id AND snapshot_uid = :snapshot_uid
                     FOR UPDATE
@@ -491,17 +629,78 @@ async def _snapshot_complete_txn(
             )
         ).first()
         if snapshot is None or snapshot[1] == "discarded":
-            raise _reconcile_required()
+            # A superseded snapshot can never complete (ADR-0017).
+            raise _StaleSnapshotError
         if snapshot[1] == "complete":
             return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
+        # An older generation can never apply over a newer projection.
+        if int(snapshot[4]) <= int(state[2]):
+            raise _TornSnapshotError(snapshot[0])
+        # Bounded completion window: a timed-out snapshot cannot apply;
+        # the last good projection stays and freshness shows the gap.
+        expired = (
+            await connection.execute(
+                text(
+                    "SELECT started_at < now() - make_interval(secs => :ttl) "
+                    "FROM inventory_snapshots WHERE id = :id"
+                ),
+                {"ttl": settings.agent_snapshot_ttl_seconds, "id": snapshot[0]},
+            )
+        ).scalar_one()
+        if bool(expired):
+            raise _TornSnapshotError(snapshot[0])
         gate = await _sequence_gate(connection, principal, body.sequence)
         if gate == "duplicate":
             return {"api_version": _API_VERSION, "kind": "ack", "result": "duplicate"}
 
-        if int(snapshot[2]) != body.total_pages or int(snapshot[3]) != body.total_resources:
+        # Page continuity: counters alone can lie. The staged page set must
+        # be EXACTLY 1..total_pages and the DISTINCT staged resources must
+        # match the declared total (duplicate UIDs across pages collapse in
+        # staging, so inflated totals surface here).
+        page_rows = (
+            await connection.execute(
+                text(
+                    "SELECT page_number FROM inventory_snapshot_pages "
+                    "WHERE snapshot_id = :id ORDER BY page_number"
+                ),
+                {"id": snapshot[0]},
+            )
+        ).all()
+        page_numbers = [int(row[0]) for row in page_rows]
+        staged_count = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM inventory_staging_resources WHERE snapshot_id = :id"
+                    ),
+                    {"id": snapshot[0]},
+                )
+            ).scalar_one()
+        )
+        if (
+            page_numbers != list(range(1, body.total_pages + 1))
+            or staged_count != body.total_resources
+            or int(snapshot[2]) != body.total_pages
+            or int(snapshot[3]) != body.total_resources
+        ):
             raise _TornSnapshotError(snapshot[0])
 
         await _apply_snapshot(connection, principal, snapshot[0])
+        await connection.execute(
+            text(
+                """
+                UPDATE cluster_inventory_state
+                SET applied_generation = :generation, applied_snapshot_id = :snapshot_id,
+                    pending_snapshot_id = NULL, updated_at = now()
+                WHERE cluster_id = :cluster_id
+                """
+            ),
+            {
+                "generation": int(snapshot[4]),
+                "snapshot_id": snapshot[0],
+                "cluster_id": principal.cluster_id,
+            },
+        )
     return {"api_version": _API_VERSION, "kind": "ack", "result": "applied"}
 
 
@@ -694,6 +893,13 @@ async def _watch_events_txn(
     engine: Any, principal: AgentPrincipal, body: WatchEventsMessage
 ) -> dict[str, Any]:
     async with engine.begin() as connection:
+        # Watch events bind to the CURRENT applied generation: only the
+        # active writer, only after its snapshot applied, only while its
+        # own state is fresh. Everything else is a reconcile demand.
+        state = await _lock_writer_state(connection, principal.cluster_id)
+        _require_active_writer(state, principal)
+        if state[3] is None or state[4] is not None:
+            raise _reconcile_required()
         state_row = (
             await connection.execute(
                 text("SELECT inventory_state FROM cluster_agents WHERE id = :id"),
@@ -702,8 +908,6 @@ async def _watch_events_txn(
         ).first()
         if state_row is None:
             raise HTTPException(status_code=403, detail="agent authentication failed")
-        # Watch events only extend a COMPLETE snapshot generation; anything
-        # else (mid-reconcile, demanded reconcile, empty) is refused.
         if str(state_row[0]) != "fresh":
             raise _reconcile_required()
         gate = await _sequence_gate(connection, principal, body.sequence)
