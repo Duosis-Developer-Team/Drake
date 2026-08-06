@@ -37,12 +37,22 @@ never bypassed.**
 
 ## 4. Provider boundary (SSRF)
 
-Provider endpoints exist only as server-owned connector configuration
-(`config_ref` → URL via settings/external secrets); requests can never
-supply one. The adapter refuses non-http(s) schemes, embedded
-credentials, metadata/link-local/multicast/unspecified targets (always),
-plaintext HTTP and loopback outside local/test; follows no redirects;
-bounds body size (2 MiB) and timeouts; validates JSON strictly; and
+Provider endpoints exist only as server-owned TYPED connector
+configuration (`config_ref` → {url, allow_private} via settings/external
+secrets); requests can never supply one. Private-network targets require
+the connector's explicit `allow_private` opt-in outside local/test —
+presence in the map alone grants nothing. The adapter refuses
+non-http(s) schemes, embedded credentials, URL fragments/query strings,
+metadata/link-local/multicast/unspecified targets (always), plaintext
+HTTP and loopback outside local/test, and mixed public/private DNS
+answer sets; DNS validation covers every A/AAAA answer on the scheme's
+real default port. DNS-name connectors are FAIL-CLOSED outside
+local/test until the transport pins validated addresses — rebinding
+cannot reach a connection because none is attempted; this is a tracked
+deployment blocker for real provider onboarding, not an accepted risk.
+The adapter follows no redirects; enforces the 2 MiB body cap as a true
+STREAMING budget (reading stops the moment the cap is crossed); refuses
+unexpected content types before reading any body; bounds timeouts; and
 redacts upstream errors to bounded machine-readable codes. Provider
 responses are normalized — never proxied — and series labels outside the
 template's output allowlist fail the response closed.
@@ -68,17 +78,26 @@ inline SVG; no external asset or endpoint enters the bundle.
 
 Broker metrics are bounded: labels are registry template keys and fixed
 enums only — never principals, tenants, scope refs, URLs, correlation
-IDs, or raw errors. `/v1/internal/metrics` must not be exposed on public
-ingress (deployment-gate note; no deployment exists this sprint).
+IDs, or raw errors. The `/v1/internal/metrics` exposition is OFF by
+default, can only be registered with an explicit local/test opt-in, and
+a production-like enable refuses to boot (fail-closed); when disabled
+the route does not exist, so probing is indistinguishable from any
+unknown path. A future real Prometheus scrape requires a separate
+internal listener/service/network policy — never the public API app.
 
 ## 8. Scanning posture
 
-gitleaks default rules with **no path exclusions**; two narrow line-shape
-allowlists cover registry key identifier fields (shapes a credential
-cannot take), and the canary regression still proves fixture directories
-are scanned. OSV clean on the digest-pinned scanner. The rendered Helm
-package is policy-checked: no LoadBalancer/NodePort/Ingress, no
-credential-shaped secret content, no wildcard-everything RBAC.
+gitleaks default rules with **no path exclusions and no value-shape
+allowlists** — a credential could hide inside an innocuous-looking field
+shape, so the only sanctioned exemption is an exact single-finding
+fingerprint (`.gitleaksignore`, each with a written justification, all
+for reviewed Sprint 3 registry identifiers). Three runtime canaries must
+each be individually detected on every run: the AWS-format YAML plant
+plus two credential-shaped values planted in exactly the exempted JSON
+field shapes — proving the fingerprints cannot blind the scanner. OSV
+clean on the digest-pinned scanner. The rendered Helm package is
+policy-checked: no LoadBalancer/NodePort/Ingress, no credential-shaped
+secret content, no wildcard-everything RBAC.
 
 ## 9. Known security work ahead
 

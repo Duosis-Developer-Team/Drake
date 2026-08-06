@@ -26,7 +26,9 @@ What Drake can honestly observe after this sprint, and what it cannot.
   screen-reader summaries plus data-table fallbacks.
 - **Broker self-observability**: bounded internal counters/histograms
   (query count/outcome/cache state, duration, returned points,
-  rejections) at `/v1/internal/metrics` — never for public ingress.
+  rejections) at `/v1/internal/metrics` — OFF by default, explicit
+  local/test opt-in only, refuses to boot if enabled in a
+  production-like environment.
 
 ## 2. State semantics (unchanged law, now with data)
 
@@ -44,6 +46,14 @@ retryable `unavailable` — never fabricated zeros, never stale-as-healthy.
   integration configuration identity, authorized scope, normalized
   matchers/parameters, aligned window, and effective step — cross-project
   reuse is impossible (negative-tested).
+- Last-good honesty: moving near-now queries may reuse the latest
+  successful envelope of the same logical shape, but historical absolute
+  windows never share stale payloads; stale responses separate the
+  requested `range` from the payload's actual `data_range` and true
+  `as_of`, and the UI says so explicitly.
+- Dashboards schedule their queries through a bounded browser-side queue
+  (≤3 concurrent per dashboard, aborted on any scope/range change), so a
+  single screen cannot exhaust the per-principal budget of 4.
 - Observation freshness: a success older than 5 minutes turns later
   failures into `stale` instead of `degraded`.
 

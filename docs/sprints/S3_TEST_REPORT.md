@@ -11,7 +11,7 @@ during final verification, judged by exit code. Status vocabulary:
 | Format | `uv run ruff format --check .` | clean | PASS |
 | Lint | `uv run ruff check .` | clean | PASS |
 | Typecheck (strict) | `uv run mypy apps/api/src apps/worker/src` | 0 issues / 53 source files | PASS |
-| Unit tests | `uv run pytest -m "not integration" -q` | **103 passed** (74 S0–S2 + 29 telemetry) | PASS |
+| Unit tests | `uv run pytest -m "not integration" -q` | **116 passed** (74 S0–S2 + 29 telemetry + 13 hardening) | PASS |
 
 Telemetry unit coverage: registry fail-closed paths (duplicates, unknown
 refs, route label, unsorted, snapshot-backed template, global-ceiling
@@ -22,8 +22,8 @@ adapter contract failures, SSRF refusals, broker-metrics hygiene.
 
 ## 2. Integration (live disposable local stack)
 
-`uv run pytest -m integration` — **90 passed** (78 S0–S2 regression +
-12 telemetry). Real PostgreSQL + Redis; deterministic fake Prometheus via
+`uv run pytest -m integration` — **94 passed** (78 S0–S2 regression +
+16 telemetry). Real PostgreSQL + Redis; deterministic fake Prometheus via
 injected transport; real local Prometheus for the smoke.
 
 | Area | Evidence | Status |
@@ -61,7 +61,7 @@ injected transport; real local Prometheus for the smoke.
 
 | Check | Command | Result | Status |
 |---|---|---|---|
-| Unit/component | `pnpm --filter @drake/web test` | **41 passed** (10 files) | PASS |
+| Unit/component | `pnpm --filter @drake/web test` | **48 passed** (11 files, incl. the dashboard scheduling suite) | PASS |
 | Lint / typecheck | eslint, `tsc --noEmit` | clean | PASS |
 | Production build | `pnpm --filter @drake/web build` | compiled | PASS |
 | Provider guard | part of the suite | extended: `/api/v1/query*`, provider port, config refs, PromQL mentions now fail the build if present in browser code — 0 violations | PASS |
@@ -95,7 +95,7 @@ have dedicated widget renderings exercised by unit + E2E tests.
 
 | Check | Result | Status |
 |---|---|---|
-| gitleaks history + tree + canary | no leaks; canary still detected (fixture dirs scanned). Two narrow line-shape allowlists added for registry key fields — no path exclusions; documented in `.gitleaks.toml` | PASS |
+| gitleaks history + tree + canaries | no leaks; shape allowlists REMOVED — exact single-finding fingerprints only (`.gitleaksignore`); all THREE runtime canaries (AWS-format YAML + credential-shaped values in the exempted JSON field shapes) individually detected | PASS |
 | OSV (digest-pinned, CI-identical) | 476 packages, no issues | PASS |
 | `git diff --check` | clean | PASS |
 
@@ -111,3 +111,19 @@ have dedicated widget renderings exercised by unit + E2E tests.
 | Thanos / HA / object storage | NOT RUN | later sprints |
 | Load/scale | NOT RUN | Sprint 12 |
 | Session inactivity timeout / auth rate limiting | NOT RUN | known hardening items |
+
+## 9. CTO acceptance hardening (post-review closure)
+
+Findings from the CTO review of the initial Sprint 3 submission, closed
+with follow-up commits on the same branch (no history rewrite):
+
+| Finding | Closure | Status |
+|---|---|---|
+| A single dashboard could 429 itself (all queries fired at once; no real cancellation) | Bounded browser-side queue (≤3 concurrent per dashboard), AbortController through the API layer, generation guards; measured max client concurrency = 3; 5- and 6-query dashboards load with zero self-inflicted 429s; a real 429 renders as `throttled` | PASS |
+| `/v1/internal/metrics` unauthenticated and on by default | Default OFF; local/test explicit opt-in registers the route; production-like enable refuses to boot; disabled = nonexistent route (no oracle); histogram `_sum`/`_count` completed and format parser-verified | PASS |
+| 2 MiB cap applied after full buffering | True streaming budget: chunk-by-chunk accounting, early stop proven by a consumption counter (33/64 chunks), content-type fail-closed before any body read, mid-stream failures typed+redacted | PASS |
+| Connector map granted implicit private-network access | Typed `{url, allow_private}` connectors; explicit opt-in for private targets; per-scheme DNS ports; all answers validated; mixed answers refused; hostname connectors FAIL-CLOSED outside local/test (rebinding unreachable; documented deployment blocker) | PASS |
+| Template lookup ran before authorization (oracle) | ADR order restored: scope lookup + grants precede template resolution; unauthorized callers get one uniform 404 with 0 provider calls, 0 cache reads, 0 connector lookups, 0 integration lookups (spied) | PASS |
+| Naive datetimes accepted despite the UTC contract | Naive → 422; aware offsets normalize to one UTC instant (single cache identity); responses always explicit UTC | PASS |
+| Same-duration historical windows could share last-good | Relative near-now vs historical absolute last-good identities split; stale responses separate requested `range`, actual `data_range`, and true `as_of` — UI shows the distinction | PASS |
+| Value-shape gitleaks allowlists could hide a real secret | Shape rules removed; exact single-finding fingerprints only; two new runtime canaries plant credential-shaped values in the exempted field shapes and must each be detected | PASS |
