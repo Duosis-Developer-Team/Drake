@@ -2,6 +2,7 @@
 
 import { Clock, Menu, Search } from "lucide-react";
 
+import { IdentityMenu } from "@/components/shell/IdentityMenu";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 /**
@@ -50,6 +51,7 @@ export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
           <span>Last 24h</span>
         </button>
         <ThemeToggle />
+        <IdentityMenu />
       </div>
     </header>
   );

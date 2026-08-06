@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { NAVIGATION } from "@/lib/navigation";
+import { useSession } from "@/lib/session";
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { hasPermission } = useSession();
 
   return (
     <div className="flex h-full flex-col">
@@ -28,9 +30,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           {NAVIGATION.map((item) => {
             const active = pathname === item.href;
             const Icon = item.icon;
+            const unlocked =
+              item.enabled &&
+              (!item.anyPermission ||
+                item.anyPermission.some((permission) => hasPermission(permission)));
             return (
               <li key={item.href}>
-                {item.enabled ? (
+                {unlocked ? (
                   <Link
                     href={item.href}
                     onClick={onNavigate}

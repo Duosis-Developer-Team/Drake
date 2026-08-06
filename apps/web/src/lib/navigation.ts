@@ -22,6 +22,11 @@ export interface NavItem {
   icon: LucideIcon;
   /** True when the destination screen exists in the current sprint. */
   enabled: boolean;
+  /**
+   * Any of these permissions unlocks the entry. UI gating is a convenience —
+   * the API remains the authorization authority.
+   */
+  anyPermission?: string[];
 }
 
 export const NAVIGATION: NavItem[] = [
@@ -34,5 +39,11 @@ export const NAVIGATION: NavItem[] = [
   { label: "Deployments", href: "/deployments", icon: Rocket, enabled: false },
   { label: "Integrations", href: "/integrations", icon: Puzzle, enabled: false },
   { label: "Catalog & Templates", href: "/catalog", icon: Activity, enabled: false },
-  { label: "Audit & Administration", href: "/admin", icon: Shield, enabled: false },
+  {
+    label: "Audit & Administration",
+    href: "/admin",
+    icon: Shield,
+    enabled: true,
+    anyPermission: ["rbac.manage", "audit.view"],
+  },
 ];

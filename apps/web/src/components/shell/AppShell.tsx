@@ -5,8 +5,44 @@ import { useCallback, useState } from "react";
 
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { SignedOut } from "@/components/shell/SignedOut";
+import { SessionProvider, useSession } from "@/lib/session";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <SessionProvider>
+      <SessionGate>{children}</SessionGate>
+    </SessionProvider>
+  );
+}
+
+function SessionGate({ children }: { children: React.ReactNode }) {
+  const { state } = useSession();
+
+  if (state.status === "loading") {
+    return (
+      <div
+        data-testid="session-loading"
+        aria-busy="true"
+        className="flex min-h-screen items-center justify-center"
+      >
+        <div className="w-72 space-y-3">
+          <div className="h-8 w-8 animate-pulse rounded-lg bg-surface-sunken" />
+          <div className="h-4 w-2/3 animate-pulse rounded bg-surface-sunken" />
+          <div className="h-4 w-1/2 animate-pulse rounded bg-surface-sunken" />
+          <span className="sr-only">Checking session</span>
+        </div>
+      </div>
+    );
+  }
+  if (state.status === "signed-out") return <SignedOut variant="signed-out" />;
+  if (state.status === "expired") return <SignedOut variant="expired" />;
+  if (state.status === "unavailable") return <SignedOut variant="unavailable" />;
+
+  return <AuthenticatedShell>{children}</AuthenticatedShell>;
+}
+
+function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
