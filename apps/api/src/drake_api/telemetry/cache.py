@@ -38,6 +38,7 @@ def build_cache_keys(
     from_ts: int,
     to_ts: int,
     effective_step_seconds: int,
+    historical: bool,
 ) -> CacheKeys:
     base = {
         "registry": registry_hash,
@@ -49,7 +50,15 @@ def build_cache_keys(
         "step": effective_step_seconds,
     }
     window = {**base, "from": from_ts, "to": to_ts}
-    logical = {**base, "range_seconds": to_ts - from_ts}
+    # Last-good identity: a MOVING near-now query (dashboard presets) may
+    # fall back to the latest successful envelope of the same logical shape,
+    # but HISTORICAL absolute windows keep their exact window in the key —
+    # two unrelated windows of equal length must never share stale payloads.
+    logical = (
+        {**base, "mode": "historical", "from": from_ts, "to": to_ts}
+        if historical
+        else {**base, "mode": "relative", "range_seconds": to_ts - from_ts}
+    )
     fresh = hashlib.sha256(json.dumps(window, sort_keys=True).encode()).hexdigest()
     last_good = hashlib.sha256(json.dumps(logical, sort_keys=True).encode()).hexdigest()
     return CacheKeys(fresh=f"telemetry:fresh:{fresh}", last_good=f"telemetry:lastgood:{last_good}")

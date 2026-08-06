@@ -127,6 +127,13 @@ class TelemetryBroker:
         except CompileError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
+        range_payload: dict[str, Any] = {
+            "from": datetime.fromtimestamp(effective.from_ts, tz=UTC).isoformat(),
+            "to": datetime.fromtimestamp(effective.to_ts, tz=UTC).isoformat(),
+            "requested_step_seconds": effective.requested_step_seconds,
+            "effective_step_seconds": effective.effective_step_seconds,
+            "step_adjusted": effective.step_adjusted,
+        }
         base_envelope = {
             "template_key": template.key,
             "template_version": template.version,
@@ -134,13 +141,7 @@ class TelemetryBroker:
             "scope": {"type": request.scope_type, "ref": resolved.scope_ref},
             "unit": template.output_unit,
             "result_type": "timeseries",
-            "range": {
-                "from": datetime.fromtimestamp(effective.from_ts, tz=UTC).isoformat(),
-                "to": datetime.fromtimestamp(effective.to_ts, tz=UTC).isoformat(),
-                "requested_step_seconds": effective.requested_step_seconds,
-                "effective_step_seconds": effective.effective_step_seconds,
-                "step_adjusted": effective.step_adjusted,
-            },
+            "range": range_payload,
             "source_type": "prometheus",
         }
 
@@ -171,6 +172,9 @@ class TelemetryBroker:
         integration_identity = hashlib.sha256(
             f"{integration[0]}:{integration[1]}".encode()
         ).hexdigest()
+        # A query whose end sits within ~2 steps of now is a moving
+        # dashboard window; anything older is a historical absolute window.
+        near_now = int(time.time()) - effective.to_ts <= max(2 * step, 120)
         keys = build_cache_keys(
             registry_hash=self._registry.content_hash,
             template_key=template.key,
@@ -183,6 +187,7 @@ class TelemetryBroker:
             from_ts=aligned_from,
             to_ts=aligned_to,
             effective_step_seconds=step,
+            historical=not near_now,
         )
 
         fresh = await self._cache.get(keys.fresh)
@@ -195,7 +200,12 @@ class TelemetryBroker:
             # Configured integration whose connector the server cannot
             # resolve: treat as provider unavailability (last-good may serve).
             return await self._serve_stale_or_unavailable(
-                template, keys.last_good, started, correlation_id, "connector_unresolved"
+                template,
+                keys.last_good,
+                started,
+                correlation_id,
+                "connector_unresolved",
+                current_range=range_payload,
             )
 
         lease_keys = [
@@ -233,7 +243,12 @@ class TelemetryBroker:
             )
             self._metrics.record_rejection("provider_unavailable")
             return await self._serve_stale_or_unavailable(
-                template, keys.last_good, started, correlation_id, error.code
+                template,
+                keys.last_good,
+                started,
+                correlation_id,
+                error.code,
+                current_range=range_payload,
             )
         except (ProviderContractError, ConnectorRefusedError) as error:
             await record_provider_observation(
@@ -247,6 +262,7 @@ class TelemetryBroker:
                 correlation_id,
                 error.code,
                 contract_error=True,
+                current_range=range_payload,
             )
         finally:
             await self._leases.release(held)
@@ -287,13 +303,18 @@ class TelemetryBroker:
         code: str,
         *,
         contract_error: bool = False,
+        current_range: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         last_good = await self._cache.get(last_good_key)
         if last_good is not None:
-            # Honest staleness: state + as_of make the age explicit; the
-            # payload keeps its original as_of and is never re-labelled ok.
+            # Honest staleness: `range` is what the caller REQUESTED now,
+            # `data_range` is what the cached payload actually covers, and
+            # as_of stays the payload's true production time — old data is
+            # never presented as if it covered the new window.
             stale = {
                 **last_good,
+                "range": current_range or last_good.get("range"),
+                "data_range": last_good.get("range"),
                 "data_state": "stale",
                 "cache_state": "stale",
                 "warnings": sorted({*last_good.get("warnings", []), "provider_unavailable"}),

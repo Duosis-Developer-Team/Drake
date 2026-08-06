@@ -101,6 +101,18 @@ function WidgetFrame({
           </button>
         </div>
       ) : null}
+      {state.kind === "ready" && state.envelope.data_state === "stale" ? (
+        <p className="mb-2 text-[11px] text-ink-muted">
+          Showing older data
+          {state.envelope.data_range
+            ? ` covering ${new Date(state.envelope.data_range.from).toLocaleString()} – ${new Date(
+                state.envelope.data_range.to,
+              ).toLocaleString()}`
+            : ""}
+          {" "}(as of {new Date(state.envelope.as_of).toLocaleString()}) — not the requested
+          window.
+        </p>
+      ) : null}
       {state.kind === "ready" ? children : null}
     </section>
   );

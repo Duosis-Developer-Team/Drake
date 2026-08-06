@@ -43,6 +43,15 @@ export interface TelemetryEnvelope {
     effective_step_seconds: number;
     step_adjusted: boolean;
   };
+  /** Stale responses only: the window the cached payload ACTUALLY covers
+   * (the `range` field stays the caller's current request). */
+  data_range?: {
+    from: string;
+    to: string;
+    requested_step_seconds: number;
+    effective_step_seconds: number;
+    step_adjusted: boolean;
+  };
   data_state: DataState;
   cache_state: CacheState;
   partial: boolean;
