@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/identity"
 )
 
@@ -18,15 +20,63 @@ type renewalResponse struct {
 	CertificateNotAfter string `json:"certificate_not_after"`
 }
 
-// RenewalLoop rotates the agent certificate at roughly two thirds of its
-// lifetime (jittered so fleets never renew in lockstep). A fresh key is
-// generated locally for every renewal; only the CSR travels. onRenewed lets
-// the caller rebuild the mTLS transport with the new identity. Failures
-// retry with backoff and fail closed: the agent never runs on an
-// unverified identity.
+// SenderFactory builds an authenticated transport for a given identity —
+// renewal needs one for the CURRENT key (prepare) and one for the PENDING
+// key (activation proof).
+type SenderFactory func(*identity.Identity) (Sender, error)
+
+// ReconcilePendingRenewal finishes an interrupted renewal at startup: if a
+// prepared bundle exists on disk, activation (signed with the pending key)
+// is the single reconciliation point — the server promotes if it had not,
+// or acknowledges idempotently if it already had. On explicit refusal the
+// pending bundle is discarded and the current identity continues; on
+// transport failure the current identity continues and the next renewal
+// cycle retries from scratch.
+func ReconcilePendingRenewal(
+	ctx context.Context,
+	factory SenderFactory,
+	stateDir string,
+	current *identity.Identity,
+	logger *slog.Logger,
+) *identity.Identity {
+	bundleID, renewalID, ok := identity.PendingRenewal(stateDir)
+	if !ok {
+		return current
+	}
+	pending, err := identity.LoadBundle(stateDir, bundleID)
+	if err != nil {
+		logger.Warn("pending renewal bundle unreadable; discarding", "error", err.Error())
+		identity.ClearPending(stateDir)
+		return current
+	}
+	promoted, err := activate(ctx, factory, pending, renewalID)
+	if err != nil {
+		logger.Warn("pending renewal activation failed; keeping current identity",
+			"error", err.Error())
+		return current
+	}
+	if !promoted {
+		identity.ClearPending(stateDir)
+		return current
+	}
+	if err := identity.Promote(stateDir, bundleID); err != nil {
+		logger.Error("promoting activated bundle failed", "error", err.Error())
+		return current
+	}
+	identity.ClearPending(stateDir)
+	logger.Info("interrupted renewal completed at startup")
+	return pending
+}
+
+// RenewalLoop rotates the certificate at roughly two thirds of its
+// lifetime (jittered). Each renewal is two-phase and idempotent:
+// prepare (CSR under the CURRENT key) → atomic bundle save → activation
+// proof (signed with the NEW key) → atomic local promotion. The current
+// key keeps working until activation, so a lost response at any step
+// leaves a working agent. Fresh keys every time; failures retry.
 func RenewalLoop(
 	ctx context.Context,
-	sender Sender,
+	factory SenderFactory,
 	current *identity.Identity,
 	stateDir string,
 	logger *slog.Logger,
@@ -40,7 +90,7 @@ func RenewalLoop(
 			return
 		case <-time.After(wait):
 		}
-		renewed, err := renewOnce(ctx, sender, id, stateDir)
+		renewed, err := renewOnce(ctx, factory, id, stateDir)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -78,8 +128,9 @@ func renewalDelay(now, notAfter time.Time) time.Duration {
 }
 
 func renewOnce(
-	ctx context.Context, sender Sender, id *identity.Identity, stateDir string,
+	ctx context.Context, factory SenderFactory, id *identity.Identity, stateDir string,
 ) (*identity.Identity, error) {
+	// PREPARE: fresh key, CSR only; signed with the CURRENT key.
 	key, err := identity.GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
@@ -88,8 +139,14 @@ func renewOnce(
 	if err != nil {
 		return nil, err
 	}
-	status, body, err := sender.Post(
-		ctx, "/internal/v1/agent/certificates/renew", map[string]any{"csr_pem": csr},
+	renewalID := uuid.NewString()
+	currentSender, err := factory(id)
+	if err != nil {
+		return nil, err
+	}
+	status, body, err := currentSender.Post(
+		ctx, "/internal/v1/agent/certificates/renew",
+		map[string]any{"renewal_id": renewalID, "csr_pem": csr},
 	)
 	if err != nil {
 		return nil, err
@@ -105,5 +162,55 @@ func renewOnce(
 	if err != nil {
 		return nil, fmt.Errorf("renewal expiry malformed: %w", err)
 	}
-	return identity.Save(stateDir, id.AgentID, key, parsed.CertificatePEM, parsed.CAChainPEM, notAfter)
+
+	// SAVE the complete bundle first (inert until pointed at), THEN record
+	// the pending marker — a crash in between costs nothing.
+	bundleID, err := identity.SaveBundle(
+		stateDir, id.AgentID, key, parsed.CertificatePEM, parsed.CAChainPEM, notAfter,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("save pending bundle: %w", err)
+	}
+	if err := identity.SetPending(stateDir, bundleID, renewalID); err != nil {
+		return nil, fmt.Errorf("record pending renewal: %w", err)
+	}
+	pending, err := identity.LoadBundle(stateDir, bundleID)
+	if err != nil {
+		return nil, fmt.Errorf("reload pending bundle: %w", err)
+	}
+
+	// ACTIVATE: possession of the new key is the promotion proof.
+	promoted, err := activate(ctx, factory, pending, renewalID)
+	if err != nil {
+		return nil, err
+	}
+	if !promoted {
+		identity.ClearPending(stateDir)
+		return nil, fmt.Errorf("activation refused")
+	}
+	if err := identity.Promote(stateDir, bundleID); err != nil {
+		return nil, fmt.Errorf("promote bundle: %w", err)
+	}
+	identity.ClearPending(stateDir)
+	return pending, nil
+}
+
+func activate(
+	ctx context.Context, factory SenderFactory, pending *identity.Identity, renewalID string,
+) (bool, error) {
+	sender, err := factory(pending)
+	if err != nil {
+		return false, err
+	}
+	status, _, err := sender.Post(
+		ctx, "/internal/v1/agent/certificates/activate",
+		map[string]any{"renewal_id": renewalID},
+	)
+	if err != nil {
+		return false, err
+	}
+	if status == http.StatusOK {
+		return true, nil
+	}
+	return false, nil
 }

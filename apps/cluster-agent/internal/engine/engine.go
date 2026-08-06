@@ -66,6 +66,13 @@ type Options struct {
 	HeartbeatInterval time.Duration
 	// Now defaults to time.Now; injected in tests.
 	Now Clock
+	// LoadSequence/StoreSequence persist the last ACKed inventory
+	// sequence next to the identity: restarts resume the chain instead of
+	// re-basing blindly, and the counter only advances past a sequence
+	// AFTER the server acknowledged it (crash between ACK and persist
+	// replays an idempotent message).
+	LoadSequence  func() int64
+	StoreSequence func(int64) error
 }
 
 type changeEvent struct {
@@ -102,7 +109,11 @@ func New(opts Options) (*Engine, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Engine{opts: opts, inventoryState: "empty"}, nil
+	engine := &Engine{opts: opts, inventoryState: "empty"}
+	if opts.LoadSequence != nil {
+		engine.sequence = opts.LoadSequence()
+	}
+	return engine, nil
 }
 
 // InventoryState returns the current freshness state (for the heartbeat).
@@ -167,7 +178,21 @@ func (e *Engine) post(ctx context.Context, path string, payload map[string]any) 
 	if status >= http.StatusBadRequest {
 		return fmt.Errorf("server rejected %s with status %d", path, status)
 	}
+	e.persistAck(payload)
 	return nil
+}
+
+// persistAck records the highest server-ACKed inventory sequence.
+// Heartbeats never consume numbers, so they never persist either.
+func (e *Engine) persistAck(payload map[string]any) {
+	if e.opts.StoreSequence == nil || payload["kind"] == "heartbeat" {
+		return
+	}
+	if sequence, ok := payload["sequence"].(int64); ok {
+		if err := e.opts.StoreSequence(sequence); err != nil {
+			e.opts.Logger.Warn("sequence persist failed", "error", err.Error())
+		}
+	}
 }
 
 // Run drives heartbeats and the sync loop until the context ends. All
@@ -442,19 +467,11 @@ func (e *Engine) flushLoop(ctx context.Context) error {
 		payload := e.base("watch_events")
 		payload["events"] = events
 		batch = nil
-		status, _, err := e.opts.Sender.Post(
-			ctx, "/internal/v1/agent/inventory/events", payload,
-		)
+		err := e.post(ctx, "/internal/v1/agent/inventory/events", payload)
 		if errors.Is(err, transport.ErrReconcileRequired) {
 			return fmt.Errorf("server demands reconcile: %w", err)
 		}
-		if err != nil {
-			return err
-		}
-		if status >= http.StatusBadRequest {
-			return fmt.Errorf("events rejected with status %d", status)
-		}
-		return nil
+		return err
 	}
 	for {
 		select {

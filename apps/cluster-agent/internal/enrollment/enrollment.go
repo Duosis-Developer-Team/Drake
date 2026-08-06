@@ -94,5 +94,16 @@ func Exchange(ctx context.Context, endpoint, serverCAFile, token, clusterID, age
 	if err != nil {
 		notAfter = time.Now().Add(24 * time.Hour)
 	}
-	return identity.Save(stateDir, enrolled.AgentID, key, enrolled.CertificatePEM, enrolled.CAChainPEM, notAfter)
+	// Versioned bundle + atomic pointer promotion: a crash mid-save leaves
+	// no half identity behind.
+	bundleID, err := identity.SaveBundle(
+		stateDir, enrolled.AgentID, key, enrolled.CertificatePEM, enrolled.CAChainPEM, notAfter,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := identity.Promote(stateDir, bundleID); err != nil {
+		return nil, err
+	}
+	return identity.LoadCurrent(stateDir)
 }

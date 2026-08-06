@@ -4,11 +4,16 @@
 // never leaves the process), then run read-only Kubernetes discovery over
 // mTLS + proof-of-possession. The only listener is the loopback liveness
 // probe. Misconfiguration refuses to start; nothing is guessed.
+//
+// `agent healthcheck [addr]` probes the loopback liveness endpoint and
+// exits 0/1 — the container liveness command, with no shell required.
 package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,7 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/collector"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/config"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/engine"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/enrollment"
@@ -50,7 +54,39 @@ func (s *swappableSender) swap(client *transport.Client) {
 	s.mu.Unlock()
 }
 
+// healthcheckMain implements the liveness subcommand: a bounded loopback
+// probe with no shell, curl, or network beyond loopback.
+func healthcheckMain(args []string) int {
+	address := "127.0.0.1:8090"
+	if len(args) > 0 && args[0] != "" {
+		address = args[0]
+	} else if fromEnv := os.Getenv("DRAKE_AGENT_HEALTH_LISTEN_ADDR"); fromEnv != "" {
+		address = fromEnv
+	}
+	if !strings.HasPrefix(address, "127.0.0.1:") && !strings.HasPrefix(address, "[::1]:") &&
+		!strings.HasPrefix(address, "localhost:") {
+		fmt.Fprintln(os.Stderr, "healthcheck probes loopback only")
+		return 1
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get("http://" + address + "/healthz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck: "+err.Error())
+		return 1
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck: status %d\n", response.StatusCode)
+		return 1
+	}
+	return 0
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheckMain(os.Args[2:]))
+	}
+
 	cfg := config.FromEnv()
 	logger := logging.New(cfg.LogLevel, os.Stderr)
 
@@ -68,6 +104,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	factory := func(candidate *identity.Identity) (engine.Sender, error) {
+		return transport.New(cfg.APIBaseURL, cfg.ServerCAFile, candidate)
+	}
+
+	// Finish any renewal that was interrupted mid-activation: the server
+	// may already trust ONLY the pending key.
+	id = engine.ReconcilePendingRenewal(ctx, factory, cfg.StateDir, id, logger)
+
 	client, err := transport.New(cfg.APIBaseURL, cfg.ServerCAFile, id)
 	if err != nil {
 		logger.Error("transport setup failed", "error", err.Error())
@@ -81,10 +125,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The registry guard still vets the collection contract at startup.
-	registry := collector.NewRegistry()
-	_ = registry
-
 	syncEngine, err := engine.New(engine.Options{
 		ClusterID:         cfg.ClusterID,
 		AgentID:           id.AgentID,
@@ -94,6 +134,12 @@ func main() {
 		CRDPresent:        clients.CRDPresent,
 		Logger:            logger,
 		HeartbeatInterval: time.Duration(cfg.HeartbeatSeconds) * time.Second,
+		LoadSequence: func() int64 {
+			return identity.LoadSequence(cfg.StateDir)
+		},
+		StoreSequence: func(value int64) error {
+			return identity.StoreSequence(cfg.StateDir, value)
+		},
 	})
 	if err != nil {
 		logger.Error("engine setup failed", "error", err.Error())
@@ -110,7 +156,7 @@ func main() {
 	group.Add(2)
 	go func() {
 		defer group.Done()
-		engine.RenewalLoop(ctx, sender, id, cfg.StateDir, logger, func(renewed *identity.Identity) {
+		engine.RenewalLoop(ctx, factory, id, cfg.StateDir, logger, func(renewed *identity.Identity) {
 			rebuilt, buildErr := transport.New(cfg.APIBaseURL, cfg.ServerCAFile, renewed)
 			if buildErr != nil {
 				logger.Error("transport rebuild after renewal failed", "error", buildErr.Error())
@@ -140,7 +186,7 @@ func main() {
 // with the one-time token. The token file is read exactly once and its
 // value never appears in logs.
 func loadOrEnroll(ctx context.Context, cfg config.Config, logger *slog.Logger) (*identity.Identity, error) {
-	if id, err := identity.Load(cfg.StateDir); err == nil {
+	if id, err := identity.LoadCurrent(cfg.StateDir); err == nil {
 		logger.Info("existing identity loaded", "agent_id", id.AgentID)
 		return id, nil
 	}

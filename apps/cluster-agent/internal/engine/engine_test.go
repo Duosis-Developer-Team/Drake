@@ -441,3 +441,58 @@ func TestRenewalDelayTargetsTwoThirdsLifetime(t *testing.T) {
 		t.Fatalf("expired cert must renew immediately, got %v", delay)
 	}
 }
+
+func TestSequencePersistsOnlyAfterAck(t *testing.T) {
+	sender := &recordingSender{}
+	engine, _ := newTestEngine(t, sender,
+		testPod("web-1", "11111111-0000-0000-0000-000000000001"),
+	)
+	var stored []int64
+	engine.opts.LoadSequence = func() int64 { return 41 }
+	engine.opts.StoreSequence = func(value int64) error {
+		stored = append(stored, value)
+		return nil
+	}
+	engine.sequence = engine.opts.LoadSequence()
+
+	if _, err := engine.snapshot(context.Background()); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if err := engine.sendHeartbeat(context.Background()); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+
+	// Resumed from the persisted counter: the first message is 42.
+	first := sender.all()[0]
+	if first.payload["sequence"].(int64) != 42 {
+		t.Fatalf("engine must resume from the persisted sequence, got %v",
+			first.payload["sequence"])
+	}
+	// Every ACKed inventory message persisted, in order; heartbeats never.
+	if len(stored) != 3 { // begin + page + complete
+		t.Fatalf("expected 3 persisted ACKs, got %d (%v)", len(stored), stored)
+	}
+	for index, value := range stored {
+		if value != int64(42+index) {
+			t.Fatalf("ACK persistence out of order: %v", stored)
+		}
+	}
+}
+
+func TestFailedSendDoesNotPersistSequence(t *testing.T) {
+	sender := &recordingSender{status: 409}
+	engine, _ := newTestEngine(t, sender,
+		testPod("web-1", "11111111-0000-0000-0000-000000000001"),
+	)
+	var stored []int64
+	engine.opts.StoreSequence = func(value int64) error {
+		stored = append(stored, value)
+		return nil
+	}
+	if _, err := engine.snapshot(context.Background()); err == nil {
+		t.Fatal("rejected snapshot must surface an error")
+	}
+	if len(stored) != 0 {
+		t.Fatalf("refused messages must never advance the persisted sequence: %v", stored)
+	}
+}
