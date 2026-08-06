@@ -51,8 +51,13 @@ def _refuse() -> HTTPException:
     return HTTPException(status_code=403, detail="agent authentication failed")
 
 
-async def authenticate_agent(request: Request) -> AgentPrincipal:
-    settings: Settings = request.app.state.settings
+async def verify_pop_signature(
+    request: Request, body: bytes, public_key_pem: str, settings: Settings
+) -> None:
+    """Verify the request's proof-of-possession signature against a GIVEN
+    public key (freshness + signature + single-use nonce). Used both for
+    normal authentication (current key) and for renewal activation, where
+    possession of the PENDING key is the promotion proof."""
     agent_id_raw = request.headers.get(HEADER_AGENT_ID, "")
     timestamp = request.headers.get(HEADER_TIMESTAMP, "")
     nonce = request.headers.get(HEADER_NONCE, "")
@@ -68,6 +73,37 @@ async def authenticate_agent(request: Request) -> AgentPrincipal:
         raise _refuse() from error
     if abs(time.time() - issued) > _FRESHNESS_SECONDS:
         raise _refuse()
+
+    public_key = serialization.load_pem_public_key(public_key_pem.encode())
+    if not isinstance(public_key, ec.EllipticCurvePublicKey):
+        raise _refuse()
+    message = canonical_string(request.method, request.url.path, body, timestamp, nonce)
+    try:
+        public_key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature as error:
+        raise _refuse() from error
+
+    # Nonce replay protection, bounded by the freshness window.
+    redis = aioredis.from_url(settings.redis_url)
+    try:
+        fresh = await redis.set(
+            f"agent:nonce:{agent_id}:{nonce_id}", "1", nx=True, ex=_FRESHNESS_SECONDS * 2
+        )
+    finally:
+        await redis.aclose()
+    if not fresh:
+        raise _refuse()
+
+
+async def authenticate_agent(request: Request) -> AgentPrincipal:
+    settings: Settings = request.app.state.settings
+    agent_id_raw = request.headers.get(HEADER_AGENT_ID, "")
+    if not agent_id_raw:
+        raise _refuse()
+    try:
+        agent_id = uuid.UUID(agent_id_raw)
+    except ValueError as error:
+        raise _refuse() from error
 
     engine = get_engine(settings)
     async with engine.connect() as connection:
@@ -88,25 +124,6 @@ async def authenticate_agent(request: Request) -> AgentPrincipal:
     if row[2].timestamp() < time.time():
         raise _refuse()  # expired identity cannot act
 
-    public_key = serialization.load_pem_public_key(str(row[1]).encode())
-    if not isinstance(public_key, ec.EllipticCurvePublicKey):
-        raise _refuse()
     body = await request.body()
-    message = canonical_string(request.method, request.url.path, body, timestamp, nonce)
-    try:
-        public_key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
-    except InvalidSignature as error:
-        raise _refuse() from error
-
-    # Nonce replay protection, bounded by the freshness window.
-    redis = aioredis.from_url(settings.redis_url)
-    try:
-        fresh = await redis.set(
-            f"agent:nonce:{agent_id}:{nonce_id}", "1", nx=True, ex=_FRESHNESS_SECONDS * 2
-        )
-    finally:
-        await redis.aclose()
-    if not fresh:
-        raise _refuse()
-
+    await verify_pop_signature(request, body, str(row[1]), settings)
     return AgentPrincipal(agent_id=agent_id, cluster_id=row[0], public_key_pem=str(row[1]))

@@ -217,31 +217,81 @@ async def test_pop_identity_spoofing_replay_and_renewal(
         import json as jsonlib
 
         renew_path = "/internal/v1/agent/certificates/renew"
-        new_key = generate_keypair()
-        body_bytes = jsonlib.dumps({"csr_pem": make_csr(new_key)}).encode()
+        activate_path = "/internal/v1/agent/certificates/activate"
 
-        # Valid PoP renewal succeeds and rotates to the NEW key.
-        headers = pop_headers(key, agent_id, "POST", renew_path, body_bytes)
-        renewed = await client.post(
-            renew_path,
-            content=body_bytes,
-            headers={**headers, "Content-Type": "application/json"},
+        async def post_signed(
+            path: str, payload: dict[str, Any], signer: Any, **kw: Any
+        ) -> httpx.Response:
+            body = jsonlib.dumps(payload).encode()
+            headers = pop_headers(signer, agent_id, "POST", path, body, **kw)
+            return await client.post(
+                path, content=body, headers={**headers, "Content-Type": "application/json"}
+            )
+
+        # PREPARE: signed with the CURRENT key; returns pending material.
+        new_key = generate_keypair()
+        renewal_id = str(uuidlib.uuid4())
+        csr = make_csr(new_key)
+        prepared = await post_signed(renew_path, {"renewal_id": renewal_id, "csr_pem": csr}, key)
+        assert prepared.status_code == 200, prepared.text
+        pending_cert = prepared.json()["certificate_pem"]
+        assert "BEGIN CERTIFICATE" in pending_cert
+
+        # Lost-response retry: SAME renewal_id + SAME CSR → SAME pending
+        # certificate, and it also proves the OLD key still authenticates
+        # (nothing was promoted yet).
+        retried = await post_signed(renew_path, {"renewal_id": renewal_id, "csr_pem": csr}, key)
+        assert retried.status_code == 200
+        assert retried.json()["certificate_pem"] == pending_cert
+
+        # SAME renewal_id + DIFFERENT CSR is never ambiguous: refused.
+        other_csr = make_csr(generate_keypair())
+        conflicting = await post_signed(
+            renew_path, {"renewal_id": renewal_id, "csr_pem": other_csr}, key
         )
-        assert renewed.status_code == 200, renewed.text
-        assert "BEGIN CERTIFICATE" in renewed.json()["certificate_pem"]
+        assert conflicting.status_code == 403
 
         # Spoofed identity headers WITHOUT the key are inert:
-        forged = pop_headers(generate_keypair(), agent_id, "POST", renew_path, body_bytes)
-        assert (
-            await client.post(
-                renew_path,
-                content=body_bytes,
-                headers={**forged, "Content-Type": "application/json"},
-            )
-        ).status_code == 403
+        forged = await post_signed(
+            renew_path,
+            {"renewal_id": str(uuidlib.uuid4()), "csr_pem": other_csr},
+            generate_keypair(),
+        )
+        assert forged.status_code == 403
+
+        # ACTIVATE requires possession of the PENDING key; the old key
+        # cannot promote what it does not hold.
+        wrong_key_activation = await post_signed(activate_path, {"renewal_id": renewal_id}, key)
+        assert wrong_key_activation.status_code == 403
+
+        activated = await post_signed(activate_path, {"renewal_id": renewal_id}, new_key)
+        assert activated.status_code == 200, activated.text
+        assert activated.json()["result"] == "activated"
+
+        # Lost activation RESPONSE: the retry (now against the promoted
+        # key) acknowledges idempotently.
+        activated_again = await post_signed(activate_path, {"renewal_id": renewal_id}, new_key)
+        assert activated_again.status_code == 200
+
+        # AFTER activation the old key is dead and the new key is live.
+        old_key_refused = await post_signed(
+            renew_path,
+            {"renewal_id": str(uuidlib.uuid4()), "csr_pem": other_csr},
+            key,
+        )
+        assert old_key_refused.status_code == 403
+        next_key = generate_keypair()
+        new_key_accepted = await post_signed(
+            renew_path,
+            {"renewal_id": str(uuidlib.uuid4()), "csr_pem": make_csr(next_key)},
+            new_key,
+        )
+        assert new_key_accepted.status_code == 200
 
         # Replay of a previously used nonce is refused:
-        body2 = jsonlib.dumps({"csr_pem": make_csr(generate_keypair())}).encode()
+        body2 = jsonlib.dumps(
+            {"renewal_id": str(uuidlib.uuid4()), "csr_pem": make_csr(generate_keypair())}
+        ).encode()
         replay_headers = pop_headers(new_key, agent_id, "POST", renew_path, body2)
         first = await client.post(
             renew_path,
@@ -281,13 +331,20 @@ async def test_pop_identity_spoofing_replay_and_renewal(
         )
         assert cookie_only.status_code == 403
 
-    # The stored key is the PUBLIC key only; no private material anywhere.
+    # The stored key is the PUBLIC key only; no private material anywhere,
+    # and the promoted identity cleared its pending material.
     async with engine.connect() as connection:
         stored = (
-            await connection.execute(text("SELECT public_key_pem FROM cluster_agents"))
-        ).scalar_one()
-    assert "PUBLIC KEY" in stored
-    assert "PRIVATE" not in stored
+            await connection.execute(
+                text(
+                    "SELECT public_key_pem, pending_certificate_pem "
+                    "FROM cluster_agents WHERE id = :id"
+                ),
+                {"id": agent_id},
+            )
+        ).one()
+    assert "PUBLIC KEY" in stored[0]
+    assert "PRIVATE" not in stored[0]
 
 
 async def test_real_tls_handshake_cert_required(engine: AsyncEngine, tmp_path: Path) -> None:
