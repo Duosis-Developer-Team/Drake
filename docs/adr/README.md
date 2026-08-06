@@ -19,3 +19,4 @@ or operational details.
 | [ADR-0011](ADR-0011-state-semantics.md) | Unknown/stale/partial state semantics |
 | [ADR-0012](ADR-0012-no-early-microservices.md) | No early microservices |
 | [ADR-0013](ADR-0013-auth-session-architecture.md) | Authentication and session architecture |
+| [ADR-0014](ADR-0014-catalog-authority-and-scope-topology.md) | Catalog authority and scope topology |
