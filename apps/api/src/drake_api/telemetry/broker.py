@@ -193,6 +193,7 @@ class TelemetryBroker:
             to_ts=aligned_to,
             effective_step_seconds=step,
             historical=not near_now,
+            requested_range_seconds=effective.to_ts - effective.from_ts,
         )
 
         fresh = await self._cache.get(keys.fresh)

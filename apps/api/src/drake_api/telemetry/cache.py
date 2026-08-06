@@ -39,6 +39,7 @@ def build_cache_keys(
     to_ts: int,
     effective_step_seconds: int,
     historical: bool,
+    requested_range_seconds: int,
 ) -> CacheKeys:
     base = {
         "registry": registry_hash,
@@ -54,10 +55,14 @@ def build_cache_keys(
     # fall back to the latest successful envelope of the same logical shape,
     # but HISTORICAL absolute windows keep their exact window in the key —
     # two unrelated windows of equal length must never share stale payloads.
+    # The relative identity uses the REQUESTED duration, not the aligned
+    # window delta — ceil/floor alignment shifts the aligned delta by up to
+    # one step depending on the request's sub-minute phase, which must not
+    # split the moving-window last-good identity.
     logical = (
         {**base, "mode": "historical", "from": from_ts, "to": to_ts}
         if historical
-        else {**base, "mode": "relative", "range_seconds": to_ts - from_ts}
+        else {**base, "mode": "relative", "range_seconds": requested_range_seconds}
     )
     fresh = hashlib.sha256(json.dumps(window, sort_keys=True).encode()).hexdigest()
     last_good = hashlib.sha256(json.dumps(logical, sort_keys=True).encode()).hexdigest()
