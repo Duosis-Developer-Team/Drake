@@ -17,4 +17,10 @@ uv run python -m drake_api.rbac.bootstrap \
   --subject "user-owner" \
   --display-name "Owner One"
 
+# Deterministic fixture world: reset leftover catalog state, then load
+# fixtures (local/test only, fail-closed elsewhere) and E2E grants.
+uv run python scripts/e2e_catalog_reset.py
+uv run python -m drake_api.catalog.bootstrap
+uv run python scripts/e2e_grants.py
+
 echo "[e2e-setup] migrations + bootstrap complete"
