@@ -271,12 +271,17 @@ test("real end-to-end cancellation: rapid changes stay bounded and disconnects f
     page.getByTestId("dashboard-service-golden-signals-v1").getByTestId("widget-scrape-state"),
   ).toContainText(/scraped|Unknown/i);
 
-  // NOW slow the provider down and churn generations: 24h → 1h → 7d.
+  // NOW slow the provider down and churn generations: 24h → 1h → 7d →
+  // 24h. The final preset is 24h: its evaluation points sit within the
+  // instant-vector lookback even on a freshly started CI Prometheus (7d's
+  // 30-minute steps can land outside it).
   await setProviderMode(page, "slow");
   const range = page.getByRole("group", { name: "Time range" });
   await range.getByText("Last 1h").click();
   await page.waitForTimeout(300);
   await range.getByText("Last 7d").click();
+  await page.waitForTimeout(300);
+  await range.getByText("Last 24h").click();
 
   // Budgets hold END TO END on the REAL Redis lease sets while churning:
   for (let sample = 0; sample < 5; sample += 1) {
@@ -285,7 +290,7 @@ test("real end-to-end cancellation: rapid changes stay bounded and disconnects f
     await page.waitForTimeout(400);
   }
 
-  // The final (7d) generation loads COMPLETELY — no self-inflicted 429:
+  // The final (24h) generation loads COMPLETELY — no self-inflicted 429:
   const dashboard = page.getByTestId("dashboard-service-golden-signals-v1");
   await expect(dashboard.getByTestId("widget-request-rate-trend")).toContainText("req/s", {
     timeout: 30_000,
