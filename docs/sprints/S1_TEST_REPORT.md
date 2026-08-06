@@ -10,7 +10,7 @@ during final verification. Status vocabulary: `PASS` / `FAIL` / `NOT RUN` /
 |---|---|---|---|
 | Format | `uv run ruff format --check .` | clean | PASS |
 | Lint | `uv run ruff check .` | clean | PASS |
-| Typecheck (strict) | `uv run mypy apps/api/src apps/worker/src` | 0 issues / 33 files | PASS |
+| Typecheck (strict) | `uv run mypy apps/api/src apps/worker/src` | 0 issues / 35 source files | PASS |
 | Unit tests | `uv run pytest -m "not integration" -q` | 74 passed | PASS |
 
 Unit coverage highlights: OIDC validation matrix (wrong issuer/audience,
@@ -88,7 +88,7 @@ service containers; no mocked network routes anywhere.
 
 | Check | Result | Status |
 |---|---|---|
-| Contracts (schema/policy/CLI) | 46 passed | PASS |
+| Contracts (schema/policy/CLI) | 43 passed | PASS |
 | Go agent fmt/vet/build/test | clean, 5 packages ok | PASS |
 | Secret scan (history + tree + canary) | no leaks; canary detected | PASS |
 | Dependency scan (osv-scanner) | no issues | PASS |
