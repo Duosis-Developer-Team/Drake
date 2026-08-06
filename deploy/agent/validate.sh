@@ -13,26 +13,42 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+COMMON_SETS=(
+  --set clusterId=00000000-0000-0000-0000-000000000000
+  --set clusterName=policy-check
+  --set apiBaseUrl=https://drake-internal.example.test
+  --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
+  --set serverCA.existingSecret=drake-agent-server-ca
+  --set enrollmentToken.existingSecret=drake-agent-enrollment
+  --set networkPolicy.apiEndpointCIDR=203.0.113.10/32
+  --set networkPolicy.kubernetesApiCIDR=198.51.100.0/24
+)
+
 echo "[helm] lint"
-helm lint . \
-  --set clusterId=00000000-0000-0000-0000-000000000000 \
-  --set clusterName=policy-check \
-  --set apiBaseUrl=https://drake-internal.example.test \
-  --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-  --set serverCA.existingSecret=drake-agent-server-ca \
-  --set enrollmentToken.existingSecret=drake-agent-enrollment >/dev/null
+helm lint . "${COMMON_SETS[@]}" >/dev/null
+
+echo "[policy] fail-closed renders"
+# Missing digest, missing netpol CIDRs, and broad CIDRs must ALL refuse.
+if helm template policy-check . --namespace drake-system \
+  "${COMMON_SETS[@]}" --set image.digest="" >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: render succeeded without a digest-pinned image" >&2
+  exit 1
+fi
+if helm template policy-check . --namespace drake-system \
+  "${COMMON_SETS[@]}" --set networkPolicy.apiEndpointCIDR="" >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: render succeeded without an explicit API endpoint CIDR" >&2
+  exit 1
+fi
+if helm template policy-check . --namespace drake-system \
+  "${COMMON_SETS[@]}" --set networkPolicy.kubernetesApiCIDR="" >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: render succeeded without an explicit Kubernetes API CIDR" >&2
+  exit 1
+fi
 
 echo "[helm] template"
 RENDERED="$(mktemp)"
 trap 'rm -f "$RENDERED"' EXIT
-helm template policy-check . \
-  --namespace drake-system \
-  --set clusterId=00000000-0000-0000-0000-000000000000 \
-  --set clusterName=policy-check \
-  --set apiBaseUrl=https://drake-internal.example.test \
-  --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-  --set serverCA.existingSecret=drake-agent-server-ca \
-  --set enrollmentToken.existingSecret=drake-agent-enrollment > "$RENDERED"
+helm template policy-check . --namespace drake-system "${COMMON_SETS[@]}" > "$RENDERED"
 
 python3 - "$RENDERED" <<'PYEOF'
 import sys
@@ -119,6 +135,36 @@ for deployment in deployments:
                 for marker in ("begin private key", "token:", "password")
             ):
                 fail(f"credential-shaped env value: {env['name']}")
+
+policies = [doc for doc in documents if doc.get("kind") == "NetworkPolicy"]
+if len(policies) != 1:
+    fail("expected exactly one NetworkPolicy")
+for policy in policies:
+    spec = policy["spec"]
+    if spec.get("ingress") != []:
+        fail("NetworkPolicy must deny ALL ingress")
+    if set(spec.get("policyTypes", [])) != {"Ingress", "Egress"}:
+        fail("NetworkPolicy must cover both Ingress and Egress")
+    rendered_policy = str(policy)
+    for broad in ("0.0.0.0/0", "::/0"):
+        if broad in rendered_policy:
+            fail(f"NetworkPolicy contains the whole internet: {broad}")
+    for rule in spec.get("egress", []):
+        for target in rule.get("to", []):
+            block = target.get("ipBlock")
+            if block is not None and not block.get("cidr"):
+                fail("egress ipBlock without an explicit CIDR")
+
+for deployment in deployments:
+    for container in deployment["spec"]["template"]["spec"].get("containers", []):
+        probe = container.get("livenessProbe", {}).get("exec", {}).get("command", [])
+        if probe[:2] != ["/usr/local/bin/drake-agent", "healthcheck"]:
+            fail(
+                "liveness must use the agent binary's healthcheck subcommand "
+                f"(the Dockerfile contract), got {probe}"
+            )
+        if not container.get("livenessProbe", {}).get("timeoutSeconds"):
+            fail("liveness probe needs a bounded timeout")
 
 services = [doc for doc in documents if doc.get("kind") == "Service"]
 if services:

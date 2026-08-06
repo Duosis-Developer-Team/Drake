@@ -31,7 +31,14 @@ def make_server_tls(directory: Path, hostname: str = "127.0.0.1") -> tuple[Path,
         .not_valid_before(now - timedelta(minutes=5))
         .not_valid_after(now + timedelta(days=1))
         .add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(hostname))]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.IPAddress(ipaddress.ip_address(hostname)),
+                    # In-cluster smoke tests reach the host listener via
+                    # k3d's host alias; harmless for loopback-only runs.
+                    x509.DNSName("host.k3d.internal"),
+                ]
+            ),
             critical=False,
         )
         .sign(key, hashes.SHA256())

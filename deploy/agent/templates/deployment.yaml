@@ -35,7 +35,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent
-          image: "{{ .Values.image.repository }}@{{ required "image.digest is required (digest-pinned deploys only)" .Values.image.digest }}"
+          image: {{ include "drake-agent.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -60,15 +60,21 @@ spec:
               value: {{ .Values.logLevel | quote }}
             - name: DRAKE_AGENT_HEALTH_LISTEN_ADDR
               value: "127.0.0.1:{{ .Values.healthPort }}"
-          # Liveness stays loopback-only: exec probe, no exposed port, no
-          # Service. The agent has NO inbound network surface.
+          # Liveness stays loopback-only: the agent binary's own
+          # healthcheck subcommand (contract with apps/cluster-agent/
+          # Dockerfile — no shell/curl/wget exists in the image). It
+          # probes ONLY local process health with a bounded timeout, so
+          # API or Kubernetes hiccups never become restart storms.
           livenessProbe:
             exec:
               command:
-                - /usr/local/bin/healthcheck
+                - /usr/local/bin/drake-agent
+                - healthcheck
                 - "127.0.0.1:{{ .Values.healthPort }}"
             initialDelaySeconds: 10
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

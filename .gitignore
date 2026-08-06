@@ -69,3 +69,4 @@ tmp/
 
 # --- Disposable full-chain E2E agent stack (script-managed) ---
 /.e2e-agent/
+/.e2e-agent-smoke/

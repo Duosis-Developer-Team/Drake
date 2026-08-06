@@ -6,8 +6,13 @@
 image:
   repository: ghcr.io/duosis-developer-team/drake-cluster-agent
   # Digest-pinned at deploy time by the operator; the empty default keeps
-  # accidental installs from pulling a floating tag.
+  # accidental installs from pulling a floating tag. Built from
+  # apps/cluster-agent/Dockerfile (binary at /usr/local/bin/drake-agent
+  # with a `healthcheck` subcommand — the liveness contract).
   digest: ""
+  # devTag is ONLY for disposable smoke clusters with locally imported
+  # images (pullPolicy Never); production renders fail without a digest.
+  devTag: ""
   pullPolicy: IfNotPresent
 
 # Drake cluster identity (UUID from the Drake catalog).
@@ -41,10 +46,18 @@ healthPort: 8090
 
 networkPolicy:
   enabled: true
-  # Egress scaffold: DNS + the Drake API endpoint + the Kubernetes API.
-  # Operators tighten the CIDRs/ports for their topology.
-  apiEndpointCIDR: 0.0.0.0/0
+  # FAIL-CLOSED egress: every destination is explicit. Rendering fails on
+  # empty values, and the policy gate refuses 0.0.0.0/0 and ::/0 — "the
+  # whole internet" is never a reviewable destination.
+  # The Drake internal gateway endpoint (CIDR + port):
+  apiEndpointCIDR: ""
   apiEndpointPort: 443
+  # The Kubernetes API endpoint(s) reachable from pods:
+  kubernetesApiCIDR: ""
+  kubernetesApiPort: 443
+  # Cluster DNS: restricted to the kube-dns service pods, not "any:53".
+  dnsNamespace: kube-system
+  dnsPodSelector: "k8s-app: kube-dns"
 
 serviceAccount:
   name: drake-cluster-agent

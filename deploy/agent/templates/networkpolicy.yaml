@@ -1,7 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
-# Outbound-only scaffold: ALL ingress denied (the agent has no inbound
-# surface at all), egress limited to DNS, the Kubernetes API, and the Drake
-# internal endpoint. Operators tighten CIDRs/ports per topology.
+# Outbound-only, FAIL-CLOSED: all ingress denied (the agent has no inbound
+# surface at all); egress is limited to cluster DNS pods, the Kubernetes
+# API, and the Drake internal endpoint — every destination explicit.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -19,23 +19,32 @@ spec:
     - Egress
   ingress: []
   egress:
+    # Cluster DNS — only the DNS pods, never any:53.
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}
+          podSelector:
+            matchLabels:
+              {{ .Values.networkPolicy.dnsPodSelector }}
       ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 6443
-        - protocol: TCP
-          port: 443
+    # The Kubernetes API (explicit CIDR; required).
     - to:
         - ipBlock:
-            cidr: {{ .Values.networkPolicy.apiEndpointCIDR }}
+            cidr: {{ required "networkPolicy.kubernetesApiCIDR is required (fail-closed egress)" .Values.networkPolicy.kubernetesApiCIDR }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.kubernetesApiPort }}
+        - protocol: TCP
+          port: 6443
+    # The Drake internal gateway (explicit CIDR; required).
+    - to:
+        - ipBlock:
+            cidr: {{ required "networkPolicy.apiEndpointCIDR is required (fail-closed egress)" .Values.networkPolicy.apiEndpointCIDR }}
       ports:
         - protocol: TCP
           port: {{ .Values.networkPolicy.apiEndpointPort }}
