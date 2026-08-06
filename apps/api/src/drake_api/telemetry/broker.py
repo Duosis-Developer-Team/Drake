@@ -173,11 +173,13 @@ class TelemetryBroker:
             f"{integration[0]}:{integration[1]}".encode()
         ).hexdigest()
         # A query whose end sits within ~2 steps BEHIND now is a moving
-        # dashboard window; anything older — or ending in the future — is a
-        # historical absolute window (two-sided check: a future-ending
-        # window must never share the relative last-good identity).
+        # dashboard window; anything older — or genuinely ending in the
+        # future — is a historical absolute window. The check is two-sided:
+        # a future-ending window must never share the relative last-good
+        # identity. One step of forward tolerance absorbs client-clock
+        # subsecond skew without letting real future windows through.
         now_delta = int(time.time()) - effective.to_ts
-        near_now = 0 <= now_delta <= max(2 * step, 120)
+        near_now = -step <= now_delta <= max(2 * step, 120)
         keys = build_cache_keys(
             registry_hash=self._registry.content_hash,
             template_key=template.key,
