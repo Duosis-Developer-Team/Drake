@@ -42,6 +42,8 @@ helm template acceptance "$REPO_ROOT/deploy/agent" \
   --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
   --set serverCA.existingSecret=drake-agent-server-ca \
   --set enrollmentToken.existingSecret=drake-agent-enrollment \
+  --set networkPolicy.apiEndpointCIDR=203.0.113.10/32 \
+  --set networkPolicy.kubernetesApiCIDR=198.51.100.0/24 \
   --show-only templates/rbac.yaml | kubectl apply -f - >/dev/null
 
 failures=0

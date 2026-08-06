@@ -280,10 +280,16 @@ test("steps 4-6: cluster screens show REAL k3d inventory", async ({ page }) => {
 
   await page.goto(`/clusters/${clusterId}/inventory`);
   await page.getByTestId("filter-kind").selectOption("Deployment");
-  await expect(page.getByTestId("resource-rows")).toContainText("e2e-web");
+  // Exact-name link is unique to the Deployment row (pod/RS names carry
+  // suffixes), so this stays deterministic even while the filtered fetch
+  // is still in flight.
+  const deploymentLink = page
+    .getByTestId("resource-rows")
+    .getByRole("link", { name: "e2e-web", exact: true });
+  await expect(deploymentLink).toBeVisible();
 
   // Drilldown to the deployment detail with reason-coded health.
-  await page.getByTestId("resource-rows").getByText("e2e-web").click();
+  await deploymentLink.click();
   await expect(page.getByTestId("health-card")).toBeVisible();
   await expect(page.getByTestId("observation-card")).toContainText("cluster-agent");
 });

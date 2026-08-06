@@ -213,7 +213,7 @@ export default function ClusterDetailPage() {
                         />
                       ) : (
                         <div className="overflow-x-auto">
-                          <table className="w-full min-w-md text-left text-sm">
+                          <table className="w-full text-left text-sm">
                             <thead>
                               <tr className="border-b border-border text-xs text-ink-muted">
                                 <th scope="col" className="py-2 pr-3 font-medium">

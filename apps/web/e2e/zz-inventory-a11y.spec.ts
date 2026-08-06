@@ -164,12 +164,28 @@ test("keyboard only: filter, row link, and drilldown are reachable", async ({
 test("honesty gates: stale is never healthy-colored, unknown stays visible", async ({
   page,
 }) => {
+  test.setTimeout(180_000);
   await signInAs(page, "user-owner");
+  // The agent from inventory.spec.ts is stopped; wait until the SERVER
+  // derives staleness (activity aged past the E2E window) so the page
+  // assertion is deterministic, not a race against the clock.
+  const deadline = Date.now() + 120_000;
+  let state = "";
+  while (Date.now() < deadline) {
+    const response = await page.request.get(
+      `/v1/clusters/${clusterId}/inventory/summary`,
+    );
+    state = ((await response.json()) as { inventory: { state: string } }).inventory
+      .state;
+    if (state === "stale") break;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  expect(state, "server must derive staleness after the agent stops").toBe("stale");
+
   await page.goto(`/clusters/${clusterId}`);
   const freshness = page.getByTestId("freshness-card");
   await expect(freshness).toBeVisible();
-  // The agent from inventory.spec.ts is stopped: stale/disconnected land
-  // in their OWN visual states, never the healthy badge.
+  // Stale/disconnected land in their OWN visual states, never healthy.
   await expect(freshness.getByTestId("status-stale")).toBeVisible();
   await expect(freshness.getByTestId("status-healthy")).toHaveCount(0);
   // Unknown buckets are rendered as data, not hidden.
