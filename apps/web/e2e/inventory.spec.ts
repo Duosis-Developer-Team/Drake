@@ -47,6 +47,8 @@ const redisUrl = process.env.DRAKE_E2E_REDIS_URL ?? "redis://127.0.0.1:56379/0";
 let internalApi: ChildProcess | null = null;
 let agent: ChildProcess | null = null;
 let clusterId = "";
+// Unique per run so consecutive suite runs never collide in k3d.
+const liveNamespace = `e2e-live-${Date.now().toString(36)}`;
 
 function tlsConfig(): Record<string, string> {
   return JSON.parse(readFileSync(join(STACK_DIR, "tls.json"), "utf8"));
@@ -132,6 +134,9 @@ function startAgent(): ChildProcess {
       DRAKE_AGENT_KUBECONFIG: KUBECONFIG,
       DRAKE_AGENT_LOG_LEVEL: "info",
       DRAKE_AGENT_HEALTH_LISTEN_ADDR: "127.0.0.1:58090",
+      // Match the API's 6s heartbeat-stale E2E window: beat every 2s so
+      // "connected" is continuously observable, not a 6s-per-30s lottery.
+      DRAKE_AGENT_HEARTBEAT_SECONDS: "2",
     },
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -292,15 +297,15 @@ test("step 7: live k3d change propagates via WATCH without a new snapshot", asyn
     `/v1/clusters/${clusterId}/inventory/summary`,
   );
 
-  kubectl("create", "namespace", "e2e-live");
+  kubectl("create", "namespace", liveNamespace);
   const deadline = Date.now() + 45_000;
   let found = false;
   while (Date.now() < deadline && !found) {
     const listing = await apiJson<{ resources: { name: string }[] }>(
       page,
-      `/v1/clusters/${clusterId}/inventory/resources?kind=Namespace&search=e2e-live`,
+      `/v1/clusters/${clusterId}/inventory/resources?kind=Namespace&search=${liveNamespace}`,
     );
-    found = listing.body.resources?.some((row) => row.name === "e2e-live") ?? false;
+    found = listing.body.resources?.some((row) => row.name === liveNamespace) ?? false;
     if (!found) await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   expect(found, "watch event never reached the projection").toBe(true);

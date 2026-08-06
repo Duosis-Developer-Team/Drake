@@ -123,8 +123,11 @@ test("project user cannot reach cluster detail; cluster viewer can", async ({ pa
   await expect(page.getByRole("heading", { name: "Cluster A", exact: true })).toBeVisible();
   // Agent/inventory honestly not configured; no fabricated environments.
   await expect(
-    page.getByTestId("operational-grid").getByTestId("state-not-configured"),
-  ).toHaveCount(2);
+    page.getByTestId("agent-card").getByText("not configured"),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("freshness-card").getByText("not configured"),
+  ).toBeVisible();
   await expect(page.getByText(/no authorized environments/i)).toBeVisible();
   // Projects nav is permission-gated away for this user; the direct URL
   // still answers with an honest empty state (collection semantics).
