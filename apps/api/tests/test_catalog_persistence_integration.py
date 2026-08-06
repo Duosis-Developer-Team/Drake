@@ -5,6 +5,7 @@ duplicate rejection, soft archive, rollback-together, fixture bootstrap
 fail-closed, and Sprint 0/1 data preservation across 0001→0004.
 """
 
+import uuid as uuidlib
 from pathlib import Path
 from typing import Any
 
@@ -372,6 +373,8 @@ async def test_migration_cycle_and_sprint1_data_preservation(engine: AsyncEngine
     config = alembic_config(settings.database_url)
 
     # Plant Sprint 1 data + catalog data, then walk 0004 down and up.
+    # Audit is append-only across suite runs, so the marker must be unique.
+    marker = f"preserve-0004-{uuidlib.uuid4().hex}"
     world = await build_world(engine)
     async with engine.begin() as connection:
         identity_id = (
@@ -391,9 +394,10 @@ async def test_migration_cycle_and_sprint1_data_preservation(engine: AsyncEngine
                     (actor_type, actor_id, action, result, correlation_id, metadata,
                      schema_version)
                 VALUES ('system', 'migration-test', 'catalog.preserve.check', 'success',
-                        'preserve-0004', '{}'::jsonb, 1)
+                        :marker, '{}'::jsonb, 1)
                 """
-            )
+            ),
+            {"marker": marker},
         )
 
     command.downgrade(config, "0003")
@@ -408,7 +412,8 @@ async def test_migration_cycle_and_sprint1_data_preservation(engine: AsyncEngine
         ).scalar_one() == 1
         assert (
             await connection.execute(
-                text("SELECT count(*) FROM audit_events WHERE correlation_id = 'preserve-0004'")
+                text("SELECT count(*) FROM audit_events WHERE correlation_id = :marker"),
+                {"marker": marker},
             )
         ).scalar_one() == 1
         # Catalog tables exist again (empty after downgrade — disposable DB).
