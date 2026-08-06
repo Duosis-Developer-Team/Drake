@@ -52,9 +52,11 @@ networkPolicy:
   # The Drake internal gateway endpoint (CIDR + port):
   apiEndpointCIDR: ""
   apiEndpointPort: 443
-  # The Kubernetes API endpoint(s) reachable from pods:
+  # The Kubernetes API: egress policies match the POST-DNAT destination,
+  # so this must cover the REAL apiserver endpoint addresses
+  # (`kubectl get endpoints kubernetes`), not the in-cluster service VIP.
   kubernetesApiCIDR: ""
-  kubernetesApiPort: 443
+  kubernetesApiPort: 6443
   # Cluster DNS: restricted to the kube-dns service pods, not "any:53".
   dnsNamespace: kube-system
   dnsPodSelector: "k8s-app: kube-dns"

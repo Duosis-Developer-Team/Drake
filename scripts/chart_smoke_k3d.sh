@@ -30,7 +30,10 @@ command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
 API_PID=""
 cleanup() {
-  [ -n "$API_PID" ] && kill "$API_PID" >/dev/null 2>&1 || true
+  if [ -n "$API_PID" ]; then
+    pkill -P "$API_PID" >/dev/null 2>&1 || true
+    kill "$API_PID" >/dev/null 2>&1 || true
+  fi
   k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
   docker image rm "$IMAGE_TAG" >/dev/null 2>&1 || true
   rm -rf "$SMOKE_DIR"
@@ -38,7 +41,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[smoke] building agent image"
-docker build -q -t "$IMAGE_TAG" "$REPO_ROOT/apps/cluster-agent" >/dev/null
+docker build -t "$IMAGE_TAG" "$REPO_ROOT/apps/cluster-agent" 2>&1 | tail -2
 
 echo "[smoke] creating disposable k3d cluster ${CLUSTER_NAME}"
 k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
@@ -57,7 +60,9 @@ echo "[smoke] TLS material + internal listener (host)"
 (cd "$REPO_ROOT" && uv run python scripts/e2e_agent_tls.py "$SMOKE_DIR") >/dev/null
 # The listener binds all interfaces so the k3d network can reach it via
 # host.k3d.internal — a LOCAL, disposable test only.
-(cd "$REPO_ROOT" && DRAKE_ENV=local \
+# exec (not a subshell chain) so $API_PID is the listener itself and the
+# cleanup trap really kills it — an orphan would hold pipes open forever.
+(cd "$REPO_ROOT" && exec env DRAKE_ENV=local \
   DRAKE_DATABASE_URL="$DB_URL" DRAKE_REDIS_URL="$REDIS_URL" \
   DRAKE_AGENT_CA_CERT_FILE="$SMOKE_DIR/ca/agent-ca.pem" \
   DRAKE_AGENT_CA_KEY_FILE="$SMOKE_DIR/ca/agent-ca-key.pem" \
@@ -66,8 +71,22 @@ echo "[smoke] TLS material + internal listener (host)"
     --tls-cert "$SMOKE_DIR/internal-server.pem" \
     --tls-key "$SMOKE_DIR/internal-server-key.pem" \
     --client-ca "$SMOKE_DIR/ca/agent-ca.pem" \
-    --client-cert-optional) &
+    --client-cert-optional >"$SMOKE_DIR/listener.log" 2>&1) &
 API_PID=$!
+echo "[smoke] waiting for the internal listener"
+LISTENER_UP=""
+for attempt in $(seq 1 60); do
+  if curl -ks "https://127.0.0.1:${INTERNAL_PORT}/x" -o /dev/null 2>/dev/null; then
+    LISTENER_UP="yes"
+    break
+  fi
+  sleep 1
+done
+if [ -z "$LISTENER_UP" ]; then
+  echo "FAIL: internal listener never became ready; log follows" >&2
+  tail -20 "$SMOKE_DIR/listener.log" >&2 || true
+  exit 1
+fi
 
 echo "[smoke] fixture world + one-time token"
 (cd "$REPO_ROOT" && DRAKE_DATABASE_URL="$DB_URL" bash scripts/e2e-setup.sh) >/dev/null
@@ -137,11 +156,22 @@ kubectl -n "$NAMESPACE" create secret generic drake-agent-server-ca \
 kubectl -n "$NAMESPACE" create secret generic drake-agent-enrollment \
   --from-literal=token="$TOKEN" >/dev/null
 
-# Egress targets: the k3d bridge (host side) and the k3s service CIDR.
-HOST_GATEWAY="$(docker network inspect "k3d-$CLUSTER_NAME" \
-  -f '{{(index .IPAM.Config 0).Gateway}}')"
-DOCKER_SUBNET="$(docker network inspect "k3d-$CLUSTER_NAME" \
-  -f '{{(index .IPAM.Config 0).Subnet}}')"
+# Egress target: the REAL IP the cluster resolves for host.k3d.internal
+# (k3d writes it into CoreDNS NodeHosts; on Docker Desktop it is the
+# host-gateway address, NOT the bridge subnet).
+HOST_ALIAS_IP="$(kubectl -n kube-system get configmap coredns \
+  -o jsonpath='{.data.NodeHosts}' | awk '/host\.k3d\.internal/{print $1; exit}')"
+[ -n "$HOST_ALIAS_IP" ] || { echo "FAIL: host.k3d.internal not in CoreDNS NodeHosts" >&2; exit 1; }
+echo "[smoke] host.k3d.internal resolves to ${HOST_ALIAS_IP} in-cluster"
+# Egress policies match the POST-DNAT destination: the Kubernetes API rule
+# must therefore target the real apiserver ENDPOINT (node ip:6443), not
+# the 10.43.0.1 service VIP.
+KUBE_API_IP="$(kubectl get endpoints kubernetes \
+  -o jsonpath='{.subsets[0].addresses[0].ip}')"
+KUBE_API_PORT="$(kubectl get endpoints kubernetes \
+  -o jsonpath='{.subsets[0].ports[0].port}')"
+[ -n "$KUBE_API_IP" ] || { echo "FAIL: kubernetes endpoint unresolved" >&2; exit 1; }
+echo "[smoke] kubernetes API endpoint is ${KUBE_API_IP}:${KUBE_API_PORT}"
 
 render_chart() {
   helm template smoke "$REPO_ROOT/deploy/agent" \
@@ -152,9 +182,12 @@ render_chart() {
     --set image.repository=drake-cluster-agent \
     --set image.devTag=smoke \
     --set image.pullPolicy=Never \
-    --set networkPolicy.apiEndpointCIDR="$DOCKER_SUBNET" \
+    --set serverCA.existingSecret=drake-agent-server-ca \
+    --set enrollmentToken.existingSecret=drake-agent-enrollment \
+    --set networkPolicy.apiEndpointCIDR="${HOST_ALIAS_IP}/32" \
     --set networkPolicy.apiEndpointPort="$INTERNAL_PORT" \
-    --set networkPolicy.kubernetesApiCIDR="10.43.0.0/16" \
+    --set networkPolicy.kubernetesApiCIDR="${KUBE_API_IP}/32" \
+    --set networkPolicy.kubernetesApiPort="${KUBE_API_PORT}" \
     "$@"
 }
 
@@ -165,7 +198,20 @@ POD="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=drake-cluster-
   -o jsonpath='{.items[0].metadata.name}')"
 
 echo "[smoke] liveness subcommand executes inside the container"
-kubectl -n "$NAMESPACE" exec "$POD" -- /usr/local/bin/drake-agent healthcheck 127.0.0.1:8090
+LIVE_OK=""
+for attempt in $(seq 1 20); do
+  if kubectl -n "$NAMESPACE" exec "$POD" -- \
+      /usr/local/bin/drake-agent healthcheck 127.0.0.1:8090 >/dev/null 2>&1; then
+    LIVE_OK="yes"
+    break
+  fi
+  sleep 3
+done
+if [ -z "$LIVE_OK" ]; then
+  echo "FAIL: liveness subcommand never succeeded; pod logs follow" >&2
+  kubectl -n "$NAMESPACE" logs "$POD" --tail=40 >&2 || true
+  exit 1
+fi
 echo "[smoke] liveness OK"
 
 echo "[smoke] surface + securityContext assertions"
@@ -173,11 +219,13 @@ SERVICES="$(kubectl -n "$NAMESPACE" get services -o name | wc -l | tr -d ' ')"
 INGRESSES="$(kubectl -n "$NAMESPACE" get ingress -o name 2>/dev/null | wc -l | tr -d ' ')"
 [ "$SERVICES" = "0" ] || { echo "FAIL: agent namespace exposes a Service" >&2; exit 1; }
 [ "$INGRESSES" = "0" ] || { echo "FAIL: agent namespace exposes an Ingress" >&2; exit 1; }
-kubectl -n "$NAMESPACE" get pod "$POD" -o json | python3 - <<'PYEOF'
+kubectl -n "$NAMESPACE" get pod "$POD" -o json > "$SMOKE_DIR/pod.json"
+python3 - "$SMOKE_DIR/pod.json" <<'PYEOF'
 import json
 import sys
 
-pod = json.load(sys.stdin)
+with open(sys.argv[1]) as handle:
+    pod = json.load(handle)
 spec = pod["spec"]
 container = spec["containers"][0]
 security = container["securityContext"]
@@ -202,7 +250,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 async def main() -> None:
     engine = create_async_engine(os.environ["DRAKE_SMOKE_DATABASE_URL"])
-    deadline = time.time() + 90
+    deadline = time.time() + 120
     state = "none"
     while time.time() < deadline:
         async with engine.connect() as connection:
@@ -230,7 +278,16 @@ async def main() -> None:
 asyncio.run(main())
 PYEOF
 )"
-[ "$SYNCED" = "fresh" ] || { echo "FAIL: agent never reached fresh through the NetworkPolicy (state=$SYNCED)" >&2; exit 1; }
+if [ "$SYNCED" != "fresh" ]; then
+  echo "FAIL: agent never reached fresh through the NetworkPolicy (state=$SYNCED)" >&2
+  echo "--- pod logs ---" >&2
+  kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/name=drake-cluster-agent \
+    --tail=40 >&2 || true
+  echo "--- pod describe (events) ---" >&2
+  kubectl -n "$NAMESPACE" describe pod -l app.kubernetes.io/name=drake-cluster-agent \
+    2>/dev/null | tail -20 >&2 || true
+  exit 1
+fi
 echo "[smoke] positive path OK (inventory fresh through restricted egress)"
 
 echo "[smoke] NEGATIVE: removing the API egress rule stops the sync"

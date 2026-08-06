@@ -98,6 +98,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// The liveness probe answers from the FIRST moment the process is
+	// alive: enrollment/backoff windows are alive-but-connecting states,
+	// not liveness failures (the probe is process health, nothing more).
+	var group sync.WaitGroup
+	probe := health.New(cfg.HealthListenAddr)
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		if err := probe.Start(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("liveness probe server failed", "error", err.Error())
+			stop()
+		}
+	}()
+
 	id, err := loadOrEnroll(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("agent identity unavailable", "error", err.Error())
@@ -152,7 +166,6 @@ func main() {
 		"mode", "read-only",
 	)
 
-	var group sync.WaitGroup
 	group.Add(2)
 	go func() {
 		defer group.Done()
@@ -173,11 +186,6 @@ func main() {
 		}
 	}()
 
-	probe := health.New(cfg.HealthListenAddr)
-	if err := probe.Start(ctx); err != nil {
-		logger.Error("liveness probe server failed", "error", err.Error())
-		os.Exit(1)
-	}
 	group.Wait()
 	logger.Info("agent stopped gracefully")
 }
