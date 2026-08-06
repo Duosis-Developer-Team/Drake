@@ -1,0 +1,170 @@
+"""Prometheus provider adapter behind the SSRF boundary.
+
+``integrations.config_ref`` is only a reference NAME; the server-owned
+connector resolver maps it to a base URL from settings (environment /
+external-secret backed; dependency-injected fakes in tests). The endpoint
+never comes from a request. Raw upstream errors are redacted to bounded
+codes; responses are size-capped and strictly validated.
+"""
+
+import asyncio
+import ipaddress
+import socket
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import urlsplit
+
+import httpx
+
+from drake_api.settings import Settings
+
+_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+class ProviderUnavailableError(RuntimeError):
+    """Timeout / connection failure / upstream 5xx (typed retryable)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class ProviderContractError(RuntimeError):
+    """The upstream response violates the adapter contract (fail-closed)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class ConnectorRefusedError(RuntimeError):
+    """The connector target violates the SSRF boundary."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class RangeQueryResult:
+    result: list[dict[str, Any]]  # raw matrix entries, validated shape only
+
+
+def _refuse(condition: bool, code: str) -> None:
+    if condition:
+        raise ConnectorRefusedError(code)
+
+
+async def validate_connector_url(url: str, settings: Settings) -> str:
+    """SSRF boundary for server-owned connector URLs (never caller input)."""
+    parts = urlsplit(url)
+    _refuse(parts.scheme not in ("http", "https"), "connector_scheme_refused")
+    _refuse(
+        parts.scheme == "http" and settings.env not in ("local", "test"),
+        "connector_plaintext_refused",
+    )
+    _refuse(
+        parts.username is not None or parts.password is not None, "connector_credentials_refused"
+    )
+    _refuse(not parts.hostname, "connector_host_missing")
+    hostname = str(parts.hostname)
+
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(hostname, parts.port or 80, type=socket.SOCK_STREAM)
+    except socket.gaierror as error:
+        raise ConnectorRefusedError("connector_unresolvable") from error
+    _refuse(not infos, "connector_unresolvable")
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        # Always refused, in every environment:
+        _refuse(address.is_link_local, "connector_target_refused")  # incl. 169.254.169.254
+        _refuse(address.is_multicast, "connector_target_refused")
+        _refuse(address.is_unspecified, "connector_target_refused")
+        _refuse(address.is_reserved, "connector_target_refused")
+        # Loopback is a local/test convenience only.
+        _refuse(
+            address.is_loopback and settings.env not in ("local", "test"),
+            "connector_target_refused",
+        )
+        # Private ranges are reachable ONLY because the connector itself is
+        # server-owned configuration — never widen this to caller input.
+    return url
+
+
+class PrometheusAdapter:
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        self._settings = settings
+        self._transport = transport
+
+    def resolve_connector(self, config_ref: str) -> str | None:
+        return self._settings.telemetry_connectors.get(config_ref)
+
+    async def query_range(
+        self,
+        base_url: str,
+        query: str,
+        *,
+        start: int,
+        end: int,
+        step_seconds: int,
+        timeout_seconds: float,
+        correlation_id: str,
+    ) -> RangeQueryResult:
+        await validate_connector_url(base_url, self._settings)
+        timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 3.0))
+        try:
+            async with httpx.AsyncClient(
+                base_url=base_url,
+                timeout=timeout,
+                follow_redirects=False,  # redirects are never followed
+                transport=self._transport,
+            ) as client:
+                response = await client.post(
+                    "/api/v1/query_range",
+                    data={
+                        "query": query,
+                        "start": str(start),
+                        "end": str(end),
+                        "step": str(step_seconds),
+                    },
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+        except httpx.TimeoutException as error:
+            raise ProviderUnavailableError("provider_timeout") from error
+        except httpx.HTTPError as error:
+            raise ProviderUnavailableError("provider_unreachable") from error
+
+        if response.status_code in (301, 302, 303, 307, 308):
+            raise ProviderContractError("provider_redirect_refused")
+        if response.status_code >= 500:
+            raise ProviderUnavailableError("provider_upstream_error")
+        if response.status_code != 200:
+            # 4xx from Prometheus (bad query etc.) — our compiler produced it,
+            # so this is a contract failure, never echoed to the caller.
+            raise ProviderContractError("provider_rejected_query")
+
+        body = response.content
+        if len(body) > _MAX_RESPONSE_BYTES:
+            raise ProviderContractError("provider_response_too_large")
+        try:
+            document = response.json()
+        except ValueError as error:
+            raise ProviderContractError("provider_malformed_response") from error
+        if not isinstance(document, dict):
+            raise ProviderContractError("provider_malformed_response")
+        if document.get("status") == "error":
+            # Upstream error strings are redacted to a bounded code.
+            raise ProviderContractError("provider_query_error")
+        data = document.get("data")
+        if not isinstance(data, dict) or data.get("resultType") != "matrix":
+            raise ProviderContractError("provider_malformed_response")
+        result = data.get("result")
+        if not isinstance(result, list):
+            raise ProviderContractError("provider_malformed_response")
+        for entry in result:
+            if not isinstance(entry, dict) or not isinstance(entry.get("metric"), dict):
+                raise ProviderContractError("provider_malformed_response")
+            if not isinstance(entry.get("values"), list):
+                raise ProviderContractError("provider_malformed_response")
+        return RangeQueryResult(result=result)

@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     # Origins allowed to perform cookie-authenticated mutations (CSRF layer 2).
     allowed_web_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
+    # --- Telemetry (Query Broker) ---
+    # Server-owned connector resolver: config_ref -> base URL. Values come
+    # from the environment / external secret store (JSON object), never from
+    # requests and never exposed through the API.
+    telemetry_connectors: dict[str, str] = {}
+    telemetry_max_timeout_seconds: float = 10.0
+    # Local/test-only override so E2E can exercise stale/last-good flows
+    # without waiting out production TTLs. Ignored outside local/test.
+    telemetry_fresh_ttl_override_seconds: int | None = None
+    internal_metrics_enabled: bool = True
+
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
 
