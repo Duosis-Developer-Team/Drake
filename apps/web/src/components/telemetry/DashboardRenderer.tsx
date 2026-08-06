@@ -30,6 +30,11 @@ import type { DashboardDefinition, RangePreset } from "@/lib/telemetry";
 import { fetchDashboard, queryTelemetry } from "@/lib/telemetry";
 
 export const MAX_CONCURRENT_QUERIES = 3;
+// A backend 429 is transient by construction (leases free within seconds):
+// each widget retries ONCE, after a bounded delay, through the same bounded
+// queue — never an uncontrolled fan-out, always abandoned with its
+// generation.
+export const THROTTLE_RETRY_DELAY_MS = 2500;
 
 function classifyError(error: unknown): WidgetState {
   if (error instanceof ApiError) {
@@ -97,6 +102,8 @@ export function DashboardRenderer({
 
     const csrfToken = me.csrf_token;
     let next = 0;
+    const retried = new Set<string>();
+    const retryTimers: ReturnType<typeof setTimeout>[] = [];
     const runNext = (): void => {
       // A stale generation must not start queued work.
       if (generation !== generationRef.current || controller.signal.aborted) return;
@@ -116,7 +123,19 @@ export function DashboardRenderer({
         .catch((error: unknown) => {
           // Abort of an outdated generation is not an error state.
           if (generation !== generationRef.current || controller.signal.aborted) return;
-          setStates((previous) => ({ ...previous, [key]: classifyError(error) }));
+          const state = classifyError(error);
+          if (state.kind === "throttled" && !retried.has(key)) {
+            retried.add(key);
+            retryTimers.push(
+              setTimeout(() => {
+                if (generation !== generationRef.current || controller.signal.aborted) return;
+                queue.push(key);
+                setStates((previous) => ({ ...previous, [key]: { kind: "loading" } }));
+                runNext();
+              }, THROTTLE_RETRY_DELAY_MS),
+            );
+          }
+          setStates((previous) => ({ ...previous, [key]: state }));
         })
         .finally(() => {
           runNext();
@@ -127,7 +146,9 @@ export function DashboardRenderer({
     }
 
     return () => {
-      // In-flight requests are truly cancelled, not just ignored.
+      // In-flight requests are truly cancelled, not just ignored; pending
+      // throttle retries die with their generation.
+      for (const timer of retryTimers) clearTimeout(timer);
       controller.abort();
     };
   }, [dashboard, me, scopeType, scopeId, preset, profile, nonce]);
