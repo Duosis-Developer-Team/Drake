@@ -34,13 +34,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802 (http.server API)
+    def do_GET(self) -> None:
         if self.path == "/__health":
             self._respond(200, b"ok")
         else:
             self._respond(404, b"not found")
 
-    def do_POST(self) -> None:  # noqa: N802 (http.server API)
+    def do_POST(self) -> None:
         if self.path == "/__mode/fail":
             MODE["value"] = "fail"
             self._respond(200, b"mode=fail")

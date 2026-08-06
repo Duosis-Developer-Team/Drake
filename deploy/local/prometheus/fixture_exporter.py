@@ -65,7 +65,7 @@ def render(elapsed: float) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 (http.server API)
+    def do_GET(self) -> None:
         parts = tuple(part for part in self.path.split("/") if part)
         if len(parts) == 4 and parts[0] == "metrics" and parts[1:] in TARGETS:
             body = render(time.time() - START).encode()
