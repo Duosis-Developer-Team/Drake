@@ -45,10 +45,10 @@ async function parseError(response: Response): Promise<ApiError> {
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   // no-store: authorization-scoped data must never outlive a permission
   // change or leak across users through shared HTTP caches.
-  const response = await fetch(path, { credentials: "include", cache: "no-store" });
+  const response = await fetch(path, { credentials: "include", cache: "no-store", signal });
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
 }
@@ -58,6 +58,7 @@ export interface MutateOptions {
   method?: "POST" | "PUT" | "DELETE";
   body?: unknown;
   ifMatch?: string;
+  signal?: AbortSignal;
 }
 
 export async function apiMutate<T>(path: string, options: MutateOptions): Promise<T> {
@@ -73,6 +74,7 @@ export async function apiMutate<T>(path: string, options: MutateOptions): Promis
     credentials: "include",
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;

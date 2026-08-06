@@ -20,6 +20,7 @@ import { formatValue, reduceEnvelope } from "@/lib/telemetry";
 export type WidgetState =
   | { kind: "loading" }
   | { kind: "denied" }
+  | { kind: "throttled"; correlationId?: string }
   | { kind: "unavailable"; correlationId?: string }
   | { kind: "error"; correlationId?: string }
   | { kind: "ready"; envelope: TelemetryEnvelope };
@@ -79,12 +80,14 @@ function WidgetFrame({
       {state.kind === "denied" ? (
         <p className="text-sm text-ink-muted">You do not have access to this signal.</p>
       ) : null}
-      {state.kind === "unavailable" || state.kind === "error" ? (
+      {state.kind === "unavailable" || state.kind === "error" || state.kind === "throttled" ? (
         <div className="space-y-2 text-sm">
           <p className="text-ink-secondary">
             {state.kind === "unavailable"
               ? "Telemetry source unavailable."
-              : "Could not load this signal."}
+              : state.kind === "throttled"
+                ? "Query limit reached — try again shortly."
+                : "Could not load this signal."}
           </p>
           {state.correlationId ? (
             <p className="font-mono text-[11px] text-ink-muted">ref: {state.correlationId}</p>

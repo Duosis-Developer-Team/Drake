@@ -4,11 +4,19 @@
  * Generic dashboard renderer: fetches a registry-defined dashboard template
  * and drives one telemetry query per referenced query template (widgets
  * sharing a template share the envelope). Profile-gated widgets are hidden
- * when the scope's runtime profile does not provide them. Every widget
- * carries its own state machine — the dashboard never fakes a value.
+ * when the scope's runtime profile does not provide them.
+ *
+ * Query execution is a bounded worker queue: at most MAX_CONCURRENT_QUERIES
+ * run at once per dashboard instance, so a single screen can never exhaust
+ * the backend's per-principal concurrency budget on its own. Every
+ * generation (scope/range/profile/template change, retry, unmount) aborts
+ * its in-flight requests via AbortController, queued work from a stale
+ * generation never starts, and stale results can never write into newer
+ * state. A real backend 429 renders as "throttled" — never misclassified
+ * as provider unavailability.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   KpiWidget,
@@ -20,6 +28,22 @@ import { ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { DashboardDefinition, RangePreset } from "@/lib/telemetry";
 import { fetchDashboard, queryTelemetry } from "@/lib/telemetry";
+
+export const MAX_CONCURRENT_QUERIES = 3;
+
+function classifyError(error: unknown): WidgetState {
+  if (error instanceof ApiError) {
+    if (error.status === 403 || error.status === 404) return { kind: "denied" };
+    if (error.status === 429) {
+      return { kind: "throttled", correlationId: error.correlationId };
+    }
+    if (error.status === 502 || error.status === 503) {
+      return { kind: "unavailable", correlationId: error.correlationId };
+    }
+    return { kind: "error", correlationId: error.correlationId };
+  }
+  return { kind: "error" };
+}
 
 export function DashboardRenderer({
   templateKey,
@@ -40,6 +64,7 @@ export function DashboardRenderer({
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [states, setStates] = useState<Record<string, WidgetState>>({});
   const [nonce, setNonce] = useState(0);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,41 +82,53 @@ export function DashboardRenderer({
 
   useEffect(() => {
     if (!dashboard || !me) return;
-    let cancelled = false;
-    const templateKeys = new Set<string>();
+    // New generation: anything from previous generations is dead on arrival.
+    const generation = ++generationRef.current;
+    const controller = new AbortController();
+
+    const queue: string[] = [];
     for (const section of dashboard.sections) {
       for (const widget of section.widgets) {
         if (widget.requiredProfile && widget.requiredProfile !== profile) continue;
-        templateKeys.add(widget.queryTemplateKey);
+        if (!queue.includes(widget.queryTemplateKey)) queue.push(widget.queryTemplateKey);
       }
     }
-    setStates(
-      Object.fromEntries([...templateKeys].map((key) => [key, { kind: "loading" as const }])),
-    );
-    for (const key of templateKeys) {
-      queryTelemetry(me.csrf_token, { templateKey: key, scopeType, scopeId, preset })
+    setStates(Object.fromEntries(queue.map((key) => [key, { kind: "loading" as const }])));
+
+    const csrfToken = me.csrf_token;
+    let next = 0;
+    const runNext = (): void => {
+      // A stale generation must not start queued work.
+      if (generation !== generationRef.current || controller.signal.aborted) return;
+      if (next >= queue.length) return;
+      const key = queue[next];
+      next += 1;
+      queryTelemetry(
+        csrfToken,
+        { templateKey: key, scopeType, scopeId, preset },
+        controller.signal,
+      )
         .then((envelope) => {
-          if (!cancelled) {
+          if (generation === generationRef.current) {
             setStates((previous) => ({ ...previous, [key]: { kind: "ready", envelope } }));
           }
         })
         .catch((error: unknown) => {
-          if (cancelled) return;
-          let next: WidgetState = { kind: "error" };
-          if (error instanceof ApiError) {
-            if (error.status === 403 || error.status === 404) {
-              next = { kind: "denied" };
-            } else if (error.status === 502 || error.status === 503) {
-              next = { kind: "unavailable", correlationId: error.correlationId };
-            } else {
-              next = { kind: "error", correlationId: error.correlationId };
-            }
-          }
-          setStates((previous) => ({ ...previous, [key]: next }));
+          // Abort of an outdated generation is not an error state.
+          if (generation !== generationRef.current || controller.signal.aborted) return;
+          setStates((previous) => ({ ...previous, [key]: classifyError(error) }));
+        })
+        .finally(() => {
+          runNext();
         });
+    };
+    for (let worker = 0; worker < MAX_CONCURRENT_QUERIES; worker += 1) {
+      runNext();
     }
+
     return () => {
-      cancelled = true;
+      // In-flight requests are truly cancelled, not just ignored.
+      controller.abort();
     };
   }, [dashboard, me, scopeType, scopeId, preset, profile, nonce]);
 
@@ -130,7 +167,11 @@ export function DashboardRenderer({
                   ) : (
                     <KpiWidget {...props} />
                   );
-                return <div key={widget.key} className="contents">{cell}</div>;
+                return (
+                  <div key={widget.key} className="contents">
+                    {cell}
+                  </div>
+                );
               })}
             </div>
           </section>

@@ -97,12 +97,14 @@ export async function queryTelemetry(
     scopeId: string;
     preset: RangePreset;
   },
+  signal?: AbortSignal,
 ): Promise<TelemetryEnvelope> {
   const preset = RANGE_PRESETS.find((entry) => entry.key === input.preset) ?? RANGE_PRESETS[1];
   const to = new Date();
   const from = new Date(to.getTime() - preset.seconds * 1000);
   return apiMutate<TelemetryEnvelope>("/v1/telemetry/query", {
     csrfToken,
+    signal,
     body: {
       template_key: input.templateKey,
       scope: { type: input.scopeType, id: input.scopeId },
