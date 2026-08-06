@@ -41,9 +41,7 @@ async def main() -> None:
                 "clusters",
             ):
                 exists = (
-                    await connection.execute(
-                        text("SELECT to_regclass(:name)"), {"name": table}
-                    )
+                    await connection.execute(text("SELECT to_regclass(:name)"), {"name": table})
                 ).scalar_one()
                 if exists is not None:
                     await connection.execute(text(f"DELETE FROM {table}"))  # noqa: S608
