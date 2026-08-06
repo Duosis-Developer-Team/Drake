@@ -9,6 +9,7 @@ codes; responses are size-capped and strictly validated.
 
 import asyncio
 import ipaddress
+import json
 import socket
 from dataclasses import dataclass
 from typing import Any
@@ -120,7 +121,11 @@ class PrometheusAdapter:
                 follow_redirects=False,  # redirects are never followed
                 transport=self._transport,
             ) as client:
-                response = await client.post(
+                # Streaming read: the size limit is enforced chunk by chunk as
+                # a real memory/network budget — the moment the cap is crossed
+                # the stream is closed, without buffering the full payload.
+                async with client.stream(
+                    "POST",
                     "/api/v1/query_range",
                     data={
                         "query": query,
@@ -129,26 +134,37 @@ class PrometheusAdapter:
                         "step": str(step_seconds),
                     },
                     headers={"X-Correlation-ID": correlation_id},
-                )
+                ) as response:
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        raise ProviderContractError("provider_redirect_refused")
+                    if response.status_code >= 500:
+                        raise ProviderUnavailableError("provider_upstream_error")
+                    if response.status_code != 200:
+                        # 4xx from Prometheus (bad query etc.) — our compiler
+                        # produced it, so this is a contract failure, never
+                        # echoed to the caller. The body is not read.
+                        raise ProviderContractError("provider_rejected_query")
+                    media_type = (
+                        response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                    )
+                    if media_type != "application/json":
+                        # Content type is never echoed to responses or logs.
+                        raise ProviderContractError("provider_unexpected_content_type")
+
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > _MAX_RESPONSE_BYTES:
+                            raise ProviderContractError("provider_response_too_large")
         except httpx.TimeoutException as error:
+            # Covers connect AND mid-stream read timeouts; the context
+            # managers close the stream/client on the way out.
             raise ProviderUnavailableError("provider_timeout") from error
         except httpx.HTTPError as error:
             raise ProviderUnavailableError("provider_unreachable") from error
 
-        if response.status_code in (301, 302, 303, 307, 308):
-            raise ProviderContractError("provider_redirect_refused")
-        if response.status_code >= 500:
-            raise ProviderUnavailableError("provider_upstream_error")
-        if response.status_code != 200:
-            # 4xx from Prometheus (bad query etc.) — our compiler produced it,
-            # so this is a contract failure, never echoed to the caller.
-            raise ProviderContractError("provider_rejected_query")
-
-        body = response.content
-        if len(body) > _MAX_RESPONSE_BYTES:
-            raise ProviderContractError("provider_response_too_large")
         try:
-            document = response.json()
+            document = json.loads(bytes(body))
         except ValueError as error:
             raise ProviderContractError("provider_malformed_response") from error
         if not isinstance(document, dict):

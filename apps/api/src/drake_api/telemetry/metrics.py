@@ -24,6 +24,7 @@ class BrokerMetrics:
         self._duration_count = 0
         self._point_buckets: dict[int, int] = defaultdict(int)
         self._point_count = 0
+        self._point_sum = 0
 
     def record_query(
         self,
@@ -46,6 +47,7 @@ class BrokerMetrics:
                 if returned_points <= bound:
                     self._point_buckets[bound] += 1
             self._point_count += 1
+            self._point_sum += returned_points
 
     def record_rejection(self, reason: str) -> None:
         """reason ∈ {concurrency, budget_unavailable, range_budget, timeout,
@@ -86,4 +88,6 @@ class BrokerMetrics:
                     f"{self._point_buckets[bound]}"
                 )
             lines.append(f'drake_telemetry_returned_points_bucket{{le="+Inf"}} {self._point_count}')
+            lines.append(f"drake_telemetry_returned_points_sum {self._point_sum}")
+            lines.append(f"drake_telemetry_returned_points_count {self._point_count}")
             return "\n".join(lines) + "\n"

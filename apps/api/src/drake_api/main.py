@@ -28,6 +28,7 @@ from drake_api.telemetry.broker import TelemetryBroker
 from drake_api.telemetry.metrics import BrokerMetrics
 from drake_api.telemetry.provider import PrometheusAdapter
 from drake_api.telemetry.registry import get_registry
+from drake_api.telemetry.router import internal_router as telemetry_internal_router
 from drake_api.telemetry.router import router as telemetry_router
 
 
@@ -101,6 +102,10 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(integrations_router)
     app.include_router(telemetry_router)
+    if settings.internal_metrics_enabled and settings.env in ("local", "test"):
+        # Explicit local/test opt-in only; validate_runtime_security refuses
+        # the flag outside local/test, so this cannot register elsewhere.
+        app.include_router(telemetry_internal_router)
     return app
 
 

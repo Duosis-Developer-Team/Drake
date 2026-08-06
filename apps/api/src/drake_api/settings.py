@@ -55,7 +55,11 @@ class Settings(BaseSettings):
     # Local/test-only override so E2E can exercise stale/last-good flows
     # without waiting out production TTLs. Ignored outside local/test.
     telemetry_fresh_ttl_override_seconds: int | None = None
-    internal_metrics_enabled: bool = True
+    # Drake's own broker metrics exposition. OFF by default; may only be
+    # enabled in local/test — the public API listener never serves it in a
+    # production-like environment (a future real scrape needs a separate
+    # internal listener/service/network policy, not this flag).
+    internal_metrics_enabled: bool = False
 
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
@@ -69,6 +73,10 @@ class Settings(BaseSettings):
             raise RuntimeError("plaintext OIDC issuer is not allowed outside local/test")
         if self.oidc_redirect_url.startswith("http://"):
             raise RuntimeError("plaintext OIDC redirect URL is not allowed outside local/test")
+        if self.internal_metrics_enabled:
+            raise RuntimeError(
+                "internal metrics cannot be enabled on the public API outside local/test"
+            )
 
 
 @lru_cache

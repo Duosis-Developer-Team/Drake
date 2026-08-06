@@ -147,15 +147,19 @@ async def telemetry_query(
     )
 
 
-@router.get("/internal/metrics")
+# Registered ONLY when settings allow it (local/test + explicit enable):
+# when disabled the route does not exist at all, so probing yields the same
+# 404 as any unknown path — no existence signal.
+internal_router = APIRouter(prefix="/v1", tags=["telemetry-internal"])
+
+
+@internal_router.get("/internal/metrics")
 async def internal_metrics(request: Request) -> Any:
     """Drake's own bounded broker metrics (Prometheus text format).
 
-    Must never be exposed on public ingress; contains only registry keys
-    and fixed enums — no PII, principals, scope refs, or URLs.
+    Local/test only; a future real Prometheus scrape needs a separate
+    internal listener/service/network policy — never the public API app.
     """
     from fastapi.responses import PlainTextResponse
 
-    if not request.app.state.settings.internal_metrics_enabled:
-        raise HTTPException(status_code=404, detail="not found")
     return PlainTextResponse(request.app.state.telemetry_metrics.render())
