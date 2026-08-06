@@ -41,9 +41,7 @@ async def main() -> None:
                     """
                 )
             )
-            await connection.execute(
-                text("DELETE FROM scopes WHERE scope_type != 'organization'")
-            )
+            await connection.execute(text("DELETE FROM scopes WHERE scope_type != 'organization'"))
     finally:
         await engine.dispose()
     sys.stdout.write("e2e catalog reset complete\n")

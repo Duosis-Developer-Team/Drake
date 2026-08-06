@@ -85,8 +85,11 @@ async def main() -> None:
                         """
                     ),
                     {
-                        "issuer": ISSUER, "subject": subject, "role": role,
-                        "scope_type": scope_type, "scope_ref": scope_ref,
+                        "issuer": ISSUER,
+                        "subject": subject,
+                        "role": role,
+                        "scope_type": scope_type,
+                        "scope_ref": scope_ref,
                     },
                 )
     finally:
