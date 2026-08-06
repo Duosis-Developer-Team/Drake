@@ -38,6 +38,15 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
+      // E2E-only flaky proxy in front of the local fixture Prometheus:
+      // lets the suite exercise honest stale/unavailable states.
+      command: "uv run python scripts/e2e_flaky_prometheus.py",
+      cwd: "../..",
+      url: "http://127.0.0.1:59191/__health",
+      reuseExistingServer: true,
+      timeout: 30_000,
+    },
+    {
       command:
         "uv run uvicorn drake_api.main:create_app --factory --host 127.0.0.1 --port 8123",
       cwd: "../..",
@@ -52,6 +61,12 @@ export default defineConfig({
         DRAKE_DATABASE_URL: databaseUrl,
         DRAKE_REDIS_URL: redisUrl,
         DRAKE_ALLOWED_WEB_ORIGINS: '["http://127.0.0.1:3456"]',
+        // Server-owned telemetry connectors (E2E: flaky proxy over the
+        // fixture Prometheus). Short fresh-TTL override (local/test only)
+        // lets the stale/last-good scenario run in seconds.
+        DRAKE_TELEMETRY_CONNECTORS:
+          '{"e2e-prometheus":"http://127.0.0.1:59191"}',
+        DRAKE_TELEMETRY_FRESH_TTL_OVERRIDE_SECONDS: "2",
       },
     },
     {

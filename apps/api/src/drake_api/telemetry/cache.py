@@ -30,8 +30,7 @@ def build_cache_keys(
     registry_hash: str,
     template_key: str,
     template_version: int,
-    integration_id: str,
-    integration_version: int,
+    integration_identity: str,
     scope_type: str,
     scope_id: str,
     matcher_set: tuple[str, ...],
@@ -43,7 +42,7 @@ def build_cache_keys(
     base = {
         "registry": registry_hash,
         "template": f"{template_key}@{template_version}",
-        "integration": f"{integration_id}@{integration_version}",
+        "integration": integration_identity,
         "scope": f"{scope_type}:{scope_id}",
         "matchers": list(matcher_set),
         "parameters": dict(sorted(parameters.items())),

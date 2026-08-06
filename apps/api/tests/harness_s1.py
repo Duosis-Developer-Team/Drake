@@ -89,7 +89,10 @@ class S1Harness:
         return query["code"][0], query["state"][0]
 
 
-def build_harness(settings: Settings | None = None) -> S1Harness:
+def build_harness(
+    settings: Settings | None = None,
+    telemetry_transport: httpx.AsyncBaseTransport | None = None,
+) -> S1Harness:
     base = settings or require_it_settings()
     wired = base.model_copy(
         update={
@@ -103,7 +106,7 @@ def build_harness(settings: Settings | None = None) -> S1Harness:
         transport=httpx.ASGITransport(app=provider.build_app()), base_url=DEFAULT_ISSUER
     )
     oidc_client = OidcClient(wired, http_client=oidc_http)
-    app = create_app(wired, oidc_client=oidc_client)
+    app = create_app(wired, oidc_client=oidc_client, telemetry_transport=telemetry_transport)
     return S1Harness(app=app, provider=provider, settings=wired)
 
 

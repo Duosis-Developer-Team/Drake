@@ -16,9 +16,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 START = 1_700_000_000  # fixed epoch so counter values are reproducible
 
 TARGETS = {
+    # integration-test world
     ("alpha", "dev", "api"),
     ("alpha", "dev", "web"),
     ("alpha", "prod", "api"),
+    # E2E fixture world (alpha/test intentionally absent: honest empty state)
+    ("alpha", "dev", "core-api"),
+    ("alpha", "dev", "auth-api"),
     ("beta", "dev", "api"),
 }
 

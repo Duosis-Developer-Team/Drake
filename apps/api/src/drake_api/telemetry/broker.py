@@ -7,6 +7,7 @@ normalization/cache → safe response. Nothing provider- or cache-shaped
 happens before authorization succeeds.
 """
 
+import hashlib
 import time
 import uuid
 from dataclasses import dataclass
@@ -168,12 +169,18 @@ class TelemetryBroker:
         step = effective.effective_step_seconds
         aligned_from = (effective.from_ts // step) * step
         aligned_to = (effective.to_ts // step) * step
+        # Cache identity follows the integration's CONFIGURATION (id +
+        # hashed config_ref) — reconfiguration invalidates cache entries,
+        # observation-projection version bumps do not. The ref itself is
+        # hashed away and never stored.
+        integration_identity = hashlib.sha256(
+            f"{integration[0]}:{integration[1]}".encode()
+        ).hexdigest()
         keys = build_cache_keys(
             registry_hash=self._registry.content_hash,
             template_key=template.key,
             template_version=template.version,
-            integration_id=str(integration[0]),
-            integration_version=int(integration[3]),
+            integration_identity=integration_identity,
             scope_type=request.scope_type,
             scope_id=str(request.scope_id),
             matcher_set=compiled.matcher_set,

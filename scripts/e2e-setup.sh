@@ -22,5 +22,6 @@ uv run python -m drake_api.rbac.bootstrap \
 uv run python scripts/e2e_catalog_reset.py
 uv run python -m drake_api.catalog.bootstrap
 uv run python scripts/e2e_grants.py
+uv run python scripts/e2e_telemetry_config.py
 
 echo "[e2e-setup] migrations + bootstrap complete"
