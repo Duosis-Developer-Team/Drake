@@ -81,7 +81,6 @@ async def _load_manifest(service: CatalogService, manifest: dict[str, Any]) -> s
 
         environment_entity = await service.create_environment(
             project.id,
-            project_key,
             environment["name"],
             runtime=environment["runtime"],
             branch=environment.get("branch", ""),
@@ -116,13 +115,7 @@ async def _load_manifest(service: CatalogService, manifest: dict[str, Any]) -> s
                     source_ref=f"fixture:{project_key}",
                     source_revision="fixture-v1",
                 )
-            await service.bind_service(
-                environment_entity.id,
-                service_id,
-                project_key=project_key,
-                environment_key=environment["name"],
-                service_key=service_spec["name"],
-            )
+            await service.bind_service(environment_entity.id, service_id)
 
     # Placeholder integrations at the project scope: honestly not_configured.
     for integration_type in ("prometheus", "github", "cluster-agent", "backup-reporter"):

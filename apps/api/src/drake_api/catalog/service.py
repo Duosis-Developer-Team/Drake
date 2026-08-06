@@ -145,10 +145,21 @@ class CatalogService:
         return CreatedEntity(project_id, scope.id)
 
     # ------------------------------------------------------------ environment
+    async def _project_identity(self, project_id: uuid.UUID) -> tuple[str, uuid.UUID]:
+        """Authoritative (project_key, scope_id) from the database."""
+        row = (
+            await self._connection.execute(
+                text("SELECT project_key, scope_id FROM projects WHERE id = :id"),
+                {"id": project_id},
+            )
+        ).first()
+        if row is None:
+            raise CatalogValidationError("unknown project")
+        return str(row[0]), row[1]
+
     async def create_environment(
         self,
         project_id: uuid.UUID,
-        project_key: str,
         environment_key: str,
         *,
         runtime: str,
@@ -159,12 +170,14 @@ class CatalogService:
         source_ref: str = "",
         source_revision: str = "",
     ) -> CreatedEntity:
-        project_scope = await self._scopes.ensure("project", project_key)
+        # Scope refs derive from AUTHORITATIVE records only — callers cannot
+        # supply a parallel key identity for the same relationship.
+        project_key, project_scope_id = await self._project_identity(project_id)
         scope = await self._scopes.ensure(
             "environment",
             f"{project_key}/{environment_key}",
             environment_key,
-            parent_id=project_scope.id,
+            parent_id=project_scope_id,
         )
         environment_id = await self._insert(
             """
@@ -235,37 +248,75 @@ class CatalogService:
             },
         )
 
-    async def bind_service(
-        self,
-        environment_id: uuid.UUID,
-        service_id: uuid.UUID,
-        *,
-        project_key: str,
-        environment_key: str,
-        service_key: str,
-    ) -> CreatedEntity:
-        environment_scope = await self._scopes.ensure(
-            "environment", f"{project_key}/{environment_key}"
-        )
+    async def bind_service(self, environment_id: uuid.UUID, service_id: uuid.UUID) -> CreatedEntity:
+        """Bind a service definition to an environment OF THE SAME PROJECT.
+
+        All identity (project/environment/service keys, scope parents) is
+        derived from authoritative rows; the same-project invariant is
+        enforced here AND by composite foreign keys in PostgreSQL (0005).
+        """
+        environment = (
+            await self._connection.execute(
+                text(
+                    """
+                    SELECT e.project_id, e.environment_key, e.scope_id, p.project_key
+                    FROM environments e JOIN projects p ON p.id = e.project_id
+                    WHERE e.id = :id
+                    """
+                ),
+                {"id": environment_id},
+            )
+        ).first()
+        if environment is None:
+            raise CatalogValidationError("unknown environment")
+        service = (
+            await self._connection.execute(
+                text("SELECT project_id, service_key FROM service_definitions WHERE id = :id"),
+                {"id": service_id},
+            )
+        ).first()
+        if service is None:
+            raise CatalogValidationError("unknown service definition")
+        if environment[0] != service[0]:
+            raise CatalogValidationError(
+                "service definition belongs to a different project than the environment"
+            )
+
+        project_key = str(environment[3])
+        environment_key = str(environment[1])
+        service_key = str(service[1])
         scope = await self._scopes.ensure(
             "service",
             f"{project_key}/{environment_key}/{service_key}",
             service_key,
-            parent_id=environment_scope.id,
+            parent_id=environment[2],
         )
         binding_id = await self._insert(
             """
-            INSERT INTO environment_services (environment_id, service_id, scope_id)
-            VALUES (:environment_id, :service_id, :scope_id)
+            INSERT INTO environment_services
+                (environment_id, service_id, project_id, scope_id)
+            VALUES (:environment_id, :service_id, :project_id, :scope_id)
             RETURNING id
             """,
             {
                 "environment_id": environment_id,
                 "service_id": service_id,
+                "project_id": environment[0],
                 "scope_id": scope.id,
             },
         )
         return CreatedEntity(binding_id, scope.id)
+
+    @staticmethod
+    def validate_error_code(code: str | None) -> str | None:
+        """Bounded machine-readable integration error code (also DB-enforced)."""
+        if code is None:
+            return None
+        import re
+
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", code):
+            raise CatalogValidationError("last_error_code must be a bounded machine-readable code")
+        return code
 
     # ------------------------------------------------------------ integration
     async def register_integration(

@@ -74,7 +74,6 @@ async def seed_catalog_world(engine: AsyncEngine) -> dict[str, Any]:
         )
         alpha_dev = await service.create_environment(
             alpha.id,
-            "alpha",
             "dev",
             runtime="kubernetes",
             cluster_id=cluster_a.id,
@@ -82,7 +81,6 @@ async def seed_catalog_world(engine: AsyncEngine) -> dict[str, Any]:
         )
         alpha_prod = await service.create_environment(
             alpha.id,
-            "alpha",
             "prod",
             runtime="kubernetes",
             cluster_id=cluster_b.id,
@@ -91,7 +89,6 @@ async def seed_catalog_world(engine: AsyncEngine) -> dict[str, Any]:
         )
         beta_dev = await service.create_environment(
             beta.id,
-            "beta",
             "dev",
             runtime="kubernetes",
             cluster_id=cluster_a.id,
@@ -112,27 +109,9 @@ async def seed_catalog_world(engine: AsyncEngine) -> dict[str, Any]:
             runtime="nextjs",
             metrics_profile="nextjs-v1",
         )
-        dev_api = await service.bind_service(
-            alpha_dev.id,
-            api_def,
-            project_key="alpha",
-            environment_key="dev",
-            service_key="api",
-        )
-        dev_web = await service.bind_service(
-            alpha_dev.id,
-            web_def,
-            project_key="alpha",
-            environment_key="dev",
-            service_key="web",
-        )
-        prod_api = await service.bind_service(
-            alpha_prod.id,
-            api_def,
-            project_key="alpha",
-            environment_key="prod",
-            service_key="api",
-        )
+        dev_api = await service.bind_service(alpha_dev.id, api_def)
+        dev_web = await service.bind_service(alpha_dev.id, web_def)
+        prod_api = await service.bind_service(alpha_prod.id, api_def)
         beta_api = await service.create_service_definition(
             beta.id,
             "api",
@@ -140,13 +119,7 @@ async def seed_catalog_world(engine: AsyncEngine) -> dict[str, Any]:
             runtime="fastapi",
             metrics_profile="fastapi-v1",
         )
-        await service.bind_service(
-            beta_dev.id,
-            beta_api,
-            project_key="beta",
-            environment_key="dev",
-            service_key="api",
-        )
+        await service.bind_service(beta_dev.id, beta_api)
         for integration_type in ("prometheus", "github"):
             await service.register_integration(integration_type, alpha.scope_id)
             await service.register_integration(integration_type, beta.scope_id)

@@ -16,6 +16,11 @@ from drake_api.rbac.catalog import ORGANIZATION_ROOT_REF
 SCOPE_TYPES = ("organization", "cluster", "project", "environment", "service", "tenant")
 
 
+class ScopeIntegrityError(RuntimeError):
+    """An existing scope node was found under a different parent than the
+    caller asserted — fail closed instead of silently accepting it."""
+
+
 @dataclass(frozen=True, slots=True)
 class ScopeNode:
     id: uuid.UUID
@@ -95,7 +100,12 @@ class ScopeResolver:
             )
         ).first()
         assert row is not None
-        return ScopeNode(*row)
+        node = ScopeNode(*row)
+        if node.parent_id != parent_id:
+            raise ScopeIntegrityError(
+                f"scope {scope_type}/{external_ref} exists under a different parent"
+            )
+        return node
 
     async def ancestors_of(self, scope_id: uuid.UUID) -> list[uuid.UUID]:
         """The scope itself plus every ancestor up to the organization root."""

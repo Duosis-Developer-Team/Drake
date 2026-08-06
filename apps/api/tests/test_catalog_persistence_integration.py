@@ -83,7 +83,6 @@ async def build_world(engine: AsyncEngine) -> dict[str, Any]:
         )
         env_dev = await service.create_environment(
             project.id,
-            "alpha",
             "dev",
             runtime="kubernetes",
             cluster_id=cluster_a.id,
@@ -91,7 +90,6 @@ async def build_world(engine: AsyncEngine) -> dict[str, Any]:
         )
         env_prod = await service.create_environment(
             project.id,
-            "alpha",
             "prod",
             runtime="kubernetes",
             cluster_id=cluster_b.id,
@@ -106,13 +104,7 @@ async def build_world(engine: AsyncEngine) -> dict[str, Any]:
             metrics_profile="fastapi-v1",
             health={"livePath": "/health/live", "readyPath": "/health/ready"},
         )
-        binding_dev = await service.bind_service(
-            env_dev.id,
-            api_service,
-            project_key="alpha",
-            environment_key="dev",
-            service_key="api",
-        )
+        binding_dev = await service.bind_service(env_dev.id, api_service)
         return {
             "cluster_a": cluster_a,
             "cluster_b": cluster_b,
@@ -234,7 +226,6 @@ async def test_kubernetes_environment_requires_cluster_and_namespace(
             service = CatalogService(connection)
             await service.create_environment(
                 world["project"].id,
-                "alpha",
                 "broken",
                 runtime="kubernetes",
                 cluster_id=None,
@@ -248,7 +239,6 @@ async def test_external_environment_needs_no_cluster(engine: AsyncEngine) -> Non
         service = CatalogService(connection)
         created = await service.create_environment(
             world["project"].id,
-            "alpha",
             "legacy",
             runtime="external",
             cluster_id=None,
@@ -274,7 +264,6 @@ async def test_duplicate_rejections(engine: AsyncEngine) -> None:
         async with engine.begin() as connection:
             await CatalogService(connection).create_environment(
                 world["project"].id,
-                "alpha",
                 "dev",
                 runtime="kubernetes",
                 cluster_id=world["cluster_a"].id,
@@ -286,7 +275,6 @@ async def test_duplicate_rejections(engine: AsyncEngine) -> None:
         async with engine.begin() as connection:
             await CatalogService(connection).create_environment(
                 world["project"].id,
-                "alpha",
                 "dev2",
                 runtime="kubernetes",
                 cluster_id=world["cluster_a"].id,
@@ -315,7 +303,6 @@ async def test_soft_archive_preserves_history_and_frees_namespace(
     async with engine.begin() as connection:
         created = await CatalogService(connection).create_environment(
             world["project"].id,
-            "alpha",
             "dev-v2",
             runtime="kubernetes",
             cluster_id=world["cluster_a"].id,
@@ -419,3 +406,285 @@ async def test_migration_cycle_and_sprint1_data_preservation(engine: AsyncEngine
         # Catalog tables exist again (empty after downgrade — disposable DB).
         assert (await connection.execute(text("SELECT count(*) FROM projects"))).scalar_one() == 0
     del world, identity_id
+
+
+# --- Sprint 2 closure: cross-project binding integrity (0005) ---------------
+
+
+async def _second_project_world(engine: AsyncEngine) -> dict[str, Any]:
+    """Extend build_world with a sibling project 'beta' and its own dev env."""
+    world = await build_world(engine)
+    async with engine.begin() as connection:
+        service = CatalogService(connection, source_kind="fixture")
+        beta = await service.create_project(
+            "beta",
+            "Beta",
+            repo_provider="github",
+            repo_owner="example-org",
+            repo_name="beta",
+        )
+        beta_dev = await service.create_environment(
+            beta.id,
+            "dev",
+            runtime="kubernetes",
+            cluster_id=world["cluster_a"].id,
+            namespace="beta-dev",
+        )
+    world["beta"] = beta
+    world["beta_dev"] = beta_dev
+    return world
+
+
+async def test_cross_project_binding_rejected_by_service(engine: AsyncEngine) -> None:
+    world = await _second_project_world(engine)
+    with pytest.raises(CatalogValidationError, match="different project"):
+        async with engine.begin() as connection:
+            await CatalogService(connection).bind_service(
+                world["beta_dev"].id, world["api_service"]
+            )
+    async with engine.connect() as connection:
+        # Neither the binding nor a leaked service scope survived.
+        assert (
+            await connection.execute(
+                text("SELECT count(*) FROM environment_services WHERE environment_id = :e"),
+                {"e": world["beta_dev"].id},
+            )
+        ).scalar_one() == 0
+        assert (
+            await connection.execute(
+                text("SELECT count(*) FROM scopes WHERE external_ref = 'beta/dev/api'")
+            )
+        ).scalar_one() == 0
+
+
+async def test_cross_project_binding_rejected_by_database(engine: AsyncEngine) -> None:
+    """Bypass the service layer: the composite FKs must refuse the row and the
+    aborted transaction must roll the freshly-created scope back with it."""
+    from drake_api.rbac.scope import ScopeResolver
+
+    world = await _second_project_world(engine)
+    async with engine.connect() as connection:
+        beta_env_scope = (
+            await connection.execute(
+                text("SELECT scope_id FROM environments WHERE id = :id"),
+                {"id": world["beta_dev"].id},
+            )
+        ).scalar_one()
+
+    # No forged project_id can satisfy both composite FKs at once.
+    for forged_project in (world["beta"].id, world["project"].id):
+        with pytest.raises(IntegrityError):
+            async with engine.begin() as connection:
+                scope = await ScopeResolver(connection).ensure(
+                    "service", "beta/dev/api", "api", parent_id=beta_env_scope
+                )
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO environment_services
+                            (environment_id, service_id, project_id, scope_id)
+                        VALUES (:e, :s, :p, :scope)
+                        """
+                    ),
+                    {
+                        "e": world["beta_dev"].id,
+                        "s": world["api_service"],
+                        "p": forged_project,
+                        "scope": scope.id,
+                    },
+                )
+    async with engine.connect() as connection:
+        assert (
+            await connection.execute(
+                text("SELECT count(*) FROM scopes WHERE external_ref = 'beta/dev/api'")
+            )
+        ).scalar_one() == 0
+
+
+async def test_scope_resolver_rejects_existing_scope_under_different_parent(
+    engine: AsyncEngine,
+) -> None:
+    from drake_api.rbac.scope import ScopeIntegrityError, ScopeResolver
+
+    world = await _second_project_world(engine)
+    async with engine.connect() as connection:
+        beta_scope = (
+            await connection.execute(
+                text("SELECT scope_id FROM projects WHERE id = :id"),
+                {"id": world["beta"].id},
+            )
+        ).scalar_one()
+    with pytest.raises(ScopeIntegrityError, match="different parent"):
+        async with engine.begin() as connection:
+            # environment/alpha/dev exists under project/alpha — reattaching it
+            # under project/beta must fail closed, never silently re-parent.
+            await ScopeResolver(connection).ensure(
+                "environment", "alpha/dev", "dev", parent_id=beta_scope
+            )
+
+
+# --- Sprint 2 closure: bounded machine-readable error codes -----------------
+
+
+async def test_error_code_rejected_at_database_boundary(engine: AsyncEngine) -> None:
+    world = await build_world(engine)
+    async with engine.begin() as connection:
+        env_scope = (
+            await connection.execute(
+                text("SELECT scope_id FROM environments WHERE id = :id"),
+                {"id": world["env_dev"].id},
+            )
+        ).scalar_one()
+        integration_id = await CatalogService(connection).register_integration(
+            "prometheus", env_scope
+        )
+
+    for bad in (
+        "Timeout Upstream",  # spaces / uppercase
+        "timeout\nstacktrace: boom",  # newline / free text
+        "https://provider.example/errors/42",  # URL
+        "x" * 65,  # unbounded length
+    ):
+        with pytest.raises((IntegrityError, DBAPIError)):
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("UPDATE integrations SET last_error_code = :c WHERE id = :id"),
+                    {"c": bad, "id": integration_id},
+                )
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE integrations SET last_error_code = :c WHERE id = :id"),
+            {"c": "upstream_timeout", "id": integration_id},
+        )
+    async with engine.connect() as connection:
+        assert (
+            await connection.execute(
+                text("SELECT last_error_code FROM integrations WHERE id = :id"),
+                {"id": integration_id},
+            )
+        ).scalar_one() == "upstream_timeout"
+
+
+def test_error_code_app_validator() -> None:
+    assert CatalogService.validate_error_code(None) is None
+    assert CatalogService.validate_error_code("scrape_failed.dns") == "scrape_failed.dns"
+    for bad in ("", "UPPER", "has space", "line\nbreak", "https://x", "x" * 65):
+        with pytest.raises(CatalogValidationError):
+            CatalogService.validate_error_code(bad)
+
+
+async def test_key_shape_rejected_at_database_boundary(engine: AsyncEngine) -> None:
+    world = await build_world(engine)
+    with pytest.raises((IntegrityError, DBAPIError)):
+        async with engine.begin() as connection:
+            await CatalogService(connection).create_environment(
+                world["project"].id,
+                "Bad Key!",
+                runtime="external",
+            )
+
+
+# --- Sprint 2 closure: 0004→0005→0004→0005 migration safety ----------------
+
+
+async def test_migration_cycle_0005_and_data_preservation(engine: AsyncEngine) -> None:
+    settings = require_it_settings()
+    config = alembic_config(settings.database_url)
+    marker = f"preserve-0005-{uuidlib.uuid4().hex}"
+
+    world = await build_world(engine)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO audit_events
+                    (actor_type, actor_id, action, result, correlation_id, metadata,
+                     schema_version)
+                VALUES ('system', 'migration-test', 'catalog.preserve.check', 'success',
+                        :marker, '{}'::jsonb, 1)
+                """
+            ),
+            {"marker": marker},
+        )
+
+    # 0005 → 0004 → 0005 → 0004 → 0005 (two full cycles).
+    for _ in range(2):
+        command.downgrade(config, "0004")
+        command.upgrade(config, "head")
+
+    async with engine.connect() as connection:
+        # Valid Sprint 2 binding survived and project_id was re-backfilled.
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT project_id FROM environment_services WHERE id = :id",
+                ),
+                {"id": world["binding_dev"].id},
+            )
+        ).first()
+        assert row is not None and row[0] == world["project"].id
+        assert (
+            await connection.execute(
+                text("SELECT count(*) FROM audit_events WHERE correlation_id = :marker"),
+                {"marker": marker},
+            )
+        ).scalar_one() == 1
+
+
+async def test_migration_0005_fails_closed_on_cross_project_rows(
+    engine: AsyncEngine,
+) -> None:
+    """Pre-existing invalid data must FAIL the migration — never silently
+    fixed or deleted."""
+    settings = require_it_settings()
+    config = alembic_config(settings.database_url)
+    world = await _second_project_world(engine)
+
+    command.downgrade(config, "0004")
+    bad_binding = None
+    try:
+        # At 0004 there is no composite FK — plant a cross-project binding.
+        async with engine.begin() as connection:
+            env_scope = (
+                await connection.execute(
+                    text("SELECT scope_id FROM environments WHERE id = :id"),
+                    {"id": world["beta_dev"].id},
+                )
+            ).scalar_one()
+            bad_binding = (
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO environment_services
+                            (environment_id, service_id, scope_id)
+                        VALUES (:e, :s, :scope) RETURNING id
+                        """
+                    ),
+                    {
+                        "e": world["beta_dev"].id,
+                        "s": world["api_service"],
+                        "scope": env_scope,
+                    },
+                )
+            ).scalar_one()
+        with pytest.raises(Exception, match="cross-project service bindings"):
+            command.upgrade(config, "head")
+        # The invalid row is untouched (no silent fix, no delete).
+        async with engine.connect() as connection:
+            assert (
+                await connection.execute(
+                    text("SELECT count(*) FROM environment_services WHERE id = :id"),
+                    {"id": bad_binding},
+                )
+            ).scalar_one() == 1
+    finally:
+        # Manual review outcome (test cleanup): remove the planted row, then
+        # the migration must succeed again.
+        if bad_binding is not None:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM environment_services WHERE id = :id"),
+                    {"id": bad_binding},
+                )
+        command.upgrade(config, "head")
