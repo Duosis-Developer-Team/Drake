@@ -1,3 +1,6 @@
+import http from "node:http";
+import net from "node:net";
+
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -14,6 +17,44 @@ import { expect, test, type Page } from "@playwright/test";
 test.describe.configure({ mode: "serial" });
 
 const FLAKY_CONTROL = "http://127.0.0.1:59191";
+const REDIS_PORT = Number(process.env.DRAKE_E2E_REDIS_PORT ?? "56379");
+
+/** Raw RESP EVAL against the disposable Redis (no client dependency). */
+function redisEval(script: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port: REDIS_PORT }, () => {
+      const payload =
+        `*3\r\n$4\r\nEVAL\r\n$${Buffer.byteLength(script)}\r\n${script}\r\n$1\r\n0\r\n`;
+      socket.write(payload);
+    });
+    socket.on("data", (data) => {
+      socket.end();
+      const text = data.toString();
+      if (text.startsWith(":")) resolve(Number(text.slice(1).trim()));
+      else reject(new Error(`unexpected redis reply: ${text.slice(0, 60)}`));
+    });
+    socket.on("error", reject);
+  });
+}
+
+const TOTAL_LEASES =
+  "local t=0 for _,k in ipairs(redis.call('KEYS','telemetry:lease:*')) do " +
+  "t=t+redis.call('ZCARD',k) end return t";
+const MAX_PRINCIPAL =
+  "local m=0 for _,k in ipairs(redis.call('KEYS','telemetry:lease:principal:*')) do " +
+  "local c=redis.call('ZCARD',k) if c>m then m=c end end return m";
+const MAX_TARGET =
+  "local m=0 for _,k in ipairs(redis.call('KEYS','telemetry:lease:target:*')) do " +
+  "local c=redis.call('ZCARD',k) if c>m then m=c end end return m";
+
+async function providerStats(page: Page): Promise<{
+  started: number;
+  completed: number;
+  disconnected: number;
+}> {
+  const response = await page.request.get(`${FLAKY_CONTROL}/__stats`);
+  return (await response.json()) as { started: number; completed: number; disconnected: number };
+}
 
 async function signInAs(page: Page, subject: string) {
   await page.goto(`/v1/auth/login?redirect=/&login_hint=${subject}`);
@@ -30,7 +71,7 @@ async function signOutIfNeeded(page: Page) {
   }
 }
 
-async function setProviderMode(page: Page, mode: "ok" | "fail") {
+async function setProviderMode(page: Page, mode: "ok" | "fail" | "slow") {
   const response = await page.request.post(`${FLAKY_CONTROL}/__mode/${mode}`);
   expect(response.ok()).toBeTruthy();
 }
@@ -205,4 +246,159 @@ test("mobile 390px: dashboards render without horizontal overflow", async ({ pag
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("real end-to-end cancellation: rapid changes stay bounded and disconnects free server work", async ({
+  page,
+  context,
+}) => {
+  // Part 1 exercises the FULL chain (browser → production Next rewrite →
+  // FastAPI → broker → real Redis → slow provider): bounded budgets, a
+  // complete final load, and no self-inflicted 429s while generations
+  // churn. Part 2 proves server-side disconnect cancellation over a REAL
+  // HTTP socket against the same uvicorn the browser uses — the Next hop
+  // cannot carry aborts upstream (it drains pooled responses; verified and
+  // documented in next.config.ts), which is exactly why the deployment
+  // plan routes /v1 directly to the API at the ingress.
+  await page.request.post(`${FLAKY_CONTROL}/__stats/reset`);
+
+  await signInAs(page, "user-owner");
+  await openAlphaOverview(page);
+  await page.getByTestId("environment-list").getByText("dev", { exact: true }).click();
+  await page.getByTestId("service-list").getByText("core-api", { exact: false }).click();
+  await expect(page.getByRole("heading", { name: /core-api/i })).toBeVisible();
+  await expect(
+    page.getByTestId("dashboard-service-golden-signals-v1").getByTestId("widget-scrape-state"),
+  ).toContainText(/scraped|Unknown/i);
+
+  // NOW slow the provider down and churn generations: 24h → 1h → 7d.
+  await setProviderMode(page, "slow");
+  const range = page.getByRole("group", { name: "Time range" });
+  await range.getByText("Last 1h").click();
+  await page.waitForTimeout(300);
+  await range.getByText("Last 7d").click();
+
+  // Budgets hold END TO END on the REAL Redis lease sets while churning:
+  for (let sample = 0; sample < 5; sample += 1) {
+    expect(await redisEval(MAX_PRINCIPAL)).toBeLessThanOrEqual(4);
+    expect(await redisEval(MAX_TARGET)).toBeLessThanOrEqual(8);
+    await page.waitForTimeout(400);
+  }
+
+  // The final (7d) generation loads COMPLETELY — no self-inflicted 429:
+  const dashboard = page.getByTestId("dashboard-service-golden-signals-v1");
+  await expect(dashboard.getByTestId("widget-request-rate-trend")).toContainText("req/s", {
+    timeout: 30_000,
+  });
+  await expect(dashboard.getByTestId("widget-error-ratio-trend")).toContainText("%");
+  await expect(dashboard.getByTestId("widget-scrape-state")).toContainText("Being scraped");
+  await expect(page.getByText(/query limit reached/i)).toHaveCount(0);
+
+  // All lease tokens drain promptly once the dashboard settles — active
+  // release, far below the 30s TTL backstop.
+  await expect.poll(() => redisEval(TOTAL_LEASES), { timeout: 10_000 }).toBe(0);
+
+  // ---- Part 2: real-HTTP disconnect against the API the browser uses ----
+  // Let the browser's world go QUIET first (any bounded throttle-retry from
+  // the churn phase finishes), so the provider counters below observe only
+  // this part's traffic.
+  // Quiet = counters balanced AND unchanged for ≥4.5s (outlasting any
+  // pending bounded throttle-retry timer plus its slow provider call).
+  let previous = "";
+  let stableSamples = 0;
+  await expect
+    .poll(
+      async () => {
+        const stats = await providerStats(page);
+        const snapshot = JSON.stringify(stats);
+        const balanced = stats.started === stats.completed + stats.disconnected;
+        stableSamples = balanced && snapshot === previous ? stableSamples + 1 : 0;
+        previous = snapshot;
+        return stableSamples >= 6 && (await redisEval(TOTAL_LEASES)) === 0;
+      },
+      { timeout: 25_000, intervals: [750] },
+    )
+    .toBe(true);
+
+  const cookies = await context.cookies();
+  const session = cookies.find((cookie) => cookie.name === "drake_session");
+  expect(session).toBeTruthy();
+  const me = (await (await page.request.get("/v1/me")).json()) as { csrf_token: string };
+  const pathParts = new URL(page.url()).pathname.split("/");
+  // /projects/{pid}/environments/{eid}/services/{sid} → the API collection:
+  const services = await page.request.get(
+    `/v1/projects/${pathParts[2]}/environments/${pathParts[4]}/services`,
+  );
+  const serviceId = ((await services.json()) as { services: { id: string }[] }).services[0].id;
+
+  await page.request.post(`${FLAKY_CONTROL}/__stats/reset`);
+  const statsBefore = await providerStats(page);
+  const sockets = 3;
+  const now = Date.now();
+  for (let index = 0; index < sockets; index += 1) {
+    const body = JSON.stringify({
+      template_key: "service.request-rate.v1",
+      scope: { type: "service", id: serviceId },
+      // Distinct historical-ish ranges → three cache misses → three
+      // concurrent slow provider calls.
+      range: {
+        from: new Date(now - (index + 3) * 3600_000).toISOString(),
+        to: new Date(now - (index + 2) * 3600_000).toISOString(),
+        step_seconds: 60,
+      },
+      parameters: {},
+    });
+    const requestOptions = {
+      host: "127.0.0.1",
+      port: 8123,
+      path: "/v1/telemetry/query",
+      method: "POST",
+      headers: {
+        cookie: `drake_session=${session?.value}`,
+        "content-type": "application/json",
+        "x-csrf-token": me.csrf_token,
+        origin: "http://127.0.0.1:3456",
+        "content-length": Buffer.byteLength(body),
+      },
+    };
+    const inflight = http.request(requestOptions);
+    inflight.on("error", () => {});
+    inflight.write(body);
+    inflight.end();
+    // Destroy the raw socket well before the 3s slow response (and far
+    // before the 5s provider timeout): a REAL client disconnect.
+    setTimeout(() => inflight.destroy(), 800);
+  }
+
+  // Leases were held, then vanish promptly after the disconnects — their
+  // own tokens, not the 30s TTL:
+  await expect.poll(() => redisEval(TOTAL_LEASES), { timeout: 3_000 }).toBeGreaterThan(0);
+  await expect.poll(() => redisEval(TOTAL_LEASES), { timeout: 5_000 }).toBe(0);
+
+  // Provider-boundary proof over REAL HTTP: at least one slow provider
+  // call ended as a client disconnect — its delayed response hit a closed
+  // connection at ~3s, well before the 5s provider timeout, so cancelled
+  // work did not run out its clock. The accounting must also CLOSE
+  // (started == completed + disconnected): nothing hangs. Exhaustive
+  // task-level cancellation semantics (transport CancelledError, immediate
+  // own-token lease release, untouched observation, no orphan tasks) are
+  // separately proven by the API disconnect integration test.
+  await expect
+    .poll(async () => {
+      const stats = await providerStats(page);
+      const started = stats.started - statsBefore.started;
+      const disconnected = stats.disconnected - statsBefore.disconnected;
+      const completed = stats.completed - statsBefore.completed;
+      return started >= 1 && disconnected >= 1 && completed + disconnected === started;
+    }, { timeout: 10_000 })
+    .toBe(true);
+
+  await setProviderMode(page, "ok");
+
+  // Cancellation never faked a provider failure: alpha's telemetry
+  // integration is not shown as degraded (cancelled calls record nothing).
+  await page.getByRole("link", { name: "Integrations", exact: true }).click();
+  const integrations = page.getByTestId("integration-table");
+  await expect(integrations).toBeVisible();
+  await expect(integrations.getByText("degraded", { exact: true })).toHaveCount(0);
 });

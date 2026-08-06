@@ -219,32 +219,51 @@ describe("dashboard query scheduling", () => {
     expect(screen.queryByText(/query limit reached/i)).not.toBeInTheDocument();
   });
 
-  it("rapid range changes abort in-flight requests and reclaim capacity", async () => {
+  it("rapid 1h → 24h → 7d changes abort each stale generation's requests", async () => {
+    // CLIENT-SCHEDULER evidence only: this proves the browser aborts its
+    // fetches and starts nothing from stale queues. Server-side broker
+    // cancellation, provider cleanup, and Redis lease release are proven
+    // separately by the API disconnect integration test and the real-HTTP
+    // E2E cancellation scenario — a mock counter here is NOT that proof.
     const { pending, counters } = installTelemetryMock(dashboardDefinition(FIVE));
     const view = renderBoard({ preset: "1h" });
     await waitFor(() => expect(pending.length).toBe(MAX_CONCURRENT_QUERIES));
-    const oldSignals = pending.map((entry) => entry.signal);
-    pending.length = 0;
+    const generationOneSignals = pending.map((entry) => entry.signal);
+    const startedBeforeFirstSwitch = counters.started;
 
-    view.rerender(
-      <SessionProvider>
-        <DashboardRenderer
-          templateKey="test-board-v1"
-          scopeType="service"
-          scopeId="s1"
-          preset="7d"
-          profile="fastapi-v1"
-        />
-      </SessionProvider>,
-    );
-    // Old generation is REALLY cancelled, not just ignored:
+    const rerenderWith = (preset: "24h" | "7d") =>
+      view.rerender(
+        <SessionProvider>
+          <DashboardRenderer
+            templateKey="test-board-v1"
+            scopeType="service"
+            scopeId="s1"
+            preset={preset}
+            profile="fastapi-v1"
+          />
+        </SessionProvider>,
+      );
+
+    rerenderWith("24h");
     await waitFor(() => {
-      for (const signal of oldSignals) expect(signal?.aborted).toBe(true);
+      for (const signal of generationOneSignals) expect(signal?.aborted).toBe(true);
     });
-    // Lease accounting recovers: the new generation starts its own bounded set.
     await waitFor(() => expect(pending.length).toBe(MAX_CONCURRENT_QUERIES));
-    expect(counters.inFlight).toBeLessThanOrEqual(MAX_CONCURRENT_QUERIES);
+    const generationTwoSignals = pending.map((entry) => entry.signal);
+    // Generation 1's queued remainder (5 - 3 = 2 jobs) never started:
+    expect(counters.started).toBe(startedBeforeFirstSwitch + MAX_CONCURRENT_QUERIES);
+
+    rerenderWith("7d");
+    await waitFor(() => {
+      for (const signal of generationTwoSignals) expect(signal?.aborted).toBe(true);
+    });
+    await waitFor(() => expect(pending.length).toBe(MAX_CONCURRENT_QUERIES));
+    // Client concurrency stayed bounded across all three generations:
+    expect(counters.maxInFlight).toBeLessThanOrEqual(MAX_CONCURRENT_QUERIES);
+
+    // The final generation completes fully.
     await flushPending(pending);
+    await waitFor(() => expect(screen.queryByText(/query limit reached/i)).toBeNull());
   });
 
   it("a stale generation's late response cannot write newer state", async () => {

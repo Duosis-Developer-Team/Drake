@@ -8,6 +8,7 @@ projection.
 """
 
 import asyncio
+import json
 import os
 import uuid as uuidlib
 from datetime import UTC, datetime, timedelta
@@ -871,3 +872,181 @@ async def test_near_now_stale_discloses_requested_vs_data_range(
         assert envelope["data_range"] == data_range
         assert envelope["range"]["requested_step_seconds"] == 60
         assert "provider_unavailable" in envelope["warnings"]
+
+
+# --- Sprint 3 final closure: server-side disconnect cancellation ------------
+
+
+class HangingTransport(httpx.AsyncBaseTransport):
+    """Provider transport that hangs until cancelled, counting cleanup."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = 0
+        self.completed = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()  # hangs forever unless cancelled
+        except asyncio.CancelledError:
+            self.cancelled += 1
+            raise
+        self.completed += 1  # pragma: no cover - unreachable
+        return httpx.Response(500)  # pragma: no cover
+
+
+async def test_client_disconnect_cancels_broker_and_releases_leases(
+    engine: AsyncEngine,
+) -> None:
+    """Manual ASGI drive of the REAL app: after http.disconnect the broker
+    task is cancelled and awaited, the provider transport observes the
+    cancellation (stream cleanup), both Redis leases vanish immediately
+    (their own tokens, not TTL expiry), no orphan task survives, and the
+    integration observation is NOT faked into a failure state."""
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    transport = HangingTransport()
+    settings = require_it_settings().model_copy(
+        update={"telemetry_connectors": {"it-fake": TelemetryConnector(url=FAKE_CONNECTOR_URL)}}
+    )
+    harness = build_harness(settings, telemetry_transport=transport)
+    user_type = type(harness.provider.users["user-owner"])
+    harness.provider.users.setdefault(
+        "user-plain", user_type("user-plain", "Plain", "user-plain@example.test")
+    )
+    integration_id = await configure_alpha_prometheus(engine, world)
+
+    async with harness.api_client() as client:
+        me = await harness.login(client, "user-plain")
+        session_cookie = client.cookies.get(harness.settings.session_cookie_name)
+        csrf = me["csrf_token"]
+    assert session_cookie
+
+    async with engine.connect() as connection:
+        identity_id = (
+            await connection.execute(text("SELECT id FROM identities WHERE subject = 'user-plain'"))
+        ).scalar_one()
+    principal_key = f"telemetry:lease:principal:{identity_id}"
+    target_key = f"telemetry:lease:target:{world['alpha'].scope_id}"
+
+    body = json.dumps(
+        query_body("service.request-rate.v1", "service", str(world["dev_api"].id), hours=11)
+    ).encode()
+    headers = [
+        (b"host", b"testserver"),
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(body)).encode()),
+        (b"cookie", f"{harness.settings.session_cookie_name}={session_cookie}".encode()),
+        (b"x-csrf-token", csrf.encode()),
+        (b"origin", harness.settings.allowed_web_origins[0].encode()),
+    ]
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/v1/telemetry/query",
+        "raw_path": b"/v1/telemetry/query",
+        "query_string": b"",
+        "root_path": "",
+        "headers": headers,
+        "client": ("127.0.0.1", 51000),
+        "server": ("127.0.0.1", 8123),
+    }
+    messages: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    await messages.put({"type": "http.request", "body": body, "more_body": False})
+
+    async def receive() -> dict[str, Any]:
+        return await messages.get()
+
+    sent: list[dict[str, Any]] = []
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    tasks_before = len(asyncio.all_tasks())
+    app_task = asyncio.create_task(harness.app(scope, receive, send))
+
+    # The provider call is in flight and BOTH leases are held:
+    await asyncio.wait_for(transport.started.wait(), timeout=5)
+    redis = aioredis.from_url(require_it_settings().redis_url)
+    try:
+        assert await redis.zcard(principal_key) == 1
+        assert await redis.zcard(target_key) == 1
+
+        # Client goes away — the endpoint must cancel and await the broker
+        # task promptly (no provider timeout is ever waited out).
+        await messages.put({"type": "http.disconnect"})
+        await asyncio.wait_for(app_task, timeout=5)
+
+        assert transport.cancelled == 1  # provider stream saw the cancellation
+        assert transport.completed == 0
+        # Leases are gone IMMEDIATELY (own-token release, far below the 30s
+        # TTL backstop):
+        assert await redis.zcard(principal_key) == 0
+        assert await redis.zcard(target_key) == 0
+    finally:
+        await redis.aclose()
+
+    # No orphan tasks survive the endpoint lifecycle:
+    for _ in range(20):
+        if len(asyncio.all_tasks()) <= tasks_before:
+            break
+        await asyncio.sleep(0.05)
+    assert len(asyncio.all_tasks()) <= tasks_before
+
+    # Cancellation is not a provider failure: the observation projection is
+    # untouched (no fake degraded, no error code, no sync attempt recorded).
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT observed_state, last_error_code, last_sync_attempt_at "
+                    "FROM integrations WHERE id = :id"
+                ),
+                {"id": integration_id},
+            )
+        ).first()
+    assert row is not None
+    assert row[0] == "unknown"
+    assert row[1] is None
+    assert row[2] is None
+
+
+async def test_future_window_never_shares_relative_last_good(engine: AsyncEngine) -> None:
+    """Two-sided near-now: a window ending in the FUTURE is historical and
+    must not reuse the moving-window last-good payload; a normal near-now
+    query still may."""
+    world = await seed_catalog_world(engine)
+    await build_users(engine)
+    harness, provider = telemetry_harness(fresh_ttl=1)
+    await configure_alpha_prometheus(engine, world)
+    service_id = str(world["dev_api"].id)
+
+    async with harness.api_client() as plain:
+        await harness.login(plain, "user-plain")
+        # Seed the RELATIVE last-good with a normal near-now 1h query.
+        assert (
+            await post_query(plain, query_body("service.request-rate.v1", "service", service_id))
+        ).status_code == 200
+
+        provider.mode = "fail"
+        await asyncio.sleep(1.2)
+
+        # Same duration/step but ending in the future: no relative reuse.
+        now = datetime.now(UTC).replace(microsecond=0)
+        future = query_body("service.request-rate.v1", "service", service_id)
+        future["range"] = {
+            "from": (now + timedelta(hours=1)).isoformat(),
+            "to": (now + timedelta(hours=2)).isoformat(),
+            "step_seconds": 60,
+        }
+        assert (await post_query(plain, future)).status_code == 503
+
+        # The moving near-now window still serves its bounded last-good.
+        stale = await post_query(
+            plain, query_body("service.request-rate.v1", "service", service_id)
+        )
+        assert stale.status_code == 200
+        assert stale.json()["data_state"] == "stale"
