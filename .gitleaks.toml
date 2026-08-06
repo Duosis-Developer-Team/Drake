@@ -9,28 +9,11 @@
 # credential inside the negative-fixture directory and asserts the scanner
 # detects it — proving that directory is NOT exempt.
 #
-# Do not add path allowlists to silence a finding; fix the finding. If an
-# exemption is ever truly unavoidable, it must be a single-finding
-# fingerprint or the narrowest possible shape rule with a written
-# justification.
+# Do not add path allowlists or value-shape allowlists to silence a
+# finding; fix the finding. The ONLY sanctioned exemption mechanism is an
+# exact single-finding fingerprint in .gitleaksignore with a written
+# justification — shape rules were removed after review because a
+# credential COULD be committed inside an innocuous-looking field shape.
 
 [extend]
 useDefault = true
-
-[allowlist]
-# Telemetry registry key references (Sprint 3). The generic-api-key rule
-# fires on JSON fields like `"queryTemplateKey": "environment.latency-p95.v1"`.
-# These are versioned registry identifiers, not credentials. The regex below
-# is deliberately narrow: it matches ONLY a known registry key field whose
-# value is a dotted kebab-case identifier ending in a `.vN` version suffix —
-# a real secret cannot take this shape, and no path is excluded from
-# scanning. (regexTarget=line: the rule's matched line must fit this shape.)
-regexTarget = "line"
-regexes = [
-  '''"(?:key|metricKey|queryTemplateKey)":\s*"[a-z0-9-]+(?:\.[a-z0-9-]+)*\.v\d+",?\s*$''',
-  # Registry widget/section keys ("latency-p95-kpi"): a JSON `key` field
-  # whose value is 2–5 short hyphen-separated lowercase words. Requiring
-  # the hyphenated multi-word shape keeps single-token values (hex strings,
-  # real keys) fully scannable.
-  '''"key":\s*"[a-z0-9]{1,20}(?:-[a-z0-9]{1,20}){1,4}",?\s*$''',
-]

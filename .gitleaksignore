@@ -1,0 +1,25 @@
+# Exact single-finding exemptions ONLY (no path or shape allowlists).
+# Each entry below is a Sprint 3 telemetry-registry identifier (dotted
+# .vN template keys / hyphenated widget keys in the registry JSON files)
+# that the generic-api-key rule flags on entropy.
+# Reviewed as registry identifiers, not credentials. Two runtime canaries
+# (scripts/secret-scan.sh) plant credential-shaped values in exactly these
+# JSON field shapes and MUST be detected — proving these fingerprints do
+# not blind the scanner to real secrets in the same fields.
+#
+# History findings (commit-scoped):
+b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49
+b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:52
+b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:67
+b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:138
+b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/query-templates.json:generic-api-key:49
+b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/query-templates.json:generic-api-key:137
+# Tracked-tree scan findings (same six lines; the tree scan copies the
+# tracked file set to /repo/.secret-scan-tree inside the scanner
+# container, so dir-mode fingerprints carry that absolute prefix):
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:49
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:52
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:67
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:138
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:49
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:137
