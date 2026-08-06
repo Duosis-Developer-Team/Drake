@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://drake.duosis.com/schemas/query-template-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "templates"],
+  "properties": {
+    "apiVersion": {"const": "drake.duosis.com/v1alpha1"},
+    "kind": {"const": "QueryTemplateRegistry"},
+    "templates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "version",
+          "metricKey",
+          "metricVersion",
+          "providerType",
+          "expression",
+          "scopeTypes",
+          "permission",
+          "matchers",
+          "parameters",
+          "budgets",
+          "cache",
+          "output",
+          "semantics"
+        ],
+        "properties": {
+          "key": {"$ref": "#/$defs/stableKey"},
+          "version": {"type": "integer", "minimum": 1, "maximum": 10000},
+          "metricKey": {"$ref": "#/$defs/stableKey"},
+          "metricVersion": {"type": "integer", "minimum": 1, "maximum": 10000},
+          "providerType": {"enum": ["prometheus"]},
+          "expression": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "scopeTypes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {"enum": ["environment", "service", "cluster"]}
+          },
+          "permission": {"const": "telemetry.query"},
+          "matchers": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["label", "source"],
+              "properties": {
+                "label": {"$ref": "#/$defs/labelName"},
+                "source": {
+                  "enum": [
+                    "project_key",
+                    "environment_key",
+                    "service_key",
+                    "cluster_ref",
+                    "namespace"
+                  ]
+                }
+              }
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "maxProperties": 4,
+            "patternProperties": {
+              "^[a-z][a-z0-9_]{0,31}$": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type"],
+                "properties": {
+                  "type": {"enum": ["enum"]},
+                  "values": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {"$ref": "#/$defs/stableKey"}
+                  },
+                  "default": {"$ref": "#/$defs/stableKey"}
+                }
+              }
+            }
+          },
+          "budgets": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "maxRangeSeconds",
+              "minStepSeconds",
+              "maxSeries",
+              "maxPoints",
+              "timeoutSeconds"
+            ],
+            "properties": {
+              "maxRangeSeconds": {"type": "integer", "minimum": 60, "maximum": 2592000},
+              "minStepSeconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+              "maxSeries": {"type": "integer", "minimum": 1, "maximum": 200},
+              "maxPoints": {"type": "integer", "minimum": 1, "maximum": 20000},
+              "timeoutSeconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 10}
+            }
+          },
+          "cache": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["freshTtlSeconds", "staleTtlSeconds"],
+            "properties": {
+              "freshTtlSeconds": {"type": "integer", "minimum": 1, "maximum": 600},
+              "staleTtlSeconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+            }
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["resultType", "unit", "labels"],
+            "properties": {
+              "resultType": {"enum": ["timeseries"]},
+              "unit": {
+                "enum": [
+                  "requests_per_second",
+                  "ratio",
+                  "seconds",
+                  "bytes",
+                  "count",
+                  "cores",
+                  "restarts"
+                ]
+              },
+              "labels": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {"$ref": "#/$defs/labelName"}
+              }
+            }
+          },
+          "semantics": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["empty", "partial"],
+            "properties": {
+              "empty": {"enum": ["no_traffic", "no_data"]},
+              "partial": {"enum": ["null_points_with_warning"]}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stableKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9_.-]{0,62}[a-z0-9])?$"
+    },
+    "labelName": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]{0,62}$"
+    }
+  }
+}

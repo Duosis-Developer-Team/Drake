@@ -17,7 +17,14 @@ import { readFileSync } from "node:fs";
 
 import { validateContent, type SchemaName } from "./validator.js";
 
-const SCHEMAS: SchemaName[] = ["drake-project", "tenant-snapshot", "backup-event"];
+const SCHEMAS: SchemaName[] = [
+  "drake-project",
+  "tenant-snapshot",
+  "backup-event",
+  "metric-catalog",
+  "query-template",
+  "dashboard-template",
+];
 
 function usage(): void {
   process.stderr.write(

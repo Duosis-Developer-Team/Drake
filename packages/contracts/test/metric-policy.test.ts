@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 
 import {
   FORBIDDEN_METRIC_LABELS,
@@ -10,27 +9,42 @@ import {
   type MetricCatalog,
 } from "../src/metric-policy.js";
 
-const CATALOG_PATH = join(__dirname, "..", "fixtures", "catalog", "metric-catalog.yaml");
+const CATALOG_PATH = join(__dirname, "..", "registry", "metric-catalog.json");
 
 describe("forbidden metric-label guard", () => {
-  it("the example metric catalog is clean", () => {
-    const catalog = parse(readFileSync(CATALOG_PATH, "utf8")) as MetricCatalog;
+  it("the authoritative metric catalog is clean", () => {
+    const catalog = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as MetricCatalog;
     expect(catalog.metrics.length).toBeGreaterThan(0);
     expect(checkMetricLabels(catalog)).toEqual([]);
   });
 
-  it("rejects PII/unbounded labels in allowedLabels", () => {
+  it("rejects PII/unbounded labels in any allowed-label field", () => {
     const catalog: MetricCatalog = {
       apiVersion: "drake.duosis.com/v1alpha1",
       kind: "MetricCatalog",
       metrics: [
-        { key: "bad.metric", allowedLabels: ["project", "user_id"] },
-        { key: "worse.metric", allowedLabels: ["email", "tenant_name"] },
+        { key: "bad.metric", allowedInputLabels: ["project", "user_id"] },
+        { key: "worse.metric", allowedOutputLabels: ["email", "tenant_name"] },
+        { key: "legacy.metric", allowedLabels: ["trace_id"] },
+      ],
+    };
+    const violations = checkMetricLabels(catalog);
+    expect(violations).toHaveLength(4);
+    expect(violations[0]).toContain("user_id");
+  });
+
+  it("rejects raw route labels; route_template is the only canonical route label", () => {
+    const catalog: MetricCatalog = {
+      apiVersion: "drake.duosis.com/v1alpha1",
+      kind: "MetricCatalog",
+      metrics: [
+        { key: "route.metric", allowedInputLabels: ["route", "path", "raw_path"] },
+        { key: "good.metric", allowedOutputLabels: ["route_template"] },
       ],
     };
     const violations = checkMetricLabels(catalog);
     expect(violations).toHaveLength(3);
-    expect(violations[0]).toContain("user_id");
+    expect(violations.join("\n")).not.toContain("route_template");
   });
 
   it("rejects a label that is simultaneously allowed and forbidden", () => {
@@ -40,8 +54,8 @@ describe("forbidden metric-label guard", () => {
       metrics: [
         {
           key: "conflicted.metric",
-          allowedLabels: ["route"],
-          forbiddenLabels: ["route"],
+          allowedInputLabels: ["status_class"],
+          forbiddenLabels: ["status_class"],
         },
       ],
     };
@@ -49,7 +63,25 @@ describe("forbidden metric-label guard", () => {
   });
 
   it("keeps the global denylist meaningful", () => {
-    for (const label of ["email", "user_id", "trace_id", "raw_path", "tenant_name"]) {
+    for (const label of [
+      "email",
+      "user_id",
+      "trace_id",
+      "raw_path",
+      "route",
+      "path",
+      "url",
+      "query",
+      "query_string",
+      "ip",
+      "client_ip",
+      "sql",
+      "tenant_name",
+      "error_message",
+      "filename",
+      "artifact_id",
+      "git_sha",
+    ]) {
       expect(FORBIDDEN_METRIC_LABELS).toContain(label);
     }
   });

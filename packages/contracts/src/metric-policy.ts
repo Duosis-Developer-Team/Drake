@@ -13,7 +13,11 @@ export const FORBIDDEN_METRIC_LABELS: readonly string[] = [
   "request_id",
   "trace_id",
   "span_id",
+  // Raw request paths (and anything that can smuggle one) are unbounded
+  // cardinality; the only canonical HTTP route label is `route_template`.
   "raw_path",
+  "route",
+  "path",
   "url",
   "query",
   "query_string",
@@ -25,11 +29,16 @@ export const FORBIDDEN_METRIC_LABELS: readonly string[] = [
   "error_message",
   "filename",
   "artifact_id",
+  // Uncontrolled revision identifiers are unbounded cardinality.
+  "git_sha",
+  "commit_sha",
 ];
 
 export interface MetricDefinition {
   key: string;
   allowedLabels?: string[];
+  allowedInputLabels?: string[];
+  allowedOutputLabels?: string[];
   forbiddenLabels?: string[];
   [extra: string]: unknown;
 }
@@ -48,7 +57,11 @@ export interface MetricCatalog {
 export function checkMetricLabels(catalog: MetricCatalog): string[] {
   const violations: string[] = [];
   for (const metric of catalog.metrics) {
-    const allowed = metric.allowedLabels ?? [];
+    const allowed = [
+      ...(metric.allowedLabels ?? []),
+      ...(metric.allowedInputLabels ?? []),
+      ...(metric.allowedOutputLabels ?? []),
+    ];
     for (const label of allowed) {
       if (FORBIDDEN_METRIC_LABELS.includes(label)) {
         violations.push(`${metric.key}: forbidden label "${label}" in allowedLabels`);
