@@ -27,7 +27,7 @@ const OPERATIONAL_LABELS = {
 export default function ProjectOverviewPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, retryProject] = useApi<Project>(`/v1/projects/${projectId}`);
-  const [environments, retryEnvironments] = useApi<{ environments: Environment[] }>(
+  const [environments, retryEnvironments] = useApi<{ environments: Environment[]; next_cursor: string | null }>(
     `/v1/projects/${projectId}/environments`,
   );
 

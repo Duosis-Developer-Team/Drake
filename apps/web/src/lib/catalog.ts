@@ -60,14 +60,14 @@ export interface ServiceSummary {
   runtime: string;
   metrics_profile: string;
   lifecycle: string;
+  version: number;
+  scope: ScopeRef;
+  source: Provenance;
 }
 
 export interface ServiceDetail extends ServiceSummary {
   workload_selector: Record<string, string>;
   health: Record<string, string>;
-  scope: ScopeRef;
-  source: Provenance;
-  version: number;
   operational: Record<string, OperationalState>;
   as_of: string;
 }

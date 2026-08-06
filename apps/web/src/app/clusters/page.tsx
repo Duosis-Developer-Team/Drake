@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/Card";
 import type { Cluster } from "@/lib/catalog";
 
 export default function ClustersPage() {
-  const [clusters, retry] = useApi<{ clusters: Cluster[] }>("/v1/clusters");
+  const [clusters, retry] = useApi<{ clusters: Cluster[]; next_cursor: string | null }>("/v1/clusters");
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">

@@ -15,7 +15,7 @@ const OBSERVED_STATUS: Record<string, HealthStatus> = {
 };
 
 export default function IntegrationsPage() {
-  const [health, retry] = useApi<{ integrations: IntegrationHealth[] }>(
+  const [health, retry] = useApi<{ integrations: IntegrationHealth[]; next_cursor: string | null }>(
     "/v1/integrations/health",
   );
 

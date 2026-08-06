@@ -333,15 +333,46 @@ async def _authorized_environment(
 
 @router.get("/projects/{project_id}/environments")
 async def list_environments(
-    request: Request, project_id: uuid.UUID, auth: AuthContext = Depends(require_auth)
+    request: Request,
+    project_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    limit: int = Query(default=_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
+    cursor: str | None = None,
+    search: str | None = Query(default=None, min_length=2, max_length=64),
+    lifecycle: str = Query(default="active", pattern="^(active|archived|all)$"),
+    criticality: str | None = Query(default=None, pattern="^(low|medium|high|critical)$"),
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
+        # Authorization first: project visibility, then the environment-scope
+        # filter inside the query — before search, ordering, and the cursor.
         full, breadcrumb = await _visible_project_ids(connection, auth)
         if project_id not in full and project_id not in breadcrumb:
             raise HTTPException(status_code=404, detail="not found")
         env_scopes = await visible_scope_ids(connection, auth.principal, "environment.view")
+
+        conditions = ["e.project_id = :pid", "e.scope_id = ANY(:scopes)"]
+        params: dict[str, Any] = {
+            "pid": project_id,
+            "scopes": list(env_scopes) or [uuid.UUID(int=0)],
+            "limit": limit + 1,
+        }
+        if lifecycle != "all":
+            conditions.append("e.lifecycle = :lifecycle")
+            params["lifecycle"] = lifecycle
+        if criticality:
+            conditions.append("e.criticality = :criticality")
+            params["criticality"] = criticality
+        if search:
+            conditions.append("e.environment_key ILIKE :term ESCAPE '\\'")
+            params["term"] = f"%{escape_like(search)}%"
+        if cursor:
+            cursor_key, cursor_id = _decode_cursor(cursor, 2)
+            conditions.append("(e.environment_key, e.id) > (:cursor_key, CAST(:cursor_id AS uuid))")
+            params["cursor_key"] = cursor_key
+            params["cursor_id"] = cursor_id
+
         rows = (
             await connection.execute(
                 text(
@@ -349,14 +380,19 @@ async def list_environments(
                     "FROM environments e "
                     "JOIN projects p ON p.id = e.project_id "
                     "LEFT JOIN clusters c ON c.id = e.cluster_id "
-                    "WHERE e.project_id = :pid AND e.scope_id = ANY(:scopes) "
-                    "ORDER BY e.environment_key, e.id"
+                    f"WHERE {' AND '.join(conditions)} "
+                    "ORDER BY e.environment_key, e.id LIMIT :limit"
                 ),
-                {"pid": project_id, "scopes": list(env_scopes) or [uuid.UUID(int=0)]},
+                params,
             )
         ).all()
+        page = rows[:limit]
+        next_cursor = (
+            _encode_cursor(page[-1][1], str(page[-1][0])) if len(rows) > limit and page else None
+        )
         return {
-            "environments": [_environment_payload(row, str(row[16])) for row in rows],
+            "environments": [_environment_payload(row, str(row[16])) for row in page],
+            "next_cursor": next_cursor,
             "as_of": _as_of(),
         }
 
@@ -390,28 +426,58 @@ async def list_services(
     project_id: uuid.UUID,
     environment_id: uuid.UUID,
     auth: AuthContext = Depends(require_auth),
+    limit: int = Query(default=_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
+    cursor: str | None = None,
+    search: str | None = Query(default=None, min_length=2, max_length=64),
+    lifecycle: str = Query(default="active", pattern="^(active|archived|all)$"),
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
-        _row, _project_key = await _authorized_environment(
+        # Environment authorization happens before any pagination input is
+        # even parsed against data — cursors cannot probe other environments.
+        env_row, project_key = await _authorized_environment(
             connection, auth, project_id, environment_id
         )
+        environment_key = str(env_row[1])
+
+        conditions = ["b.environment_id = :eid"]
+        params: dict[str, Any] = {"eid": environment_id, "limit": limit + 1}
+        if lifecycle != "all":
+            conditions.append("b.lifecycle = :lifecycle")
+            params["lifecycle"] = lifecycle
+        if search:
+            conditions.append(
+                "(s.service_key ILIKE :term ESCAPE '\\' OR s.display_name ILIKE :term ESCAPE '\\')"
+            )
+            params["term"] = f"%{escape_like(search)}%"
+        if cursor:
+            cursor_key, cursor_id = _decode_cursor(cursor, 2)
+            conditions.append("(s.service_key, b.id) > (:cursor_key, CAST(:cursor_id AS uuid))")
+            params["cursor_key"] = cursor_key
+            params["cursor_id"] = cursor_id
+
         rows = (
             await connection.execute(
                 text(
                     """
                     SELECT b.id, s.service_key, s.display_name, s.component, s.runtime,
-                           s.metrics_profile, b.lifecycle
+                           s.metrics_profile, b.lifecycle, s.version,
+                           s.catalog_source_kind, s.catalog_source_ref,
+                           s.source_revision, s.accepted_at
                     FROM environment_services b
                     JOIN service_definitions s ON s.id = b.service_id
-                    WHERE b.environment_id = :eid
-                    ORDER BY s.service_key, b.id
-                    """
+                    WHERE {conditions}
+                    ORDER BY s.service_key, b.id LIMIT :limit
+                    """.format(conditions=" AND ".join(conditions))  # noqa: S608
                 ),
-                {"eid": environment_id},
+                params,
             )
         ).all()
+        page = rows[:limit]
+        next_cursor = (
+            _encode_cursor(page[-1][1], str(page[-1][0])) if len(rows) > limit and page else None
+        )
         return {
             "services": [
                 {
@@ -422,9 +488,21 @@ async def list_services(
                     "runtime": row[4],
                     "metrics_profile": row[5],
                     "lifecycle": row[6],
+                    "version": row[7],
+                    "scope": {
+                        "type": "service",
+                        "ref": f"{project_key}/{environment_key}/{row[1]}",
+                    },
+                    "source": {
+                        "kind": row[8],
+                        "ref": row[9],
+                        "revision": row[10],
+                        "accepted_at": row[11].isoformat(),
+                    },
                 }
-                for row in rows
+                for row in page
             ],
+            "next_cursor": next_cursor,
             "as_of": _as_of(),
         }
 
@@ -521,6 +599,8 @@ async def list_clusters(
     auth: AuthContext = Depends(require_auth),
     limit: int = Query(default=_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
     cursor: str | None = None,
+    search: str | None = Query(default=None, min_length=2, max_length=64),
+    lifecycle: str = Query(default="active", pattern="^(active|archived|all)$"),
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
@@ -530,6 +610,14 @@ async def list_clusters(
             return {"clusters": [], "next_cursor": None, "as_of": _as_of()}
         params: dict[str, Any] = {"scopes": list(cluster_scopes), "limit": limit + 1}
         conditions = ["c.scope_id = ANY(:scopes)"]
+        if lifecycle != "all":
+            conditions.append("c.lifecycle = :lifecycle")
+            params["lifecycle"] = lifecycle
+        if search:
+            conditions.append(
+                "(c.cluster_ref ILIKE :term ESCAPE '\\' OR c.display_name ILIKE :term ESCAPE '\\')"
+            )
+            params["term"] = f"%{escape_like(search)}%"
         if cursor:
             cursor_ref, cursor_id = _decode_cursor(cursor, 2)
             conditions.append("(c.cluster_ref, c.id) > (:cursor_ref, CAST(:cursor_id AS uuid))")
@@ -653,7 +741,7 @@ async def catalog_search(
                      WHERE c.scope_id = ANY(:cluster_scopes) AND c.lifecycle = 'active'
                        AND (c.cluster_ref ILIKE :term ESCAPE '\\'
                             OR c.display_name ILIKE :term ESCAPE '\\'))
-                    ORDER BY kind, key LIMIT :limit
+                    ORDER BY kind, project_key NULLS FIRST, key, id LIMIT :limit
                     """
                 ),
                 {

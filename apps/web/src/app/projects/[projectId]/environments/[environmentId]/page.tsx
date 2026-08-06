@@ -32,7 +32,7 @@ export default function EnvironmentDetailPage() {
   const [environment, retryEnvironment] = useApi<Environment>(
     `/v1/projects/${projectId}/environments/${environmentId}`,
   );
-  const [services, retryServices] = useApi<{ services: ServiceSummary[] }>(
+  const [services, retryServices] = useApi<{ services: ServiceSummary[]; next_cursor: string | null }>(
     `/v1/projects/${projectId}/environments/${environmentId}/services`,
   );
 
@@ -114,7 +114,7 @@ export default function EnvironmentDetailPage() {
                                 </span>
                               </span>
                               <span className="font-mono text-[11px] text-ink-muted">
-                                {service.metrics_profile}
+                                {service.metrics_profile} · v{service.version}
                               </span>
                             </Link>
                           </li>
