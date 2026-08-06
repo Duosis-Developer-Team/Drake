@@ -86,15 +86,11 @@ class TelemetryBroker:
         started = time.monotonic()
         correlation_id = correlation_id_var.get() or ""
 
-        template = find_template(self._registry, request.template_key)
-        if template is None:
-            raise HTTPException(status_code=404, detail="not found")
-        if request.scope_type not in template.scope_types:
-            raise HTTPException(status_code=422, detail="template does not support this scope type")
-
         async with self._engine.connect() as connection:
-            # Authoritative scope lookup + authorization — BEFORE any cache,
-            # provider-config, or budget access.
+            # ADR-0015 order: authoritative scope lookup + grant resolution
+            # come FIRST — template existence/compatibility must not act as
+            # an oracle for unauthorized callers, and no cache, connector,
+            # or integration-config access happens before authorization.
             resolved = await self._resolve_scope(connection, request.scope_type, request.scope_id)
             if resolved is None:
                 raise HTTPException(status_code=404, detail="not found")
@@ -102,19 +98,16 @@ class TelemetryBroker:
             if resolved.scope_id not in visible:
                 raise HTTPException(status_code=404, detail="not found")
 
-            integration = (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT id, config_ref, configuration_state, version
-                        FROM integrations
-                        WHERE scope_id = :scope AND integration_type = 'prometheus'
-                          AND lifecycle = 'active'
-                        """
-                    ),
-                    {"scope": resolved.provider_scope_id},
+            # Only an AUTHORIZED caller reaches template resolution:
+            template = find_template(self._registry, request.template_key)
+            if template is None:
+                raise HTTPException(status_code=404, detail="not found")
+            if request.scope_type not in template.scope_types:
+                raise HTTPException(
+                    status_code=422, detail="template does not support this scope type"
                 )
-            ).first()
+
+            integration = await self._lookup_integration(connection, resolved.provider_scope_id)
 
         try:
             effective = resolve_range(
@@ -197,8 +190,8 @@ class TelemetryBroker:
             self._record(template, "ok", "fresh_hit", started, _point_count(fresh))
             return {**fresh, "cache_state": "fresh_hit", "correlation_id": correlation_id}
 
-        base_url = self._adapter.resolve_connector(str(integration[1]))
-        if base_url is None:
+        connector = self._adapter.resolve_connector(str(integration[1]))
+        if connector is None:
             # Configured integration whose connector the server cannot
             # resolve: treat as provider unavailability (last-good may serve).
             return await self._serve_stale_or_unavailable(
@@ -223,7 +216,7 @@ class TelemetryBroker:
 
         try:
             raw = await self._adapter.query_range(
-                base_url,
+                connector,
                 compiled.query,
                 start=aligned_from,
                 end=aligned_to,
@@ -328,6 +321,21 @@ class TelemetryBroker:
             duration_seconds=time.monotonic() - started,
             returned_points=points,
         )
+
+    async def _lookup_integration(self, connection: Any, provider_scope_id: uuid.UUID) -> Any:
+        return (
+            await connection.execute(
+                text(
+                    """
+                    SELECT id, config_ref, configuration_state, version
+                    FROM integrations
+                    WHERE scope_id = :scope AND integration_type = 'prometheus'
+                      AND lifecycle = 'active'
+                    """
+                ),
+                {"scope": provider_scope_id},
+            )
+        ).first()
 
     async def _resolve_scope(
         self, connection: Any, scope_type: str, scope_id: uuid.UUID

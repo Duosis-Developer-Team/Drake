@@ -13,7 +13,7 @@ import binascii
 import json
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -40,6 +40,16 @@ class RangeIn(BaseModel):
     from_: datetime = Field(alias="from")
     to: datetime
     step_seconds: int = Field(ge=1, le=86400)
+
+    @field_validator("from_", "to")
+    @classmethod
+    def utc_contract(cls, value: datetime) -> datetime:
+        # The contract is UTC ISO-8601: naive timestamps are ambiguous and
+        # refused; aware values (any offset) normalize to the same UTC
+        # instant, so DST or host timezones can never change the result.
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamps must be timezone-aware UTC ISO-8601")
+        return value.astimezone(UTC)
 
 
 class QueryRequest(BaseModel):

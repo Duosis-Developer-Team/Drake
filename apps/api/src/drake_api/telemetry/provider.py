@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from drake_api.settings import Settings
+from drake_api.settings import Settings, TelemetryConnector
 
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
@@ -56,9 +56,31 @@ def _refuse(condition: bool, code: str) -> None:
         raise ConnectorRefusedError(code)
 
 
-async def validate_connector_url(url: str, settings: Settings) -> str:
-    """SSRF boundary for server-owned connector URLs (never caller input)."""
-    parts = urlsplit(url)
+def _check_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    settings: Settings,
+    connector: TelemetryConnector,
+) -> bool:
+    """Validate one resolved address; returns whether it is private."""
+    # Always refused, in every environment:
+    _refuse(address.is_link_local, "connector_target_refused")  # incl. 169.254.169.254
+    _refuse(address.is_multicast, "connector_target_refused")
+    _refuse(address.is_unspecified, "connector_target_refused")
+    _refuse(address.is_reserved, "connector_target_refused")
+    local_like = settings.env in ("local", "test")
+    # Loopback is a local/test convenience only.
+    _refuse(address.is_loopback and not local_like, "connector_target_refused")
+    if address.is_private and not address.is_loopback:
+        # Private targets need the connector's EXPLICIT opt-in outside
+        # local/test — presence in the server-owned map is not enough.
+        _refuse(not (local_like or connector.allow_private), "connector_private_refused")
+        return True
+    return False
+
+
+async def validate_connector(connector: TelemetryConnector, settings: Settings) -> str:
+    """SSRF boundary for server-owned connectors (never caller input)."""
+    parts = urlsplit(connector.url)
     _refuse(parts.scheme not in ("http", "https"), "connector_scheme_refused")
     _refuse(
         parts.scheme == "http" and settings.env not in ("local", "test"),
@@ -67,30 +89,41 @@ async def validate_connector_url(url: str, settings: Settings) -> str:
     _refuse(
         parts.username is not None or parts.password is not None, "connector_credentials_refused"
     )
+    _refuse(bool(parts.fragment) or bool(parts.query), "connector_url_shape_refused")
     _refuse(not parts.hostname, "connector_host_missing")
     hostname = str(parts.hostname)
+    # DNS validation uses the scheme's real default port (443 for https).
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        # IP-literal connectors: no DNS involved, no rebinding surface.
+        _check_address(literal, settings, connector)
+        return connector.url
+
+    # DNS-name connectors: httpx re-resolves independently of this check, so
+    # a hostile DNS answer could flip public→private between validation and
+    # connection (rebinding). Until the transport pins the validated address,
+    # hostname connectors are FAIL-CLOSED outside local/test — a documented
+    # deployment blocker for real provider onboarding, not an accepted risk.
+    _refuse(settings.env not in ("local", "test"), "connector_hostname_unpinned")
 
     try:
         loop = asyncio.get_running_loop()
-        infos = await loop.getaddrinfo(hostname, parts.port or 80, type=socket.SOCK_STREAM)
+        infos = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
     except socket.gaierror as error:
         raise ConnectorRefusedError("connector_unresolvable") from error
     _refuse(not infos, "connector_unresolvable")
-    for info in infos:
-        address = ipaddress.ip_address(info[4][0])
-        # Always refused, in every environment:
-        _refuse(address.is_link_local, "connector_target_refused")  # incl. 169.254.169.254
-        _refuse(address.is_multicast, "connector_target_refused")
-        _refuse(address.is_unspecified, "connector_target_refused")
-        _refuse(address.is_reserved, "connector_target_refused")
-        # Loopback is a local/test convenience only.
-        _refuse(
-            address.is_loopback and settings.env not in ("local", "test"),
-            "connector_target_refused",
-        )
-        # Private ranges are reachable ONLY because the connector itself is
-        # server-owned configuration — never widen this to caller input.
-    return url
+    verdicts = [
+        _check_address(ipaddress.ip_address(info[4][0]), settings, connector) for info in infos
+    ]
+    # Mixed public/private answer sets are a rebinding smell: refuse outright.
+    _refuse(any(verdicts) and not all(verdicts), "connector_mixed_answers_refused")
+    return connector.url
 
 
 class PrometheusAdapter:
@@ -98,12 +131,12 @@ class PrometheusAdapter:
         self._settings = settings
         self._transport = transport
 
-    def resolve_connector(self, config_ref: str) -> str | None:
+    def resolve_connector(self, config_ref: str) -> TelemetryConnector | None:
         return self._settings.telemetry_connectors.get(config_ref)
 
     async def query_range(
         self,
-        base_url: str,
+        connector: TelemetryConnector,
         query: str,
         *,
         start: int,
@@ -112,7 +145,7 @@ class PrometheusAdapter:
         timeout_seconds: float,
         correlation_id: str,
     ) -> RangeQueryResult:
-        await validate_connector_url(base_url, self._settings)
+        base_url = await validate_connector(connector, self._settings)
         timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 3.0))
         try:
             async with httpx.AsyncClient(

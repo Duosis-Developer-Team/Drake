@@ -65,7 +65,7 @@ export default defineConfig({
         // fixture Prometheus). Short fresh-TTL override (local/test only)
         // lets the stale/last-good scenario run in seconds.
         DRAKE_TELEMETRY_CONNECTORS:
-          '{"e2e-prometheus":"http://127.0.0.1:59191"}',
+          '{"e2e-prometheus":{"url":"http://127.0.0.1:59191"}}',
         DRAKE_TELEMETRY_FRESH_TTL_OVERRIDE_SECONDS: "2",
       },
     },

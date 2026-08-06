@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from drake_api.settings import TelemetryConnector
 from drake_api.telemetry.budgets import BudgetError, resolve_range
 from drake_api.telemetry.compiler import CompileError, compile_query, escape_label_value
 from drake_api.telemetry.metrics import BrokerMetrics
@@ -19,7 +20,7 @@ from drake_api.telemetry.provider import (
     ProviderContractError,
     ProviderUnavailableError,
     RangeQueryResult,
-    validate_connector_url,
+    validate_connector,
 )
 from drake_api.telemetry.registry import (
     REGISTRY_DIR,
@@ -256,18 +257,20 @@ def _run(coro):
 def test_ssrf_targets_always_refused(url: str) -> None:
     settings = make_settings(env="test")
     with pytest.raises(ConnectorRefusedError):
-        _run(validate_connector_url(url, settings))
+        _run(validate_connector(TelemetryConnector(url=url), settings))
 
 
 def test_plaintext_and_loopback_refused_outside_local_test() -> None:
     settings = make_settings(env="prod", oidc_issuer="https://issuer.example")
     with pytest.raises(ConnectorRefusedError, match="plaintext"):
-        _run(validate_connector_url("http://prometheus.internal:9090", settings))
+        _run(
+            validate_connector(TelemetryConnector(url="http://prometheus.internal:9090"), settings)
+        )
     with pytest.raises(ConnectorRefusedError, match="target_refused"):
-        _run(validate_connector_url("https://127.0.0.1:9090", settings))
+        _run(validate_connector(TelemetryConnector(url="https://127.0.0.1:9090"), settings))
     # ...but loopback over http is the local/test convenience:
     local = make_settings(env="test")
-    assert _run(validate_connector_url("http://127.0.0.1:59090", local))
+    assert _run(validate_connector(TelemetryConnector(url="http://127.0.0.1:59090"), local))
 
 
 def _adapter_with(handler) -> PrometheusAdapter:
@@ -276,7 +279,7 @@ def _adapter_with(handler) -> PrometheusAdapter:
 
 def _query(adapter: PrometheusAdapter):
     return adapter.query_range(
-        "http://127.0.0.1:59090",
+        TelemetryConnector(url="http://127.0.0.1:59090"),
         "up",
         start=0,
         end=600,

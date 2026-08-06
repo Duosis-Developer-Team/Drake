@@ -21,6 +21,7 @@ from alembic import command
 from alembic.config import Config
 from drake_api.catalog.service import CatalogValidationError
 from drake_api.db import dispose_engines
+from drake_api.settings import TelemetryConnector
 from drake_api.telemetry.observations import record_provider_observation
 from harness_s1 import S1Harness, build_harness, grant_platform_owner, require_it_settings
 from sqlalchemy import text
@@ -91,7 +92,7 @@ def telemetry_harness(fresh_ttl: int = 1) -> tuple[S1Harness, FakeProvider]:
     provider = FakeProvider()
     settings = require_it_settings().model_copy(
         update={
-            "telemetry_connectors": {"it-fake": FAKE_CONNECTOR_URL},
+            "telemetry_connectors": {"it-fake": TelemetryConnector(url=FAKE_CONNECTOR_URL)},
             "telemetry_fresh_ttl_override_seconds": fresh_ttl,
         }
     )
@@ -671,7 +672,7 @@ async def test_real_prometheus_query_smoke(engine: AsyncEngine) -> None:
     world = await seed_catalog_world(engine)
     await build_users(engine)
     settings = require_it_settings().model_copy(
-        update={"telemetry_connectors": {"it-real": prometheus_url}}
+        update={"telemetry_connectors": {"it-real": TelemetryConnector(url=prometheus_url)}}
     )
     harness = build_harness(settings)
     async with engine.begin() as connection:
