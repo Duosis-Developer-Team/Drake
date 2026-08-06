@@ -14,6 +14,18 @@ registry, matcher values from authoritative catalog rows through one
 central exact-match escaper. Injection attempts (quotes, backslashes,
 newlines, operator smuggling) are neutralized or refused — negative-tested.
 
+## 1b. Cancellation hygiene
+
+Client disconnects cancel server work: the query endpoint supervises the
+broker task against an event-driven `http.disconnect` watcher — the
+provider stream closes, both concurrency leases release immediately with
+their own tokens (partial acquires included), no orphan tasks survive,
+and a cancellation is never recorded as a provider failure or served as
+stale data. Deployment requirement (verified platform finding): Next's
+proxy hop does not propagate client aborts, so the ingress must route
+`/v1` directly to the API for browser-driven cancellation to reach it —
+the local rewrite exists only for dev/E2E.
+
 ## 2. Authorization before everything
 
 The broker's order is fixed: session → shape → authoritative scope lookup

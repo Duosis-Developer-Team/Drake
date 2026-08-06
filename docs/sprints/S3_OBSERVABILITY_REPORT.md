@@ -53,7 +53,9 @@ retryable `unavailable` — never fabricated zeros, never stale-as-healthy.
   `as_of`, and the UI says so explicitly.
 - Dashboards schedule their queries through a bounded browser-side queue
   (≤3 concurrent per dashboard, aborted on any scope/range change), so a
-  single screen cannot exhaust the per-principal budget of 4.
+  single screen cannot exhaust the per-principal budget of 4; a transient
+  429 retries exactly once through the same queue. Server-side, a client
+  disconnect cancels the broker task and frees both leases immediately.
 - Observation freshness: a success older than 5 minutes turns later
   failures into `stale` instead of `degraded`.
 
@@ -65,6 +67,10 @@ retryable `unavailable` — never fabricated zeros, never stale-as-healthy.
 - Known upstream limitation, reported honestly: the chart pins its
   sub-images by tag, not digest; mirroring/digest-pinning is part of the
   real onboarding gate.
+- Deployment requirement from a verified platform finding: route `/v1`
+  at the ingress DIRECTLY to the Drake API (not through the Next
+  server) so browser aborts reach the API as real disconnects and
+  cancel provider work; Next's proxy hop drains instead of aborting.
 
 ## 5. What Drake still cannot see (honest list)
 

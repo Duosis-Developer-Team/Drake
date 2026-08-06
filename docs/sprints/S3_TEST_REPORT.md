@@ -22,8 +22,8 @@ adapter contract failures, SSRF refusals, broker-metrics hygiene.
 
 ## 2. Integration (live disposable local stack)
 
-`uv run pytest -m integration` — **94 passed** (78 S0–S2 regression +
-16 telemetry). Real PostgreSQL + Redis; deterministic fake Prometheus via
+`uv run pytest -m integration` — **96 passed** (78 S0–S2 regression +
+18 telemetry). Real PostgreSQL + Redis; deterministic fake Prometheus via
 injected transport; real local Prometheus for the smoke.
 
 | Area | Evidence | Status |
@@ -69,10 +69,10 @@ injected transport; real local Prometheus for the smoke.
 
 ## 6. Browser E2E (real stack, no route mocking)
 
-`make e2e-test` — **24 passed** in **two consecutive runs** (16 existing
-S1/S2 scenarios kept + 8 metrics scenarios). Fake OIDC (test-only),
-FastAPI, PostgreSQL, Redis, local fixture Prometheus behind the E2E flaky
-proxy, production Next.js build, Chromium.
+`make e2e-test` — **25 passed** in **three consecutive runs** (16
+existing S1/S2 scenarios kept + 9 metrics scenarios). Fake OIDC
+(test-only), FastAPI, PostgreSQL, Redis, local fixture Prometheus behind
+the E2E flaky proxy, production Next.js build, Chromium.
 
 | Scenario | Status |
 |---|---|
@@ -85,6 +85,7 @@ proxy, production Next.js build, Chromium.
 | Narrow environment grant: selector offers only the authorized environment | PASS |
 | Keyboard operation of the range control + axe (0 critical) | PASS |
 | 390px mobile: dashboards render, no horizontal overflow | PASS |
+| Real end-to-end cancellation: slow-provider churn stays within real Redis budgets (principal ≤4, target ≤8), final dashboard fully loads (no lingering 429), lease tokens drain to 0 far below TTL, raw-socket disconnects register closed connections at the provider boundary before any timeout | PASS |
 
 Viewport/theme/state matrix: 390/768/1280/1536 px via responsive classes +
 the 390px E2E check; light/dark via the themed component library; loading/
@@ -127,3 +128,16 @@ with follow-up commits on the same branch (no history rewrite):
 | Naive datetimes accepted despite the UTC contract | Naive → 422; aware offsets normalize to one UTC instant (single cache identity); responses always explicit UTC | PASS |
 | Same-duration historical windows could share last-good | Relative near-now vs historical absolute last-good identities split; stale responses separate requested `range`, actual `data_range`, and true `as_of` — UI shows the distinction | PASS |
 | Value-shape gitleaks allowlists could hide a real secret | Shape rules removed; exact single-finding fingerprints only; two new runtime canaries plant credential-shaped values in the exempted field shapes and must each be detected | PASS |
+
+## 10. Final cancellation closure (post-hardening review)
+
+| Finding | Closure | Status |
+|---|---|---|
+| Client aborts were browser-side only; the endpoint awaited the broker directly and could leave provider work + Redis leases running | `POST /v1/telemetry/query` runs the broker as a supervised task racing an event-driven `http.disconnect` watcher (no busy polling): disconnect cancels AND awaits the broker; provider stream/client close; both leases release immediately with own tokens; the watcher itself is cancelled+awaited on every path; mid-acquire cancellation releases partial tokens; cancellation is never recorded as a provider failure, never mints stale fallbacks, never maps to provider-unavailable | PASS |
+| No end-to-end cancellation proof | Manual-ASGI integration test (real Redis): provider transport observes exactly one CancelledError, leases vanish immediately, observation untouched, zero orphan tasks. E2E over the full stack: real-HTTP disconnects against the browser's own uvicorn register closed connections at the provider proxy before any timeout; accounting closes; leases drain. Frontend scheduling test honestly re-scoped to client-scheduler evidence with a real 1h→24h→7d walk | PASS |
+| Near-now accepted future-ending windows | Two-sided policy with one step of forward skew tolerance; future windows are historical (never share relative last-good) — integration-tested | PASS |
+| **Platform finding (documented deployment requirement)** | Next's proxy hop does not reliably propagate client aborts upstream (drains pooled responses; Route Handler + `request.signal` behaves the same). Browser-driven server-side cancellation therefore requires the deployment ingress to route `/v1` DIRECTLY to the API; the local rewrite is dev/E2E-only. Recorded in `next.config.ts` and the security report | NOTED |
+
+Observed bounds in the cancellation E2E: client concurrency ≤3 (component
+suite: exactly 3 under a slow provider), principal leases ≤4, target
+leases ≤8 on live Redis; lease drain to 0 in ≤5s (TTL backstop 30s).
