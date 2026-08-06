@@ -5,13 +5,26 @@ automatic path, forcing a rotation, and revocation.
 
 ## Automatic rotation (normal case)
 
-The agent renews at a jittered ~2/3 of certificate lifetime: it generates
-a FRESH P-256 key, sends a CSR over its current verified identity to
-`/internal/v1/agent/certificates/renew`, persists the new material
-atomically (0600), and swaps its transport. No operator action. The
-cluster detail screen shows the certificate expiry; an "expires soon"
-badge appears under 5 days — if you see it, renewal has been failing long
-enough to matter.
+Renewal is two-phase and crash/retry safe; no operator action is needed:
+
+1. **Prepare** — at a jittered ~2/3 of lifetime the agent generates a
+   FRESH P-256 key and sends a CSR with a stable `renewal_id`, signed
+   with its CURRENT key. The server signs into a pending slot (public
+   material only, bounded expiry); the current key keeps working.
+2. **Save** — the agent writes the new bundle as a versioned directory
+   (0600) that nothing references yet.
+3. **Activate** — the agent proves possession of the NEW key by signing
+   `/internal/v1/agent/certificates/activate`; the server promotes the
+   pending key atomically. Only now does the old key stop working.
+4. **Promote** — the agent atomically points its identity at the new
+   bundle and swaps its transport.
+
+A lost response at ANY step recovers: prepare retries return the same
+pending certificate; activation retries acknowledge idempotently; an
+agent restarted between save and activate reconciles at startup through
+the same activation call. The cluster detail screen shows certificate
+expiry; an "expires soon" badge appears under 5 days — if you see it,
+renewal has been failing long enough to matter.
 
 ## If renewal keeps failing
 

@@ -66,11 +66,30 @@ layer still binds identity end-to-end), or a future SPIFFE mesh.
 
 ### 4. Renewal
 
-`POST /internal/v1/agent/certificates/renew` accepts a CSR signed-for by
-the **current** verified identity (PoP with the current key); the claimed
-cluster/agent in the CSR SAN must match the verified identity or the
-request fails closed. Expired, wrong-CA, wrong-cluster, or revoked
-identities cannot renew. The agent renews with jitter inside the final
+Renewal is TWO-PHASE and idempotent, so a lost response at any step can
+never strand the agent:
+
+1. **Prepare** — `POST /internal/v1/agent/certificates/renew` carries a
+   stable `renewal_id` and a CSR for a FRESH key, signed (PoP) with the
+   **current** key. The server signs into a PENDING slot only (public
+   material, bounded expiry); the current key stays fully valid. Retrying
+   the same `renewal_id` + CSR returns the same pending certificate; the
+   same `renewal_id` with a different CSR is refused.
+2. **Activate** — `POST /internal/v1/agent/certificates/activate` is
+   signed with the PENDING key: possession of the new key IS the
+   promotion proof. Promotion swaps the current public key atomically;
+   an activation retry after a lost response acknowledges idempotently
+   against the now-current key. Only after activation is the old key
+   refused.
+
+Expired pending renewals are cleaned and cannot activate. Expired,
+wrong-CA, wrong-cluster, or revoked identities cannot prepare (an expired
+CURRENT identity fails closed — recovery is re-enrollment with a fresh
+one-time token). Agent-side, the new bundle is written as a versioned
+directory and promoted by an atomic pointer AFTER activation succeeds; a
+crash at any instant leaves either the complete old or the complete new
+identity, and an interrupted renewal is reconciled at startup through the
+idempotent activation call. The agent renews with jitter inside the final
 third of certificate lifetime and backs off exponentially on failure —
 never a tight loop.
 

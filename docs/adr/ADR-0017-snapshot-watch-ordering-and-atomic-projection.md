@@ -19,25 +19,43 @@ health.
 - Pages land in a staging table; page numbers are unique per snapshot, so
   duplicate pages are idempotent no-ops; per-page and total resource/page
   budgets are enforced fail-closed.
-- `complete` declares the expected page count; a completion with missing
-  pages is refused. A successful completion swaps the projection in ONE
-  transaction: staged rows upsert the current inventory, resources absent
-  from the snapshot flip to `missing` (never hard-deleted), change events
-  are appended, and the snapshot is marked complete. Repeated `complete`
-  for the same snapshot is idempotent (returns the recorded outcome).
-- Snapshots have a bounded completion window; a timed-out or abandoned
-  snapshot is discarded — the last good projection stays intact and its
-  freshness makes the staleness visible. An older snapshot (started
-  before the currently-applied one) can never complete over a newer one.
+- `complete` verifies the staged page SET, not counters alone: page
+  numbers must be exactly `1..total_pages` (no holes, no extras) and the
+  DISTINCT staged resources must match the declared total, so duplicate
+  UIDs across pages cannot inflate it. A replayed page is idempotent only
+  when its content hash matches; the same page number with different
+  content is a torn stream. A successful completion swaps the projection
+  in ONE transaction: staged rows upsert the current inventory, resources
+  absent from the snapshot flip to `missing` (never hard-deleted), change
+  events are appended, and the snapshot is marked complete. Repeated
+  `complete` for the same snapshot is idempotent.
+- A per-cluster **writer/generation row** serializes every inventory
+  write: one active writer (the most recently enrolled agent — a
+  superseded agent can heartbeat but never write), a server-assigned
+  monotonic generation per snapshot, and the applied generation. A new
+  begin supersedes the pending snapshot; a superseded snapshot can never
+  complete; a snapshot at or below the applied generation can never touch
+  the projection; watch events bind to the applied generation only.
+- Snapshots have a bounded completion window (typed settings with
+  production floors): a timed-out snapshot is refused at complete and
+  discarded by maintenance — the last good projection stays intact and
+  its freshness makes the staleness visible. Staging of dead snapshots,
+  snapshot metadata history, and change events all have enforced bounds,
+  cleaned in advisory-locked batches that never touch the projection.
 
 ### 2. Watch events: idempotent, ordered, gap-aware
 
-- The agent stamps every batch with a strictly monotonic sequence; the
-  server records the last applied sequence per agent. Replays (≤ last
-  applied) are acknowledged as no-ops; **gaps** are refused with an
-  explicit `reconcile_required` state — the agent must run a fresh full
-  snapshot. ResourceVersions are opaque strings used only for watch
-  bookmarks, never compared numerically.
+- The agent stamps every batch with a strictly monotonic sequence and
+  persists the last ACKNOWLEDGED sequence next to its identity: restarts
+  resume the chain, never re-base it blindly, and a crash between ACK and
+  persist replays an idempotent message. The server records the last
+  applied sequence per agent. Replays (≤ last applied) are acknowledged
+  as no-ops; **gaps** on pages/completes/events are refused with a
+  DURABLE `reconcile_required` (committed outside the refused request's
+  rollback). A `snapshot_begin` is itself the reconcile action: it may
+  jump the sequence forward, while a begin with a stale sequence is a
+  no-op that can regress nothing. ResourceVersions are opaque strings
+  used only for watch bookmarks, never compared numerically.
 - Events normalize to add/update/missing transitions on the current
   projection; a delete marks `missing` (lifecycle), never a hard delete.
   Events belonging to a superseded snapshot generation cannot overwrite
