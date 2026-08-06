@@ -13,12 +13,19 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-3 border-b border-border px-5">
-        <div
+        {/* Official Drake brand assets (light/dark variants). */}
+        <img
+          src="/brand/drake-icon-light.png"
+          alt=""
           aria-hidden
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent font-semibold text-white"
-        >
-          D
-        </div>
+          className="h-8 w-8 rounded-lg dark:hidden"
+        />
+        <img
+          src="/brand/drake-icon-dark.png"
+          alt=""
+          aria-hidden
+          className="hidden h-8 w-8 rounded-lg dark:block"
+        />
         <div className="leading-tight">
           <div className="text-sm font-semibold tracking-wide text-ink">Drake</div>
           <div className="text-[11px] text-ink-muted">Operations control plane</div>

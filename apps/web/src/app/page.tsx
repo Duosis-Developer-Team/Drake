@@ -1,7 +1,11 @@
+"use client";
+
+import { LoadGate, useApi } from "@/components/catalog/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
+import type { CatalogContext } from "@/lib/catalog";
 
 /**
  * Command Center — Sprint 0 foundation.
@@ -48,8 +52,10 @@ export default function CommandCenterPage() {
             Unified operations view. Sources appear here as integrations are connected.
           </p>
         </div>
-        <StatusBadge status="unknown" label="No sources connected" />
+        <StatusBadge status="unknown" label="No operational sources connected" />
       </div>
+
+      <CatalogCounts />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {DOMAIN_CARDS.map((card) => (
@@ -79,5 +85,35 @@ export default function CommandCenterPage() {
         </p>
       </Card>
     </div>
+  );
+}
+
+/** Exact, authorized catalog counts — real PostgreSQL data, nothing more. */
+function CatalogCounts() {
+  const [context, retry] = useApi<CatalogContext>("/v1/catalog/context");
+  return (
+    <Card title="Your catalog">
+      <LoadGate value={context} retry={retry}>
+        {(data) => (
+          <div
+            className="grid grid-cols-3 gap-4 text-center"
+            data-testid="catalog-counts"
+          >
+            {(
+              [
+                ["Projects", data.projects],
+                ["Environments", data.environments],
+                ["Clusters", data.clusters],
+              ] as const
+            ).map(([label, count]) => (
+              <div key={label}>
+                <p className="text-2xl font-semibold tabular-nums text-ink">{count}</p>
+                <p className="text-xs text-ink-muted">{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </LoadGate>
+    </Card>
   );
 }

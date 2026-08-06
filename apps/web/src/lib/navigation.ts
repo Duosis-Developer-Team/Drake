@@ -31,13 +31,31 @@ export interface NavItem {
 
 export const NAVIGATION: NavItem[] = [
   { label: "Command Center", href: "/", icon: LayoutDashboard, enabled: true },
-  { label: "Projects", href: "/projects", icon: FolderKanban, enabled: false },
-  { label: "Clusters", href: "/clusters", icon: Boxes, enabled: false },
+  {
+    label: "Projects",
+    href: "/projects",
+    icon: FolderKanban,
+    enabled: true,
+    anyPermission: ["project.view", "environment.view"],
+  },
+  {
+    label: "Clusters",
+    href: "/clusters",
+    icon: Boxes,
+    enabled: true,
+    anyPermission: ["cluster.view"],
+  },
   { label: "Tenants", href: "/tenants", icon: Users, enabled: false },
   { label: "Alerts & Incidents", href: "/incidents", icon: Bell, enabled: false },
   { label: "Protection", href: "/protection", icon: ShieldCheck, enabled: false },
   { label: "Deployments", href: "/deployments", icon: Rocket, enabled: false },
-  { label: "Integrations", href: "/integrations", icon: Puzzle, enabled: false },
+  {
+    label: "Integrations",
+    href: "/integrations",
+    icon: Puzzle,
+    enabled: true,
+    anyPermission: ["project.view", "environment.view", "cluster.view"],
+  },
   { label: "Catalog & Templates", href: "/catalog", icon: Activity, enabled: false },
   {
     label: "Audit & Administration",

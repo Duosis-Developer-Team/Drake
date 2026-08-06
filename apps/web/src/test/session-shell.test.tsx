@@ -6,6 +6,8 @@ import { errorBody, installFetchMock, makeMe } from "@/test/mock-api";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 describe("session-aware shell", () => {

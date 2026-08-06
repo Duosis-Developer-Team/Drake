@@ -23,6 +23,7 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly code: string,
     message: string,
+    public readonly correlationId?: string,
   ) {
     super(message);
   }
@@ -31,12 +32,13 @@ export class ApiError extends Error {
 async function parseError(response: Response): Promise<ApiError> {
   try {
     const body = (await response.json()) as {
-      error?: { code?: string; message?: string };
+      error?: { code?: string; message?: string; correlation_id?: string };
     };
     return new ApiError(
       response.status,
       body.error?.code ?? "error",
       body.error?.message ?? response.statusText,
+      body.error?.correlation_id,
     );
   } catch {
     return new ApiError(response.status, "error", response.statusText);
@@ -44,7 +46,9 @@ async function parseError(response: Response): Promise<ApiError> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(path, { credentials: "include" });
+  // no-store: authorization-scoped data must never outlive a permission
+  // change or leak across users through shared HTTP caches.
+  const response = await fetch(path, { credentials: "include", cache: "no-store" });
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
 }

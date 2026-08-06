@@ -625,20 +625,20 @@ async def catalog_search(
                     """
                     (SELECT 'project' AS kind, p.id, p.project_key AS key,
                             p.display_name, p.project_key AS project_key,
-                            NULL AS environment_id
+                            NULL AS parent_id, p.id AS project_id
                      FROM projects p
                      WHERE p.id = ANY(:project_ids) AND p.lifecycle = 'active'
                        AND (p.project_key ILIKE :term ESCAPE '\\'
                             OR p.display_name ILIKE :term ESCAPE '\\'))
                     UNION ALL
                     (SELECT 'environment', e.id, e.environment_key,
-                            e.environment_key, p.project_key, e.project_id
+                            e.environment_key, p.project_key, e.project_id, p.id
                      FROM environments e JOIN projects p ON p.id = e.project_id
                      WHERE e.scope_id = ANY(:env_scopes) AND e.lifecycle = 'active'
                        AND e.environment_key ILIKE :term ESCAPE '\\')
                     UNION ALL
                     (SELECT 'service', b.id, s.service_key, s.display_name,
-                            p.project_key, b.environment_id
+                            p.project_key, b.environment_id, p.id
                      FROM environment_services b
                      JOIN environments e ON e.id = b.environment_id
                      JOIN projects p ON p.id = e.project_id
@@ -648,7 +648,7 @@ async def catalog_search(
                             OR s.display_name ILIKE :term ESCAPE '\\'))
                     UNION ALL
                     (SELECT 'cluster', c.id, c.cluster_ref, c.display_name,
-                            NULL, NULL
+                            NULL, NULL, NULL
                      FROM clusters c
                      WHERE c.scope_id = ANY(:cluster_scopes) AND c.lifecycle = 'active'
                        AND (c.cluster_ref ILIKE :term ESCAPE '\\'
@@ -674,6 +674,7 @@ async def catalog_search(
                 "display_name": row[3],
                 "project_key": row[4],
                 "parent_id": str(row[5]) if row[5] else None,
+                "project_id": str(row[6]) if row[6] else None,
             }
             for row in rows
         ],
