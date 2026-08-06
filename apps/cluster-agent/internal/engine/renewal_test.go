@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -12,7 +13,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
-	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +22,13 @@ import (
 )
 
 func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	return slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+}
+
+// capturedLogger records everything for leak assertions.
+func capturedLogger() (*slog.Logger, *bytes.Buffer) {
+	buffer := &bytes.Buffer{}
+	return slog.New(slog.NewTextHandler(buffer, &slog.HandlerOptions{Level: slog.LevelDebug})), buffer
 }
 
 func selfSigned(t *testing.T, key *ecdsa.PrivateKey) string {
@@ -61,67 +69,124 @@ func seededIdentity(t *testing.T, dir string) *identity.Identity {
 	return current
 }
 
-// renewalServer fakes the prepare/activate endpoints per identity.
-type renewalServer struct {
-	t              *testing.T
-	prepareStatus  int
-	prepareErr     error
-	activateStatus int
-	activateErr    error
-	prepares       int
-	activations    int
-	lastRenewalID  string
+// statefulServer models the REAL server key state: which public key it
+// currently accepts, which pending key/renewal id exists, and — the crux —
+// activations that COMMIT server-side while every response is lost.
+type statefulServer struct {
+	t  *testing.T
+	mu sync.Mutex
+
+	acceptedKey      *ecdsa.PublicKey // the key the server trusts right now
+	pendingKey       *ecdsa.PublicKey
+	pendingRenewalID string
+	lastRenewalID    string // survives promotion for idempotent activation
+
+	// dropActivationResponses: for this many activation calls the server
+	// COMMITS the promotion (when applicable) but the response is lost.
+	dropActivationResponses int
+	refuseActivations       bool // explicit 403 path
+	refusePrepares          bool
+
+	prepares    int
+	activations int
 }
 
-type boundSender struct {
-	server *renewalServer
+func keysEqual(a, b *ecdsa.PublicKey) bool {
+	return a != nil && b != nil && a.Equal(b)
+}
+
+type stateBoundSender struct {
+	server *statefulServer
 	id     *identity.Identity
 }
 
-func (b *boundSender) Post(_ context.Context, path string, payload any) (int, []byte, error) {
+func (s *stateBoundSender) Post(_ context.Context, path string, payload any) (int, []byte, error) {
+	server := s.server
+	server.mu.Lock()
+	defer server.mu.Unlock()
 	body := payload.(map[string]any)
+	callerKey := &s.id.Key().PublicKey
 	switch path {
 	case "/internal/v1/agent/certificates/renew":
-		b.server.prepares++
-		b.server.lastRenewalID = body["renewal_id"].(string)
-		if b.server.prepareErr != nil {
-			return 0, nil, b.server.prepareErr
+		server.prepares++
+		if server.refusePrepares || !keysEqual(callerKey, server.acceptedKey) {
+			return 403, []byte("{}"), nil // old key dead after promotion
 		}
-		if b.server.prepareStatus != 200 {
-			return b.server.prepareStatus, []byte("{}"), nil
+		csrBlock, _ := pem.Decode([]byte(body["csr_pem"].(string)))
+		request, err := x509.ParseCertificateRequest(csrBlock.Bytes)
+		if err != nil {
+			server.t.Fatalf("fake server: bad CSR: %v", err)
 		}
-		// Issue a throwaway certificate for the CSR's key: content only
-		// needs to parse; possession semantics live server-side.
-		key, _ := identity.GenerateKey()
+		newKey, ok := request.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			server.t.Fatal("fake server: CSR key is not ECDSA")
+		}
+		server.pendingKey = newKey
+		server.pendingRenewalID = body["renewal_id"].(string)
+		throwaway, _ := identity.GenerateKey()
 		response, _ := json.Marshal(map[string]string{
-			"certificate_pem":       selfSigned(b.server.t, key),
+			"certificate_pem":       selfSigned(server.t, throwaway),
 			"ca_chain_pem":          "ca",
 			"certificate_not_after": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		})
 		return 200, response, nil
 	case "/internal/v1/agent/certificates/activate":
-		b.server.activations++
-		if b.server.activateErr != nil {
-			return 0, nil, b.server.activateErr
+		server.activations++
+		renewalID := body["renewal_id"].(string)
+		if server.refuseActivations {
+			return 403, []byte("{}"), nil
 		}
-		return b.server.activateStatus, []byte("{}"), nil
+		promotedNow := false
+		if server.pendingKey != nil && renewalID == server.pendingRenewalID &&
+			keysEqual(callerKey, server.pendingKey) {
+			// COMMIT: from this instant the OLD key is dead server-side.
+			server.acceptedKey = server.pendingKey
+			server.lastRenewalID = server.pendingRenewalID
+			server.pendingKey = nil
+			server.pendingRenewalID = ""
+			promotedNow = true
+		}
+		idempotentAck := !promotedNow && renewalID == server.lastRenewalID &&
+			keysEqual(callerKey, server.acceptedKey)
+		if !promotedNow && !idempotentAck {
+			return 403, []byte("{}"), nil
+		}
+		if server.dropActivationResponses > 0 {
+			server.dropActivationResponses--
+			// The promotion above already happened; only the RESPONSE dies.
+			return 0, nil, errors.New("transport: response lost")
+		}
+		return 200, []byte(`{"result":"activated"}`), nil
 	default:
 		return 0, nil, fmt.Errorf("unexpected path %s", path)
 	}
 }
 
-func factoryFor(server *renewalServer) SenderFactory {
+func (s *statefulServer) factory() SenderFactory {
 	return func(id *identity.Identity) (Sender, error) {
-		return &boundSender{server: server, id: id}, nil
+		return &stateBoundSender{server: s, id: id}, nil
 	}
+}
+
+func (s *statefulServer) accepts(id *identity.Identity) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return keysEqual(&id.Key().PublicKey, s.acceptedKey)
+}
+
+func shrinkBackoff(t *testing.T) {
+	t.Helper()
+	oldBase, oldMax := activationRetryBase, activationRetryMax
+	activationRetryBase, activationRetryMax = 10*time.Millisecond, 40*time.Millisecond
+	t.Cleanup(func() { activationRetryBase, activationRetryMax = oldBase, oldMax })
 }
 
 func TestRenewOncePromotesOnlyAfterActivation(t *testing.T) {
 	dir := t.TempDir()
 	current := seededIdentity(t, dir)
-	server := &renewalServer{t: t, prepareStatus: 200, activateStatus: 200}
+	server := &statefulServer{t: t, acceptedKey: &current.Key().PublicKey}
 
-	renewed, err := renewOnce(context.Background(), factoryFor(server), current, dir)
+	renewed, err := renewOnce(context.Background(), server.factory(), current, dir)
 	if err != nil {
 		t.Fatalf("renew: %v", err)
 	}
@@ -135,69 +200,265 @@ func TestRenewOncePromotesOnlyAfterActivation(t *testing.T) {
 	if _, _, pending := identity.PendingRenewal(dir); pending {
 		t.Fatal("pending marker must clear after activation")
 	}
-	if server.prepares != 1 || server.activations != 1 {
-		t.Fatalf("expected 1 prepare + 1 activate, got %d/%d", server.prepares, server.activations)
+	if !server.accepts(renewed) || server.accepts(current) {
+		t.Fatal("server must accept ONLY the new key after activation")
 	}
 }
 
-func TestLostActivationResponseKeepsOldIdentityUntilReconcile(t *testing.T) {
+func TestActivationCommittedButAllResponsesLostRecoversWithoutRestart(t *testing.T) {
+	shrinkBackoff(t)
 	dir := t.TempDir()
-	current := seededIdentity(t, dir)
-	server := &renewalServer{
-		t: t, prepareStatus: 200, activateErr: errors.New("network lost"),
+	oldIdentity := seededIdentity(t, dir)
+	// The first TWO activation calls COMMIT/ack server-side but their
+	// responses are lost — consecutive ambiguous failures.
+	server := &statefulServer{
+		t:                       t,
+		acceptedKey:             &oldIdentity.Key().PublicKey,
+		dropActivationResponses: 2,
 	}
+	logger, logs := capturedLogger()
 
-	_, err := renewOnce(context.Background(), factoryFor(server), current, dir)
+	// The in-loop renewal hits the ambiguous window.
+	_, err := renewOnce(context.Background(), server.factory(), oldIdentity, dir)
 	if err == nil {
-		t.Fatal("lost activation must surface as an error")
-	}
-	// The OLD identity keeps working; the pending bundle survives on disk.
-	still, loadErr := identity.LoadCurrent(dir)
-	if loadErr != nil || !still.Key().Equal(current.Key()) {
-		t.Fatalf("old identity must remain active: %v", loadErr)
-	}
-	if _, _, pending := identity.PendingRenewal(dir); !pending {
-		t.Fatal("pending bundle must survive a lost activation")
+		t.Fatal("lost activation response must surface as an error")
 	}
 
-	// Restart: activation is the reconciliation point (idempotent server
-	// side). Success promotes the SAME pending bundle.
-	server.activateErr = nil
-	server.activateStatus = 200
-	reconciled := ReconcilePendingRenewal(
-		context.Background(), factoryFor(server), dir, still, testLogger(),
-	)
-	if reconciled.Key().Equal(current.Key()) {
-		t.Fatal("reconciliation must promote the pending identity")
+	// SERVER-SIDE the promotion is already real: the old key is dead.
+	if server.accepts(oldIdentity) {
+		t.Fatal("server must have promoted the new key (old key dead)")
 	}
-	if _, _, pending := identity.PendingRenewal(dir); pending {
+	oldKeySender, _ := server.factory()(oldIdentity)
+	status, _, _ := oldKeySender.Post(
+		context.Background(), "/internal/v1/agent/certificates/renew",
+		map[string]any{"renewal_id": "probe", "csr_pem": mustCSR(t)},
+	)
+	if status != 403 {
+		t.Fatalf("old key must be refused after server promotion, got %d", status)
+	}
+	// Locally nothing was promoted yet; the pending bundle survived.
+	still, loadErr := identity.LoadCurrent(dir)
+	if loadErr != nil || !still.Key().Equal(oldIdentity.Key()) {
+		t.Fatalf("local current pointer must still be the old identity: %v", loadErr)
+	}
+	pendingBundle, pendingRenewalID, ok := identity.PendingRenewal(dir)
+	if !ok {
+		t.Fatal("pending bundle and renewal id must survive the ambiguous failure")
+	}
+
+	// NO restart: the running RenewalLoop reconciles in process.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	swapped := make(chan *identity.Identity, 1)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		RenewalLoop(ctx, server.factory(), oldIdentity, dir, logger,
+			func(renewed *identity.Identity) { swapped <- renewed })
+	}()
+
+	var reconciled *identity.Identity
+	select {
+	case reconciled = <-swapped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("in-process reconciliation never completed")
+	}
+	cancel()
+	select {
+	case <-loopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RenewalLoop leaked after cancellation")
+	}
+
+	// Same renewal id, same bundle, ONE prepare total (never a new CSR).
+	if server.prepares != 1+1 { // renewOnce prepare + the old-key probe
+		t.Fatalf("no new prepare may happen during reconciliation, got %d", server.prepares)
+	}
+	nowBundle, _, stillPending := identity.PendingRenewal(dir)
+	if stillPending {
 		t.Fatal("pending marker must clear after reconciliation")
 	}
+	_ = nowBundle
+	promoted, err := identity.LoadCurrent(dir)
+	if err != nil || !promoted.Key().Equal(reconciled.Key()) {
+		t.Fatalf("local current pointer must switch to the reconciled bundle: %v", err)
+	}
+	if promoted.Key().Equal(oldIdentity.Key()) {
+		t.Fatal("reconciled identity must be the NEW key")
+	}
+	// The reconciled bundle IS the surviving pending bundle (same id).
+	fromPending, err := identity.LoadBundle(dir, pendingBundle)
+	if err != nil || !fromPending.Key().Equal(promoted.Key()) {
+		t.Fatalf("promotion must use the SAME pending bundle %s: %v", pendingBundle, err)
+	}
+	_ = pendingRenewalID
+	// New key accepted, old key refused; the swap callback fed the sender.
+	if !server.accepts(promoted) || server.accepts(oldIdentity) {
+		t.Fatal("server must accept the new key and refuse the old one")
+	}
+	// No private material anywhere in logs.
+	if strings.Contains(logs.String(), "PRIVATE KEY") {
+		t.Fatal("private material leaked into logs")
+	}
 }
 
-func TestRefusedActivationDiscardsPendingAndKeepsCurrent(t *testing.T) {
+func mustCSR(t *testing.T) string {
+	t.Helper()
+	key, err := identity.GenerateKey()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	csr, err := identity.CSRPEM(key)
+	if err != nil {
+		t.Fatalf("csr: %v", err)
+	}
+	return csr
+}
+
+func TestActivationNeverReachedServerKeepsOldIdentityAndRetries(t *testing.T) {
+	shrinkBackoff(t)
 	dir := t.TempDir()
 	current := seededIdentity(t, dir)
-	server := &renewalServer{t: t, prepareStatus: 200, activateStatus: 403}
+	server := &statefulServer{t: t, acceptedKey: &current.Key().PublicKey}
+	factory := server.factory()
 
-	_, err := renewOnce(context.Background(), factoryFor(server), current, dir)
+	// Wrap the factory so activation calls NEVER reach the server for a
+	// while (pure transport failure; nothing commits).
+	var reachable sync.Map
+	reachable.Store("down", true)
+	blockingFactory := func(id *identity.Identity) (Sender, error) {
+		inner, _ := factory(id)
+		return senderFunc(func(ctx context.Context, path string, payload any) (int, []byte, error) {
+			if down, _ := reachable.Load("down"); down.(bool) &&
+				strings.HasSuffix(path, "/activate") {
+				return 0, nil, errors.New("transport: connection refused")
+			}
+			return inner.Post(ctx, path, payload)
+		}), nil
+	}
+
+	_, err := renewOnce(context.Background(), blockingFactory, current, dir)
+	if err == nil {
+		t.Fatal("unreachable activation must surface as an error")
+	}
+	// Nothing committed: the OLD identity keeps working server-side.
+	if !server.accepts(current) {
+		t.Fatal("old key must remain accepted when activation never arrived")
+	}
+	_, renewalIDBefore, ok := identity.PendingRenewal(dir)
+	if !ok {
+		t.Fatal("pending must survive an unreachable server")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	swapped := make(chan *identity.Identity, 1)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		RenewalLoop(ctx, blockingFactory, current, dir, testLogger(),
+			func(renewed *identity.Identity) { swapped <- renewed })
+	}()
+
+	// Several ambiguous retries pass; the pending id never changes and is
+	// never deleted while the server stays unreachable.
+	time.Sleep(150 * time.Millisecond)
+	_, renewalIDDuring, stillOK := identity.PendingRenewal(dir)
+	if !stillOK || renewalIDDuring != renewalIDBefore {
+		t.Fatalf("pending renewal id must be preserved across retries: %v %v",
+			renewalIDDuring, stillOK)
+	}
+
+	// Server becomes reachable: the SAME pending activates and promotes.
+	reachable.Store("down", false)
+	select {
+	case reconciled := <-swapped:
+		if !server.accepts(reconciled) {
+			t.Fatal("reconciled key must be accepted")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("reconciliation never completed after the server returned")
+	}
+	cancel()
+	select {
+	case <-loopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RenewalLoop leaked after cancellation")
+	}
+}
+
+type senderFunc func(ctx context.Context, path string, payload any) (int, []byte, error)
+
+func (f senderFunc) Post(ctx context.Context, path string, payload any) (int, []byte, error) {
+	return f(ctx, path, payload)
+}
+
+func TestCancellationDuringAmbiguousRetriesIsClean(t *testing.T) {
+	shrinkBackoff(t)
+	dir := t.TempDir()
+	current := seededIdentity(t, dir)
+	server := &statefulServer{t: t, acceptedKey: &current.Key().PublicKey}
+	failing := func(id *identity.Identity) (Sender, error) {
+		inner, _ := server.factory()(id)
+		return senderFunc(func(ctx context.Context, path string, payload any) (int, []byte, error) {
+			if strings.HasSuffix(path, "/activate") {
+				return 0, nil, errors.New("transport: down")
+			}
+			return inner.Post(ctx, path, payload)
+		}), nil
+	}
+	if _, err := renewOnce(context.Background(), failing, current, dir); err == nil {
+		t.Fatal("expected ambiguous failure")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		RenewalLoop(ctx, failing, current, dir, testLogger(), func(*identity.Identity) {})
+	}()
+	time.Sleep(60 * time.Millisecond) // land inside the retry/backoff loop
+	cancel()
+	select {
+	case <-loopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RenewalLoop leaked goroutines/timers after cancellation")
+	}
+	// Pending must still be intact for the next process/loop.
+	if _, _, ok := identity.PendingRenewal(dir); !ok {
+		t.Fatal("cancellation must not cost the pending material")
+	}
+}
+
+func TestExplicitRefusalDiscardsPendingWithoutAssumingNewKey(t *testing.T) {
+	shrinkBackoff(t)
+	dir := t.TempDir()
+	current := seededIdentity(t, dir)
+	server := &statefulServer{
+		t: t, acceptedKey: &current.Key().PublicKey, refuseActivations: true,
+	}
+
+	_, err := renewOnce(context.Background(), server.factory(), current, dir)
 	if err == nil {
 		t.Fatal("refused activation must surface as an error")
 	}
 	if _, _, pending := identity.PendingRenewal(dir); pending {
-		t.Fatal("refused pending renewal must be discarded")
+		t.Fatal("an explicit refusal must discard the pending marker")
 	}
 	still, loadErr := identity.LoadCurrent(dir)
 	if loadErr != nil || !still.Key().Equal(current.Key()) {
-		t.Fatalf("current identity must keep working after refusal: %v", loadErr)
+		t.Fatalf("the refused new key must never be assumed current: %v", loadErr)
+	}
+	if !server.accepts(current) {
+		t.Fatal("old key must keep working after an explicit refusal")
 	}
 }
 
 func TestPrepareFailureLeavesNoPendingState(t *testing.T) {
 	dir := t.TempDir()
 	current := seededIdentity(t, dir)
-	server := &renewalServer{t: t, prepareStatus: 403}
-	_, err := renewOnce(context.Background(), factoryFor(server), current, dir)
+	server := &statefulServer{t: t, acceptedKey: &current.Key().PublicKey, refusePrepares: true}
+	_, err := renewOnce(context.Background(), server.factory(), current, dir)
 	if err == nil {
 		t.Fatal("refused prepare must surface as an error")
 	}
@@ -209,11 +470,9 @@ func TestPrepareFailureLeavesNoPendingState(t *testing.T) {
 	}
 }
 
-func TestReconcileWithRefusedPendingFallsBackToCurrent(t *testing.T) {
+func TestStartupReconcileWithRefusedPendingFallsBackToCurrent(t *testing.T) {
 	dir := t.TempDir()
 	current := seededIdentity(t, dir)
-	// Manually plant a pending renewal (simulating a crash), then have the
-	// server refuse it (e.g., pending expired server-side).
 	key, _ := identity.GenerateKey()
 	bundleID, err := identity.SaveBundle(
 		dir, current.AgentID, key, selfSigned(t, key), "ca", time.Now().Add(time.Hour),
@@ -224,9 +483,11 @@ func TestReconcileWithRefusedPendingFallsBackToCurrent(t *testing.T) {
 	if err := identity.SetPending(dir, bundleID, "renewal-x"); err != nil {
 		t.Fatalf("pending: %v", err)
 	}
-	server := &renewalServer{t: t, activateStatus: 403}
+	server := &statefulServer{
+		t: t, acceptedKey: &current.Key().PublicKey, refuseActivations: true,
+	}
 	reconciled := ReconcilePendingRenewal(
-		context.Background(), factoryFor(server), dir, current, testLogger(),
+		context.Background(), server.factory(), dir, current, testLogger(),
 	)
 	if !reconciled.Key().Equal(current.Key()) {
 		t.Fatal("refused pending must fall back to the current identity")

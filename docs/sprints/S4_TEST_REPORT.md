@@ -25,13 +25,27 @@ queue overflow dropping + raising the reconcile signal; sync-cycle state
 transitions (`reconciling → fresh`); clean cancellation teardown of every
 goroutine; optional CRDs collected only when present; renewal delay
 targeting jittered 2/3 lifetime. Renewal protocol coverage
-(`renewal_test.go`): promotion only after activation
-(`TestRenewOncePromotesOnlyAfterActivation`); a lost activation response
-keeps the old identity live with the pending bundle intact and
-`ReconcilePendingRenewal` finishes the promotion at restart
-(`TestLostActivationResponseKeepsOldIdentityUntilReconcile`); refused
-activations discard the pending and keep the current identity; refused
-prepares leave no pending state. Identity/bundle coverage
+(`renewal_test.go`, against a STATEFUL fake server that tracks which key
+it accepts and can commit a promotion while losing the response):
+promotion only after activation
+(`TestRenewOncePromotesOnlyAfterActivation`); the two ambiguity cases are
+distinct and both proven —
+**request never committed**: the old identity keeps working server-side,
+the pending bundle and renewal id survive every retry, and the SAME
+pending activates once the server returns
+(`TestActivationNeverReachedServerKeepsOldIdentityAndRetries`);
+**request committed but every response lost**: the server already
+refuses the old key (asserted with a real 403 probe), yet the RUNNING
+RenewalLoop reconciles in process — same renewal id, same bundle, zero
+new prepares, idempotent 200, atomic local promotion, transport-swap
+callback fired — with no restart
+(`TestActivationCommittedButAllResponsesLostRecoversWithoutRestart`).
+Context cancellation mid-retry exits cleanly without losing the pending
+material (`TestCancellationDuringAmbiguousRetriesIsClean`); explicit
+refusals discard the pending WITHOUT ever assuming the new key
+(`TestExplicitRefusalDiscardsPendingWithoutAssumingNewKey`); refused
+prepares leave no pending state; captured logs carry no private
+material. Identity/bundle coverage
 (`store_test.go`): versioned bundles are inert until the atomic pointer
 names them; a failed promote keeps the old identity working; a simulated
 crash mid-renewal loads the fully-old identity and, after promotion, the

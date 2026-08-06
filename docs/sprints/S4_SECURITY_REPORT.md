@@ -36,11 +36,21 @@ crash/retry safe: prepare signs a fresh-key CSR into a pending slot
 (public material, bounded expiry) while the current key stays fully
 valid; activation — signed with the PENDING key — is the promotion proof;
 retries of either phase are idempotent, so a lost response can never
-strand the agent on a key the server no longer accepts. Agent-side, the
-new bundle is a versioned directory promoted by an atomic pointer only
-after activation, and an interrupted renewal reconciles at startup
-through the same idempotent activation; a crash at any instant leaves
-either the complete old or the complete new identity. The CA private
+strand the agent on a key the server no longer accepts. The two
+ambiguity cases behave differently and both are safe: if the activation
+never committed, the old identity keeps working while the SAME pending
+renewal retries; if it committed but the response was lost, the server
+has already switched to the new key — and the RUNNING agent reconciles
+in process (bounded, context-aware retries of the same renewal id and
+bundle, idempotent acknowledgement, atomic promotion, transport swap)
+without waiting for a restart. No new renewal ever starts while a
+pending one exists; explicit refusals discard the pending without
+assuming the new key; unreachable servers never cost the pending
+material. Agent-side, the new bundle is a versioned directory promoted
+by an atomic pointer only after activation, and an interrupted renewal
+also reconciles at startup through the same idempotent activation; a
+crash at any instant leaves either the complete old or the complete new
+identity. The CA private
 key is referenced only through external file configuration; a
 production-like environment refuses to start the internal app without it
 (fail-closed `validate_runtime_security`).

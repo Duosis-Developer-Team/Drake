@@ -25,13 +25,19 @@ type renewalResponse struct {
 // key (activation proof).
 type SenderFactory func(*identity.Identity) (Sender, error)
 
-// ReconcilePendingRenewal finishes an interrupted renewal at startup: if a
-// prepared bundle exists on disk, activation (signed with the pending key)
-// is the single reconciliation point — the server promotes if it had not,
-// or acknowledges idempotently if it already had. On explicit refusal the
-// pending bundle is discarded and the current identity continues; on
-// transport failure the current identity continues and the next renewal
-// cycle retries from scratch.
+// Activation-retry backoff bounds for ambiguous transport failures.
+// Package vars so tests can shrink them; production never mutates these.
+var (
+	activationRetryBase = 5 * time.Second
+	activationRetryMax  = time.Minute
+)
+
+// ReconcilePendingRenewal finishes an interrupted renewal at startup with
+// ONE activation attempt: the server promotes if it had not, or
+// acknowledges idempotently if it already had. On explicit refusal the
+// pending bundle is discarded; on an ambiguous transport failure the
+// pending survives untouched — RenewalLoop's settlePending keeps
+// reconciling it in process with bounded backoff.
 func ReconcilePendingRenewal(
 	ctx context.Context,
 	factory SenderFactory,
@@ -39,41 +45,110 @@ func ReconcilePendingRenewal(
 	current *identity.Identity,
 	logger *slog.Logger,
 ) *identity.Identity {
+	settled, outcome := tryActivatePending(ctx, factory, stateDir, logger)
+	switch outcome {
+	case pendingPromoted:
+		logger.Info("interrupted renewal completed at startup")
+		return settled
+	case pendingAmbiguous:
+		logger.Warn("pending renewal activation ambiguous at startup; " +
+			"the renewal loop keeps reconciling it in process")
+	}
+	return current
+}
+
+type pendingOutcome int
+
+const (
+	pendingNone pendingOutcome = iota
+	pendingPromoted
+	pendingRefused
+	pendingAmbiguous
+)
+
+// tryActivatePending makes ONE activation attempt for a pending renewal.
+// Explicit refusal discards the pending (the new key is NEVER assumed
+// current without the server's word); an ambiguous transport failure
+// keeps the SAME bundle and renewal id on disk for the next attempt.
+func tryActivatePending(
+	ctx context.Context, factory SenderFactory, stateDir string, logger *slog.Logger,
+) (*identity.Identity, pendingOutcome) {
 	bundleID, renewalID, ok := identity.PendingRenewal(stateDir)
 	if !ok {
-		return current
+		return nil, pendingNone
 	}
 	pending, err := identity.LoadBundle(stateDir, bundleID)
 	if err != nil {
 		logger.Warn("pending renewal bundle unreadable; discarding", "error", err.Error())
 		identity.ClearPending(stateDir)
-		return current
+		return nil, pendingRefused
 	}
 	promoted, err := activate(ctx, factory, pending, renewalID)
 	if err != nil {
-		logger.Warn("pending renewal activation failed; keeping current identity",
-			"error", err.Error())
-		return current
+		// Ambiguous: the server may or may not have committed. The pending
+		// material and renewal id MUST survive for the idempotent retry.
+		return nil, pendingAmbiguous
 	}
 	if !promoted {
 		identity.ClearPending(stateDir)
-		return current
+		return nil, pendingRefused
 	}
 	if err := identity.Promote(stateDir, bundleID); err != nil {
 		logger.Error("promoting activated bundle failed", "error", err.Error())
-		return current
+		return nil, pendingAmbiguous
 	}
 	identity.ClearPending(stateDir)
-	logger.Info("interrupted renewal completed at startup")
-	return pending
+	return pending, pendingPromoted
+}
+
+// settlePending reconciles any pending renewal IN PROCESS before the loop
+// may sleep or start a new renewal. The dangerous race this closes: the
+// server committed the activation but every response was lost — the old
+// key is already dead server-side, so waiting for a restart would leave
+// the agent locked out while liveness stays green. Ambiguous failures
+// retry the SAME renewal id and bundle with bounded, context-aware
+// backoff; unreachable servers never cost the pending material; explicit
+// refusals discard it without ever assuming the new key.
+func settlePending(
+	ctx context.Context,
+	factory SenderFactory,
+	stateDir string,
+	current *identity.Identity,
+	logger *slog.Logger,
+	onRenewed func(*identity.Identity),
+) *identity.Identity {
+	backoff := activationRetryBase
+	for ctx.Err() == nil {
+		settled, outcome := tryActivatePending(ctx, factory, stateDir, logger)
+		switch outcome {
+		case pendingNone, pendingRefused:
+			return current
+		case pendingPromoted:
+			logger.Info("pending renewal reconciled in process",
+				"not_after", settled.NotAfter.UTC().Format(time.RFC3339))
+			onRenewed(settled)
+			return settled
+		case pendingAmbiguous:
+			logger.Warn("activation ambiguous; retrying the same renewal id",
+				"backoff", backoff.String())
+			select {
+			case <-ctx.Done():
+				return current
+			case <-time.After(backoff):
+			}
+			backoff = min(backoff*2, activationRetryMax)
+		}
+	}
+	return current
 }
 
 // RenewalLoop rotates the certificate at roughly two thirds of its
 // lifetime (jittered). Each renewal is two-phase and idempotent:
 // prepare (CSR under the CURRENT key) → atomic bundle save → activation
-// proof (signed with the NEW key) → atomic local promotion. The current
-// key keeps working until activation, so a lost response at any step
-// leaves a working agent. Fresh keys every time; failures retry.
+// proof (signed with the NEW key) → atomic local promotion. Before any
+// sleep or new renewal, settlePending finishes whatever is on disk — no
+// new renewal ever starts while a pending one exists, and an ambiguous
+// activation is reconciled in process without a restart.
 func RenewalLoop(
 	ctx context.Context,
 	factory SenderFactory,
@@ -84,6 +159,10 @@ func RenewalLoop(
 ) {
 	id := current
 	for ctx.Err() == nil {
+		id = settlePending(ctx, factory, stateDir, id, logger, onRenewed)
+		if ctx.Err() != nil {
+			return
+		}
 		wait := renewalDelay(time.Now(), id.NotAfter)
 		select {
 		case <-ctx.Done():
@@ -96,10 +175,15 @@ func RenewalLoop(
 				return
 			}
 			logger.Warn("certificate renewal failed; retrying", "error", err.Error())
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Minute):
+			// With a pending on disk, settlePending owns the backoff at the
+			// top of the loop; pause only when there is nothing to settle
+			// (e.g. the prepare itself was refused) to avoid a tight loop.
+			if _, _, pendingExists := identity.PendingRenewal(stateDir); !pendingExists {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Minute):
+				}
 			}
 			continue
 		}

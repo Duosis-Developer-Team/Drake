@@ -19,9 +19,21 @@ Renewal is two-phase and crash/retry safe; no operator action is needed:
 4. **Promote** — the agent atomically points its identity at the new
    bundle and swaps its transport.
 
-A lost response at ANY step recovers: prepare retries return the same
-pending certificate; activation retries acknowledge idempotently; an
-agent restarted between save and activate reconciles at startup through
+A lost response at ANY step recovers, and the two ambiguity cases are
+worth knowing apart:
+
+- **The activation never committed** (server unreachable): the OLD key
+  keeps working; the agent retries the SAME pending renewal with bounded
+  backoff and never deletes the pending material.
+- **The activation committed but the response was lost**: the server has
+  already switched to the new key and refuses the old one — the RUNNING
+  agent detects this through the same idempotent activation retry and
+  promotes the pending bundle in process (same renewal id, no new CSR,
+  transport swapped automatically). No restart is needed or expected.
+
+No new renewal ever starts while a pending one exists; an explicit
+server refusal discards the pending without ever assuming the new key.
+An agent restarted mid-renewal reconciles the pending at startup through
 the same activation call. The cluster detail screen shows certificate
 expiry; an "expires soon" badge appears under 5 days — if you see it,
 renewal has been failing long enough to matter.
