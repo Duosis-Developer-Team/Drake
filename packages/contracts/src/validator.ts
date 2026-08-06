@@ -14,7 +14,8 @@ export type SchemaName =
   | "backup-event"
   | "metric-catalog"
   | "query-template"
-  | "dashboard-template";
+  | "dashboard-template"
+  | "agent-inventory";
 
 export interface ValidationIssue {
   /** Instance path of the problem ("" = document root). */
@@ -38,6 +39,7 @@ const SCHEMA_FILES: Record<SchemaName, string> = {
   "metric-catalog": "metric-catalog.schema.json",
   "query-template": "query-template.schema.json",
   "dashboard-template": "dashboard-template.schema.json",
+  "agent-inventory": "agent-inventory.schema.json",
 };
 
 // CJS/ESM interop under NodeNext: the default import of these CommonJS

@@ -76,6 +76,27 @@ class Settings(BaseSettings):
     # internal listener/service/network policy, not this flag).
     internal_metrics_enabled: bool = False
 
+    # --- Cluster agent internal API (ADR-0016) ---
+    # File/external-secret REFERENCES only; key material never lives in the
+    # repository, database, logs, or responses.
+    agent_ca_cert_file: str = ""
+    agent_ca_key_file: str = ""
+    agent_cert_ttl_days: int = 14
+    # Inventory retention/cleanup bounds (ADR-0017 bounded completion
+    # window). Safe production defaults; local/test may shrink them, and
+    # validate_runtime_security refuses unsafe values elsewhere.
+    agent_snapshot_ttl_seconds: int = 900
+    agent_max_pending_snapshots: int = 4
+    agent_snapshot_history_limit: int = 50
+    agent_change_event_retention_days: int = 30
+    agent_change_event_row_limit: int = 20_000
+    agent_cleanup_batch_rows: int = 5_000
+    # The internal agent listener's own TLS identity (server cert) and the
+    # client-CA used for CERT_REQUIRED verification are configured on the
+    # listener (scripts/run_internal_agent_api.py); these settings gate the
+    # fail-closed production boot below.
+    internal_agent_api_enabled: bool = False
+
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
 
@@ -92,6 +113,16 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "internal metrics cannot be enabled on the public API outside local/test"
             )
+        if self.internal_agent_api_enabled and not (
+            self.agent_ca_cert_file and self.agent_ca_key_file
+        ):
+            raise RuntimeError("internal agent API requires Agent CA material outside local/test")
+        if self.agent_snapshot_ttl_seconds < 300:
+            raise RuntimeError("snapshot completion TTL below 300s is local/test only")
+        if self.agent_change_event_retention_days < 7:
+            raise RuntimeError("change-event retention below 7 days is local/test only")
+        if self.agent_snapshot_history_limit < 10:
+            raise RuntimeError("snapshot history limit below 10 is local/test only")
 
 
 @lru_cache

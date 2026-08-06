@@ -1,0 +1,65 @@
+# Drake cluster agent — reusable, UNAPPLIED template.
+# This chart is rendered and policy-checked in CI; it is never installed on
+# a real or shared cluster by the repository itself. Disposable test
+# clusters are the only sanctioned apply target during acceptance runs.
+
+image:
+  repository: ghcr.io/duosis-developer-team/drake-cluster-agent
+  # Digest-pinned at deploy time by the operator; the empty default keeps
+  # accidental installs from pulling a floating tag. Built from
+  # apps/cluster-agent/Dockerfile (binary at /usr/local/bin/drake-agent
+  # with a `healthcheck` subcommand — the liveness contract).
+  digest: ""
+  # devTag is ONLY for disposable smoke clusters with locally imported
+  # images (pullPolicy Never); production renders fail without a digest.
+  devTag: ""
+  pullPolicy: IfNotPresent
+
+# Drake cluster identity (UUID from the Drake catalog).
+clusterId: ""
+clusterName: ""
+
+# Outbound-only internal API endpoint (HTTPS).
+apiBaseUrl: ""
+
+# Existing Secrets ONLY — this chart never templates credential material.
+# Each secret is created out-of-band by the operator.
+serverCA:
+  existingSecret: ""   # secret with the internal listener CA bundle
+  key: ca.pem
+enrollmentToken:
+  existingSecret: ""   # one-time token; consumed at first start, then inert
+  key: token
+
+logLevel: info
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Loopback liveness probe port (never exposed via Service; no Service exists).
+healthPort: 8090
+
+networkPolicy:
+  enabled: true
+  # FAIL-CLOSED egress: every destination is explicit. Rendering fails on
+  # empty values, and the policy gate refuses 0.0.0.0/0 and ::/0 — "the
+  # whole internet" is never a reviewable destination.
+  # The Drake internal gateway endpoint (CIDR + port):
+  apiEndpointCIDR: ""
+  apiEndpointPort: 443
+  # The Kubernetes API: egress policies match the POST-DNAT destination,
+  # so this must cover the REAL apiserver endpoint addresses
+  # (`kubectl get endpoints kubernetes`), not the in-cluster service VIP.
+  kubernetesApiCIDR: ""
+  kubernetesApiPort: 6443
+  # Cluster DNS: restricted to the kube-dns service pods, not "any:53".
+  dnsNamespace: kube-system
+  dnsPodSelector: "k8s-app: kube-dns"
+
+serviceAccount:
+  name: drake-cluster-agent

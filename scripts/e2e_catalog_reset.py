@@ -22,6 +22,17 @@ async def main() -> None:
     try:
         async with engine.begin() as connection:
             for table in (
+                # Sprint 4 agent/inventory tables reference clusters with
+                # RESTRICT — cleared first (guarded: they may not exist yet
+                # on a database migrated only part-way).
+                "cluster_inventory_state",
+                "inventory_change_events",
+                "inventory_resources",
+                "inventory_staging_resources",
+                "inventory_snapshot_pages",
+                "inventory_snapshots",
+                "cluster_agents",
+                "agent_enrollment_tokens",
                 "integrations",
                 "environment_services",
                 "service_definitions",
@@ -30,7 +41,11 @@ async def main() -> None:
                 "projects",
                 "clusters",
             ):
-                await connection.execute(text(f"DELETE FROM {table}"))  # noqa: S608
+                exists = (
+                    await connection.execute(text("SELECT to_regclass(:name)"), {"name": table})
+                ).scalar_one()
+                if exists is not None:
+                    await connection.execute(text(f"DELETE FROM {table}"))  # noqa: S608
             # Grants that pointed at non-org scopes (scope FKs are RESTRICT).
             await connection.execute(
                 text(

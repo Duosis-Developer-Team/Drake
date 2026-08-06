@@ -1,37 +1,109 @@
-// Package enrollment defines how an agent obtains its service identity.
+// Package enrollment exchanges a one-time token for the agent's identity.
 //
-// Contract (implemented in a later sprint):
-//   - The operator provisions a single-use, short-lived enrollment token.
-//   - The agent exchanges it (outbound TLS) for a client certificate.
-//   - The token is invalid after first use; certificates rotate.
-//   - Tokens and keys never appear in logs (see internal/redact).
+// The private key is generated locally and never leaves the process; only
+// the CSR travels. Tokens and keys never appear in logs or errors.
 package enrollment
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/identity"
 )
 
-// ErrNotImplemented marks the Sprint 0 stub.
-var ErrNotImplemented = errors.New("enrollment not implemented (foundation stub)")
+// ErrRefused is returned for any enrollment rejection (no detail leaks).
+var ErrRefused = errors.New("enrollment refused")
 
-// Credentials is a reference to the agent's obtained identity material.
-// It intentionally never carries raw key bytes through logs or errors.
-type Credentials struct {
-	// CertificateRef points at where the certificate is stored (file path).
-	CertificateRef string
-	// KeyRef points at where the private key is stored (file path).
-	KeyRef string
+type response struct {
+	AgentID             string `json:"agent_id"`
+	ClusterID           string `json:"cluster_id"`
+	CertificatePEM      string `json:"certificate_pem"`
+	CAChainPEM          string `json:"ca_chain_pem"`
+	CertificateNotAfter string `json:"certificate_not_after"`
 }
 
-// Enroller exchanges a one-time token for agent credentials.
-type Enroller interface {
-	Exchange(ctx context.Context, oneTimeToken string) (Credentials, error)
-}
+// Exchange enrolls against the internal API and persists the identity.
+func Exchange(ctx context.Context, endpoint, serverCAFile, token, clusterID, agentVersion, stateDir string) (*identity.Identity, error) {
+	key, err := identity.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+	csr, err := identity.CSRPEM(key)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"api_version":   "drake.duosis.com/agent/v1",
+		"kind":          "enrollment_request",
+		"token":         token,
+		"csr_pem":       csr,
+		"cluster_id":    clusterID,
+		"agent_version": agentVersion,
+	})
+	if err != nil {
+		return nil, err
+	}
 
-// NotImplemented is the Sprint 0 stub.
-type NotImplemented struct{}
-
-func (NotImplemented) Exchange(_ context.Context, _ string) (Credentials, error) {
-	return Credentials{}, ErrNotImplemented
+	caPool := x509.NewCertPool()
+	caPEM, err := os.ReadFile(serverCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read server ca: %w", err)
+	}
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("server ca not parseable")
+	}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: caPool, MinVersion: tls.VersionTLS12},
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	request, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, endpoint+"/internal/v1/agent/enroll", bytes.NewReader(payload),
+	)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("enrollment transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusCreated {
+		return nil, ErrRefused
+	}
+	var enrolled response
+	if err := json.Unmarshal(body, &enrolled); err != nil {
+		return nil, fmt.Errorf("enrollment response malformed: %w", err)
+	}
+	notAfter, err := time.Parse(time.RFC3339, enrolled.CertificateNotAfter)
+	if err != nil {
+		notAfter = time.Now().Add(24 * time.Hour)
+	}
+	// Versioned bundle + atomic pointer promotion: a crash mid-save leaves
+	// no half identity behind.
+	bundleID, err := identity.SaveBundle(
+		stateDir, enrolled.AgentID, key, enrolled.CertificatePEM, enrolled.CAChainPEM, notAfter,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := identity.Promote(stateDir, bundleID); err != nil {
+		return nil, err
+	}
+	return identity.LoadCurrent(stateDir)
 }

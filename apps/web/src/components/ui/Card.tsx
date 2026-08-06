@@ -2,13 +2,18 @@ export function Card({
   title,
   children,
   footer,
+  "data-testid": testId,
 }: {
   title?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  "data-testid"?: string;
 }) {
   return (
-    <section className="flex flex-col rounded-xl border border-border bg-surface shadow-sm">
+    <section
+      data-testid={testId}
+      className="flex flex-col rounded-xl border border-border bg-surface shadow-sm"
+    >
       {title ? (
         <header className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-ink">{title}</h2>

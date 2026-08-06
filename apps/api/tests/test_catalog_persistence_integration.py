@@ -40,6 +40,23 @@ def migrated_db() -> None:
 
 async def reset_catalog(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
+        # Sprint 4 agent/inventory tables reference clusters with RESTRICT;
+        # clear them first whenever they exist (order-independent resets).
+        for table in (
+            "cluster_inventory_state",
+            "inventory_change_events",
+            "inventory_resources",
+            "inventory_staging_resources",
+            "inventory_snapshot_pages",
+            "inventory_snapshots",
+            "cluster_agents",
+            "agent_enrollment_tokens",
+        ):
+            exists = (
+                await connection.execute(text("SELECT to_regclass(:name)"), {"name": table})
+            ).scalar_one()
+            if exists is not None:
+                await connection.execute(text(f"DELETE FROM {table}"))  # noqa: S608
         for table in (
             "integrations",
             "environment_services",

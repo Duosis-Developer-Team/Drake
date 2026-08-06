@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "drake-agent.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "drake-agent.labels" . | nindent 4 }}
+spec:
+  # Single replica BY DESIGN (ADR-0017): the server-side protocol is
+  # idempotent and restart-safe; a second replica would need Lease
+  # permissions the agent deliberately does not have.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake-agent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "drake-agent.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: true
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: {{ include "drake-agent.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: DRAKE_AGENT_API_BASE_URL
+              value: {{ required "apiBaseUrl is required" .Values.apiBaseUrl | quote }}
+            - name: DRAKE_AGENT_CLUSTER_ID
+              value: {{ required "clusterId is required" .Values.clusterId | quote }}
+            - name: DRAKE_AGENT_CLUSTER_NAME
+              value: {{ required "clusterName is required" .Values.clusterName | quote }}
+            - name: DRAKE_AGENT_SERVER_CA_FILE
+              value: /etc/drake-agent/server-ca/{{ .Values.serverCA.key }}
+            - name: DRAKE_AGENT_ENROLLMENT_TOKEN_FILE
+              value: /etc/drake-agent/enrollment/{{ .Values.enrollmentToken.key }}
+            - name: DRAKE_AGENT_STATE_DIR
+              value: /var/lib/drake-agent
+            - name: DRAKE_AGENT_LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: DRAKE_AGENT_HEALTH_LISTEN_ADDR
+              value: "127.0.0.1:{{ .Values.healthPort }}"
+          # Liveness stays loopback-only: the agent binary's own
+          # healthcheck subcommand (contract with apps/cluster-agent/
+          # Dockerfile — no shell/curl/wget exists in the image). It
+          # probes ONLY local process health with a bounded timeout, so
+          # API or Kubernetes hiccups never become restart storms.
+          livenessProbe:
+            exec:
+              command:
+                - /usr/local/bin/drake-agent
+                - healthcheck
+                - "127.0.0.1:{{ .Values.healthPort }}"
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/drake-agent
+            - name: server-ca
+              mountPath: /etc/drake-agent/server-ca
+              readOnly: true
+            - name: enrollment
+              mountPath: /etc/drake-agent/enrollment
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Identity state: emptyDir keeps the private key node-local and
+        # ephemeral; a restart re-enrolls only if the pod is rescheduled
+        # (one-time tokens make that an explicit operator action).
+        - name: state
+          emptyDir:
+            medium: Memory
+        - name: tmp
+          emptyDir:
+            medium: Memory
+        - name: server-ca
+          secret:
+            secretName: {{ required "serverCA.existingSecret is required (existing secrets only)" .Values.serverCA.existingSecret }}
+        - name: enrollment
+          secret:
+            secretName: {{ required "enrollmentToken.existingSecret is required (existing secrets only)" .Values.enrollmentToken.existingSecret }}
+            optional: true

@@ -222,3 +222,36 @@ describe("backup event schema", () => {
     expect(result.valid).toBe(false);
   });
 });
+
+describe("agent-inventory contract", () => {
+  const read = (name: string) =>
+    readFileSync(join(__dirname, "..", "fixtures", "agent", name), "utf8");
+
+  it("accepts a bounded snapshot page", () => {
+    const result = validateContent(read("snapshot-page.json"), "agent-inventory");
+    expect(result.issues).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects Secret resources at the schema boundary", () => {
+    const result = validateContent(read("invalid-secret-kind.json"), "agent-inventory");
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects raw manifest fields (additionalProperties: false)", () => {
+    const result = validateContent(read("invalid-raw-manifest.json"), "agent-inventory");
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects ConfigMap and oversized label maps", () => {
+    const page = JSON.parse(read("snapshot-page.json"));
+    page.resources[0].kind = "ConfigMap";
+    expect(validateContent(JSON.stringify(page), "agent-inventory").valid).toBe(false);
+
+    const oversized = JSON.parse(read("snapshot-page.json"));
+    oversized.resources[0].labels = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [`label-${index}`, "value"]),
+    );
+    expect(validateContent(JSON.stringify(oversized), "agent-inventory").valid).toBe(false);
+  });
+});

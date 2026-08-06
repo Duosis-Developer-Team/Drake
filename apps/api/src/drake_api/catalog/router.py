@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from drake_api.agents.observation import agent_observations
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.catalog.authz import escape_like, visible_scope_ids
 from drake_api.db import get_engine
@@ -578,7 +579,14 @@ _CLUSTER_COLUMNS = """
 """
 
 
-def _cluster_payload(row: Any) -> dict[str, Any]:
+def _cluster_payload(row: Any, observation: dict[str, Any] | None = None) -> dict[str, Any]:
+    # Capability states come from REAL agent observation (ADR-0017 §4):
+    # no enrolled agent stays not_configured; a heartbeat alone never
+    # upgrades inventory beyond what snapshots/events actually delivered.
+    observation = observation or {
+        "agent": {"status": "not_configured"},
+        "inventory": {"state": "not_configured"},
+    }
     return {
         "id": str(row[0]),
         "cluster_ref": row[1],
@@ -588,7 +596,11 @@ def _cluster_payload(row: Any) -> dict[str, Any]:
         "version": row[9],
         "scope": {"type": "cluster", "ref": row[1]},
         "source": _provenance(row, 5),
-        "operational": {"agent": "not_configured", "inventory": "not_configured"},
+        "operational": {
+            "agent": observation["agent"]["status"],
+            "inventory": observation["inventory"]["state"],
+        },
+        "agent_observation": observation,
         "as_of": _as_of(),
     }
 
@@ -633,12 +645,13 @@ async def list_clusters(
                 params,
             )
         ).all()
-    page = rows[:limit]
+        page = rows[:limit]
+        observations = await agent_observations(connection, [row[0] for row in page])
     next_cursor = (
         _encode_cursor(page[-1][1], str(page[-1][0])) if len(rows) > limit and page else None
     )
     return {
-        "clusters": [_cluster_payload(row) for row in page],
+        "clusters": [_cluster_payload(row, observations.get(row[0])) for row in page],
         "next_cursor": next_cursor,
         "as_of": _as_of(),
     }
@@ -663,7 +676,8 @@ async def get_cluster(
         ).first()
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
-        payload = _cluster_payload(row)
+        observations = await agent_observations(connection, [row[0]])
+        payload = _cluster_payload(row, observations.get(row[0]))
 
         env_scopes = await visible_scope_ids(connection, auth.principal, "environment.view")
         referencing = (

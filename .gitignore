@@ -66,3 +66,7 @@ Thumbs.db
 logs/
 tmp/
 .cache/
+
+# --- Disposable full-chain E2E agent stack (script-managed) ---
+/.e2e-agent/
+/.e2e-agent-smoke/
