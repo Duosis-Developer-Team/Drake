@@ -192,8 +192,16 @@ func TestSequencesAreStrictlyMonotonic(t *testing.T) {
 	previous := int64(0)
 	for _, message := range sender.all() {
 		sequence := message.payload["sequence"].(int64)
-		if sequence <= previous {
-			t.Fatalf("sequence not monotonic: %d after %d (%s)",
+		if message.payload["kind"] == "heartbeat" {
+			// Heartbeats report the counter without consuming a number —
+			// they must never punch gaps into the inventory chain.
+			if sequence != previous {
+				t.Fatalf("heartbeat consumed a sequence number: %d after %d", sequence, previous)
+			}
+			continue
+		}
+		if sequence != previous+1 {
+			t.Fatalf("inventory chain not gapless: %d after %d (%s)",
 				sequence, previous, message.payload["kind"])
 		}
 		previous = sequence

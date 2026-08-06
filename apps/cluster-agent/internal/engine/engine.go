@@ -118,7 +118,9 @@ func (e *Engine) setInventoryState(state string) {
 	e.mu.Unlock()
 }
 
-// nextSequence hands out the monotonic message sequence.
+// nextSequence hands out the monotonic INVENTORY message sequence. Only
+// snapshot and watch messages consume numbers — they are serialized within
+// a sync cycle, so the server can require a strict, gapless chain.
 func (e *Engine) nextSequence() int64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -126,11 +128,20 @@ func (e *Engine) nextSequence() int64 {
 	return e.sequence
 }
 
+// currentSequence reads the counter without consuming a number; heartbeats
+// report it for observability but never advance the inventory chain (they
+// run on their own goroutine and would otherwise punch fake gaps into it).
+func (e *Engine) currentSequence() int64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.sequence
+}
+
 func (e *Engine) sourceTime() string {
 	return e.opts.Now().UTC().Format(time.RFC3339)
 }
 
-func (e *Engine) base(kind string) map[string]any {
+func (e *Engine) payload(kind string, sequence int64) map[string]any {
 	return map[string]any{
 		"api_version":   apiVersion,
 		"kind":          kind,
@@ -139,8 +150,13 @@ func (e *Engine) base(kind string) map[string]any {
 		"agent_version": e.opts.AgentVersion,
 		"request_id":    uuid.NewString(),
 		"source_time":   e.sourceTime(),
-		"sequence":      e.nextSequence(),
+		"sequence":      sequence,
 	}
+}
+
+// base consumes the next inventory sequence number.
+func (e *Engine) base(kind string) map[string]any {
+	return e.payload(kind, e.nextSequence())
 }
 
 func (e *Engine) post(ctx context.Context, path string, payload map[string]any) error {
@@ -477,7 +493,8 @@ func (e *Engine) heartbeatLoop(ctx context.Context) {
 }
 
 func (e *Engine) sendHeartbeat(ctx context.Context) error {
-	payload := e.base("heartbeat")
+	// Heartbeat reports the current sequence without consuming a number.
+	payload := e.payload("heartbeat", e.currentSequence())
 	payload["inventory_state"] = e.InventoryState()
 	return e.post(ctx, "/internal/v1/agent/heartbeat", payload)
 }
