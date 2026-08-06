@@ -5,6 +5,7 @@ refused with a typed retryable error — budgets are never bypassed.
 """
 
 import asyncio
+import contextlib
 import math
 import uuid
 from dataclasses import dataclass
@@ -137,11 +138,28 @@ class ConcurrencyLeases:
         await self._release(held)
 
     async def _release(self, held: list[tuple[str, str]]) -> None:
-        for key, token in held:
+        """Cancellation-proof own-token removal.
+
+        Release often runs inside a finally while the surrounding task is
+        being cancelled (client disconnect); a bare await could be
+        interrupted mid-command and leak tokens until the TTL sweep. Every
+        ZREM starts immediately and is shielded — a cancellation is
+        re-raised only AFTER all removals have actually finished. Genuine
+        Redis failures stay swallowed: the bounded TTL is the backstop.
+        """
+        pending = [asyncio.ensure_future(self._redis.zrem(key, token)) for key, token in held]
+        cancelled = False
+        for task in pending:
             try:
-                await self._redis.zrem(key, token)
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+                with contextlib.suppress(Exception):
+                    await task  # the removal itself still completes
             except Exception:  # noqa: S110 - leases self-expire via TTL
                 pass
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 def keys_with_limits(keys: list[str]) -> list[tuple[str, int]]:
