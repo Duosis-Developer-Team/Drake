@@ -24,6 +24,12 @@ const FORBIDDEN_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: "kubernetes api host", pattern: new RegExp("kuber" + "netes\\.default") },
   { name: "kubernetes api path", pattern: new RegExp("/api/v1/(pods|nodes|secrets)") },
   { name: "kubeconfig", pattern: new RegExp("kube" + "config", "i") },
+  // Telemetry era: the browser must never know provider query APIs,
+  // provider ports, connector internals, or config references.
+  { name: "provider query api", pattern: new RegExp("/api/v1/query") },
+  { name: "local provider port", pattern: new RegExp(":59" + "090") },
+  { name: "provider config ref", pattern: new RegExp("config_" + "ref") },
+  { name: "promql", pattern: new RegExp("prom" + "ql", "i") },
   // No absolute runtime URLs at all in Sprint 0 web code.
   { name: "absolute url", pattern: new RegExp("https?:" + "//", "i") },
 ];

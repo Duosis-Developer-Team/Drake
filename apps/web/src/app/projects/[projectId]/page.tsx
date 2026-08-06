@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { Suspense } from "react";
 
 import {
   CriticalityBadge,
@@ -14,6 +15,7 @@ import {
 } from "@/components/catalog/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
 import { DataState } from "@/components/state/DataState";
+import { ProjectMetricsSection } from "@/components/telemetry/ProjectMetricsSection";
 import { Card } from "@/components/ui/Card";
 import type { Environment, Project } from "@/lib/catalog";
 
@@ -122,6 +124,14 @@ export default function ProjectOverviewPage() {
                 </LoadGate>
               </Card>
             </div>
+
+            <LoadGate value={environments} retry={retryEnvironments}>
+              {(body) => (
+                <Suspense fallback={null}>
+                  <ProjectMetricsSection environments={body.environments} />
+                </Suspense>
+              )}
+            </LoadGate>
 
             <section aria-label="Operational capabilities">
               <h2 className="mb-3 text-sm font-semibold text-ink">
