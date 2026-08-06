@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from drake_api.agents.maintenance import run_inventory_maintenance
 from drake_api.db import dispose_engines
 from harness_s1 import require_it_settings
@@ -34,6 +36,17 @@ from test_catalog_api_integration import seed_catalog_world
 from test_catalog_persistence_integration import reset_catalog
 
 pytestmark = pytest.mark.integration
+
+API_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def migrated_db() -> None:
+    settings = require_it_settings()
+    config = Config(str(API_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(API_ROOT / "alembic"))
+    config.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(config, "head")
 
 
 @pytest.fixture
