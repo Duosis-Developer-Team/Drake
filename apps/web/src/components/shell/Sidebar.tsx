@@ -13,17 +13,22 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-3 border-b border-border px-5">
-        {/* Official Drake brand assets (light/dark variants). */}
+        {/* Official Drake brand assets: 64px (2×) derivatives of the
+            masters in apps/web/assets/brand — full-res never ships. */}
         <img
-          src="/brand/drake-icon-light.png"
+          src="/brand/drake-icon-light-64.png"
           alt=""
           aria-hidden
+          width={32}
+          height={32}
           className="h-8 w-8 rounded-lg dark:hidden"
         />
         <img
-          src="/brand/drake-icon-dark.png"
+          src="/brand/drake-icon-dark-64.png"
           alt=""
           aria-hidden
+          width={32}
+          height={32}
           className="hidden h-8 w-8 rounded-lg dark:block"
         />
         <div className="leading-tight">
