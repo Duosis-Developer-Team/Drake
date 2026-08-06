@@ -1,0 +1,32 @@
+# Drake LOCAL-ONLY Prometheus configuration.
+#
+# Scrapes the deterministic fixture exporter, one job per simulated
+# service target so `up` and every series carry the bounded catalog
+# identity labels (project/environment/service). No real endpoints,
+# no credentials.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: alpha-dev-api
+    metrics_path: /metrics/alpha/dev/api
+    static_configs:
+      - targets: ["fixture-exporter:9464"]
+        labels: {project: alpha, environment: dev, service: api}
+  - job_name: alpha-dev-web
+    metrics_path: /metrics/alpha/dev/web
+    static_configs:
+      - targets: ["fixture-exporter:9464"]
+        labels: {project: alpha, environment: dev, service: web}
+  - job_name: alpha-prod-api
+    metrics_path: /metrics/alpha/prod/api
+    static_configs:
+      - targets: ["fixture-exporter:9464"]
+        labels: {project: alpha, environment: prod, service: api}
+  - job_name: beta-dev-api
+    metrics_path: /metrics/beta/dev/api
+    static_configs:
+      - targets: ["fixture-exporter:9464"]
+        labels: {project: beta, environment: dev, service: api}

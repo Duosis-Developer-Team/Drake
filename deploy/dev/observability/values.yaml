@@ -1,0 +1,100 @@
+# Drake dev-cluster observability values (kube-prometheus-stack).
+#
+# Design constraints (see README + ADR-0015):
+# - No public exposure: no Ingress, no NodePort, no LoadBalancer.
+# - No embedded credentials or object-store secrets.
+# - Single replica, honest dev posture — no production HA claims.
+# - Explicit ServiceMonitor/PodMonitor selection (nothing auto-adopted).
+# - Grafana disabled: Drake is the consumer, not Grafana.
+
+kube-prometheus-stack:
+  fullnameOverride: drake-dev-obs
+
+  grafana:
+    enabled: false
+
+  prometheusOperator:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  prometheus:
+    enabled: true
+    service:
+      type: ClusterIP
+    prometheusSpec:
+      replicas: 1
+      retention: 15d
+      # The operator stamps each replica with this external label.
+      replicaExternalLabelName: prometheus_replica
+      externalLabels:
+        cluster: hermes-dev
+        site: dev
+        environment: dev
+      # Explicit selection: only monitors carrying this release label are
+      # scraped. Nothing in the cluster is adopted implicitly.
+      serviceMonitorSelectorNilUsesHelmValues: true
+      podMonitorSelectorNilUsesHelmValues: true
+      serviceMonitorSelector:
+        matchLabels:
+          release: drake-dev-observability
+      podMonitorSelector:
+        matchLabels:
+          release: drake-dev-observability
+      resources:
+        requests:
+          cpu: 250m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            # Explicit and configurable per cluster; no default-class surprise.
+            storageClassName: standard
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 20Gi
+
+  alertmanager:
+    enabled: true
+    service:
+      type: ClusterIP
+    alertmanagerSpec:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+  kubeStateMetrics:
+    enabled: true
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  nodeExporter:
+    enabled: true
+  prometheus-node-exporter:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi

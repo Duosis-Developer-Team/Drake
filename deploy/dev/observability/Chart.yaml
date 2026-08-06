@@ -1,0 +1,13 @@
+apiVersion: v2
+name: drake-dev-observability
+description: >-
+  Drake dev-cluster observability wrapper: pinned kube-prometheus-stack with
+  Drake's dev values. Rendered and policy-checked in CI only — applying it to
+  a real cluster is a separate operator-approved step.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: kube-prometheus-stack
+    version: "88.1.5"
+    repository: https://prometheus-community.github.io/helm-charts

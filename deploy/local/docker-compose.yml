@@ -41,6 +41,43 @@ services:
       timeout: 3s
       retries: 12
 
+  prometheus:
+    # prom/prometheus v3.5.0 pinned by immutable digest.
+    image: prom/prometheus@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=3d"
+      - "--web.listen-address=0.0.0.0:9090"
+    ports:
+      # Local-only, non-default host port.
+      - "127.0.0.1:59090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - drake-prometheus-data:/prometheus
+    depends_on:
+      - fixture-exporter
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--spider",
+          "http://127.0.0.1:9090/-/healthy",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  fixture-exporter:
+    # python:3.13-slim pinned by immutable digest; serves deterministic
+    # fixture metrics to Prometheus over the compose network only.
+    image: python@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251
+    command: ["python", "/fixture/fixture_exporter.py"]
+    volumes:
+      - ./prometheus/fixture_exporter.py:/fixture/fixture_exporter.py:ro
+
 volumes:
   drake-postgres-data:
   drake-redis-data:
+  drake-prometheus-data:
