@@ -409,6 +409,135 @@ test("an unsupported action is reported as unsupported", async ({ page }) => {
   expect((await response.json()).status).toBe("unsupported");
 });
 
+test("static scan, manifest review and catalog import", async ({ page }) => {
+  await signInAs(page, "user-owner");
+  const request = page.request;
+
+  // Re-announce so this scenario does not depend on what earlier tests in
+  // this file left behind.
+  const announced = await deliver(request, {
+    event: "installation",
+    body: installationPayload("created"),
+  });
+  expect(announced.status()).toBe(202);
+
+  const listed = (await (
+    await request.get("/v1/integrations/github/repositories?limit=50")
+  ).json()) as { repositories: { id: string; full_name: string }[] };
+  const hermes = listed.repositories.find((r) => r.full_name.endsWith("/Hermes"))!;
+  const logislot = listed.repositories.find((r) => r.full_name.endsWith("/logislot"))!;
+  const csrf = await csrfToken(page);
+
+  // Reconcile first: a scan needs a complete projection.
+  const reconciled = await reconcile(page, hermes.id);
+  expect(reconciled.status(), await reconciled.text()).toBe(202);
+
+  // 1. Scan at a pinned commit.
+  const scanned = await request.post(
+    `/v1/integrations/github/repositories/${hermes.id}/onboarding/scan`,
+    { headers: { "x-csrf-token": csrf }, failOnStatusCode: false },
+  );
+  expect(scanned.status(), await scanned.text()).toBe(202);
+  const draft = (await scanned.json()) as {
+    state: string;
+    commit_sha: string;
+    manifest_source: string;
+    importable: boolean;
+    discovery: { files: { path: string }[] };
+  };
+  expect(draft.state).toBe("ready_to_import");
+  expect(draft.manifest_source).toBe("repository");
+  expect(draft.commit_sha).toHaveLength(40);
+  expect(draft.importable).toBe(true);
+
+  // Only allowlisted metadata was read — never the shell scripts present
+  // in the fixture repository.
+  const readPaths = draft.discovery.files.map((file) => file.path);
+  expect(readPaths).toContain(".drake/project.yaml");
+  expect(readPaths).not.toContain("Makefile");
+  expect(readPaths).not.toContain("install.sh");
+
+  // 2. Import atomically.
+  const imported = await request.post(
+    `/v1/integrations/github/repositories/${hermes.id}/onboarding/import`,
+    {
+      headers: { "x-csrf-token": csrf, "idempotency-key": crypto.randomUUID() },
+      failOnStatusCode: false,
+    },
+  );
+  expect(imported.status()).toBe(201);
+  const { project_id: projectId, project_key: projectKey } = (await imported.json()) as {
+    project_id: string;
+    project_key: string;
+  };
+  expect(projectKey).toBe("hermes");
+
+  // 3. The project is a real catalog project.
+  await page.goto(`/projects/${projectId}`);
+  await expect(page.getByRole("heading", { name: /hermes/i }).first()).toBeVisible();
+
+  // A repository without a manifest gets a downloadable draft and no import.
+  await reconcile(page, logislot.id);
+  const missing = await request.post(
+    `/v1/integrations/github/repositories/${logislot.id}/onboarding/scan`,
+    { headers: { "x-csrf-token": csrf }, failOnStatusCode: false },
+  );
+  expect(missing.status()).toBe(202);
+  const generated = (await missing.json()) as {
+    state: string;
+    manifest_source: string;
+    importable: boolean;
+    draft_manifest: string;
+  };
+  expect(generated.state).toBe("needs_input");
+  expect(generated.manifest_source).toBe("operator_draft");
+  expect(generated.importable).toBe(false);
+  expect(generated.draft_manifest).toContain("REPLACE_ME");
+
+  const refused = await request.post(
+    `/v1/integrations/github/repositories/${logislot.id}/onboarding/import`,
+    {
+      headers: { "x-csrf-token": csrf, "idempotency-key": crypto.randomUUID() },
+      failOnStatusCode: false,
+    },
+  );
+  expect(refused.status()).toBe(409);
+
+  const download = await request.get(
+    `/v1/integrations/github/repositories/${logislot.id}/onboarding/download`,
+  );
+  expect(download.status()).toBe(200);
+  expect(await download.text()).toContain("apiVersion: drake.duosis.com/v1alpha1");
+});
+
+test("onboarding refuses the gated repository and leaks nothing", async ({ page }) => {
+  await signInAs(page, "user-owner");
+  const request = page.request;
+  const listed = (await (
+    await request.get("/v1/integrations/github/repositories?limit=50")
+  ).json()) as { repositories: { id: string; full_name: string }[] };
+  const datalake = listed.repositories.find((r) =>
+    r.full_name.endsWith("Datalake-Platform-GUI"),
+  )!;
+  const csrf = await csrfToken(page);
+  const before = await fakeGitHubCalls(request);
+
+  const scan = await request.post(
+    `/v1/integrations/github/repositories/${datalake.id}/onboarding/scan`,
+    { headers: { "x-csrf-token": csrf }, failOnStatusCode: false },
+  );
+  expect(scan.status()).toBe(409);
+  expect(await fakeGitHubCalls(request)).toEqual(before);
+
+  // A read-only user cannot scan at all.
+  await signInAs(page, "user-plain");
+  const denied = await page.request.post(
+    `/v1/integrations/github/repositories/${datalake.id}/onboarding/scan`,
+    { headers: { "x-csrf-token": await csrfToken(page) }, failOnStatusCode: false },
+  );
+  expect(denied.status()).toBe(404);
+});
+
 test("a read-only user can see the integration but cannot drive it", async ({ page }) => {
   await signInAs(page, "user-plain");
   const request = page.request;

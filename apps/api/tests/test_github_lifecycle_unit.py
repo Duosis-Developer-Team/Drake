@@ -153,3 +153,20 @@ def test_a_weaker_observation_never_overrides_a_stronger_reason() -> None:
         reconciliation_state="partial",
     )
     assert partial == "degraded"
+
+
+def test_a_failed_provider_read_can_degrade_a_discovered_repository() -> None:
+    """Without this the failure path raised instead of recording anything.
+
+    A reconciliation that never got an answer leaves the repository
+    degraded; making that legal only from VALIDATING meant the honest
+    outcome depended on a bookkeeping step having run first.
+    """
+    from drake_api.github_app import onboarding
+
+    assert onboarding.can_transition(onboarding.DISCOVERED, onboarding.DEGRADED)
+    change = onboarding.transition(
+        onboarding.DISCOVERED, onboarding.DEGRADED, "reconciliation_error"
+    )
+    assert change.next == onboarding.DEGRADED
+    assert change.changed is True

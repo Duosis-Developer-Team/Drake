@@ -104,3 +104,113 @@ export function isStale(timestamp: string | null, now: number = Date.now()): boo
   if (Number.isNaN(parsed)) return true;
   return now - parsed > RECONCILE_STALE_SECONDS * 1000;
 }
+
+// --- catalog onboarding (Sprint 5B) --------------------------------------
+
+/**
+ * Catalog onboarding is a separate axis from `onboarding_state`, which
+ * describes the GitHub projection. A repository can be perfectly
+ * reconciled and simply not onboarded into the Drake catalog yet.
+ */
+export type OnboardingDraftState =
+  | "not_started"
+  | "scanning"
+  | "needs_input"
+  | "invalid"
+  | "ready_to_import"
+  | "imported"
+  | "failed";
+
+/** Where the manifest came from. Only `repository` may be imported. */
+export type ManifestSource = "none" | "repository" | "operator_draft";
+
+export interface ManifestFinding {
+  path: string;
+  rule: string;
+  message: string;
+}
+
+export interface DiscoveredFile {
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+export interface Detection {
+  kind: string;
+  value: string;
+  evidence: string;
+  confidence: string;
+}
+
+export interface DiscoverySummary {
+  commit_sha?: string;
+  default_branch?: string;
+  files?: DiscoveredFile[];
+  detections?: Detection[];
+  manifest_found?: boolean;
+  truncated?: boolean;
+  provider_calls?: number;
+  total_bytes?: number;
+}
+
+export interface OperatorInput {
+  field: string;
+  reason: string;
+}
+
+export interface OnboardingDraft {
+  repository_id: string;
+  state: OnboardingDraftState;
+  commit_sha: string;
+  manifest_source: ManifestSource;
+  manifest_digest?: string;
+  findings: ManifestFinding[];
+  discovery: DiscoverySummary;
+  draft_manifest?: string | null;
+  reason_code?: string | null;
+  accepted_project_id?: string | null;
+  accepted_at?: string | null;
+  scanned_at?: string | null;
+  revision?: number;
+  operator_inputs_required: OperatorInput[];
+  /** The single field the Import action keys off. */
+  importable: boolean;
+  as_of: string;
+}
+
+export interface ManifestValidation {
+  repository_id: string;
+  valid: boolean;
+  findings: ManifestFinding[];
+  importable: boolean;
+  next_step: string;
+  as_of: string;
+}
+
+export interface ImportResult {
+  repository_id: string;
+  project_id: string;
+  project_key: string;
+  created: boolean;
+  as_of: string;
+}
+
+const onboardingBase = (repositoryId: string) =>
+  `/v1/integrations/github/repositories/${repositoryId}/onboarding`;
+
+export const onboardingPath = onboardingBase;
+export const onboardingScanPath = (id: string) => `${onboardingBase(id)}/scan`;
+export const onboardingValidatePath = (id: string) => `${onboardingBase(id)}/validate`;
+export const onboardingDownloadPath = (id: string) => `${onboardingBase(id)}/download`;
+export const onboardingImportPath = (id: string) => `${onboardingBase(id)}/import`;
+
+/** Human-readable reason a repository cannot be onboarded right now. */
+export function blockedReason(repository: GitHubRepository): string | null {
+  if (repository.security_gate) return "A manual security gate is open on this repository.";
+  if (repository.access_state !== "accessible")
+    return "Drake does not currently have access to this repository.";
+  if (repository.onboarding_state !== "ready")
+    return "Reconcile the repository first so Drake has a complete picture of it.";
+  return null;
+}

@@ -852,3 +852,34 @@ async def test_no_onboarding_response_leaks_credential_material(
         assert "BEGIN PRIVATE KEY" not in body
         assert "api.github.com" not in body
         assert WEBHOOK_SECRET not in body
+
+
+async def test_reconciling_a_disabled_repository_is_not_a_500(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """A legitimate request on a disabled repository must answer honestly.
+
+    The endpoint used to apply VALIDATING itself, which the state machine
+    refuses from DISABLED — so the request became an unhandled 500 rather
+    than a reportable outcome.
+    """
+    harness, _fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
+    await _seed_admin(harness, engine)
+    row_id = await _onboard_and_reconcile(harness, engine)
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE github_repositories SET onboarding_state = 'disabled', "
+                "access_state = 'removed' WHERE id = :id"
+            ),
+            {"id": row_id},
+        )
+
+    async with harness.api_client() as client:
+        me = await harness.login(client, "user-owner")
+        response = await client.post(
+            f"/v1/integrations/github/repositories/{row_id}/reconcile",
+            headers={"X-CSRF-Token": me["csrf_token"], "Idempotency-Key": str(uuidlib.uuid4())},
+        )
+    assert response.status_code < 500, response.text
