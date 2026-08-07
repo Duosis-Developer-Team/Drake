@@ -175,6 +175,7 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             ),
         )
         touched = 0
+        conflicts: list[int] = []
         for summary in envelope.repositories:
             if summary.get("membership") == "removed" or envelope.action in (
                 "removed",
@@ -194,10 +195,15 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
                 private=bool(summary.get("private", True)),
             )
             gate = catalog.security_gate_for(summary["full_name"])
-            target, reason = onboarding.resolve_target(
-                security_gate=gate, access_state="accessible", reconciled=False, had_error=False
-            )
-            await service.apply_state(connection, repository_row_id, target, reason)
+            try:
+                await service.apply_announced_state(connection, repository_row_id, gate)
+            except onboarding.InvalidTransitionError:
+                # The state machine refused. A validly signed delivery must
+                # not become a 500 — GitHub would retry it forever against
+                # an invariant that will not change. Keep the current state,
+                # record the conflict, and carry on with the rest.
+                conflicts.append(summary["external_id"])
+                continue
             touched += 1
         if envelope.action == "suspend":
             await service.set_installation_state(
@@ -206,6 +212,14 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
         if outcome.delivery_row_id is not None:
             await service.mark_delivery_processed(connection, outcome.delivery_row_id, "processed")
 
+    if conflicts:
+        await service._audit(
+            engine,
+            action="github.repository.state_conflict",
+            result="denied",
+            target_type="github_repository",
+            metadata={"event": event, "repositories": len(conflicts)},
+        )
     await service._audit(
         engine,
         action=f"github.webhook.{event}",
@@ -214,4 +228,9 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
         target_id=str(envelope.installation_external_id),
         metadata={"event": event, "action": envelope.action, "repositories": touched},
     )
-    return {"status": "processed", "delivery_id": delivery_id, "repositories": touched}
+    return {
+        "status": "processed",
+        "delivery_id": delivery_id,
+        "repositories": touched,
+        "conflicts": len(conflicts),
+    }

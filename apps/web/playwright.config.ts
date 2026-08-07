@@ -47,6 +47,14 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
+      // Deterministic fake GitHub REST API for the integration scenario.
+      command: "uv run python scripts/e2e_fake_github.py",
+      cwd: "../..",
+      url: "http://127.0.0.1:59097/__health",
+      reuseExistingServer: true,
+      timeout: 30_000,
+    },
+    {
       command:
         "uv run uvicorn drake_api.main:create_app --factory --host 127.0.0.1 --port 8123",
       cwd: "../..",
@@ -71,6 +79,12 @@ export default defineConfig({
         // are observable in seconds (local/E2E only; defaults are 90/900).
         DRAKE_AGENT_HEARTBEAT_STALE_SECONDS: "6",
         DRAKE_AGENT_INVENTORY_STALE_SECONDS: "60",
+        // GitHub App against the local fake — throwaway material only.
+        DRAKE_GITHUB_APP_ENABLED: "true",
+        DRAKE_GITHUB_APP_CLIENT_ID: "Iv1.e2elocal",
+        DRAKE_GITHUB_APP_PRIVATE_KEY_FILE: ".e2e-github/app-key.pem",
+        DRAKE_GITHUB_WEBHOOK_SECRET_FILE: ".e2e-github/webhook-secret",
+        DRAKE_GITHUB_API_BASE_URL: "http://127.0.0.1:59097",
       },
     },
     {

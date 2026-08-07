@@ -23,5 +23,8 @@ uv run python scripts/e2e_catalog_reset.py
 uv run python -m drake_api.catalog.bootstrap
 uv run python scripts/e2e_grants.py
 uv run python scripts/e2e_telemetry_config.py
+# Throwaway GitHub App material for the fake provider (never committed).
+DRAKE_E2E_GITHUB_WEBHOOK_SECRET="${DRAKE_E2E_GITHUB_WEBHOOK_SECRET:-e2e-local-webhook-secret}" \
+  uv run python scripts/e2e_github_config.py
 
 echo "[e2e-setup] migrations + bootstrap complete"

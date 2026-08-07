@@ -771,3 +771,80 @@ async def test_audit_records_are_written_without_secrets(
         assert WEBHOOK_SECRET not in row[2]
         assert "ghs_" not in row[2]
         assert "PRIVATE KEY" not in row[2]
+
+
+async def test_redelivery_after_reconciliation_does_not_regress_a_ready_repository(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """A webhook says a repository EXISTS — not that our history is void.
+
+    Regression: the announcement path used to derive every repository as
+    "not yet reconciled", which pushed an already-READY row back to
+    DISCOVERED. That transition is illegal, so a perfectly valid GitHub
+    re-delivery turned into a 500 and GitHub would have retried it forever.
+    """
+    harness, _fake = github_harness(tmp_path)
+    await _seed_admin(harness, engine)
+
+    async with harness.api_client() as client:
+        await deliver(client, "installation", installation_payload(), str(uuidlib.uuid4()))
+        me = await harness.login(client, "user-owner")
+        listing = (await client.get("/v1/integrations/github/repositories")).json()
+        hermes = next(item for item in listing["repositories"] if item["external_id"] == HERMES_ID)
+        reconciled = await client.post(
+            f"/v1/integrations/github/repositories/{hermes['id']}/reconcile",
+            headers={"X-CSRF-Token": me["csrf_token"], "Idempotency-Key": str(uuidlib.uuid4())},
+        )
+        assert reconciled.status_code == 202, reconciled.text
+
+        async with engine.connect() as connection:
+            before = (
+                await connection.execute(
+                    text(
+                        "SELECT onboarding_state FROM github_repositories WHERE external_id = :id"
+                    ),
+                    {"id": HERMES_ID},
+                )
+            ).scalar_one()
+        assert before == "ready"
+
+        # A brand-new delivery announcing the same repositories plus the
+        # gated one, so both the "don't regress" and "gate still wins"
+        # rules are exercised by the same announcement.
+        announced = installation_payload(
+            repositories=[
+                {
+                    "id": HERMES_ID,
+                    "node_id": "R_hermes",
+                    "name": "Hermes",
+                    "full_name": "Duosis-Developer-Team/Hermes",
+                    "private": True,
+                },
+                {
+                    "id": DATALAKE_ID,
+                    "node_id": "R_datalake",
+                    "name": "Datalake-Platform-GUI",
+                    "full_name": "Duosis-Developer-Team/Datalake-Platform-GUI",
+                    "private": True,
+                },
+            ]
+        )
+        again = await deliver(client, "installation", announced, str(uuidlib.uuid4()))
+        assert again.status_code == 202, again.text
+        assert again.json()["conflicts"] == 0
+
+        async with engine.connect() as connection:
+            rows = dict(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT external_id, onboarding_state FROM github_repositories "
+                            "WHERE external_id = ANY(:ids)"
+                        ),
+                        {"ids": [HERMES_ID, DATALAKE_ID]},
+                    )
+                ).all()
+            )
+    # READY survives the re-announcement, and the gate still wins outright.
+    assert rows[HERMES_ID] == "ready"
+    assert rows[DATALAKE_ID] == "blocked"

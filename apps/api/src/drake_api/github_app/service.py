@@ -360,7 +360,11 @@ async def apply_state(
     target: onboarding.OnboardingState,
     reason: str,
 ) -> onboarding.Transition:
-    """The ONLY writer of onboarding_state — every path goes through here."""
+    """The writer of every derived onboarding_state change.
+
+    Access loss is the one other path (`mark_access_removed`), and DISABLED
+    is legal from every state, so it cannot violate the machine.
+    """
     current = (
         await connection.execute(
             text("SELECT onboarding_state FROM github_repositories WHERE id = :id FOR UPDATE"),
@@ -378,6 +382,37 @@ async def apply_state(
             {"state": change.next, "reason": reason[:64], "id": repository_row_id},
         )
     return change
+
+
+async def apply_announced_state(
+    connection: AsyncConnection,
+    repository_row_id: uuid.UUID,
+    security_gate: str | None,
+) -> onboarding.Transition:
+    """Re-derive state after a webhook announcement.
+
+    A webhook tells us a repository EXISTS, not that everything we already
+    learned about it is void. Deriving from the row's own facts is what
+    keeps a re-delivery from dragging a READY repository back to
+    DISCOVERED — while an open security gate still wins, because
+    `resolve_target` puts it first.
+    """
+    row = (
+        await connection.execute(
+            text(
+                "SELECT last_reconciled_at, last_error_code, access_state "
+                "FROM github_repositories WHERE id = :id"
+            ),
+            {"id": repository_row_id},
+        )
+    ).one()
+    target, reason = onboarding.resolve_target(
+        security_gate=security_gate,
+        access_state=str(row[2] or "accessible"),
+        reconciled=row[0] is not None,
+        had_error=bool(row[1]),
+    )
+    return await apply_state(connection, repository_row_id, target, reason)
 
 
 async def mark_access_removed(
