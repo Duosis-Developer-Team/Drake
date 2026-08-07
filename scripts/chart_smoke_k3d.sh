@@ -159,9 +159,54 @@ kubectl -n "$NAMESPACE" create secret generic drake-agent-enrollment \
 # Egress target: the REAL IP the cluster resolves for host.k3d.internal
 # (k3d writes it into CoreDNS NodeHosts; on Docker Desktop it is the
 # host-gateway address, NOT the bridge subnet).
-HOST_ALIAS_IP="$(kubectl -n kube-system get configmap coredns \
-  -o jsonpath='{.data.NodeHosts}' | awk '/host\.k3d\.internal/{print $1; exit}')"
-[ -n "$HOST_ALIAS_IP" ] || { echo "FAIL: host.k3d.internal not in CoreDNS NodeHosts" >&2; exit 1; }
+#
+# k3d injects that entry ASYNCHRONOUSLY, shortly after the cluster reports
+# ready — reading the ConfigMap once races the injection. Poll on a bounded
+# budget instead: no fixed sleep, no infinite retry, no fallback IP, and
+# the NetworkPolicy target stays the real /32 address either way.
+NODEHOSTS_ATTEMPTS=30
+NODEHOSTS_INTERVAL=1
+NODEHOSTS_BUDGET_SECONDS=$((NODEHOSTS_ATTEMPTS * NODEHOSTS_INTERVAL))
+
+read_host_alias_ip() {
+  # Every failure here is "not yet", not "broken": the ConfigMap may not
+  # exist, kubectl may error transiently, or NodeHosts may not carry the
+  # alias so far. Each case returns EMPTY with status 0, so a first-attempt
+  # miss cannot kill the script under `set -euo pipefail`.
+  local node_hosts=""
+  if ! node_hosts="$(kubectl -n kube-system get configmap coredns \
+    -o jsonpath='{.data.NodeHosts}' 2>/dev/null)"; then
+    return 0
+  fi
+  printf '%s\n' "$node_hosts" \
+    | awk '{ for (i = 2; i <= NF; i++) if ($i == "host.k3d.internal") { print $1; exit } }'
+  return 0
+}
+
+echo "[smoke] waiting for the k3d host alias in CoreDNS (<= ${NODEHOSTS_BUDGET_SECONDS}s)"
+HOST_ALIAS_IP=""
+for attempt in $(seq 1 "$NODEHOSTS_ATTEMPTS"); do
+  HOST_ALIAS_IP="$(read_host_alias_ip)"
+  if [ -n "$HOST_ALIAS_IP" ]; then
+    break
+  fi
+  if [ "$attempt" -lt "$NODEHOSTS_ATTEMPTS" ]; then
+    sleep "$NODEHOSTS_INTERVAL"
+  fi
+done
+
+if [ -z "$HOST_ALIAS_IP" ]; then
+  {
+    echo "FAIL: host.k3d.internal never appeared in the CoreDNS NodeHosts"
+    echo "      (waited ${NODEHOSTS_ATTEMPTS} attempts x ${NODEHOSTS_INTERVAL}s" \
+      "= ${NODEHOSTS_BUDGET_SECONDS}s)"
+    echo "--- diagnostic: CoreDNS NodeHosts (host entries only) ---"
+    kubectl -n kube-system get configmap coredns \
+      -o jsonpath='{.data.NodeHosts}' 2>&1 || echo "(CoreDNS ConfigMap unreadable)"
+    echo
+  } >&2
+  exit 1
+fi
 echo "[smoke] host.k3d.internal resolves to ${HOST_ALIAS_IP} in-cluster"
 # Egress policies match the POST-DNAT destination: the Kubernetes API rule
 # must therefore target the real apiserver ENDPOINT (node ip:6443), not
