@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -16,6 +19,17 @@ import { expect, test, type Page } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(120_000);
+
+// These gates assert on REAL inventory produced by inventory.spec.ts. When
+// its prerequisite stack is absent that spec skips, so this one must skip
+// for the same reason — a missing prerequisite is not a UI regression.
+const STACK_DIR = path.resolve(__dirname, "../../../.e2e-agent");
+const stackReady =
+  existsSync(path.join(STACK_DIR, "kubeconfig")) &&
+  existsSync(path.join(STACK_DIR, "tls.json"));
+test.beforeAll(() => {
+  test.skip(!stackReady, "agent E2E stack missing — run scripts/e2e_agent_stack.sh up");
+});
 
 let clusterId = "";
 

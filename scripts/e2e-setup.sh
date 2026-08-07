@@ -27,4 +27,16 @@ uv run python scripts/e2e_telemetry_config.py
 DRAKE_E2E_GITHUB_WEBHOOK_SECRET="${DRAKE_E2E_GITHUB_WEBHOOK_SECRET:-e2e-local-webhook-secret}" \
   uv run python scripts/e2e_github_config.py
 
+# The catalog reset truncates cluster_agents, so the server forgets every
+# enrolled agent. The agent's local identity is the other half of that same
+# reset: leaving it behind makes the agent present a certificate the server
+# has never seen, and it will (correctly) refuse to re-enroll on its own.
+# Only the disposable, gitignored stack directory is touched.
+AGENT_STATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.e2e-agent/state"
+if [ -d "$AGENT_STATE_DIR" ]; then
+  echo "[e2e-setup] clearing disposable agent identity in .e2e-agent/state"
+  rm -rf "${AGENT_STATE_DIR:?}"/bundles "${AGENT_STATE_DIR:?}"/current \
+    "${AGENT_STATE_DIR:?}"/sequence "${AGENT_STATE_DIR:?}"/enrollment-token
+fi
+
 echo "[e2e-setup] migrations + bootstrap complete"
