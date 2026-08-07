@@ -93,3 +93,63 @@ def test_the_allowlist_is_explicit_per_event() -> None:
     assert "added" not in lifecycle.supported_actions("installation")
     assert "suspend" not in lifecycle.supported_actions("installation_repositories")
     assert lifecycle.supported_actions("push") == frozenset()
+
+
+# --- fix gate 3: the precedence chain, as a table -------------------------
+
+
+@pytest.mark.parametrize(
+    ("gate", "installation", "access", "reconciliation", "expected"),
+    [
+        # A security gate outranks everything below it.
+        ("manual_env_review", "active", "accessible", "complete", "blocked"),
+        ("manual_env_review", "deleted", "removed", "never", "blocked"),
+        # Then the installation's own state.
+        (None, "deleted", "accessible", "complete", "disabled"),
+        (None, "suspended", "accessible", "complete", "disabled"),
+        # Then the repository's access.
+        (None, "active", "removed", "complete", "disabled"),
+        (None, "active", "suspended", "complete", "disabled"),
+        # Then how complete the current evidence is.
+        (None, "active", "accessible", "failed", "degraded"),
+        (None, "active", "accessible", "partial", "degraded"),
+        (None, "active", "accessible", "stale", "degraded"),
+        (None, "active", "accessible", "never", "discovered"),
+        # Only a complete, current projection is READY.
+        (None, "active", "accessible", "complete", "ready"),
+    ],
+)
+def test_the_precedence_chain(
+    gate: str | None, installation: str, access: str, reconciliation: str, expected: str
+) -> None:
+    from drake_api.github_app import onboarding
+
+    state, _reason = onboarding.resolve_effective(
+        security_gate=gate,
+        installation_state=installation,
+        access_state=access,
+        reconciliation_state=reconciliation,
+    )
+    assert state == expected
+
+
+def test_a_weaker_observation_never_overrides_a_stronger_reason() -> None:
+    """The property the chain exists to guarantee."""
+    from drake_api.github_app import onboarding
+
+    # Complete evidence does not make a suspended App's repository ready.
+    suspended, _ = onboarding.resolve_effective(
+        security_gate=None,
+        installation_state="suspended",
+        access_state="accessible",
+        reconciliation_state="complete",
+    )
+    assert suspended == "disabled"
+    # And regained access does not make partial evidence complete.
+    partial, _ = onboarding.resolve_effective(
+        security_gate=None,
+        installation_state="active",
+        access_state="accessible",
+        reconciliation_state="partial",
+    )
+    assert partial == "degraded"

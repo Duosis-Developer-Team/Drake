@@ -100,6 +100,10 @@ def upgrade() -> None:
         sa.Column("last_error_code", sa.Text(), nullable=True),
         *_timestamps(),
         sa.UniqueConstraint("provider", "external_id", name="uq_github_installation_identity"),
+        # Referenced by the composite FK below: a repository's scope must be
+        # its installation's scope, enforced by the database rather than by
+        # every writer remembering to.
+        sa.UniqueConstraint("id", "scope_id", name="uq_github_installation_scope"),
         sa.CheckConstraint(
             "state IN ('active', 'suspended', 'deleted')", name="ck_github_installation_state"
         ),
@@ -163,8 +167,35 @@ def upgrade() -> None:
         sa.Column("last_reconciled_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("last_policy_evaluated_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("last_error_code", sa.Text(), nullable=True),
+        # Whether the CURRENT projection and evidence are complete. Kept
+        # separate from `last_reconciled_at`, which records the last time a
+        # reconciliation actually succeeded: an old success is not evidence
+        # that what we hold now is complete, and conflating the two let a
+        # webhook promote a degraded repository back to READY.
+        sa.Column(
+            "reconciliation_state", sa.Text(), nullable=False, server_default=sa.text("'never'")
+        ),
         *_timestamps(),
         sa.UniqueConstraint("provider", "external_id", name="uq_github_repository_identity"),
+        sa.CheckConstraint(
+            "reconciliation_state IN ('never', 'complete', 'partial', 'stale', 'failed')",
+            name="ck_github_repository_reconciliation_state",
+        ),
+        # Deferrable so a transaction that legitimately re-scopes an
+        # installation can move it and its repositories together; the
+        # invariant still has to hold at COMMIT.
+        sa.ForeignKeyConstraint(
+            ["installation_id", "scope_id"],
+            ["github_installations.id", "github_installations.scope_id"],
+            name="fk_github_repository_installation_scope",
+            # NO ACTION rather than RESTRICT: RESTRICT is checked
+            # immediately even on a deferrable constraint, which would make
+            # a legitimate "move the installation and its repositories
+            # together" transaction impossible to commit.
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         sa.CheckConstraint(
             "onboarding_state IN ('discovered', 'validating', 'ready', 'blocked', "
             "'degraded', 'disabled')",
@@ -287,6 +318,12 @@ def upgrade() -> None:
         sa.Column("last_error_code", sa.Text(), nullable=True),
         sa.Column("last_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("processed_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        # A durable lease, because the row lock is released when the claim
+        # transaction commits and the provider work happens after that. The
+        # lease is what actually makes a claim exclusive; it expires so a
+        # dead worker cannot strand the job forever.
+        sa.Column("lease_expires_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("lease_owner", sa.Text(), nullable=True),
         *_timestamps(),
         sa.CheckConstraint(
             "status IN ('pending', 'processed', 'failed')", name="ck_github_job_status"

@@ -57,6 +57,20 @@ async def _jobs(engine: AsyncEngine) -> list[dict[str, Any]]:
     return [{"installation": r[0], "reason": r[1], "status": r[2], "attempts": r[3]} for r in rows]
 
 
+async def _installation_scope(engine: AsyncEngine) -> uuidlib.UUID:
+    async with engine.connect() as connection:
+        return uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text("SELECT scope_id FROM github_installations WHERE external_id = :e"),
+                        {"e": INSTALLATION_ID},
+                    )
+                ).scalar_one()
+            )
+        )
+
+
 async def _repo_ids(engine: AsyncEngine) -> set[int]:
     async with engine.connect() as connection:
         rows = (await connection.execute(text("SELECT external_id FROM github_repositories"))).all()
@@ -306,8 +320,12 @@ async def test_reconciliation_is_idempotent(engine: AsyncEngine, tmp_path: Path)
     async with harness.api_client() as client:
         await deliver(client, "installation", installation_payload(), str(uuidlib.uuid4()))
 
-    first = await reconciler.reconcile_installation(INSTALLATION_ID)
-    second = await reconciler.reconcile_installation(INSTALLATION_ID)
+    first = await reconciler.reconcile_installation(
+        INSTALLATION_ID, scope_id=await _installation_scope(engine)
+    )
+    second = await reconciler.reconcile_installation(
+        INSTALLATION_ID, scope_id=await _installation_scope(engine)
+    )
     assert (first.present, first.removed) == (second.present, second.removed)
     assert second.removed == 0
 
@@ -324,7 +342,9 @@ async def test_installation_reconciliation_removes_what_the_provider_no_longer_l
     # The repository leaves the installation; no webhook arrives.
     del fake.repositories["logislot"]
     reconciler = service.GitHubReconciler(engine, harness.app.state.github_client)
-    sync = await reconciler.reconcile_installation(INSTALLATION_ID)
+    sync = await reconciler.reconcile_installation(
+        INSTALLATION_ID, scope_id=await _installation_scope(engine)
+    )
 
     assert sync.removed == 1
     assert await _access(engine, LOGISLOT_ID) == "removed", "soft state, not deletion"
@@ -344,7 +364,9 @@ async def test_an_incomplete_listing_commits_no_partial_membership(
     fake.installation_repositories_pages = 999  # always a full page
     reconciler = service.GitHubReconciler(engine, harness.app.state.github_client)
     with pytest.raises(GitHubContractError):
-        await reconciler.reconcile_installation(INSTALLATION_ID)
+        await reconciler.reconcile_installation(
+            INSTALLATION_ID, scope_id=await _installation_scope(engine)
+        )
 
     assert await _access(engine, LOGISLOT_ID) == before, (
         "a failed listing must not have removed anything"
@@ -359,7 +381,9 @@ async def test_reconciliation_only_reads(engine: AsyncEngine, tmp_path: Path) ->
     fake.calls.clear()
 
     reconciler = service.GitHubReconciler(engine, harness.app.state.github_client)
-    await reconciler.reconcile_installation(INSTALLATION_ID)
+    await reconciler.reconcile_installation(
+        INSTALLATION_ID, scope_id=await _installation_scope(engine)
+    )
 
     for call in fake.calls:
         method, path = call.split(" ", 1)

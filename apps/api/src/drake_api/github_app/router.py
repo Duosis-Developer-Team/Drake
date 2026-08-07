@@ -529,6 +529,12 @@ async def reconcile_repository(
         raise HTTPException(
             status_code=409, detail="repository is blocked by a security gate"
         ) from blocked
+    except service.RepositoryIdentityError as mismatch:
+        # The provider answered about a different repository. Nothing was
+        # written; the row is already BLOCKED with an identity conflict.
+        raise HTTPException(
+            status_code=409, detail="provider repository identity did not match"
+        ) from mismatch
     except service.PermissionShortfallError as shortfall:
         # A required read permission was never granted. That is a
         # configuration fact, not a transient failure, and it must not look
@@ -573,35 +579,11 @@ async def reconcile_repository(
         )
         raise HTTPException(status_code=503, detail="github is unavailable") from error
 
-    async with engine.begin() as connection:
-        await service.store_policy_evaluation(connection, repository_id, evaluation, dry_run=True)
-        # Readiness is about the PROJECTION, not about compliance. A
-        # repository whose facts we read completely is READY even when its
-        # governance verdict is FAIL — that is a real, reportable answer.
-        # A repository we could only read in part is DEGRADED, because
-        # "we do not know" is not a state anything may be called ready on.
-        if result.complete:
-            await connection.execute(
-                text(
-                    "UPDATE github_repositories SET last_reconciled_at = now(), "
-                    "last_policy_evaluated_at = now(), last_error_code = NULL, "
-                    "updated_at = now() WHERE id = :id"
-                ),
-                {"id": repository_id},
-            )
-            await service.apply_state(connection, repository_id, onboarding.READY, "reconciled")
-        else:
-            await connection.execute(
-                text(
-                    "UPDATE github_repositories SET last_policy_evaluated_at = now(), "
-                    "updated_at = now() WHERE id = :id"
-                ),
-                {"id": repository_id},
-            )
-            await service.apply_state(
-                connection, repository_id, onboarding.DEGRADED, "evidence_incomplete"
-            )
-
+    # The snapshot and the resulting state were both written by the
+    # reconciler, in one transaction with the projection. Readiness is
+    # about the PROJECTION, not about compliance: a repository read
+    # completely is READY even when its governance verdict is FAIL, and one
+    # read only in part is DEGRADED.
     await service._audit(
         engine,
         action="github.policy.evaluated",

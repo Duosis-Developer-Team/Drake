@@ -648,10 +648,13 @@ async def test_security_refusals_are_audited(engine: AsyncEngine, tmp_path: Path
                 )
             )
         ).scalar_one()
+        # The composite FK binds a repository's scope to its
+        # installation's, so a re-scoping moves both together.
         await connection.execute(
             text("UPDATE github_installations SET scope_id = :s WHERE external_id = :e"),
             {"s": other, "e": INSTALLATION_ID},
         )
+        await connection.execute(text("UPDATE github_repositories SET scope_id = :s"), {"s": other})
     scope_before = await _audit_count(engine, "github.installation.scope_mismatch")
     async with harness.api_client() as client:
         assert (

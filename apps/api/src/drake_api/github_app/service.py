@@ -36,6 +36,11 @@ PROVIDER = catalog.PROVIDER
 # 403 into an honest "we were not granted this", never into a PASS.
 # The read permissions a dry-run evaluation needs. Requested explicitly so
 # the minted token is no wider than the job.
+# Membership projection reads repository identity only, so it asks for
+# nothing beyond Metadata. Requesting authority a step has no use for is
+# how least privilege quietly stops being least.
+MEMBERSHIP_PERMISSIONS: dict[str, str] = {"metadata": "read"}
+
 EVALUATION_PERMISSIONS: dict[str, str] = {
     "metadata": "read",
     "administration": "read",
@@ -65,6 +70,9 @@ class SecurityGateBlockedError(RuntimeError):
 MAX_DELIVERY_ATTEMPTS = 5
 # One drain pass stays bounded so a backlog cannot monopolise a worker.
 DRAIN_BATCH_SIZE = 50
+# How long a claimed reconciliation job stays owned. Long enough for the
+# provider round trip, short enough that a dead worker's job is retried.
+JOB_LEASE_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -331,6 +339,9 @@ async def process_delivery(engine: AsyncEngine, delivery_row_id: uuid.UUID) -> s
             target_type="github_webhook",
             metadata={"event": result.event, "action": result.action},
         )
+        # Handled and terminal, but NOT processed: no domain work happened,
+        # and calling it processed would claim otherwise.
+        return "unsupported"
     return "processed"
 
 
@@ -421,13 +432,16 @@ async def _apply_envelope(
         result.unsupported_action = True
         return result
 
+    # `unchanged` means the state column is not written at all — not that
+    # some default is written in its place.
     installation_row = await upsert_installation(
         connection,
         scope_id=scope_id,
         external_id=installation_external_id,
         account_login=str(envelope.get("account_login") or ""),
-        state=plan.installation,
+        state=None if plan.installation == "unchanged" else plan.installation,
     )
+    parent_state = await installation_state(connection, installation_external_id) or "active"
     if delivery_row_id is not None:
         await connection.execute(
             text("UPDATE github_webhook_deliveries SET installation_id = :inst WHERE id = :id"),
@@ -461,6 +475,7 @@ async def _apply_envelope(
             await mark_access_removed(connection, known, "suspended")
         elif plan.outcome == "restored":
             await restore_access(connection, known)
+            await resettle_states(connection, known)
         result.touched = len(known)
         return result
 
@@ -488,6 +503,13 @@ async def _apply_envelope(
             await mark_access_removed(connection, [external_id], "removed")
             result.touched += 1
             continue
+
+        if plan.reason == "repositories_added" and parent_state == "active":
+            # The only announcement that legitimately restores access, and
+            # only while the App is actually installed and unsuspended.
+            # What state that leaves the repository in is still the
+            # precedence chain's call, applied a few lines below.
+            await restore_access(connection, [external_id])
 
         if owner and owner.lower() != catalog.ORGANIZATION.lower():
             # The repository has left the organization. Leaving it
@@ -619,52 +641,89 @@ class DeliveryRecoveryWorker:
 async def drain_reconciliation_jobs(
     engine: AsyncEngine, reconciler: "GitHubReconciler", limit: int = DRAIN_BATCH_SIZE
 ) -> int:
-    """Run outstanding installation-level reconciliation intents."""
+    """Run outstanding installation-level reconciliation intents.
+
+    `FOR UPDATE SKIP LOCKED` alone is not enough here. The provider work
+    happens AFTER the claim transaction commits, and committing releases
+    the lock — so a second worker arriving a moment later would find the
+    row unlocked and still pending, and both would call GitHub. The claim
+    therefore takes a durable LEASE in the same statement that selects the
+    row: a conditional update that only one worker can win. The lease
+    expires so a worker that dies mid-job cannot strand it forever.
+    """
+    owner = str(uuid.uuid4())
     async with engine.begin() as connection:
         rows = (
             await connection.execute(
                 text(
-                    "SELECT id, installation_external_id FROM github_reconciliation_jobs "
-                    "WHERE status = 'pending' AND attempts < :max "
-                    "ORDER BY created_at LIMIT :limit FOR UPDATE SKIP LOCKED"
+                    """
+                    UPDATE github_reconciliation_jobs
+                    SET lease_owner = :owner,
+                        lease_expires_at = now() + make_interval(secs => :lease),
+                        last_attempt_at = now(),
+                        updated_at = now()
+                    WHERE id IN (
+                        SELECT id FROM github_reconciliation_jobs
+                        WHERE status = 'pending'
+                          AND attempts < :max
+                          AND (lease_expires_at IS NULL OR lease_expires_at < now())
+                        ORDER BY created_at
+                        LIMIT :limit
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING id, installation_external_id, scope_id
+                    """
                 ),
-                {"max": MAX_DELIVERY_ATTEMPTS, "limit": limit},
+                {
+                    "owner": owner,
+                    "lease": JOB_LEASE_SECONDS,
+                    "max": MAX_DELIVERY_ATTEMPTS,
+                    "limit": limit,
+                },
             )
         ).all()
-        claimed = [(uuid.UUID(str(row[0])), int(row[1])) for row in rows]
+        claimed = [(uuid.UUID(str(row[0])), int(row[1]), uuid.UUID(str(row[2]))) for row in rows]
 
     completed = 0
-    for job_id, installation_external_id in claimed:
+    for job_id, installation_external_id, scope_id in claimed:
         try:
-            await reconciler.reconcile_installation(installation_external_id)
+            await reconciler.reconcile_installation(installation_external_id, scope_id=scope_id)
         except Exception as error:
-            await _record_job_failure(engine, job_id, type(error).__name__)
+            await _record_job_failure(engine, job_id, type(error).__name__, owner)
             continue
         async with engine.begin() as connection:
+            # Compare-and-set on the lease: only the owner may close it, so
+            # a job reclaimed after an expiry cannot be completed twice.
             await connection.execute(
                 text(
                     "UPDATE github_reconciliation_jobs "
                     "SET status = 'processed', processed_at = now(), "
-                    "    attempts = attempts + 1, last_attempt_at = now() "
-                    "WHERE id = :id"
+                    "    attempts = attempts + 1, lease_owner = NULL, "
+                    "    lease_expires_at = NULL, updated_at = now() "
+                    "WHERE id = :id AND lease_owner = :owner AND status = 'pending'"
                 ),
-                {"id": job_id},
+                {"id": job_id, "owner": owner},
             )
         completed += 1
     return completed
 
 
-async def _record_job_failure(engine: AsyncEngine, job_id: uuid.UUID, code: str) -> None:
+async def _record_job_failure(
+    engine: AsyncEngine, job_id: uuid.UUID, code: str, owner: str
+) -> None:
+    """Count the attempt and release the lease, once, for the owner only."""
     async with engine.begin() as connection:
         row = (
             await connection.execute(
                 text(
                     "UPDATE github_reconciliation_jobs "
                     "SET attempts = attempts + 1, last_attempt_at = now(), "
-                    "    last_error_code = :code "
-                    "WHERE id = :id AND status = 'pending' RETURNING attempts"
+                    "    last_error_code = :code, lease_owner = NULL, "
+                    "    lease_expires_at = NULL, updated_at = now() "
+                    "WHERE id = :id AND status = 'pending' AND lease_owner = :owner "
+                    "RETURNING attempts"
                 ),
-                {"id": job_id, "code": _error_code_slug(code)},
+                {"id": job_id, "code": _error_code_slug(code), "owner": owner},
             )
         ).first()
         if row is not None and int(row[0]) >= MAX_DELIVERY_ATTEMPTS:
@@ -742,12 +801,32 @@ async def upsert_installation(
     account_external_id: int | None = None,
     account_type: str = "",
     app_slug: str = "",
-    repository_selection: str = "selected",
+    repository_selection: str | None = None,
     granted_permissions: dict[str, Any] | None = None,
     subscribed_events: list[str] | None = None,
-    state: str = "active",
+    state: str | None = None,
     suspended_at: dt.datetime | None = None,
+    reconciled: bool = False,
 ) -> uuid.UUID:
+    """Insert or PATCH an installation row.
+
+    Absent is not empty. A webhook envelope carries an installation id and
+    an account login and nothing else, so writing the remaining columns
+    from defaults erases what a real reconciliation established — the
+    permissions, the events, the app slug, the account identity. Every
+    optional field here therefore means "leave it alone" when omitted.
+
+    `state=None` means the same thing: an event whose plan says the
+    installation is unchanged must not touch the state column at all.
+    Coercing an unrecognised value to `active` is how a repository rename
+    used to revive a suspended or uninstalled App.
+
+    `reconciled` gates `last_reconciled_at`: receiving a notification is
+    not the same as having re-read the installation from the provider.
+    """
+    if state is not None and state not in ("active", "suspended", "deleted"):
+        raise ValueError(f"unknown installation state: {state}")
+
     row = (
         await connection.execute(
             text(
@@ -757,19 +836,43 @@ async def upsert_installation(
                      account_type, app_slug, repository_selection, granted_permissions,
                      subscribed_events, state, suspended_at, last_reconciled_at)
                 VALUES (:provider, :external_id, :scope_id, :login, :account_external_id,
-                        :account_type, :app_slug, :selection, CAST(:permissions AS jsonb),
-                        CAST(:events AS jsonb), :state, :suspended_at, now())
+                        :account_type, :app_slug, COALESCE(:selection, 'selected'),
+                        COALESCE(CAST(:permissions AS jsonb), '{}'::jsonb),
+                        COALESCE(CAST(:events AS jsonb), '[]'::jsonb),
+                        COALESCE(:state, 'active'), :suspended_at,
+                        CASE WHEN :reconciled THEN now() ELSE NULL END)
                 ON CONFLICT (provider, external_id) DO UPDATE SET
-                    account_login = EXCLUDED.account_login,
-                    account_external_id = EXCLUDED.account_external_id,
-                    account_type = EXCLUDED.account_type,
-                    app_slug = EXCLUDED.app_slug,
-                    repository_selection = EXCLUDED.repository_selection,
-                    granted_permissions = EXCLUDED.granted_permissions,
-                    subscribed_events = EXCLUDED.subscribed_events,
-                    state = EXCLUDED.state,
-                    suspended_at = EXCLUDED.suspended_at,
-                    last_reconciled_at = now(),
+                    account_login = COALESCE(
+                        NULLIF(EXCLUDED.account_login, ''), github_installations.account_login
+                    ),
+                    account_external_id = COALESCE(
+                        EXCLUDED.account_external_id, github_installations.account_external_id
+                    ),
+                    account_type = COALESCE(
+                        NULLIF(EXCLUDED.account_type, ''), github_installations.account_type
+                    ),
+                    app_slug = COALESCE(
+                        NULLIF(EXCLUDED.app_slug, ''), github_installations.app_slug
+                    ),
+                    repository_selection = COALESCE(
+                        :selection, github_installations.repository_selection
+                    ),
+                    granted_permissions = COALESCE(
+                        CAST(:permissions AS jsonb), github_installations.granted_permissions
+                    ),
+                    subscribed_events = COALESCE(
+                        CAST(:events AS jsonb), github_installations.subscribed_events
+                    ),
+                    state = COALESCE(:state, github_installations.state),
+                    suspended_at = CASE
+                        WHEN :state = 'suspended' THEN now()
+                        WHEN :state IS NOT NULL THEN NULL
+                        ELSE github_installations.suspended_at
+                    END,
+                    last_reconciled_at = CASE
+                        WHEN :reconciled THEN now()
+                        ELSE github_installations.last_reconciled_at
+                    END,
                     updated_at = now()
                 RETURNING id
                 """
@@ -783,18 +886,34 @@ async def upsert_installation(
                 "account_type": account_type[:64],
                 "app_slug": app_slug[:128],
                 "selection": (
-                    repository_selection
-                    if repository_selection in ("all", "selected")
-                    else "selected"
+                    repository_selection if repository_selection in ("all", "selected") else None
                 ),
-                "permissions": json.dumps(granted_permissions or {}),
-                "events": json.dumps(sorted(subscribed_events or [])),
-                "state": state if state in ("active", "suspended", "deleted") else "active",
+                "permissions": (
+                    json.dumps(granted_permissions) if granted_permissions is not None else None
+                ),
+                "events": (
+                    json.dumps(sorted(subscribed_events)) if subscribed_events is not None else None
+                ),
+                "state": state,
                 "suspended_at": suspended_at,
+                "reconciled": reconciled,
             },
         )
     ).one()
     return uuid.UUID(str(row[0]))
+
+
+async def installation_state(connection: AsyncConnection, external_id: int) -> str | None:
+    row = (
+        await connection.execute(
+            text(
+                "SELECT state FROM github_installations "
+                "WHERE provider = :provider AND external_id = :external_id"
+            ),
+            {"provider": PROVIDER, "external_id": external_id},
+        )
+    ).first()
+    return None if row is None else str(row[0])
 
 
 async def set_installation_state(connection: AsyncConnection, external_id: int, state: str) -> None:
@@ -896,8 +1015,16 @@ async def upsert_repository(
                     archived = :archived,
                     disabled = :disabled,
                     default_branch = COALESCE(NULLIF(:default_branch, ''), default_branch),
-                    security_gate = :gate,
-                    access_state = 'accessible',
+                    -- A gate may be OPENED by an observation (a rename into
+                    -- a gated name) but never closed by one. Closing it is a
+                    -- manual operator process, so renaming away from the
+                    -- gated name must not quietly unblock the repository.
+                    security_gate = COALESCE(:gate, security_gate),
+                    -- access_state is deliberately NOT written here. A
+                    -- metadata update is not evidence that access was
+                    -- restored; restoring it is a lifecycle transition of
+                    -- its own (installation.unsuspend, or a membership
+                    -- addition under an active installation).
                     updated_at = now()
                 WHERE provider = :provider AND external_id = :external_id
                 RETURNING id
@@ -958,28 +1085,35 @@ async def apply_announced_state(
     repository_row_id: uuid.UUID,
     security_gate: str | None,
 ) -> onboarding.Transition:
-    """Re-derive state after a webhook announcement.
+    """Re-derive state after an announcement, through the precedence chain.
 
-    A webhook tells us a repository EXISTS, not that everything we already
-    learned about it is void. Deriving from the row's own facts is what
-    keeps a re-delivery from dragging a READY repository back to
-    DISCOVERED — while an open security gate still wins, because
-    `resolve_target` puts it first.
+    A webhook tells us a repository EXISTS; it is not evidence that the
+    App is still installed, that access was restored, or that the last
+    reconciliation was complete. All three are read from what we already
+    hold, so an announcement can only ever move a repository as far as the
+    strongest standing reason allows.
     """
     row = (
         await connection.execute(
             text(
-                "SELECT last_reconciled_at, last_error_code, access_state "
-                "FROM github_repositories WHERE id = :id"
+                "SELECT r.last_error_code, r.access_state, r.reconciliation_state, i.state, "
+                "r.security_gate FROM github_repositories r "
+                "JOIN github_installations i ON i.id = r.installation_id "
+                "WHERE r.id = :id"
             ),
             {"id": repository_row_id},
         )
     ).one()
-    target, reason = onboarding.resolve_target(
-        security_gate=security_gate,
-        access_state=str(row[2] or "accessible"),
-        reconciled=row[0] is not None,
-        had_error=bool(row[1]),
+    # A stored gate outranks whatever the caller derived from the announced
+    # name: renaming away from a gated name does not close the gate, and an
+    # observation must never be able to argue that it did.
+    effective_gate = (row[4] and str(row[4])) or security_gate
+    target, reason = onboarding.resolve_effective(
+        security_gate=effective_gate,
+        installation_state=str(row[3] or "active"),
+        access_state=str(row[1] or "accessible"),
+        reconciliation_state=str(row[2] or "never"),
+        had_error=bool(row[0]),
     )
     return await apply_state(connection, repository_row_id, target, reason)
 
@@ -1024,12 +1158,38 @@ async def mark_access_removed(
     return [str(row[0]) for row in rows]
 
 
-async def restore_access(connection: AsyncConnection, external_ids: list[int]) -> list[str]:
-    """Access came back. Compliance knowledge did not.
+async def resettle_states(connection: AsyncConnection, external_ids: list[int]) -> None:
+    """Re-derive onboarding state for repositories whose access changed.
 
-    Repositories return to `discovered`, never straight to `ready`: an
-    unsuspend says we may look again, not that what we would find is fine.
-    A gated repository stays blocked regardless.
+    Access is one input to the precedence chain, not a conclusion. After
+    moving it, the state each repository should now be in is recomputed
+    from everything the chain considers.
+    """
+    if not external_ids:
+        return
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT id, security_gate FROM github_repositories "
+                "WHERE provider = :provider AND external_id = ANY(:ids)"
+            ),
+            {"provider": PROVIDER, "ids": external_ids},
+        )
+    ).all()
+    for row in rows:
+        with contextlib.suppress(onboarding.InvalidTransitionError):
+            await apply_announced_state(connection, uuid.UUID(str(row[0])), row[1] and str(row[1]))
+
+
+async def restore_access(connection: AsyncConnection, external_ids: list[int]) -> list[str]:
+    """Access came back. Nothing else is asserted.
+
+    This writes `access_state` ONLY. What the repository's onboarding state
+    should now be is not this function's call — it depends on the security
+    gate, the parent installation, and whether the current evidence is
+    complete, all of which the precedence chain already knows. Writing
+    `discovered` here would overrule that chain and quietly promote a
+    repository whose evidence we know to be partial.
     """
     if not external_ids:
         return []
@@ -1038,16 +1198,7 @@ async def restore_access(connection: AsyncConnection, external_ids: list[int]) -
             text(
                 """
                 UPDATE github_repositories
-                SET access_state = 'accessible',
-                    onboarding_state = CASE
-                        WHEN security_gate IS NOT NULL THEN 'blocked'
-                        ELSE 'discovered'
-                    END,
-                    state_reason = CASE
-                        WHEN security_gate IS NOT NULL THEN 'security_gate_' || security_gate
-                        ELSE 'awaiting_reconciliation'
-                    END,
-                    updated_at = now()
+                SET access_state = 'accessible', updated_at = now()
                 WHERE provider = :provider AND external_id = ANY(:ids)
                 RETURNING full_name
                 """
@@ -1296,72 +1447,122 @@ class GitHubReconciler:
             complete=inputs.evidence_complete(),
         )
 
-    async def reconcile_repository(
-        self,
-        repository_row_id: uuid.UUID,
-        installation_external_id: int,
-        full_name: str,
-        repository_external_id: int,
-        profile: str = policy.DEFAULT_PROFILE,
-    ) -> "ReconcileResult":
-        """Re-derive one repository's projection AND evaluate it.
+    async def reconcile_installation(
+        self, installation_external_id: int, *, scope_id: uuid.UUID
+    ) -> "InstallationSync":
+        """Re-derive an installation's membership, inside its own scope.
 
-        Reconciliation is what makes the projection true again; policy
-        evaluation is a stage inside it, not the whole of it. A missed
-        rename or a repository that quietly went archived is corrected
-        here, on the permanent id, without waiting for a webhook.
+        `scope_id` is passed in from the job or the persisted installation
+        and verified against what we hold — falling back to the root scope
+        would silently move another tenant's data into it.
+
+        Membership sync is NOT policy evaluation. It establishes which
+        repositories exist and what their observed attributes are; nothing
+        here promotes anything to READY, and a change that invalidates
+        previously gathered evidence marks it stale instead.
         """
-        result = await self.evaluate_repository(
-            installation_external_id,
-            full_name,
-            profile,
-            repository_external_id=repository_external_id,
-        )
-        async with self._engine.begin() as connection:
-            await update_repository_projection(connection, repository_row_id, result.repository)
-        return result
+        async with self._engine.connect() as connection:
+            persisted = (
+                await connection.execute(
+                    text(
+                        "SELECT scope_id FROM github_installations "
+                        "WHERE provider = :provider AND external_id = :external_id"
+                    ),
+                    {"provider": PROVIDER, "external_id": installation_external_id},
+                )
+            ).first()
+        if persisted is not None and uuid.UUID(str(persisted[0])) != scope_id:
+            await _audit(
+                self._engine,
+                action="github.installation.scope_mismatch",
+                result="denied",
+                target_type="github_installation",
+                target_id=str(installation_external_id),
+                metadata={"reason": "job_scope_mismatch"},
+            )
+            raise InstallationScopeMismatchError(
+                "reconciliation scope does not match the persisted installation"
+            )
 
-    async def reconcile_installation(self, installation_external_id: int) -> "InstallationSync":
-        """Re-derive an installation's full repository membership.
+        try:
+            detail = await self._client.get_installation(installation_external_id)
+        except GitHubNotFoundError:
+            # The provider no longer knows this installation for this App:
+            # it was uninstalled while we were not listening. That is a real
+            # answer, unlike a 403 or a timeout, so it is safe to act on.
+            return await self._close_uninstalled(installation_external_id, scope_id)
 
-        This is the recovery path for everything a webhook could not tell
-        us: truncated envelopes, missed deliveries, drift while Drake was
-        down. Membership is only applied when the provider listing came
-        back COMPLETE — a partial page set is a reason to fail, never to
-        conclude that the missing repositories are gone.
-        """
-        detail = await self._client.get_installation(installation_external_id)
-        state = "active"
-        if detail.get("suspended_at"):
-            state = "suspended"
+        try:
+            self._verify_installation_identity(detail, installation_external_id)
+        except InstallationIdentityError as mismatch:
+            await _audit(
+                self._engine,
+                action="github.installation.identity_mismatch",
+                result="denied",
+                target_type="github_installation",
+                target_id=str(installation_external_id),
+                metadata={"reason": mismatch.reason},
+            )
+            raise
+        state = "suspended" if detail.get("suspended_at") else "active"
 
+        # Membership projection needs only Metadata:read. Asking for
+        # administration or actions here would request authority this step
+        # has no use for.
         token = await self._client.installation_token(
-            installation_external_id, permissions=dict(EVALUATION_PERMISSIONS)
+            installation_external_id, permissions=dict(MEMBERSHIP_PERMISSIONS)
         )
-        # Raises GitHubContractError if the listing was truncated, so a
-        # partial membership can never be committed as complete.
+        shortfall = missing_permissions(token.permissions, dict(MEMBERSHIP_PERMISSIONS))
+        if shortfall:
+            await _audit(
+                self._engine,
+                action="github.installation.permission_insufficient",
+                result="denied",
+                target_type="github_installation",
+                target_id=str(installation_external_id),
+                metadata={"missing": sorted(shortfall)},
+            )
+            raise PermissionShortfallError(str(installation_external_id), shortfall)
+
+        # Raises if the listing was truncated, so a partial membership can
+        # never be committed as complete.
         listed = await self._client.list_installation_repositories(token)
 
         present: list[dict[str, Any]] = []
         for item in listed:
             external_id = item.get("id")
             full_name = str(item.get("full_name") or "")
-            if not isinstance(external_id, int) or not full_name:
+            if not isinstance(external_id, int) or isinstance(external_id, bool):
                 continue
-            owner = full_name.split("/")[0] if "/" in full_name else ""
-            if owner.lower() != catalog.ORGANIZATION.lower():
-                # Outside the organization we govern: not ours to onboard.
+            if not full_name or "/" not in full_name:
+                continue
+            if full_name.split("/")[0].lower() != catalog.ORGANIZATION.lower():
                 continue
             present.append(item)
 
+        vanished: list[int] = []
         async with self._engine.begin() as connection:
-            scope_id = await organization_scope_id(connection)
             installation_row = await upsert_installation(
                 connection,
                 scope_id=scope_id,
                 external_id=installation_external_id,
                 account_login=str((detail.get("account") or {}).get("login") or ""),
+                account_external_id=(detail.get("account") or {}).get("id"),
+                account_type=str((detail.get("account") or {}).get("type") or ""),
+                app_slug=str(detail.get("app_slug") or ""),
+                repository_selection=str(detail.get("repository_selection") or "") or None,
+                granted_permissions=(
+                    detail.get("permissions")
+                    if isinstance(detail.get("permissions"), dict)
+                    else None
+                ),
+                subscribed_events=(
+                    [str(item) for item in detail["events"]]
+                    if isinstance(detail.get("events"), list)
+                    else None
+                ),
                 state=state,
+                reconciled=True,
             )
             known = set(await _installation_repository_ids(connection, installation_external_id))
             seen: set[int] = set()
@@ -1369,7 +1570,8 @@ class GitHubReconciler:
                 external_id = int(item["id"])
                 seen.add(external_id)
                 full_name = str(item["full_name"])
-                repository_row_id, _created = await upsert_repository(
+                gate = catalog.security_gate_for(full_name)
+                repository_row_id, created = await upsert_repository(
                     connection,
                     installation_row_id=installation_row,
                     scope_id=scope_id,
@@ -1380,13 +1582,22 @@ class GitHubReconciler:
                     node_id=str(item.get("node_id") or ""),
                     private=bool(item.get("private", True)),
                 )
-                await update_repository_projection(connection, repository_row_id, item)
-                gate = catalog.security_gate_for(full_name)
+                if gate:
+                    # Gated: recorded as present, never read any further.
+                    await connection.execute(
+                        text(
+                            "UPDATE github_repositories SET reconciliation_state = 'never', "
+                            "updated_at = now() WHERE id = :id"
+                        ),
+                        {"id": repository_row_id},
+                    )
+                else:
+                    await self._settle_membership_evidence(
+                        connection, repository_row_id, item, created
+                    )
                 with contextlib.suppress(onboarding.InvalidTransitionError):
                     await apply_announced_state(connection, repository_row_id, gate)
 
-            # Anything we knew about that the provider no longer lists has
-            # left the installation. Soft state: the row stays.
             vanished = sorted(known - seen)
             if vanished:
                 await mark_access_removed(connection, vanished, "removed")
@@ -1396,6 +1607,322 @@ class GitHubReconciler:
             state=state,
             present=len(present),
             removed=len(vanished),
+        )
+
+    @staticmethod
+    async def _settle_membership_evidence(
+        connection: AsyncConnection,
+        repository_row_id: uuid.UUID,
+        observed: dict[str, Any],
+        created: bool,
+    ) -> None:
+        """Decide whether previously gathered evidence still applies.
+
+        A membership sync reads repository ATTRIBUTES, not governance. If an
+        attribute the evidence depended on has moved — the default branch
+        above all, since every branch-scoped verdict was gathered against
+        it — the stored verdict describes something that no longer exists,
+        so it is marked stale rather than left looking current.
+        """
+        if created:
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET reconciliation_state = 'never', "
+                    "updated_at = now() WHERE id = :id"
+                ),
+                {"id": repository_row_id},
+            )
+            return
+
+        current = (
+            await connection.execute(
+                text(
+                    "SELECT default_branch, archived, disabled, visibility, owner_login "
+                    "FROM github_repositories WHERE id = :id"
+                ),
+                {"id": repository_row_id},
+            )
+        ).one()
+        observed_full_name = str(observed.get("full_name") or "")
+        observed_owner = (
+            observed_full_name.split("/")[0] if "/" in observed_full_name else str(current[4])
+        )
+        changed = (
+            str(observed.get("default_branch") or current[0]) != str(current[0])
+            or bool(observed.get("archived", current[1])) != bool(current[1])
+            or bool(observed.get("disabled", current[2])) != bool(current[2])
+            or str(observed.get("visibility") or current[3]) != str(current[3])
+            or observed_owner != str(current[4])
+        )
+        await update_repository_projection(connection, repository_row_id, observed)
+        if changed:
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET reconciliation_state = 'stale', "
+                    "updated_at = now() WHERE id = :id"
+                ),
+                {"id": repository_row_id},
+            )
+
+    @staticmethod
+    def _verify_installation_identity(detail: dict[str, Any], expected: int) -> None:
+        observed_id = detail.get("id")
+        if not isinstance(observed_id, int) or isinstance(observed_id, bool):
+            raise InstallationIdentityError(expected, "id_missing")
+        if observed_id != expected:
+            raise InstallationIdentityError(expected, "id_mismatch")
+        login = str((detail.get("account") or {}).get("login") or "")
+        if not login:
+            raise InstallationIdentityError(expected, "account_missing")
+        if login.lower() != catalog.ORGANIZATION.lower():
+            raise InstallationIdentityError(expected, "account_mismatch")
+
+    async def _close_uninstalled(
+        self, installation_external_id: int, scope_id: uuid.UUID
+    ) -> "InstallationSync":
+        """A confirmed uninstall: close the installation and its access."""
+        async with self._engine.begin() as connection:
+            await upsert_installation(
+                connection,
+                scope_id=scope_id,
+                external_id=installation_external_id,
+                state="deleted",
+                reconciled=True,
+            )
+            known = await _installation_repository_ids(connection, installation_external_id)
+            if known:
+                await mark_access_removed(connection, known, "removed")
+        await _audit(
+            self._engine,
+            action="github.installation.uninstalled",
+            result="success",
+            target_type="github_installation",
+            target_id=str(installation_external_id),
+            metadata={"repositories": len(known)},
+        )
+        return InstallationSync(
+            installation_external_id=installation_external_id,
+            state="deleted",
+            present=0,
+            removed=len(known),
+        )
+
+    async def reconcile_repository(
+        self,
+        repository_row_id: uuid.UUID,
+        installation_external_id: int,
+        full_name: str,
+        repository_external_id: int,
+        profile: str = policy.DEFAULT_PROFILE,
+    ) -> "ReconcileResult":
+        """Re-derive one repository's projection AND evaluate it.
+
+        The provider is asked about a PATH, but we mean a permanent id.
+        Those are different things the moment a repository is renamed,
+        transferred, or deleted and re-created at the same path — so the
+        response is verified against the identity we meant before a single
+        column is written.
+        """
+        gate = catalog.security_gate_for(full_name)
+        if gate:
+            raise SecurityGateBlockedError(full_name, gate)
+        owner, _, repo = full_name.partition("/")
+        token = await self._client.installation_token(
+            installation_external_id,
+            repository_ids=[repository_external_id],
+            permissions=dict(EVALUATION_PERMISSIONS),
+        )
+        shortfall = missing_permissions(token.permissions, dict(EVALUATION_PERMISSIONS))
+        if "metadata" in shortfall:
+            await self._mark_incomplete(repository_row_id, "failed", "required_permission_missing")
+            raise PermissionShortfallError(full_name, shortfall)
+
+        async with self._engine.begin() as connection:
+            # We are, right now, validating it. Saying so is what makes the
+            # eventual READY a legal transition rather than a jump.
+            with contextlib.suppress(onboarding.InvalidTransitionError):
+                await apply_state(
+                    connection,
+                    repository_row_id,
+                    onboarding.VALIDATING,
+                    "reconciliation_started",
+                )
+
+        repository = await self._client.get_repository(token, owner, repo)
+        await self._verify_repository_identity(
+            repository_row_id, repository, repository_external_id, full_name
+        )
+
+        # The provider may have just told us the repository is now called
+        # something that IS gated. The gate is derived from the name, so it
+        # has to be re-derived here — before any policy subresource is read.
+        observed_name = str(repository.get("full_name") or full_name)
+        observed_gate = catalog.security_gate_for(observed_name)
+        if observed_gate:
+            async with self._engine.begin() as connection:
+                await update_repository_projection(connection, repository_row_id, repository)
+                await connection.execute(
+                    text(
+                        "UPDATE github_repositories SET security_gate = :gate, "
+                        "reconciliation_state = 'never', updated_at = now() WHERE id = :id"
+                    ),
+                    {"gate": observed_gate, "id": repository_row_id},
+                )
+                await apply_announced_state(connection, repository_row_id, observed_gate)
+            await _audit(
+                self._engine,
+                action="github.repository.security_gate_applied",
+                result="denied",
+                target_type="github_repository",
+                target_id=str(repository_row_id),
+                metadata={"gate": observed_gate, "full_name": observed_name[:255]},
+            )
+            raise SecurityGateBlockedError(observed_name, observed_gate)
+
+        inputs = await self.gather_policy_inputs(
+            token, owner, repo, repository, shortfall=shortfall
+        )
+        evaluation = policy.evaluate(inputs, profile)
+        complete = inputs.evidence_complete()
+
+        async with self._engine.begin() as connection:
+            await update_repository_projection(connection, repository_row_id, repository)
+            await store_policy_evaluation(connection, repository_row_id, evaluation, dry_run=True)
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET reconciliation_state = :state, "
+                    "last_policy_evaluated_at = now(), "
+                    "last_error_code = CASE WHEN :complete THEN NULL ELSE last_error_code END, "
+                    "last_reconciled_at = CASE "
+                    "  WHEN :complete THEN now() ELSE last_reconciled_at END, "
+                    "updated_at = now() WHERE id = :id"
+                ),
+                {
+                    "state": "complete" if complete else "partial",
+                    "complete": complete,
+                    "id": repository_row_id,
+                },
+            )
+            # One place decides the resulting state, from the precedence
+            # chain, so the endpoint and the worker cannot disagree.
+            gate_row = (
+                await connection.execute(
+                    text("SELECT security_gate FROM github_repositories WHERE id = :id"),
+                    {"id": repository_row_id},
+                )
+            ).one()
+            with contextlib.suppress(onboarding.InvalidTransitionError):
+                await apply_announced_state(
+                    connection, repository_row_id, gate_row[0] and str(gate_row[0])
+                )
+        return ReconcileResult(
+            evaluation=evaluation,
+            repository=repository,
+            shortfall=tuple(sorted(shortfall)),
+            complete=complete,
+        )
+
+    async def _mark_incomplete(self, repository_row_id: uuid.UUID, state: str, reason: str) -> None:
+        """Record that the CURRENT evidence is not complete.
+
+        Kept separate from `last_reconciled_at`, which still records the
+        last time a reconciliation actually succeeded. Conflating the two
+        let a later webhook read an old success as proof that what we hold
+        now is complete.
+        """
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET reconciliation_state = :state, "
+                    "last_error_code = :reason, updated_at = now() WHERE id = :id"
+                ),
+                {"state": state, "reason": _error_code_slug(reason), "id": repository_row_id},
+            )
+            gate_row = (
+                await connection.execute(
+                    text("SELECT security_gate FROM github_repositories WHERE id = :id"),
+                    {"id": repository_row_id},
+                )
+            ).one()
+            with contextlib.suppress(onboarding.InvalidTransitionError):
+                await apply_announced_state(
+                    connection, repository_row_id, gate_row[0] and str(gate_row[0])
+                )
+
+    async def _verify_repository_identity(
+        self,
+        repository_row_id: uuid.UUID,
+        repository: dict[str, Any],
+        expected_external_id: int,
+        expected_full_name: str,
+    ) -> None:
+        """The response must be about the repository we asked about."""
+        observed_id = repository.get("id")
+        if not isinstance(observed_id, int) or isinstance(observed_id, bool):
+            await self._reject_identity(repository_row_id, "id_missing", expected_external_id, None)
+            raise RepositoryIdentityError(expected_full_name, "id_missing")
+        if observed_id != expected_external_id:
+            # A different repository now lives at this path. Writing its
+            # attributes onto our row would bind the wrong object to the
+            # right identity.
+            await self._reject_identity(
+                repository_row_id, "id_mismatch", expected_external_id, observed_id
+            )
+            raise RepositoryIdentityError(expected_full_name, "id_mismatch")
+
+        observed_full_name = str(repository.get("full_name") or "")
+        observed_owner = observed_full_name.split("/")[0] if "/" in observed_full_name else ""
+        if not observed_owner:
+            await self._reject_identity(
+                repository_row_id, "owner_missing", expected_external_id, observed_id
+            )
+            raise RepositoryIdentityError(expected_full_name, "owner_missing")
+        if observed_owner.lower() != catalog.ORGANIZATION.lower():
+            # It left the organization. Soft access loss, never READY.
+            async with self._engine.begin() as connection:
+                await mark_access_removed(connection, [expected_external_id], "removed")
+                await connection.execute(
+                    text(
+                        "UPDATE github_repositories SET reconciliation_state = 'stale', "
+                        "updated_at = now() WHERE id = :id"
+                    ),
+                    {"id": repository_row_id},
+                )
+            await _audit(
+                self._engine,
+                action="github.repository.transferred_out",
+                result="denied",
+                target_type="github_repository",
+                target_id=str(repository_row_id),
+                metadata={"observed_owner": observed_owner[:255]},
+            )
+            raise RepositoryIdentityError(expected_full_name, "owner_mismatch")
+
+    async def _reject_identity(
+        self,
+        repository_row_id: uuid.UUID,
+        reason: str,
+        expected: int,
+        observed: int | None,
+    ) -> None:
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET reconciliation_state = 'failed', "
+                    "last_error_code = 'identity_conflict', updated_at = now() WHERE id = :id"
+                ),
+                {"id": repository_row_id},
+            )
+            await apply_state(
+                connection, repository_row_id, onboarding.BLOCKED, "identity_conflict"
+            )
+        await _audit(
+            self._engine,
+            action="github.repository.identity_mismatch",
+            result="denied",
+            target_type="github_repository",
+            target_id=str(repository_row_id),
+            metadata={"reason": reason, "expected": expected, "observed": observed},
         )
 
 
@@ -1415,6 +1942,24 @@ class InstallationSync:
     state: str
     present: int
     removed: int
+
+
+class RepositoryIdentityError(RuntimeError):
+    """The provider answered about a repository we did not ask about."""
+
+    def __init__(self, full_name: str, reason: str) -> None:
+        super().__init__(f"provider identity did not match for {full_name}: {reason}")
+        self.full_name = full_name
+        self.reason = reason
+
+
+class InstallationIdentityError(RuntimeError):
+    """The provider answered about an installation we did not ask about."""
+
+    def __init__(self, expected: int, reason: str) -> None:
+        super().__init__(f"provider installation identity mismatch ({reason})")
+        self.expected = expected
+        self.reason = reason
 
 
 class PermissionShortfallError(RuntimeError):

@@ -227,6 +227,15 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
         return {"status": "duplicate", "delivery_id": delivery_id}
     if result == "failed":
         return {"status": "failed", "delivery_id": delivery_id}
+    if result == "unsupported":
+        # Acknowledged so GitHub stops retrying, and recorded as refused by
+        # `process_delivery`. No success audit: nothing succeeded.
+        return {
+            "status": "unsupported",
+            "delivery_id": delivery_id,
+            "event": event,
+            "action": envelope.action,
+        }
 
     await service._audit(
         engine,

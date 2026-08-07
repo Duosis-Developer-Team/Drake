@@ -68,6 +68,43 @@ def transition(current: OnboardingState, target: OnboardingState, reason: str) -
     return Transition(previous=current, next=target, reason=reason, changed=current != target)
 
 
+def resolve_effective(
+    *,
+    security_gate: str | None,
+    installation_state: str,
+    access_state: str,
+    reconciliation_state: str,
+    had_error: bool = False,
+) -> tuple[OnboardingState, str]:
+    """The single precedence chain for a repository's state.
+
+    Ordered most-authoritative first, because each level describes a
+    stronger reason to stop than the one below it:
+
+        security gate > installation deleted > installation suspended >
+        repository access removed > reconciliation incomplete > accessible
+
+    A weaker observation can never override a stronger one. That is what
+    stops a repository-metadata webhook from restoring access under a
+    suspended App, or a rename from re-opening a manual security gate.
+    """
+    if security_gate:
+        return BLOCKED, f"security_gate_{security_gate}"
+    if installation_state == "deleted":
+        return DISABLED, "installation_deleted"
+    if installation_state == "suspended":
+        return DISABLED, "installation_suspended"
+    if access_state in ("removed", "suspended"):
+        return DISABLED, f"access_{access_state}"
+    if had_error or reconciliation_state == "failed":
+        return DEGRADED, "reconciliation_error"
+    if reconciliation_state in ("partial", "stale"):
+        return DEGRADED, f"evidence_{reconciliation_state}"
+    if reconciliation_state == "complete":
+        return READY, "reconciled"
+    return DISCOVERED, "awaiting_reconciliation"
+
+
 def resolve_target(
     *,
     security_gate: str | None,

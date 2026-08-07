@@ -474,9 +474,15 @@ async def test_installation_bound_to_another_scope_is_refused(
         # Move the installation to a different scope behind Drake's back.
         other_scope = await _other_scope(engine)
         async with engine.begin() as connection:
+            # The composite FK binds a repository's scope to its
+            # installation's, so a re-scoping moves both together.
             await connection.execute(
                 text("UPDATE github_installations SET scope_id = :scope WHERE external_id = :ext"),
                 {"scope": other_scope, "ext": INSTALLATION_ID},
+            )
+            await connection.execute(
+                text("UPDATE github_repositories SET scope_id = :scope"),
+                {"scope": other_scope},
             )
 
         refused = await deliver(

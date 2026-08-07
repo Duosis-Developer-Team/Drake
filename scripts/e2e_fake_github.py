@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("DRAKE_E2E_GITHUB_PORT", "59097"))
 
-_STATE = {"mode": "ok", "calls": []}
+_STATE = {"mode": "ok", "calls": [], "installation_present": True}
 _LOCK = threading.Lock()
 
 HERMES_ID = 900001
@@ -178,6 +178,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, [{"id": INSTALLATION_ID}])
             return
         if path == f"/app/installations/{INSTALLATION_ID}":
+            if not _STATE.get("installation_present", True):
+                self._send(
+                    404,
+                    {
+                        "message": "Not Found",
+                        "documentation_url": (
+                            "https://docs.github.com/rest/apps/apps"
+                            "#get-an-installation-for-the-authenticated-app"
+                        ),
+                        "status": "404",
+                    },
+                )
+                return
             self._send(
                 200,
                 {
@@ -253,10 +266,16 @@ class Handler(BaseHTTPRequestHandler):
                 _STATE["mode"] = path.rsplit("/", 1)[-1]
             self._send(200, {"mode": _STATE["mode"]})
             return
+        if path == "/__uninstall":
+            with _LOCK:
+                _STATE["installation_present"] = False
+            self._send(200, {"installation_present": False})
+            return
         if path == "/__reset":
             with _LOCK:
                 _STATE["calls"] = []
                 _STATE["mode"] = "ok"
+                _STATE["installation_present"] = True
             self._send(200, {"status": "reset"})
             return
         self._record()

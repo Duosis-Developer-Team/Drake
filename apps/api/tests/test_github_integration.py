@@ -65,6 +65,13 @@ class FakeGitHub:
         self.granted_permissions = {"metadata": "read", "administration": "read", "actions": "read"}
         # Force an always-full page set to exercise the pagination cap.
         self.installation_repositories_pages = 1
+        # Provider-side installation identity, so identity verification and
+        # a missed uninstall can be exercised.
+        self.installation_present = True
+        self.installation_account_login = catalog.ORGANIZATION
+        self.installation_id_override: int | None = None
+        # Every access-token request body, so least privilege is checkable.
+        self.token_requests: list[dict[str, Any]] = []
         # Effective rules per repository, shaped like
         # GET /repos/{owner}/{repo}/rules/branches/{branch}.
         self.branch_rules: dict[str, list[dict[str, Any]]] = {}
@@ -108,6 +115,10 @@ class FakeGitHub:
             )
 
         if path.endswith("/access_tokens"):
+            try:
+                self.token_requests.append(jsonlib.loads(request.content or b"{}"))
+            except ValueError:
+                self.token_requests.append({})
             return httpx.Response(
                 201,
                 json={
@@ -121,11 +132,27 @@ class FakeGitHub:
         if path == "/app/installations":
             return httpx.Response(200, json=[{"id": INSTALLATION_ID}])
         if path == f"/app/installations/{INSTALLATION_ID}":
+            if not self.installation_present:
+                # GitHub's documented not-found shape.
+                return httpx.Response(
+                    404,
+                    json={
+                        "message": "Not Found",
+                        "documentation_url": (
+                            "https://docs.github.com/rest/apps/apps"
+                            "#get-an-installation-for-the-authenticated-app"
+                        ),
+                        "status": "404",
+                    },
+                )
             return httpx.Response(
                 200,
                 json={
-                    "id": INSTALLATION_ID,
-                    "account": {"login": catalog.ORGANIZATION, "type": "Organization"},
+                    "id": self.installation_id_override or INSTALLATION_ID,
+                    "account": {
+                        "login": self.installation_account_login,
+                        "type": "Organization",
+                    },
                     "app_slug": "drake",
                     "repository_selection": "selected",
                     "permissions": dict(self.granted_permissions),
@@ -835,6 +862,18 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
             ).scalar_one()
         assert before == "ready"
 
+        async with engine.connect() as connection:
+            conflicts_before = int(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM audit_events "
+                            "WHERE action = 'github.repository.state_conflict'"
+                        )
+                    )
+                ).scalar_one()
+            )
+
         # A brand-new delivery announcing the same repositories plus the
         # gated one, so both the "don't regress" and "gate still wins"
         # rules are exercised by the same announcement.
@@ -860,9 +899,11 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
         assert again.status_code == 202, again.text
 
         # No state-machine conflict was recorded: the re-announcement was a
-        # legal no-op, not a refusal the code quietly swallowed.
+        # legal no-op, not a refusal the code quietly swallowed. Measured as
+        # a DELTA — audit is append-only and shared across the suite, so an
+        # absolute count says nothing about what this delivery did.
         async with engine.connect() as connection:
-            conflicts = int(
+            conflicts_after = int(
                 (
                     await connection.execute(
                         text(
@@ -872,7 +913,7 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
                     )
                 ).scalar_one()
             )
-        assert conflicts == 0
+        assert conflicts_after == conflicts_before
 
         async with engine.connect() as connection:
             rows = dict(
