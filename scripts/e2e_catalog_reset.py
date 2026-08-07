@@ -29,7 +29,7 @@ async def main() -> None:
                 "github_webhook_deliveries",
                 "github_repositories",
                 "github_reconciliation_jobs",
-            "github_installations",
+                "github_installations",
                 "cluster_inventory_state",
                 "inventory_change_events",
                 "inventory_resources",
