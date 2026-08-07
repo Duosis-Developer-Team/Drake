@@ -5,9 +5,11 @@ permissions, repository onboarding, and the read-only policy engine.
 
 ## 1. Credential handling
 
-Three credential layers, none of which ever becomes a value in
-configuration, a field in an API response, a column in the database, or a
-string in a log line.
+Three credential layers. Material is of course loaded into process memory
+— a key that is never read cannot sign anything — but it never becomes a
+value in configuration, a field in an API response, a column in the
+database, an entry in the audit log, or a string in a log line. That is
+the claim, and it is the one the tests check.
 
 | Material | Where it lives | How it is referenced | Lifetime |
 |---|---|---|---|
@@ -22,11 +24,23 @@ by accident. The E2E asserts positively on the other side of the boundary:
 no response body and no rendered page contains a PEM header, a `ghs_`
 token, a JWT shape, or the webhook secret.
 
-Startup is fail-closed. With the feature enabled and a reference missing
-or unreadable, `validate_runtime_security` refuses to start rather than
-running in a degraded, silently unauthenticated state. With the feature
-disabled the routes return 404 and the UI states `NOT_CONFIGURED`,
-listing which operator inputs are missing — by name, never by value.
+Startup is fail-closed, and it verifies the credentials rather than the
+configuration strings. When the feature is enabled — in **any**
+environment, including local — startup opens both references and proves
+they are usable: the private key must exist, be readable, parse as an
+unencrypted PEM, and be an RSA key (GitHub signs RS256); the webhook
+secret must exist, be readable, and be non-empty. The JWT TTL (1–600 s),
+the token refresh buffer, and the webhook body limit are range-checked,
+and a production-like environment additionally requires an HTTPS API URL.
+A broken reference is a refusal to start, not something the first webhook
+discovers.
+
+Refusals name what is wrong and never quote file contents, so they are
+safe to log; a test asserts that a PEM-shaped file's contents never appear
+in the exception or its cause. With the feature disabled, no secret file
+is opened at all, the routes return 404, and the UI states
+`NOT_CONFIGURED`, listing which operator inputs are missing — by name,
+never by value.
 
 ## 2. Webhook trust boundary
 
@@ -34,8 +48,11 @@ The endpoint belongs to no user session: no cookie, no CSRF token, no
 principal. Trust is the HMAC over the raw bytes and nothing else. The
 order is the security contract:
 
-1. read the raw body **once**, under a hard byte ceiling (declared
-   `Content-Length` is rejected before reading, then the actual length);
+1. **stream** the raw body once and refuse the moment it crosses the byte
+   ceiling, so at most one chunk beyond the limit is ever held. A declared
+   `Content-Length` is an early-exit hint only — never the boundary, since
+   a chunked or understated one would otherwise let the whole payload
+   through;
 2. require the delivery, event and signature headers;
 3. HMAC-SHA256 over those exact bytes;
 4. constant-time comparison (`hmac.compare_digest`, asserted by a test
@@ -51,15 +68,29 @@ Nothing before step 5 trusts the payload's structure, so a hostile body
 cannot reach the parser without a valid signature. Every refusal returns
 one bounded message — the caller cannot learn which check failed.
 
+**Durability.** The claim and the durable work item commit in one
+transaction, and the endpoint acknowledges only after that commit. The
+delivery row starts `pending` and is closed out only by a transaction that
+writes the domain work and the `processed` flag together. A redelivery of
+a `pending` row runs it rather than acking it; a drain worker recovers
+rows GitHub will not redeliver forever; attempts are counted in their own
+transaction so a poison delivery dead-letters and is audited instead of
+spinning.
+
 **Replay.** A unique constraint on `delivery_id` is the arbiter, so a
 concurrent race is settled by the database and exactly one caller wins
-(asserted by a concurrency test). Same id with the same digest is an
-idempotent acknowledgement. Same id with a **different** digest is a
-security violation: 409, refused, and audited with the reason and no
-payload content. Only a bounded envelope of identity fields is stored —
-never the raw payload — and the envelope drops every field not explicitly
-chosen (proven against a payload carrying an unrelated `secret_field` and
-an email address).
+(asserted by a concurrency test). Same id with the same digest, already
+finished, is an idempotent acknowledgement. Same id with a **different**
+digest is a security violation: 409, refused, audited with the reason and
+no payload content — and the original row is left untouched, because it is
+the record of what actually happened. Only a bounded envelope of identity
+fields is stored, never the raw payload; the envelope drops every field
+not explicitly chosen (proven against a payload carrying an unrelated
+`secret_field` and an email address), and it is fitted to a byte budget
+that provably satisfies the column constraint. An over-budget payload is
+stored as explicitly truncated, with its observed count, flagged for
+installation-level reconciliation rather than persisted as a partial list
+that reads like the whole truth.
 
 ## 3. Least privilege
 
@@ -80,6 +111,12 @@ Granted-narrower-than-requested is handled honestly: the affected rules
 return UNKNOWN naming the missing permission, and the repository moves to
 DEGRADED or BLOCKED. Permissions are never escalated, and a missing
 permission never becomes a PASS.
+
+Installation tokens are requested for the target repository's permanent id
+and only the read permissions an evaluation needs, and they are cached
+under that **scope** rather than under the installation id. Keying on the
+id alone would let a token minted for one repository answer for another,
+or a metadata-only token satisfy a caller that asked for more.
 
 ## 4. Onboarding state and access loss
 
@@ -110,6 +147,19 @@ version violated this by reporting FAIL "unprotected" when protection was
 unreadable and rulesets happened to be empty; absence of evidence is not
 evidence of absence. Drake's own eight required check names are never
 imposed on another repository.
+
+Two further corrections came out of the CTO review. Ruleset evidence now
+comes from `GET /repos/{owner}/{repo}/rules/branches/{branch}` — the rules
+actually in effect on the branch — because the ruleset *list* endpoint
+returns summaries with no `rules` member, so an entry there proves a
+ruleset exists but says nothing about what it enforces or whether it
+covers the default branch. And an aggregate that spans several objects
+(production environments especially) can only be a PASS if every one of
+them was readable: one unreadable member makes the verdict UNKNOWN with
+the per-object reason recorded, while a known violation still outranks an
+unknown. Pagination follows the same rule — reaching the page cap with a
+full final page is an explicit error, never a short answer that a rule
+could read as "nothing found".
 
 ## 6. Authorization surface
 

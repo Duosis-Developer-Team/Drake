@@ -23,3 +23,16 @@ b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/query-templ
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:138
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:49
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:137
+
+# Sprint 5A CTO fix gate — one commit-scoped exemption.
+# 56083ff introduced a test that proves a credential-validation failure
+# never quotes the file it read. The assertion needed a PEM-shaped string,
+# and that literal is what the private-key rule flagged. It is a test
+# fixture, not a key: there is no key body, and no such file is ever read
+# outside the test's own tmp_path.
+# The literal has since been removed from the tree — the test now builds
+# the marker at runtime by concatenation, so the tracked tree is clean and
+# no new commit can reintroduce it. This fingerprint covers only the
+# historical commit, which is not rewritten because this branch does not
+# rewrite history.
+56083ff842e5b15af43820e94300e74a76f300a9:apps/api/tests/test_github_contract_unit.py:private-key:105

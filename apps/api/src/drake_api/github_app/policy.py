@@ -194,9 +194,7 @@ def _protection_facts(inputs: PolicyInputs) -> dict[str, Any]:
         # applying to this branch, across repository AND organization
         # rulesets, and already filtered to active enforcement.
         facts["source"] = "ruleset" if facts["source"] == "none" else f"{facts['source']}+ruleset"
-        rule_types = {
-            str(rule.get("type")) for rule in branch_rules if isinstance(rule, dict)
-        }
+        rule_types = {str(rule.get("type")) for rule in branch_rules if isinstance(rule, dict)}
         if "pull_request" in rule_types:
             facts["pull_request_required"] = True
         if "non_fast_forward" in rule_types:

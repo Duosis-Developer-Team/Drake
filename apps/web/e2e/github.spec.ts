@@ -215,6 +215,14 @@ test("a dry-run reconciliation reports governance honestly", async ({ page }) =>
   await expect(hermes.getByTestId("policy-result")).toBeVisible();
   await expect(hermes.getByTestId("policy-result").getByText("dry run")).toBeVisible();
 
+  // Fikir-Sepeti is governed by a RULESET rather than classic protection.
+  // The ruleset list endpoint carries no rule detail, so a pass here can
+  // only come from the effective-rules endpoint actually being consulted.
+  const fikir = page.getByTestId("repository-card").filter({ hasText: "/Fikir-Sepeti" });
+  await fikir.getByTestId("reconcile-button").click();
+  await expect(fikir.getByTestId("policy-result")).toBeVisible();
+  await expect(fikir.getByTestId("blocking-violations")).toHaveCount(0);
+
   // logislot has no protection at all, so it must show a blocking violation
   // rather than a quiet pass.
   const logislot = page.getByTestId("repository-card").filter({ hasText: "/logislot" });
@@ -222,8 +230,10 @@ test("a dry-run reconciliation reports governance honestly", async ({ page }) =>
   await expect(logislot.getByTestId("blocking-violations")).toBeVisible();
   await expect(logislot.getByText("Default branch is protected")).toBeVisible();
 
-  // Nothing Drake did may have been a write.
+  // Nothing Drake did may have been a write, and the effective-rules
+  // endpoint is the one that answered the ruleset question.
   const calls = await fakeGitHubCalls(page.request);
+  expect(calls.some((call) => call.includes("/rules/branches/"))).toBe(true);
   expect(calls.filter((call) => call.startsWith("POST") && !call.endsWith("/access_tokens"))).toEqual(
     [],
   );

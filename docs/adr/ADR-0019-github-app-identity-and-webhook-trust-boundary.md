@@ -116,3 +116,38 @@ permission is never allowed to look like a passing check.
   answerable (for example, workflow file contents). Those answer
   `UNKNOWN` with an explicit reason instead of guessing — consistent
   with ADR-0011's state semantics.
+
+
+## Amendment — durability and real limits (CTO fix gate)
+
+**A delivery is acknowledged only once its work is durable.** The original
+design claimed the delivery id and started the domain work in a separate
+transaction. That is a lost-update hole: a crash in between leaves a row
+whose digest matches GitHub's retry, so the retry is indistinguishable
+from a harmless replay and the event disappears behind two 202s. The
+delivery row is therefore the durable work item — an inbox, not a receipt.
+It is claimed `pending`, and only a transaction that commits the domain
+work *and* the `processed` flag together may close it. Recovery has two
+paths, because GitHub does not redeliver forever: a redelivery runs a
+`pending` row, and a drain worker picks up rows nobody redelivers.
+Attempts are counted outside the work transaction — counting them inside
+would roll the count back with the failure — so a poison delivery
+dead-letters and is audited instead of retrying without end.
+
+**Stored deliveries are evidence.** A conflicting replay does not modify
+the original row's digest, status, or processed timestamp, and does no
+domain work. Rewriting the record on the strength of an unverified second
+message would let an attacker edit history by replaying it.
+
+**Limits are enforced where the bytes arrive.** The body is streamed and
+refused the moment it crosses the ceiling; `Content-Length` is an
+early-exit hint, since a chunked or understated one would otherwise let
+the entire payload into memory before any check ran. The same applies
+outbound: upstream responses are read incrementally against a budget
+rather than buffered and then measured.
+
+**Ownership is checked even when absent.** The account comparison only ran
+when an account was present, which exempted precisely the payloads that
+omitted it. Missing installation id, missing or empty account, foreign
+owner, mixed-owner repository lists, and an installation bound to a
+different scope are all refusals now.
