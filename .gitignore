@@ -70,3 +70,6 @@ tmp/
 # --- Disposable full-chain E2E agent stack (script-managed) ---
 /.e2e-agent/
 /.e2e-agent-smoke/
+
+# --- Disposable E2E GitHub App material (script-managed) ---
+/.e2e-github/

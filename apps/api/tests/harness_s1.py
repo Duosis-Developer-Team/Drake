@@ -92,6 +92,7 @@ class S1Harness:
 def build_harness(
     settings: Settings | None = None,
     telemetry_transport: httpx.AsyncBaseTransport | None = None,
+    github_transport: httpx.AsyncBaseTransport | None = None,
 ) -> S1Harness:
     base = settings or require_it_settings()
     wired = base.model_copy(
@@ -106,7 +107,12 @@ def build_harness(
         transport=httpx.ASGITransport(app=provider.build_app()), base_url=DEFAULT_ISSUER
     )
     oidc_client = OidcClient(wired, http_client=oidc_http)
-    app = create_app(wired, oidc_client=oidc_client, telemetry_transport=telemetry_transport)
+    app = create_app(
+        wired,
+        oidc_client=oidc_client,
+        telemetry_transport=telemetry_transport,
+        github_transport=github_transport,
+    )
     return S1Harness(app=app, provider=provider, settings=wired)
 
 
@@ -121,6 +127,13 @@ async def reset_rbac_state(engine: AsyncEngine) -> None:
         for table in (
             # Sprint 4 agent/inventory tables reference clusters AND
             # identities with RESTRICT — cleared first when they exist.
+            # Sprint 5A GitHub tables reference scopes/installations with
+            # RESTRICT — cleared before anything they point at.
+            "github_policy_evaluations",
+            "github_webhook_deliveries",
+            "github_repositories",
+            "github_reconciliation_jobs",
+            "github_installations",
             "cluster_inventory_state",
             "inventory_change_events",
             "inventory_resources",

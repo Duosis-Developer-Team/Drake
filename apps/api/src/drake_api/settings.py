@@ -97,6 +97,32 @@ class Settings(BaseSettings):
     # fail-closed production boot below.
     internal_agent_api_enabled: bool = False
 
+    # --- GitHub App (Sprint 5A) -------------------------------------
+    # Feature flag: everything below is inert until an operator turns it
+    # on AND supplies the secret references.
+    github_app_enabled: bool = False
+    # GitHub recommends the CLIENT ID as the JWT issuer; the numeric app
+    # id stays accepted for operators who configured it earlier.
+    github_app_client_id: str = ""
+    github_app_id: str = ""
+    # Secret REFERENCES only — file paths into the operator's secret
+    # store, exactly like agent_ca_key_file. The material never becomes a
+    # settings value, a column, a log line, or an API response.
+    github_app_private_key_file: str = ""
+    github_webhook_secret_file: str = ""
+    github_api_base_url: str = "https://api.github.com"
+    github_http_timeout_seconds: float = 10.0
+    # JWT lifetime stays under GitHub's hard 10-minute ceiling.
+    github_jwt_ttl_seconds: int = 540
+    # Refresh an installation token this long before it expires, so a slow
+    # request can never ride an already-dead token.
+    github_token_refresh_buffer_seconds: int = 300
+    github_webhook_max_body_bytes: int = 1_048_576
+    # Recovery worker: how often to sweep for stranded deliveries and
+    # outstanding reconciliation intents, and how many to take per sweep.
+    github_recovery_poll_seconds: float = 30.0
+    github_recovery_batch_size: int = 50
+
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
 
@@ -123,6 +149,18 @@ class Settings(BaseSettings):
             raise RuntimeError("change-event retention below 7 days is local/test only")
         if self.agent_snapshot_history_limit < 10:
             raise RuntimeError("snapshot history limit below 10 is local/test only")
+        if self.github_app_enabled:
+            if not (self.github_app_private_key_file and self.github_webhook_secret_file):
+                raise RuntimeError(
+                    "GitHub App requires private key and webhook secret references "
+                    "outside local/test"
+                )
+            if not (self.github_app_client_id or self.github_app_id):
+                raise RuntimeError("GitHub App requires a client id (or app id) outside local/test")
+            if not self.github_api_base_url.startswith("https://"):
+                raise RuntimeError("GitHub API base URL must be https outside local/test")
+        if self.github_jwt_ttl_seconds > 600:
+            raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
 
 
 @lru_cache

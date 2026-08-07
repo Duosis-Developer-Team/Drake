@@ -20,6 +20,12 @@ from drake_api.catalog.router import router as catalog_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines, get_engine
 from drake_api.errors import register_error_handlers
+from drake_api.github_app.auth import GitHubAppAuth
+from drake_api.github_app.auth import validate_credentials as validate_github_credentials
+from drake_api.github_app.client import GitHubClient
+from drake_api.github_app.router import router as github_router
+from drake_api.github_app.router_webhook import router as github_webhook_router
+from drake_api.github_app.service import DeliveryRecoveryWorker, GitHubReconciler
 from drake_api.health import router as health_router
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
@@ -36,7 +42,17 @@ from drake_api.telemetry.router import router as telemetry_router
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    yield
+    # The recovery worker exists only when the integration is enabled: a
+    # disabled feature starts no background task and touches no credential.
+    worker = getattr(app.state, "github_recovery_worker", None)
+    if worker is not None:
+        await worker.start()
+    try:
+        yield
+    finally:
+        if worker is not None:
+            # Deterministic cancellation, so no task outlives the process.
+            await worker.stop()
     await app.state.session_store.aclose()
     await app.state.oidc_client.aclose()
     await app.state.telemetry_redis.aclose()
@@ -47,6 +63,7 @@ def create_app(
     settings: Settings | None = None,
     oidc_client: OidcClient | None = None,
     telemetry_transport: "httpx.AsyncBaseTransport | None" = None,
+    github_transport: "httpx.AsyncBaseTransport | None" = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast on insecure identity configuration outside local/test —
@@ -87,6 +104,27 @@ def create_app(
     app.state.telemetry_registry = get_registry()
     app.state.telemetry_metrics = BrokerMetrics()
     app.state.telemetry_redis = aioredis.from_url(settings.redis_url)
+    # GitHub App: credentials stay in process memory; only the reconciler
+    # and its bounded client live on app.state.
+    # An enabled GitHub App must prove its credentials are usable now, not
+    # discover at the first webhook that the key never parsed.
+    validate_github_credentials(settings)
+    github_auth = GitHubAppAuth(settings)
+    github_client = GitHubClient(settings, github_auth, transport=github_transport)
+    app.state.github_auth = github_auth
+    app.state.github_client = github_client
+    github_reconciler = GitHubReconciler(get_engine(settings), github_client)
+    app.state.github_reconciler = github_reconciler
+    app.state.github_recovery_worker = (
+        DeliveryRecoveryWorker(
+            get_engine(settings),
+            poll_seconds=settings.github_recovery_poll_seconds,
+            batch_size=settings.github_recovery_batch_size,
+            reconciler=github_reconciler,
+        )
+        if settings.github_app_enabled
+        else None
+    )
     app.state.telemetry_broker = TelemetryBroker(
         settings=settings,
         engine=get_engine(settings),
@@ -105,6 +143,8 @@ def create_app(
     app.include_router(cluster_inventory_router)
     app.include_router(catalog_router)
     app.include_router(integrations_router)
+    app.include_router(github_router)
+    app.include_router(github_webhook_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):
         # Explicit local/test opt-in only; validate_runtime_security refuses
