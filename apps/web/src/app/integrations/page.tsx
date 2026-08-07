@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
@@ -29,6 +31,14 @@ export default function IntegrationsPage() {
           Connector configuration and observed state per scope. Providers are
           not yet connected in this phase.
         </p>
+      </div>
+      <div>
+        <Link
+          href="/integrations/github"
+          className="inline-flex rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+        >
+          GitHub App integration
+        </Link>
       </div>
       <Card>
         <LoadGate value={health} retry={retry}>
