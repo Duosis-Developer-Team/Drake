@@ -182,6 +182,38 @@ No secret was read, no installation access was used, no reconciliation ran,
 and no live API query was made. The gate is not closed and nothing in the
 code assumes it is. Closing it is an authorized-operator decision.
 
+## 7b. Recovery, lifecycle, and readiness (fix gate 2)
+
+Stranded deliveries are finished by a lifespan-owned worker that claims
+rows with `FOR UPDATE SKIP LOCKED`, so several instances never process the
+same delivery and a crash releases its locks with its connection. A
+dead-lettered delivery is terminal: the ceiling cannot be walked past by
+pressing GitHub's redeliver button, and the endpoint says `failed` rather
+than reporting work it did not do.
+
+Each (event, action) pair maps to an explicit plan. An action outside the
+allowlist performs no domain mutation — treating an unrecognised action as
+"active" is how a future GitHub action would silently re-enable something.
+Suspension and uninstall act on the rows we hold rather than on whatever
+the payload happened to list, so an uninstall cannot leave repositories
+sitting in an accessible state.
+
+A truncated envelope records durable installation-level intent in the same
+transaction as the delivery, never drives a removal from a partial list,
+and is surfaced in the UI as reconciliation-required until the full
+membership has been re-derived. A repository transferred out of the
+organization becomes an access loss rather than a stale accessible row.
+
+Readiness is separated from compliance: `BLOCKED` for a gate or a missing
+required grant, `DEGRADED` for partial evidence, `READY` only for a
+complete and current projection. A repository read completely and failing
+policy is `READY` with a `FAIL` verdict — a real answer. `READY` on
+partial evidence is not reachable.
+
+The Datalake gate holds through the new paths too: installation-level
+reconciliation makes no call for a gated repository, and its blocked state
+survives an access observation rather than being downgraded to disabled.
+
 ## 8. Deliberately still open
 
 The Sprint 3 production ingress `/v1` requirement remains open and is

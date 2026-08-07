@@ -284,6 +284,54 @@ test("an unreadable upstream never manufactures a fresh pass", async ({ page }) 
   }
 });
 
+test("removing one repository does not delete the installation", async ({ page }) => {
+  await signInAs(page, "user-owner");
+  const request = page.request;
+
+  // A membership event names repositories; it says nothing about the App's
+  // own installation. Collapsing the two is how one removal used to take
+  // the whole installation with it.
+  const removed = await deliver(request, {
+    event: "installation_repositories",
+    body: {
+      action: "removed",
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "Duosis-Developer-Team", type: "Organization" },
+      },
+      repositories_removed: [REPOSITORIES.find((r) => r.name === "logislot")],
+    },
+  });
+  expect(removed.status()).toBe(202);
+
+  const installations = await (
+    await request.get("/v1/integrations/github/installations")
+  ).json();
+  expect(installations.installations[0].state).toBe("active");
+
+  const body = (await (
+    await request.get("/v1/integrations/github/repositories?limit=50")
+  ).json()) as { repositories: { full_name: string; access_state: string }[] };
+  const logislot = body.repositories.find((r) => r.full_name.endsWith("/logislot"))!;
+  const hermes = body.repositories.find((r) => r.full_name.endsWith("/Hermes"))!;
+  expect(logislot.access_state).toBe("removed");
+  expect(hermes.access_state).toBe("accessible");
+
+  // Put it back so later scenarios see the full catalogue again.
+  const restored = await deliver(request, {
+    event: "installation_repositories",
+    body: {
+      action: "added",
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "Duosis-Developer-Team", type: "Organization" },
+      },
+      repositories_added: [REPOSITORIES.find((r) => r.name === "logislot")],
+    },
+  });
+  expect(restored.status()).toBe(202);
+});
+
 test("a read-only user can see the integration but cannot drive it", async ({ page }) => {
   await signInAs(page, "user-plain");
   const request = page.request;

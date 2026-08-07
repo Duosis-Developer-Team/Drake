@@ -177,6 +177,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/app/installations":
             self._send(200, [{"id": INSTALLATION_ID}])
             return
+        if path == f"/app/installations/{INSTALLATION_ID}":
+            self._send(
+                200,
+                {
+                    "id": INSTALLATION_ID,
+                    "account": {"login": "Duosis-Developer-Team", "type": "Organization"},
+                    "app_slug": "drake",
+                    "repository_selection": "selected",
+                    "permissions": {
+                        "metadata": "read",
+                        "administration": "read",
+                        "actions": "read",
+                    },
+                    "events": ["installation", "installation_repositories", "repository"],
+                    "suspended_at": None,
+                },
+            )
+            return
+        if path == "/installation/repositories":
+            # The documented shape: {total_count, repositories: [...]}.
+            listed = list(REPOSITORIES.values())
+            self._send(200, {"total_count": len(listed), "repositories": listed})
+            return
         for name, payload in REPOSITORIES.items():
             prefix = f"/repos/Duosis-Developer-Team/{name}"
             if path == prefix:

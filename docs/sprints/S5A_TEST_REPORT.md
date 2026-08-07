@@ -11,12 +11,12 @@ during final verification, judged by exit code. Status vocabulary:
 | Python format | `uv run ruff format --check .` | 177 files already formatted | PASS |
 | Python lint | `uv run ruff check .` | All checks passed | PASS |
 | Python types | `uv run mypy apps/api/src` | no issues in 69 source files | PASS |
-| Python unit | `uv run pytest -m "not integration" -q` | 303 passed | PASS |
-| Python integration | `uv run pytest -m integration -q` | 152 passed | PASS |
+| Python unit | `uv run pytest -m "not integration" -q` | 326 passed | PASS |
+| Python integration | `uv run pytest -m integration -q` | 191 passed | PASS |
 | Contracts | `pnpm --filter @drake/contracts lint/typecheck/test` | 63 tests passed | PASS |
 | Web lint | `pnpm lint` | clean | PASS |
 | Web types | `pnpm typecheck` | clean | PASS |
-| Web unit | `pnpm test` | 67 passed across 12 files | PASS |
+| Web unit | `pnpm test` | 69 passed across 12 files | PASS |
 | Web build | `pnpm build` | compiled | PASS |
 | Provider guard | `vitest run src/test/provider-guard.test.ts` | 2 passed | PASS |
 | Go format/vet/build | `gofmt -l .`, `go vet ./...` | clean | PASS |
@@ -97,8 +97,8 @@ manufacturing a fresh pass; a read-only user seeing the surface but unable
 to drive it; and a leak check asserting no response or rendered page
 contains a PEM header, a `ghs_` token, a JWT shape, or the webhook secret.
 
-**Two consecutive full-chain runs: 49/49 passed, both times** (2.7 and
-2.6 min), with the disposable k3d agent stack up so nothing was skipped.
+**Two consecutive full-chain runs: 50/50 passed, both times** (2.7 min
+each), with the disposable k3d agent stack up so nothing was skipped.
 The GitHub scenario additionally proves the ruleset path: Fikir-Sepeti is
 governed by a ruleset rather than classic protection, and the fake serves
 ruleset summaries with no `rules` member, so its clean verdict can only
@@ -129,15 +129,46 @@ written.
 | 12 | Cache keyed on installation id | repo A token served repo B | keyed on full scope |
 | 13 | Response buffered then measured | whole body read | streamed; page cap is an error |
 
-Two defects were found in the *fix* itself, by these same tests: the
-attempt counter wrote an error code that violated its own CHECK constraint
-and rolled back the transaction that bounded retries, and the
-state-conflict signal was briefly lost when domain work moved into the
-service layer. Both are covered now.
+One defect was found in the *fix* itself by these same tests: the attempt
+counter wrote an error code that violated its own CHECK constraint and
+rolled back the transaction that bounded retries.
+
+A second was NOT caught, and the report said otherwise. The state-conflict
+audit claim below was wrong.
 
 New suites: `test_github_durability_integration.py` (10),
 `test_github_boundary_integration.py` (20),
 `test_github_contract_unit.py` (45).
+
+## 4b. CTO fix gate 2 — what the first round got wrong
+
+The previous report claimed the state-conflict signal was "fixed and
+covered". It was not. `_apply_envelope`'s return value was discarded, so
+the conflict list was permanently empty and the audit could never be
+written — and the test asserting "zero conflicts" passed *because* of the
+bug, not despite it. A green test is not evidence; a test that can only go
+one way is not a test. It is replaced by one that triggers a real
+`InvalidTransitionError` and asserts the audit delta is exactly one.
+
+Nine further findings, each with a regression recorded failing on
+`8ba008a` (lifecycle baseline: **13 failed / 10 passed**).
+
+| § | Regression | Failing evidence on `8ba008a` | Now |
+|---|---|---|---|
+| 3 | `drain_pending_deliveries` called from nowhere | no worker existed to run | lifespan-owned loop, `SKIP LOCKED` |
+| 4 | `failed` re-runnable | redelivery ran work past the ceiling | terminal; reported as `failed` |
+| 5 | Conflict audit unreachable | return value discarded | positive audit test, delta = 1 |
+| 6 | One repository removal deleted the installation | installation went `deleted` | plan matrix per (event, action) |
+| 6 | Uninstall left repositories accessible | payload carried no list | acts on our own rows |
+| 6 | Suspend did not suspend repositories | untouched | `suspended` + `disabled` |
+| 7 | Truncated list applied anyway | partial membership written | durable intent, no partial removals |
+| 8 | Reconcile only evaluated policy | missed rename stayed wrong | projection re-derived |
+| 10 | READY after UNKNOWN evidence | `ready` on partial reads | `DEGRADED` |
+| 11 | `scope_id` nullable with root fallback | column nullable | `NOT NULL`, no fallback |
+
+New suites this round: `test_github_lifecycle_integration.py` (23),
+`test_github_lifecycle_unit.py` (23),
+`test_github_reconciliation_integration.py` (16).
 
 ## 5. Defects found by these tests
 

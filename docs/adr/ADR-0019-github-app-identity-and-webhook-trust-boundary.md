@@ -151,3 +151,39 @@ when an account was present, which exempted precisely the payloads that
 omitted it. Missing installation id, missing or empty account, foreign
 owner, mixed-owner repository lists, and an installation bound to a
 different scope are all refusals now.
+
+
+## Amendment 2 — recovery and lifecycle (CTO fix gate 2)
+
+**A recovery function nobody calls is not recovery.** The drain existed but
+was never wired, so the only path that ever finished a stranded delivery
+was a GitHub redelivery — and GitHub does not redeliver forever. It now
+runs as a lifespan-owned loop: started only when the integration is
+enabled, cancelled deterministically on shutdown, and claiming rows with
+`FOR UPDATE SKIP LOCKED` so several instances take disjoint sets and a
+crashed worker releases its locks with its connection rather than leaving
+rows parked in a state nobody clears.
+
+**Dead-lettered is terminal.** `failed` was treated as "unfinished, try
+again", which made the attempt ceiling advisory: a redelivery would run
+the work a sixth and seventh time. It is terminal now, and the endpoint
+says `failed` rather than dressing the outcome up as `processed` or
+`duplicate`. Recovering from there is an explicit operator action, not a
+webhook.
+
+**Event and action are different questions.** `installation_repositories.
+removed` and `installation.deleted` both contain a word for "gone", and
+comparing only the action made them the same thing — removing one
+repository deleted the installation, and an uninstall (whose payload
+carries no repository list) left every repository accessible. Each
+(event, action) pair now maps to an explicit plan, and a pair outside the
+allowlist produces no domain mutation at all: guessing that an unknown
+action means "active" is how a future GitHub action silently re-enables
+something.
+
+**Truncation is recovered, not annotated.** Marking an envelope truncated
+and then applying the surviving subset is data loss with a note attached —
+and on a removal event it is a destructive change driven by an arbitrary
+subset. Truncation now writes durable installation-level intent in the
+same transaction as the delivery, partial lists never drive removals, and
+the dropped identities are re-derived from the provider.

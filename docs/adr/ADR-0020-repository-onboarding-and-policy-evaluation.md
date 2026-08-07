@@ -129,3 +129,31 @@ objects — production environments especially — states something about all
 of them. If any one was unreadable, that statement cannot be made, so the
 verdict is UNKNOWN with the per-object reason recorded. A *known*
 violation still outranks an unknown: FAIL survives, PASS does not.
+
+
+## Amendment 2 — reconciliation and readiness (CTO fix gate 2)
+
+**Reconciliation reconciles.** The endpoint named "reconcile" only read a
+repository as policy input and wrote a snapshot; the projection itself was
+never corrected, so a missed rename stayed wrong forever. Reconciliation
+now re-derives the observed attributes on the permanent id, and
+installation-level sync re-derives membership — which is the only way
+drift from a missed webhook gets fixed. A page set that came back
+incomplete fails instead of committing a partial membership as though the
+absent repositories had been removed.
+
+**Readiness and compliance are different statements.** `READY` used to be
+applied at the end of any successful HTTP flow, including one whose
+evidence was full of UNKNOWNs. The contract is now explicit:
+
+- `BLOCKED` — a manual security gate, or a required read permission that
+  was never granted. Both are configuration facts, not transient failures.
+- `DEGRADED` — the provider answered in part: unreadable subresource, rate
+  limit, incomplete reconciliation. "We do not know" is not a state
+  anything may be called ready on.
+- `READY` — the projection is complete and current.
+
+Governance is orthogonal: a repository whose facts we read *completely*
+and which fails policy is `READY` with a `FAIL` verdict. That is a real,
+reportable answer. What cannot happen is `READY` on partial evidence.
+`last_reconciled_at` moves only when a reconciliation actually completed.
