@@ -513,10 +513,10 @@ async def reconcile_repository(
     if reconciler is None:
         raise HTTPException(status_code=503, detail="github integration is not configured")
 
-    async with engine.begin() as connection:
-        await service.apply_state(
-            connection, repository_id, onboarding.VALIDATING, "reconciliation_started"
-        )
+    # The reconciler owns the VALIDATING transition (and suppresses it when
+    # the state machine refuses, e.g. for a DISABLED repository). Applying
+    # it here as well made a legitimate request on a disabled repository a
+    # 500 instead of an honest outcome.
     try:
         result = await reconciler.reconcile_repository(
             repository_id,

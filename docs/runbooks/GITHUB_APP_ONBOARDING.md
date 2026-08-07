@@ -118,3 +118,82 @@ Turning this on against the real organization is a separate, explicit
 decision. It requires CTO/operator approval, and it inherits the standing
 Sprint 3 requirement that production ingress route `/v1` directly to the
 API. Sprint 5A ships the capability; it does not activate it.
+
+
+## Sprint 5B: repository onboarding
+
+### App permission change
+
+Sprint 5B adds **Contents: read** to the App's requested permissions. It
+is needed to resolve the default branch to a commit SHA and to read the
+allowlisted metadata files — above all `.drake/project.yaml` — at that
+SHA. No write permission is added, and none is used.
+
+Changing a GitHub App's permissions requires each installation to accept
+the new set. Until an installation accepts, `contents` will not appear in
+the token's granted permissions and Drake will refuse to scan, naming the
+missing permission rather than proceeding with a partial read.
+
+### Selected repositories, not "all"
+
+Install the App against **selected repositories**. It is the difference
+between "Drake can read the four repositories we chose" and "Drake can
+read everything the organization owns", and it is the control that keeps
+Datalake-Platform-GUI out of reach at the provider level as well as
+behind Drake's own gate.
+
+### What the scanner will and will not do
+
+It reads a fixed allowlist — the manifest, README, `package.json`,
+`pyproject.toml`, bounded requirements files, Dockerfile and Compose
+metadata, bounded `.github/workflows` and Kubernetes/Helm/Kustomize
+metadata — through the Contents API, at one commit, under these budgets:
+
+| Budget | Value |
+|---|---|
+| Files inspected | 60 |
+| Bytes per file | 256 KiB |
+| Total decoded bytes | 1 MiB |
+| Provider calls | 80 |
+| Wall clock | 15 s |
+| Directory depth | 2 |
+| Manifest size | 128 KiB |
+
+Nothing is cloned, downloaded as an archive, or executed. A budget being
+exhausted is reported as an incomplete scan, and an incomplete scan is
+never importable.
+
+### The GitOps workflow
+
+If the repository already contains a valid `.drake/project.yaml`, review
+it in Drake and import it. The imported project appears in the catalog;
+nothing is deployed.
+
+If it does not, Drake generates a starting point from what it observed and
+offers it for download. Drake fills in only the repository block, because
+that is all it can see. Ownership, cluster, namespace, criticality, tenant
+model and metrics profile are left as `REPLACE_ME` — a plausible guess
+would invite being committed unread.
+
+**Commit the file to the repository, then scan again.** A draft edited in
+the browser can be validated and downloaded but never imported: ADR-0007
+makes the repository the source of intent, and an import that accepted a
+browser copy would record intent the repository never expressed.
+
+### First target
+
+The first real repository is `Duosis-Developer-Team/Hermes`.
+
+`Duosis-Developer-Team/Datalake-Platform-GUI` remains **excluded**. Its
+manual `.env` security gate is still open, and both the scan and the
+import refuse it before any token is minted or any provider call is made.
+Closing that gate is an authorized-operator process, unchanged by this
+sprint.
+
+### Still requiring operator action
+
+- Registering and installing the real GitHub App, and accepting the new
+  Contents: read permission.
+- Production activation, which still inherits the unresolved Sprint 3
+  production ingress `/v1` requirement.
+- Closing the Datalake `.env` security gate, if and when that is decided.

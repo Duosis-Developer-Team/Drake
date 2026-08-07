@@ -27,6 +27,8 @@ async def main() -> None:
                 # on a database migrated only part-way).
                 "github_policy_evaluations",
                 "github_webhook_deliveries",
+                "github_repository_projects",
+                "github_onboarding_drafts",
                 "github_repositories",
                 "github_reconciliation_jobs",
                 "github_installations",

@@ -10,6 +10,7 @@ whole point: an unreadable answer must never look like a passing check
 import asyncio
 import json
 import random
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +26,8 @@ from drake_api.github_app.auth import (
 from drake_api.settings import Settings
 
 API_VERSION = "2022-11-28"
+# A full 40-hex commit sha. Used to refuse any read that is not pinned.
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 _MAX_ATTEMPTS = 3
 _MAX_PAGES = 20
@@ -368,6 +371,63 @@ class GitHubClient:
         return await self._paginated(
             f"/repos/{owner}/{repo}/environments", token.token, key="environments"
         )
+
+    # --- source metadata (Sprint 5B, Contents: read) ---------------------
+
+    async def resolve_branch_head(
+        self, token: InstallationToken, owner: str, repo: str, branch: str
+    ) -> str:
+        """Resolve a branch to the immutable commit SHA it points at.
+
+        Every later read is pinned to this SHA. Reading "the default
+        branch" across several calls would let the repository move
+        underneath the scan and produce a report of a state that never
+        existed all at once.
+        """
+        response = await self._request(
+            "GET", f"/repos/{owner}/{repo}/commits/{branch}", token.token
+        )
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise GitHubContractError("commit response was not an object")
+        sha = payload.get("sha")
+        if not isinstance(sha, str) or not _COMMIT_SHA.fullmatch(sha):
+            raise GitHubContractError("commit response carried no usable sha")
+        return sha
+
+    async def get_content(
+        self, token: InstallationToken, owner: str, repo: str, path: str, ref: str
+    ) -> dict[str, Any]:
+        """One file, at one commit. Never a directory, never an archive."""
+        if not _COMMIT_SHA.fullmatch(ref):
+            raise GitHubContractError("content reads must be pinned to a commit sha")
+        response = await self._request(
+            "GET", f"/repos/{owner}/{repo}/contents/{path}", token.token, params={"ref": ref}
+        )
+        payload = response.payload
+        if isinstance(payload, list):
+            # The path is a directory; the caller asked for a file.
+            raise GitHubContractError("content path is a directory")
+        if not isinstance(payload, dict):
+            raise GitHubContractError("content response was not an object")
+        return payload
+
+    async def list_directory(
+        self, token: InstallationToken, owner: str, repo: str, path: str, ref: str
+    ) -> list[dict[str, Any]]:
+        """One bounded directory listing, at one commit."""
+        if not _COMMIT_SHA.fullmatch(ref):
+            raise GitHubContractError("directory reads must be pinned to a commit sha")
+        response = await self._request(
+            "GET",
+            f"/repos/{owner}/{repo}/contents/{path}".rstrip("/"),
+            token.token,
+            params={"ref": ref},
+        )
+        payload = response.payload
+        if not isinstance(payload, list):
+            raise GitHubContractError("directory listing was not a list")
+        return [item for item in payload if isinstance(item, dict)]
 
     async def get_environment(
         self, token: InstallationToken, owner: str, repo: str, environment: str

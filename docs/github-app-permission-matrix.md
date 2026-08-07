@@ -33,6 +33,8 @@ configuration).
 | `GET /repos/{owner}/{repo}/branches/{branch}/protection` | classic branch protection: required status checks (+ `strict`), enforce admins, force-push and deletion protection, required reviews | Administration | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/rules/branches/{branch}` | the rules **actually in effect** on the default branch, already resolved across repository and organization rulesets and already filtered to active enforcement | Metadata | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/rulesets` | ruleset **summaries** only — used for attribution, never as rule evidence | Administration | read | `repository` | no |
+| `GET /repos/{owner}/{repo}/commits/{branch}` | resolve the default branch to one immutable commit SHA, so every scan read is pinned | Contents | read | `repository` | yes (5B) |
+| `GET /repos/{owner}/{repo}/contents/{path}` | read the allowlisted metadata files, and `.drake/project.yaml`, at that SHA | Contents | read | `repository` | yes (5B) |
 | `GET /repos/{owner}/{repo}/actions/workflows` | workflow inventory (names, paths, state) for CI-gate presence | Actions | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/environments` | environment inventory, to locate production-like environments | Actions | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/environments/{environment_name}` | environment protection rules: required reviewers, wait timer, deployment branch policy | Actions | read | `repository` | yes |
@@ -70,6 +72,27 @@ Not requested, not used, and rejected in review if proposed:
 
 - **Administration: write** — would allow changing branch protection or
   rulesets. Drake evaluates; it does not remediate.
+
+## Sprint 5B addition: Contents (read)
+
+Static repository discovery cannot happen without reading files, so the
+App requests **Contents: read** — and nothing more. It is justified by
+exactly four things:
+
+1. resolving the default branch to an immutable commit SHA;
+2. reading the allowlisted metadata files at that SHA;
+3. reading and validating `.drake/project.yaml`;
+4. producing static discovery evidence (paths, sizes, digests).
+
+What this permission is **not** used for, and what the scanner cannot do
+regardless of it: clone the repository, download a tarball or zipball,
+invoke Git, start a shell, install a package, run a build or test, execute
+a hook, or run any repository binary. Symlinks and submodules are refused
+rather than followed. Reads are bounded by file count, per-file bytes,
+total bytes, provider calls, directory depth and wall-clock time.
+
+`Contents: write` remains forbidden, along with every other write
+permission. Drake does not create branches, commits, or pull requests.
 
 ## Permission note: effective rules need only Metadata
 

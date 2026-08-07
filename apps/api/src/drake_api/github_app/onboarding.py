@@ -30,7 +30,10 @@ STATES: tuple[OnboardingState, ...] = (
 # Allowed transitions. DISABLED is reachable from everywhere (access can
 # vanish at any moment) and recoverable only through rediscovery.
 _ALLOWED: dict[OnboardingState, frozenset[OnboardingState]] = {
-    DISCOVERED: frozenset({VALIDATING, BLOCKED, DISABLED, DISCOVERED}),
+    # DEGRADED is reachable directly: a reconciliation that fails at the
+    # provider leaves a discovered repository degraded, and routing that
+    # through VALIDATING would only be bookkeeping.
+    DISCOVERED: frozenset({VALIDATING, DEGRADED, BLOCKED, DISABLED, DISCOVERED}),
     VALIDATING: frozenset({READY, DEGRADED, BLOCKED, DISABLED, VALIDATING}),
     READY: frozenset({VALIDATING, DEGRADED, BLOCKED, DISABLED, READY}),
     DEGRADED: frozenset({VALIDATING, READY, BLOCKED, DISABLED, DEGRADED}),

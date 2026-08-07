@@ -23,7 +23,9 @@ from drake_api.errors import register_error_handlers
 from drake_api.github_app.auth import GitHubAppAuth
 from drake_api.github_app.auth import validate_credentials as validate_github_credentials
 from drake_api.github_app.client import GitHubClient
+from drake_api.github_app.onboarding_service import CatalogImporter, OnboardingScanner
 from drake_api.github_app.router import router as github_router
+from drake_api.github_app.router_onboarding import router as github_onboarding_router
 from drake_api.github_app.router_webhook import router as github_webhook_router
 from drake_api.github_app.service import DeliveryRecoveryWorker, GitHubReconciler
 from drake_api.health import router as health_router
@@ -115,6 +117,8 @@ def create_app(
     app.state.github_client = github_client
     github_reconciler = GitHubReconciler(get_engine(settings), github_client)
     app.state.github_reconciler = github_reconciler
+    app.state.github_onboarding_scanner = OnboardingScanner(get_engine(settings), github_client)
+    app.state.github_catalog_importer = CatalogImporter(get_engine(settings), github_client)
     app.state.github_recovery_worker = (
         DeliveryRecoveryWorker(
             get_engine(settings),
@@ -144,6 +148,7 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(integrations_router)
     app.include_router(github_router)
+    app.include_router(github_onboarding_router)
     app.include_router(github_webhook_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):

@@ -10,6 +10,7 @@ import {
   VerdictBadge,
   formatUtc,
 } from "@/components/github/primitives";
+import { OnboardingPanel } from "@/components/github/OnboardingPanel";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -206,6 +207,7 @@ function RepositoryCard({
 }) {
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<PolicySnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -333,6 +335,21 @@ function RepositoryCard({
       ) : null}
 
       {snapshot ? <PolicyResult snapshot={snapshot} /> : null}
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => setOnboardingOpen((open) => !open)}
+          aria-expanded={onboardingOpen}
+          data-testid="onboarding-toggle"
+          className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+        >
+          {onboardingOpen ? "Hide onboarding" : "Start onboarding"}
+        </button>
+      </div>
+      {onboardingOpen ? (
+        <OnboardingPanel repository={repository} csrfToken={csrf} canManage={canManage} />
+      ) : null}
     </section>
   );
 }

