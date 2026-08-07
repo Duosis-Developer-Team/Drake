@@ -214,6 +214,38 @@ The Datalake gate holds through the new paths too: installation-level
 reconciliation makes no call for a gated repository, and its blocked state
 survives an access observation rather than being downgraded to disabled.
 
+## 7c. State precedence and provider identity (fix gate 3)
+
+One ordering decides every repository's state — security gate, then
+installation deleted, then installation suspended, then access removed,
+then incomplete evidence, then accessible — and every path derives through
+it. A weaker observation cannot override a stronger reason, which is what
+stops a rename from restoring access under a suspended App or reopening a
+manual security gate.
+
+Provider responses are verified against the identity they were requested
+for. The permanent id must be an integer and must match; the owner must be
+the expected organization; the installation id and account must match. A
+mismatch writes nothing, is audited once, and leaves the repository
+blocked with an identity conflict rather than binding a different object
+to our row. A repository transferred out becomes a soft access loss.
+
+The Datalake gate is re-derived from what the provider actually returned,
+so a repository renamed into the gated name is blocked before any policy
+subresource is read — and a rename away from it does not close the gate.
+A gate may be opened by an observation and closed only by an operator.
+
+Installation reconciliation carries its scope and verifies it against the
+persisted installation; the root fallback is gone, and a composite
+foreign key makes the database enforce that a repository's scope is its
+installation's scope. Membership sync uses a Metadata-only token,
+validates what was granted, and treats a documented 404 as an uninstall
+while a 403, rate limit or timeout is never mistaken for one.
+
+Reconciliation jobs are claimed with a durable, expiring lease rather than
+a row lock that is released at claim-commit — two workers could otherwise
+both have called GitHub for the same job.
+
 ## 8. Deliberately still open
 
 The Sprint 3 production ingress `/v1` requirement remains open and is

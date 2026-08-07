@@ -11,8 +11,8 @@ during final verification, judged by exit code. Status vocabulary:
 | Python format | `uv run ruff format --check .` | 177 files already formatted | PASS |
 | Python lint | `uv run ruff check .` | All checks passed | PASS |
 | Python types | `uv run mypy apps/api/src` | no issues in 69 source files | PASS |
-| Python unit | `uv run pytest -m "not integration" -q` | 326 passed | PASS |
-| Python integration | `uv run pytest -m integration -q` | 191 passed | PASS |
+| Python unit | `uv run pytest -m "not integration" -q` | 338 passed | PASS |
+| Python integration | `uv run pytest -m integration -q` | 238 passed | PASS |
 | Contracts | `pnpm --filter @drake/contracts lint/typecheck/test` | 63 tests passed | PASS |
 | Web lint | `pnpm lint` | clean | PASS |
 | Web types | `pnpm typecheck` | clean | PASS |
@@ -97,8 +97,8 @@ manufacturing a fresh pass; a read-only user seeing the surface but unable
 to drive it; and a leak check asserting no response or rendered page
 contains a PEM header, a `ghs_` token, a JWT shape, or the webhook secret.
 
-**Two consecutive full-chain runs: 50/50 passed, both times** (2.7 min
-each), with the disposable k3d agent stack up so nothing was skipped.
+**Two consecutive full-chain runs: 52/52 passed, both times** (2.7 and
+2.6 min), with the disposable k3d agent stack up so nothing was skipped.
 The GitHub scenario additionally proves the ruleset path: Fikir-Sepeti is
 governed by a ruleset rather than classic protection, and the fake serves
 ruleset summaries with no `rules` member, so its clean verdict can only
@@ -169,6 +169,44 @@ Nine further findings, each with a regression recorded failing on
 New suites this round: `test_github_lifecycle_integration.py` (23),
 `test_github_lifecycle_unit.py` (23),
 `test_github_reconciliation_integration.py` (16).
+
+## 4c. CTO fix gate 3 — what rounds one and two got wrong
+
+Five claims in the previous reports were wrong, and are corrected here.
+
+| Claimed | Actually |
+|---|---|
+| "`unchanged` leaves the installation alone" | `unchanged` was written into the state column and coerced to `active`, so a rename revived suspended and deleted installations |
+| Installation metadata was safe | every webhook overwrote permissions, events, app slug and account identity from defaults, and stamped `last_reconciled_at` |
+| "missed uninstall closes via reconciliation" | no test exercised it; the 404 path did not exist |
+| "`SKIP LOCKED` so workers take disjoint sets" | true of deliveries, false of reconciliation jobs: the lock is released at claim-commit and the provider work runs after |
+| unknown-action test | ended in `or True`, a tautology that passed regardless of behaviour |
+
+Ten findings, each with a regression recorded failing on `6f4cb52`
+(baseline: **45 failed / 2 passed**).
+
+| § | Regression | Failing evidence on `6f4cb52` | Now |
+|---|---|---|---|
+| 3 | Rename revived a suspended App | installation went `active` | `unchanged` writes nothing |
+| 4 | Webhook blanked installation metadata | permissions/events emptied | patch semantics; absent ≠ empty |
+| 4 | Webhook stamped reconciliation | `last_reconciled_at` set | only a complete provider read stamps |
+| 5 | Metadata event restored access | `accessible` under a suspended App | precedence chain |
+| 6 | Reused path bound to wrong row | foreign id written onto our row | id/owner verified; identity conflict |
+| 7 | Rename into gated name read policy | subresources fetched | gate re-derived, blocks first |
+| 8 | Webhook promoted partial evidence | back to `ready` | `reconciliation_state` column |
+| 9 | Reconciliation fell back to root scope | new rows in root | scope carried + composite FK |
+| 10 | Missed uninstall never closed | stayed `active` | documented 404 → uninstalled |
+| 11 | Membership sync asked for 3 permissions | over-privileged token | Metadata only, grant validated |
+| 12 | Default-branch change kept READY | stale verdict looked current | marked stale |
+| 13 | Two workers ran one job twice | both called the provider | durable lease + compare-and-set |
+| 14 | Unsupported action said `processed` | success audit written | `unsupported`, refusal only |
+
+New suites this round: `test_github_precedence_integration.py` (16),
+`test_github_identity_integration.py` (31), plus 12 precedence-chain unit
+tests. Two defects were found in this round's own fixes by these tests:
+`restore_access` wrote `discovered` directly instead of deferring to the
+chain, and `RESTRICT` on the new composite FK made a legitimate re-scoping
+transaction impossible to commit.
 
 ## 5. Defects found by these tests
 

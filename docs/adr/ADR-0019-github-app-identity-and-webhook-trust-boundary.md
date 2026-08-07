@@ -187,3 +187,37 @@ and on a removal event it is a destructive change driven by an arbitrary
 subset. Truncation now writes durable installation-level intent in the
 same transaction as the delivery, partial lists never drive removals, and
 the dropped identities are re-derived from the provider.
+
+
+## Amendment 3 — scope, leases, and honest outcomes (CTO fix gate 3)
+
+**An installation's scope is carried, not guessed.** Reconciliation used
+to fall back to the root scope, which would move another tenant's data
+into it. The scope now comes from the job or the persisted installation
+and is verified against what we hold; a contradiction fails before any
+provider call. A composite foreign key makes the invariant the database's
+job: a repository's scope must be its installation's scope. It is
+deferrable, so a legitimate re-scoping can move both in one transaction,
+and `NO ACTION` rather than `RESTRICT` because RESTRICT is checked
+immediately even on a deferrable constraint.
+
+**A claim is a lease, not a lock.** `FOR UPDATE SKIP LOCKED` was described
+as making reconciliation jobs exclusive. It does not: the provider work
+happens after the claim transaction commits, and committing releases the
+lock, so a second worker arriving a moment later would find the row
+unlocked and still pending. The claim now takes a durable lease in the
+same statement that selects the row, and closing the job is a
+compare-and-set on that lease. The lease expires so a worker that dies
+mid-job cannot strand it.
+
+**An unsupported action says so.** It used to audit a refusal and then
+report `processed` with a success audit alongside it. It now returns
+`unsupported`, writes only the refusal, and does no domain work — and the
+test guarding this no longer ends in `or True`, which had made it pass
+regardless of what the endpoint did.
+
+**A confirmed uninstall is acted on; an ambiguous failure is not.** A
+documented 404 from the installation endpoint means the App is gone, so
+the installation is closed and every repository under it loses access. A
+403, a rate limit, or a timeout is not evidence of anything and never
+refreshes state into READY.

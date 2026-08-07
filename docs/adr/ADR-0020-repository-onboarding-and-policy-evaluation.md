@@ -157,3 +157,49 @@ Governance is orthogonal: a repository whose facts we read *completely*
 and which fails policy is `READY` with a `FAIL` verdict. That is a real,
 reportable answer. What cannot happen is `READY` on partial evidence.
 `last_reconciled_at` moves only when a reconciliation actually completed.
+
+
+## Amendment 3 — a webhook is not a source of truth (CTO fix gate 3)
+
+Most of this round has one cause: a delivery was treated as though it
+re-established facts it never carried.
+
+**One precedence chain owns repository state.** Scattered writers each
+decided a state from whatever they happened to know, so a rename could
+restore access under a suspended App and a membership event could promote
+a repository whose evidence we knew was partial. There is now a single
+ordering, and every path derives through it:
+
+    security gate > installation deleted > installation suspended >
+    repository access removed > evidence incomplete > accessible
+
+A weaker observation can never override a stronger reason. `restore_access`
+writes access only; what that leaves the repository in is the chain's call.
+
+**Provider identity is verified before anything is written.** We ask the
+provider about a *path* but we mean a *permanent id*, and those diverge
+the moment a repository is renamed, transferred, or deleted and re-created
+at the same path. The response's `id` must be an integer and must equal
+the id we meant; the owner must be the expected organization. A mismatch
+mutates nothing, is audited once, and leaves the repository BLOCKED with
+an identity conflict rather than preserving a stale READY.
+
+**The gate is derived from the name, so it is re-derived when the name
+changes.** A repository renamed *into* the gated name is blocked before a
+single policy subresource is read. A repository renamed *away* from it
+stays blocked: a gate may be opened by an observation, never closed by
+one. Closing it remains a manual operator process.
+
+**Completeness is its own fact.** `last_reconciled_at` was doing two jobs
+— recording the last success and standing in for "the current picture is
+complete" — so an old success let a later webhook promote a degraded
+repository back to READY. `reconciliation_state` now records what the
+current evidence is worth, and only a complete reconciliation transaction
+produces READY.
+
+**Membership sync is not policy evaluation.** It reads identity and
+attributes with a Metadata-only token, validates what was actually
+granted, and never promotes anything. When an attribute the evidence
+depended on has moved — the default branch above all, since every
+branch-scoped verdict was gathered against it — the stored verdict is
+marked stale rather than left looking current.

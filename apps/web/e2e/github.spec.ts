@@ -332,6 +332,83 @@ test("removing one repository does not delete the installation", async ({ page }
   expect(restored.status()).toBe(202);
 });
 
+test("a suspended installation is not revived by a repository event", async ({ page }) => {
+  await signInAs(page, "user-owner");
+  const request = page.request;
+
+  const suspend = await deliver(request, {
+    event: "installation",
+    body: {
+      action: "suspend",
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "Duosis-Developer-Team", type: "Organization" },
+      },
+    },
+  });
+  expect(suspend.status()).toBe(202);
+
+  // A rename says nothing about whether the App is still permitted to act.
+  const renamed = await deliver(request, {
+    event: "repository",
+    body: {
+      action: "renamed",
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "Duosis-Developer-Team", type: "Organization" },
+      },
+      repository: { ...REPOSITORIES.find((r) => r.name === "logislot")! },
+    },
+  });
+  expect(renamed.status()).toBe(202);
+
+  const installations = await (
+    await request.get("/v1/integrations/github/installations")
+  ).json();
+  expect(installations.installations[0].state).toBe("suspended");
+
+  const body = (await (
+    await request.get("/v1/integrations/github/repositories?limit=50")
+  ).json()) as { repositories: { full_name: string; access_state: string }[] };
+  const logislot = body.repositories.find((r) => r.full_name.endsWith("/logislot"))!;
+  expect(logislot.access_state).toBe("suspended");
+
+  // Unsuspend restores access without claiming anything about compliance.
+  const unsuspend = await deliver(request, {
+    event: "installation",
+    body: {
+      action: "unsuspend",
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "Duosis-Developer-Team", type: "Organization" },
+      },
+    },
+  });
+  expect(unsuspend.status()).toBe(202);
+  const after = (await (
+    await request.get("/v1/integrations/github/repositories?limit=50")
+  ).json()) as { repositories: { full_name: string; access_state: string; onboarding_state: string }[] };
+  const restored = after.repositories.find((r) => r.full_name.endsWith("/logislot"))!;
+  expect(restored.access_state).toBe("accessible");
+  expect(restored.onboarding_state).not.toBe("ready");
+});
+
+test("an unsupported action is reported as unsupported", async ({ page }) => {
+  await signInAs(page, "user-owner");
+  const response = await deliver(page.request, {
+    event: "installation",
+    body: {
+      action: "some_future_action",
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "Duosis-Developer-Team", type: "Organization" },
+      },
+    },
+  });
+  expect(response.status()).toBe(202);
+  expect((await response.json()).status).toBe("unsupported");
+});
+
 test("a read-only user can see the integration but cannot drive it", async ({ page }) => {
   await signInAs(page, "user-plain");
   const request = page.request;
