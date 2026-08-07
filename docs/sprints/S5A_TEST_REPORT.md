@@ -12,7 +12,7 @@ during final verification, judged by exit code. Status vocabulary:
 | Python lint | `uv run ruff check .` | All checks passed | PASS |
 | Python types | `uv run mypy apps/api/src` | no issues in 69 source files | PASS |
 | Python unit | `uv run pytest -m "not integration" -q` | 338 passed | PASS |
-| Python integration | `uv run pytest -m integration -q` | 238 passed | PASS |
+| Python integration | `uv run pytest -m integration -q` | 276 passed | PASS |
 | Contracts | `pnpm --filter @drake/contracts lint/typecheck/test` | 63 tests passed | PASS |
 | Web lint | `pnpm lint` | clean | PASS |
 | Web types | `pnpm typecheck` | clean | PASS |
@@ -207,6 +207,43 @@ tests. Two defects were found in this round's own fixes by these tests:
 `restore_access` wrote `discovered` directly instead of deferring to the
 chain, and `RESTRICT` on the new composite FK made a legitimate re-scoping
 transaction impossible to commit.
+
+## 4d. CTO fix gate 4 — and one more wrong claim
+
+The previous report stated "No `or True`, no `assert True`, no
+`status_code in (success, failure)` anywhere". That was **false**: the
+tautology was still at `test_github_lifecycle_integration.py:576`. I had
+written a new exact test in a different file and left the old one in
+place. Every remaining loose assertion has now been replaced by a single
+exact contract, and the tree scan returns nothing but a docstring that
+quotes the old line.
+
+Eight findings, each with a regression recorded failing on `8e47f13`
+(baseline: **25 failed / 13 passed**).
+
+| § | Regression | Failing evidence on `8e47f13` | Now |
+|---|---|---|---|
+| 1 | Rename away from the gated name allowed calls | provider + token calls made | persisted gate consulted first; zero calls |
+| 2 | Suspend/unsuspend restored READY | `complete` survived the outage | access loss clears current evidence |
+| 2 | Remove/re-add restored READY | same | same |
+| 3 | Webhook blanked archived/disabled/visibility/branch | overwritten from defaults | absent means absent |
+| 3 | Webhook left evidence looking current | stayed `complete` | marked stale |
+| 4 | Membership compared post-update | changes invisible | pre-update snapshot, both directions |
+| 4 | Malformed entry silently skipped | live repository looked removed | whole listing fails closed |
+| 5 | Batch lease + serial execution | second worker ran the same job | per-job claim, heartbeat, fencing |
+| 5 | Crash did not spend an attempt | unbounded retries | attempt spent at claim |
+| 6 | Delivery scope not enforced by the DB | foreign scope accepted | composite FK |
+| 7 | Node id never checked | impostor accepted | identity conflict, audited once |
+| 8 | `or True` tautology | passed regardless | exact contract |
+
+New suites this round: `test_github_invariants_integration.py` (29),
+`test_github_lease_integration.py` (9). One defect was found in this
+round's own fixes: releasing the lease on failure let the same sweep
+re-claim the job and burn all five attempts at once.
+
+The node-id check also caught a real inconsistency in the E2E fixture —
+the webhook payload and the REST response described the same repository
+with different node ids, which is exactly the drift the check exists for.
 
 ## 5. Defects found by these tests
 

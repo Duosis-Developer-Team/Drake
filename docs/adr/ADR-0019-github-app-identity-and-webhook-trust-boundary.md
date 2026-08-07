@@ -221,3 +221,24 @@ documented 404 from the installation endpoint means the App is gone, so
 the installation is closed and every repository under it loses access. A
 403, a rate limit, or a timeout is not evidence of anything and never
 refreshes state into READY.
+
+
+## Amendment 4 — bounded job ownership (CTO fix gate 4)
+
+The previous lease was taken for a whole batch at once and then the jobs
+were run serially, which is not bounded ownership: the last job's lease
+started burning while the first was still inside the provider, so by the
+time it ran another worker could legitimately have taken it.
+
+Ownership is now one job at a time. Each job is claimed immediately before
+it runs; the claim spends the attempt atomically, so a worker that dies
+straight afterwards has still used one of its chances. A heartbeat renews
+the lease while the work is in flight, and stops renewing the moment the
+lease is no longer ours. Closing the job is fenced on a monotonic
+generation, so a worker whose lease was taken over writes nothing and
+reports nothing completed. A failed job keeps its lease until it expires,
+which is what stops a single sweep from burning the whole attempt budget.
+
+Deliveries carry the same composite installation/scope foreign key the
+repositories do. The application still checks the relationship before
+claiming; the database is the layer that cannot be forgotten.

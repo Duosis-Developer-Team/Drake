@@ -26,7 +26,7 @@ INSTALLATION_ID = 55501
 REPOSITORIES = {
     "Hermes": {
         "id": HERMES_ID,
-        "node_id": "R_hermes",
+        "node_id": "R_Hermes",
         "name": "Hermes",
         "full_name": "Duosis-Developer-Team/Hermes",
         "private": True,
@@ -52,7 +52,7 @@ REPOSITORIES = {
     },
     "Fikir-Sepeti": {
         "id": FIKIR_ID,
-        "node_id": "R_fikir",
+        "node_id": "R_Fikir-Sepeti",
         "name": "Fikir-Sepeti",
         "full_name": "Duosis-Developer-Team/Fikir-Sepeti",
         "private": True,

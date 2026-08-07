@@ -203,3 +203,40 @@ granted, and never promotes anything. When an attribute the evidence
 depended on has moved — the default branch above all, since every
 branch-scoped verdict was gathered against it — the stored verdict is
 marked stale rather than left looking current.
+
+
+## Amendment 4 — recorded state outranks later observation (CTO fix gate 4)
+
+**The gate is a row, not a name.** It was derived from `full_name` alone,
+so renaming a repository away from the gated name restarted the provider
+calls — anyone who could rename could decide when Drake talks to GitHub
+about it. Both sources are consulted before anything reaches the network,
+and OPEN wins: the recorded gate, and the gate the current name derives.
+
+**Losing sight of a repository clears current evidence.** An access loss
+left `reconciliation_state = complete` behind, so the precedence chain
+derived READY again the moment access returned — from a reading taken
+before we stopped being able to see it. Suspension, removal and uninstall
+now clear current evidence outright. The last-good snapshot and the last
+successful timestamp are untouched: they record history, not the present.
+
+**Absent is absent.** The repository upsert wrote every column from
+defaults, so a rename reported the repository as un-archived, enabled, and
+on a guessed default branch — facts the message never carried. Optional
+attributes now mean "not carried" unless supplied, the envelope keeps
+`private` only when the payload stated it, and a metadata webhook marks
+the evidence gathered before it as no longer current.
+
+**Comparisons use the pre-update snapshot.** Membership sync compared
+after part of the projection had already been written, so a field the
+update had just overwritten compared equal to itself and the change that
+invalidated the evidence went unnoticed. The old projection is read once,
+before any write, and compared symmetrically in both directions.
+
+**A malformed membership entry fails the listing.** Skipping it made the
+repository it described look like one that had vanished, which would have
+marked a live repository removed.
+
+**Node identity must agree.** The numeric id remains the identity, but a
+node id we already hold and one the provider reports must match; an empty
+stored value is a legacy row filled in from the verified response.
