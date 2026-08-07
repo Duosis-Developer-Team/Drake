@@ -96,6 +96,9 @@ def _repository_payload(row: Any) -> dict[str, Any]:
         "last_policy_evaluated_at": row[16].isoformat() if row[16] else None,
         "last_error_code": row[17],
         "installation_external_id": row[18],
+        # A truncated or ambiguous webhook left work outstanding: what is
+        # shown here is not yet a complete picture of this installation.
+        "pending_reconciliation": bool(row[19]),
         "as_of": _as_of(),
     }
 
@@ -105,7 +108,11 @@ _REPOSITORY_COLUMNS = """
     r.private, r.visibility, r.archived, r.disabled, r.default_branch,
     r.onboarding_state, r.state_reason, r.security_gate, r.access_state,
     r.last_reconciled_at, r.last_policy_evaluated_at, r.last_error_code,
-    i.external_id
+    i.external_id,
+    EXISTS (
+        SELECT 1 FROM github_reconciliation_jobs j
+        WHERE j.installation_external_id = i.external_id AND j.status = 'pending'
+    ) AS pending_reconciliation
 """
 
 
@@ -511,13 +518,37 @@ async def reconcile_repository(
             connection, repository_id, onboarding.VALIDATING, "reconciliation_started"
         )
     try:
-        evaluation = await reconciler.evaluate_repository(
-            installation_external_id, full_name, repository_external_id=repository_external_id
+        result = await reconciler.reconcile_repository(
+            repository_id,
+            installation_external_id,
+            full_name,
+            repository_external_id,
         )
+        evaluation = result.evaluation
     except service.SecurityGateBlockedError as blocked:
         raise HTTPException(
             status_code=409, detail="repository is blocked by a security gate"
         ) from blocked
+    except service.PermissionShortfallError as shortfall:
+        # A required read permission was never granted. That is a
+        # configuration fact, not a transient failure, and it must not look
+        # like one: BLOCKED until an operator grants it.
+        async with engine.begin() as connection:
+            await service.apply_state(
+                connection, repository_id, onboarding.BLOCKED, "required_permission_missing"
+            )
+        await service._audit(
+            engine,
+            action="github.repository.permission_insufficient",
+            result="denied",
+            target_id=str(repository_id),
+            metadata={"missing": shortfall.missing, "full_name": full_name},
+            actor_type="user",
+            actor_id=str(auth.principal.identity_id),
+        )
+        raise HTTPException(
+            status_code=409, detail="installation is missing a required read permission"
+        ) from shortfall
     except GitHubError as error:
         code = error_code(error)
         async with engine.begin() as connection:
@@ -544,14 +575,32 @@ async def reconcile_repository(
 
     async with engine.begin() as connection:
         await service.store_policy_evaluation(connection, repository_id, evaluation, dry_run=True)
-        await connection.execute(
-            text(
-                "UPDATE github_repositories SET last_reconciled_at = now(), "
-                "last_error_code = NULL, updated_at = now() WHERE id = :id"
-            ),
-            {"id": repository_id},
-        )
-        await service.apply_state(connection, repository_id, onboarding.READY, "reconciled")
+        # Readiness is about the PROJECTION, not about compliance. A
+        # repository whose facts we read completely is READY even when its
+        # governance verdict is FAIL — that is a real, reportable answer.
+        # A repository we could only read in part is DEGRADED, because
+        # "we do not know" is not a state anything may be called ready on.
+        if result.complete:
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET last_reconciled_at = now(), "
+                    "last_policy_evaluated_at = now(), last_error_code = NULL, "
+                    "updated_at = now() WHERE id = :id"
+                ),
+                {"id": repository_id},
+            )
+            await service.apply_state(connection, repository_id, onboarding.READY, "reconciled")
+        else:
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET last_policy_evaluated_at = now(), "
+                    "updated_at = now() WHERE id = :id"
+                ),
+                {"id": repository_id},
+            )
+            await service.apply_state(
+                connection, repository_id, onboarding.DEGRADED, "evidence_incomplete"
+            )
 
     await service._audit(
         engine,
@@ -562,6 +611,7 @@ async def reconcile_repository(
             "overall": evaluation.overall,
             "blocking": evaluation.blocking_count,
             "unknown": evaluation.unknown_count,
+            "evidence_complete": result.complete,
             "dry_run": True,
         },
         actor_type="user",
@@ -580,6 +630,10 @@ async def reconcile_repository(
         "overall": evaluation.overall,
         "blocking_count": evaluation.blocking_count,
         "unknown_count": evaluation.unknown_count,
+        # Two independent facts: was the evidence complete, and what did the
+        # complete-or-not evidence say.
+        "evidence_complete": result.complete,
+        "onboarding_state": onboarding.READY if result.complete else onboarding.DEGRADED,
         "dry_run": True,
         "as_of": _as_of(),
     }

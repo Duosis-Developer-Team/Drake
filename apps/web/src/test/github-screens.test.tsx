@@ -293,6 +293,30 @@ describe("github integration screen", () => {
     expect(container.querySelectorAll('[data-testid="status-healthy"]')).toHaveLength(0);
   });
 
+  it("says plainly when an installation still owes a reconciliation", async () => {
+    mockRoutes({
+      "/v1/integrations/github/repositories": {
+        status: 200,
+        body: {
+          repositories: [{ ...HERMES, pending_reconciliation: true }, DATALAKE],
+          next_cursor: null,
+        },
+      },
+    });
+    render(<GitHubIntegrationPage />);
+    await waitFor(() => expect(screen.getByTestId("repository-list")).toBeInTheDocument());
+    const notice = screen.getByTestId("reconciliation-required");
+    expect(within(notice).getByText("Reconciliation required")).toBeInTheDocument();
+    expect(screen.getByText(/may be incomplete/i)).toBeInTheDocument();
+  });
+
+  it("does not claim reconciliation is pending when it is not", async () => {
+    mockRoutes();
+    render(<GitHubIntegrationPage />);
+    await waitFor(() => expect(screen.getByTestId("repository-list")).toBeInTheDocument());
+    expect(screen.queryByTestId("reconciliation-required")).not.toBeInTheDocument();
+  });
+
   it("treats a missing or old reconciliation as stale", () => {
     const now = Date.parse("2026-08-07T12:00:00Z");
     expect(isStale(null, now)).toBe(true);

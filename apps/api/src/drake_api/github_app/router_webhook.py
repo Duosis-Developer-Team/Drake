@@ -21,6 +21,7 @@ from drake_api.github_app.webhook import (
     WebhookRejectedError,
     build_envelope,
     check_ownership,
+    foreign_repositories,
     payload_digest,
     validate_delivery_id,
     validate_event_name,
@@ -29,6 +30,14 @@ from drake_api.github_app.webhook import (
 from drake_api.settings import Settings
 
 router = APIRouter(prefix="/v1/integrations/github", tags=["github-webhook"])
+
+
+class _ForeignRepositoryError(Exception):
+    """An announced repository outside the organization that we do not track."""
+
+    def __init__(self, external_ids: list[int]) -> None:
+        super().__init__("repository owner mismatch")
+        self.external_ids = external_ids
 
 
 def _refused(reason: str) -> HTTPException:
@@ -132,14 +141,44 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
 
     # 8-9. Claim the delivery AND make its work durable in ONE transaction.
     # Only after this commits may the endpoint acknowledge anything.
-    async with engine.begin() as connection:
-        scope_id = await service.organization_scope_id(connection)
-        try:
+    try:
+        async with engine.begin() as connection:
+            scope_id = await service.organization_scope_id(connection)
             await service.assert_installation_scope(
                 connection, envelope.installation_external_id, scope_id
             )
-        except service.InstallationScopeMismatchError as mismatch:
-            raise _refused("installation_scope_mismatch") from mismatch
+            foreign = foreign_repositories(envelope)
+            unknown = await service.unknown_repository_ids(connection, foreign) if foreign else []
+            if unknown:
+                raise _ForeignRepositoryError(unknown)
+    except _ForeignRepositoryError as foreign_error:
+        await service._audit(
+            engine,
+            action="github.webhook.ownership_rejected",
+            result="denied",
+            target_type="github_webhook",
+            target_id=delivery_id,
+            metadata={
+                "reason": "repository_owner_mismatch",
+                "event": event,
+                "repositories": len(foreign_error.external_ids),
+            },
+        )
+        raise _refused("repository_owner_mismatch") from foreign_error
+    except service.InstallationScopeMismatchError as mismatch:
+        # Audited outside the transaction it aborted, so the record
+        # survives the rollback that refusing causes.
+        await service._audit(
+            engine,
+            action="github.installation.scope_mismatch",
+            result="denied",
+            target_type="github_installation",
+            target_id=str(envelope.installation_external_id),
+            metadata={"reason": "scope_mismatch", "event": event},
+        )
+        raise _refused("installation_scope_mismatch") from mismatch
+
+    async with engine.begin() as connection:
         outcome = await service.record_delivery(
             connection,
             delivery_id=delivery_id,
@@ -169,6 +208,16 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
     if outcome.status == "duplicate":
         return {"status": "duplicate", "delivery_id": delivery_id}
 
+    if outcome.status == "failed":
+        # Dead-lettered earlier. Say so plainly: reporting `processed` or a
+        # plain `duplicate` here would claim work that never happened, and
+        # would invite an unbounded redelivery loop against the ceiling.
+        return {
+            "status": "failed",
+            "delivery_id": delivery_id,
+            "detail": "delivery exhausted its retry budget; operator action required",
+        }
+
     # 10. Run the durable work item now. If this fails the row stays
     # `pending`, so a redelivery or the drain worker finishes it — the
     # event cannot be acknowledged into nothing.
@@ -176,6 +225,8 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
     result = await service.process_delivery(engine, outcome.delivery_row_id)
     if result == "duplicate":
         return {"status": "duplicate", "delivery_id": delivery_id}
+    if result == "failed":
+        return {"status": "failed", "delivery_id": delivery_id}
 
     await service._audit(
         engine,

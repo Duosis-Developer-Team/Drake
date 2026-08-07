@@ -17,6 +17,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from drake_api.github_app import catalog
+from drake_api.github_app.webhook import SUPPORTED_EVENTS
 from harness_s1 import build_harness, grant_platform_owner, require_it_settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -59,6 +60,11 @@ class FakeGitHub:
         self.mode = "ok"
         self.protection_status = 200
         self.branch_rules_status = 200
+        # What the access-token mint actually grants, so a narrower grant
+        # than requested can be exercised.
+        self.granted_permissions = {"metadata": "read", "administration": "read", "actions": "read"}
+        # Force an always-full page set to exercise the pagination cap.
+        self.installation_repositories_pages = 1
         # Effective rules per repository, shaped like
         # GET /repos/{owner}/{repo}/rules/branches/{branch}.
         self.branch_rules: dict[str, list[dict[str, Any]]] = {}
@@ -108,12 +114,46 @@ class FakeGitHub:
                     # A deliberately long, non-fixed-length opaque token.
                     "token": "ghs_" + "t" * 82,
                     "expires_at": "2099-01-01T00:00:00Z",
-                    "permissions": {"metadata": "read", "administration": "read"},
+                    "permissions": dict(self.granted_permissions),
                     "repository_selection": "selected",
                 },
             )
         if path == "/app/installations":
             return httpx.Response(200, json=[{"id": INSTALLATION_ID}])
+        if path == f"/app/installations/{INSTALLATION_ID}":
+            return httpx.Response(
+                200,
+                json={
+                    "id": INSTALLATION_ID,
+                    "account": {"login": catalog.ORGANIZATION, "type": "Organization"},
+                    "app_slug": "drake",
+                    "repository_selection": "selected",
+                    "permissions": dict(self.granted_permissions),
+                    "events": sorted(SUPPORTED_EVENTS),
+                    "suspended_at": None,
+                },
+            )
+        if path == "/installation/repositories":
+            if self.installation_repositories_pages > 1:
+                # Always a full page: the listing is never complete.
+                return httpx.Response(
+                    200,
+                    json={
+                        "total_count": 10_000,
+                        "repositories": [
+                            {
+                                "id": 990_000 + index,
+                                "node_id": f"R_p{index}",
+                                "name": f"pad{index}",
+                                "full_name": f"Duosis-Developer-Team/pad{index}",
+                                "private": True,
+                            }
+                            for index in range(100)
+                        ],
+                    },
+                )
+            listed = list(self.repositories.values())
+            return httpx.Response(200, json={"total_count": len(listed), "repositories": listed})
         for name, payload in self.repositories.items():
             if path == f"/repos/Duosis-Developer-Team/{name}":
                 return httpx.Response(200, json=payload)

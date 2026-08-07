@@ -215,11 +215,14 @@ def upgrade() -> None:
         sa.Column("last_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True),
         # Scope ownership of the delivery metadata itself, so the operator
         # listing can be filtered per tenant instead of returning the table.
+        # NOT NULL: a delivery with no scope cannot be filtered, and a
+        # nullable column invites a "fall back to root" branch that quietly
+        # widens visibility.
         sa.Column(
             "scope_id",
             postgresql.UUID(as_uuid=True),
             sa.ForeignKey("scopes.id", ondelete="RESTRICT"),
-            nullable=True,
+            nullable=False,
         ),
         sa.Column(
             "installation_id",
@@ -263,6 +266,48 @@ def upgrade() -> None:
         "github_webhook_deliveries",
         ["status", "received_at"],
     )
+
+    # Durable intent to re-derive an installation's full repository
+    # membership from the provider. A truncated webhook is not a complete
+    # statement of membership, so the missing identities are recovered here
+    # instead of being silently dropped.
+    op.create_table(
+        "github_reconciliation_jobs",
+        _uuid_pk(),
+        sa.Column(
+            "scope_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("scopes.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column("installation_external_id", sa.BigInteger(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'pending'")),
+        sa.Column("attempts", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("last_error_code", sa.Text(), nullable=True),
+        sa.Column("last_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("processed_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        *_timestamps(),
+        sa.CheckConstraint(
+            "status IN ('pending', 'processed', 'failed')", name="ck_github_job_status"
+        ),
+        sa.CheckConstraint("attempts >= 0", name="ck_github_job_attempts"),
+        sa.CheckConstraint(f"reason {_ERROR_CODE_SHAPE}", name="ck_github_job_reason"),
+        sa.CheckConstraint(
+            f"last_error_code IS NULL OR last_error_code {_ERROR_CODE_SHAPE}",
+            name="ck_github_job_error_code",
+        ),
+    )
+    # At most one outstanding job per installation: repeated truncated
+    # deliveries coalesce instead of queueing duplicate work.
+    op.create_index(
+        "uq_github_job_pending",
+        "github_reconciliation_jobs",
+        ["installation_external_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'pending'"),
+    )
+    op.create_index("ix_github_jobs_status", "github_reconciliation_jobs", ["status", "created_at"])
 
     op.create_table(
         "github_policy_evaluations",
@@ -308,6 +353,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("github_policy_evaluations")
+    op.drop_table("github_reconciliation_jobs")
     op.drop_table("github_webhook_deliveries")
     op.drop_table("github_repositories")
     op.drop_table("github_installations")

@@ -63,6 +63,8 @@ export interface GitHubRepository {
   last_policy_evaluated_at: string | null;
   last_error_code: string | null;
   installation_external_id: number;
+  /** Outstanding installation-level work: this view is not yet complete. */
+  pending_reconciliation?: boolean;
   as_of: string;
 }
 

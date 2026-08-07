@@ -259,12 +259,24 @@ def check_ownership(envelope: WebhookEnvelope) -> None:
         raise WebhookRejectedError("owner_mismatch")
 
     for summary in envelope.repositories:
-        owner = summary_owner(summary)
-        if not owner:
+        if not summary_owner(summary):
             raise WebhookRejectedError("repository_owner_missing")
-        if owner.lower() != EXPECTED_ORGANIZATION.lower():
-            raise WebhookRejectedError("repository_owner_mismatch")
-        if owner.lower() != envelope.account_login.lower():
-            # The repository claims a different owner than the installation
-            # account that supposedly sent it.
-            raise WebhookRejectedError("repository_installation_mismatch")
+
+
+def foreign_repositories(envelope: WebhookEnvelope) -> list[int]:
+    """Announced repositories whose owner is not the expected organization.
+
+    A foreign owner means two different things. For a repository Drake
+    already tracks by permanent id it is evidence the repository LEFT —
+    refusing the delivery would strand it as accessible with stale
+    metadata, which is the worst of both worlds. For a repository we have
+    never seen it is an attempt to onboard something that is not ours, and
+    that is refused. The caller resolves which case applies, because only
+    it can consult what we already know.
+    """
+    expected = EXPECTED_ORGANIZATION.lower()
+    return [
+        int(summary["external_id"])
+        for summary in envelope.repositories
+        if summary_owner(summary).lower() != expected
+    ]

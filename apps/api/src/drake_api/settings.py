@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     # request can never ride an already-dead token.
     github_token_refresh_buffer_seconds: int = 300
     github_webhook_max_body_bytes: int = 1_048_576
+    # Recovery worker: how often to sweep for stranded deliveries and
+    # outstanding reconciliation intents, and how many to take per sweep.
+    github_recovery_poll_seconds: float = 30.0
+    github_recovery_batch_size: int = 50
 
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.

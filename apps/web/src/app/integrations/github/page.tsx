@@ -261,6 +261,16 @@ function RepositoryCard({
         </div>
       </div>
 
+      {repository.pending_reconciliation && !blocked ? (
+        <div className="mt-3" data-testid="reconciliation-required">
+          <DataState
+            kind="no-data"
+            title="Reconciliation required"
+            description="A recent change could not be recorded in full, so this installation is being re-read from the provider. What is shown here may be incomplete until that finishes."
+          />
+        </div>
+      ) : null}
+
       {blocked ? (
         <div className="mt-3" data-testid="security-gate-warning">
           <DataState

@@ -31,7 +31,7 @@ configuration).
 | `GET /installation/repositories` | list repositories the installation can see | Metadata | read | `installation`, `installation_repositories` | yes |
 | `GET /repos/{owner}/{repo}` | permanent repository id, owner, name, visibility, archived/disabled, **default branch** | Metadata | read | `repository`, `installation_repositories` | yes |
 | `GET /repos/{owner}/{repo}/branches/{branch}/protection` | classic branch protection: required status checks (+ `strict`), enforce admins, force-push and deletion protection, required reviews | Administration | read | `repository` | yes |
-| `GET /repos/{owner}/{repo}/rules/branches/{branch}` | the rules **actually in effect** on the default branch, already resolved across repository and organization rulesets and already filtered to active enforcement | Administration | read | `repository` | yes |
+| `GET /repos/{owner}/{repo}/rules/branches/{branch}` | the rules **actually in effect** on the default branch, already resolved across repository and organization rulesets and already filtered to active enforcement | Metadata | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/rulesets` | ruleset **summaries** only — used for attribution, never as rule evidence | Administration | read | `repository` | no |
 | `GET /repos/{owner}/{repo}/actions/workflows` | workflow inventory (names, paths, state) for CI-gate presence | Actions | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/environments` | environment inventory, to locate production-like environments | Actions | read | `repository` | yes |
@@ -70,6 +70,16 @@ Not requested, not used, and rejected in review if proposed:
 
 - **Administration: write** — would allow changing branch protection or
   rulesets. Drake evaluates; it does not remediate.
+
+## Permission note: effective rules need only Metadata
+
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` requires **Metadata:
+read**, not Administration. `Administration: read` is still required for
+the classic branch-protection endpoint and for the ruleset management
+endpoints, so it remains in the requested set — but an unreadable
+effective-rules response must be reported as a `metadata:read` gap, never
+as `administration:read`. Naming the wrong permission sends an operator to
+grant something that would not have fixed anything.
 
 ## Why the effective-rules endpoint, not the ruleset list
 

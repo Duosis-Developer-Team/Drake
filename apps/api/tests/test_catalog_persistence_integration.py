@@ -46,6 +46,7 @@ async def reset_catalog(engine: AsyncEngine) -> None:
             "github_policy_evaluations",
             "github_webhook_deliveries",
             "github_repositories",
+            "github_reconciliation_jobs",
             "github_installations",
             "cluster_inventory_state",
             "inventory_change_events",

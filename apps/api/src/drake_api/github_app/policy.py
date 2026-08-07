@@ -98,6 +98,28 @@ class PolicyInputs:
     security_analysis: dict[str, Any] | None = None
     security_analysis_error: str | None = None
     archived: bool = False
+    # Read permissions the installation token did NOT actually grant. These
+    # are evidence gaps, not warnings: every rule family that depends on a
+    # missing permission is UNKNOWN, and the repository cannot be READY.
+    missing_permissions: tuple[str, ...] = ()
+
+    def evidence_complete(self) -> bool:
+        """Was every fact a rule might need actually readable?
+
+        Readiness is a statement about the projection being current and
+        complete. Any gap here means the answer to "is this repository
+        governed" is partly unknown, so the repository cannot be READY
+        however good the readable parts look.
+        """
+        return not (
+            self.missing_permissions
+            or self.protection_error
+            or self.branch_rules_error
+            or self.workflows_error
+            or self.environments_error
+            or self.environment_errors
+            or self.security_analysis_error
+        )
 
 
 # --- profiles ---------------------------------------------------------

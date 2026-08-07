@@ -25,7 +25,7 @@ from drake_api.github_app.auth import validate_credentials as validate_github_cr
 from drake_api.github_app.client import GitHubClient
 from drake_api.github_app.router import router as github_router
 from drake_api.github_app.router_webhook import router as github_webhook_router
-from drake_api.github_app.service import GitHubReconciler
+from drake_api.github_app.service import DeliveryRecoveryWorker, GitHubReconciler
 from drake_api.health import router as health_router
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
@@ -42,7 +42,17 @@ from drake_api.telemetry.router import router as telemetry_router
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    yield
+    # The recovery worker exists only when the integration is enabled: a
+    # disabled feature starts no background task and touches no credential.
+    worker = getattr(app.state, "github_recovery_worker", None)
+    if worker is not None:
+        await worker.start()
+    try:
+        yield
+    finally:
+        if worker is not None:
+            # Deterministic cancellation, so no task outlives the process.
+            await worker.stop()
     await app.state.session_store.aclose()
     await app.state.oidc_client.aclose()
     await app.state.telemetry_redis.aclose()
@@ -103,7 +113,18 @@ def create_app(
     github_client = GitHubClient(settings, github_auth, transport=github_transport)
     app.state.github_auth = github_auth
     app.state.github_client = github_client
-    app.state.github_reconciler = GitHubReconciler(get_engine(settings), github_client)
+    github_reconciler = GitHubReconciler(get_engine(settings), github_client)
+    app.state.github_reconciler = github_reconciler
+    app.state.github_recovery_worker = (
+        DeliveryRecoveryWorker(
+            get_engine(settings),
+            poll_seconds=settings.github_recovery_poll_seconds,
+            batch_size=settings.github_recovery_batch_size,
+            reconciler=github_reconciler,
+        )
+        if settings.github_app_enabled
+        else None
+    )
     app.state.telemetry_broker = TelemetryBroker(
         settings=settings,
         engine=get_engine(settings),

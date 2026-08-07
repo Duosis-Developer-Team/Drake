@@ -291,6 +291,10 @@ def validate_credentials(settings: Settings) -> None:
         MIN_WEBHOOK_BODY_BYTES <= settings.github_webhook_max_body_bytes <= MAX_WEBHOOK_BODY_BYTES
     ):
         raise GitHubAuthError("github webhook body limit is outside the safe range")
+    if not 1.0 <= settings.github_recovery_poll_seconds <= 3600.0:
+        raise GitHubAuthError("github recovery poll interval is outside the safe range")
+    if not 1 <= settings.github_recovery_batch_size <= 500:
+        raise GitHubAuthError("github recovery batch size is outside the safe range")
 
     if settings.env not in ("local", "test") and not settings.github_api_base_url.startswith(
         "https://"

@@ -5,18 +5,20 @@ observed attributes only. Repositories are keyed on GitHub's PERMANENT id
 so renames and transfers reconcile onto the same row (ADR-0020 §1).
 """
 
+import asyncio
+import contextlib
 import datetime as dt
 import json
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.audit import AuditEventData, record_audit_event
-from drake_api.github_app import catalog, onboarding, policy, webhook
+from drake_api.github_app import catalog, lifecycle, onboarding, policy, webhook
 from drake_api.github_app.auth import missing_permissions
 from drake_api.github_app.client import (
     GitHubClient,
@@ -70,6 +72,7 @@ class DeliveryOutcome:
     # "new"      -> we claimed it; the durable work item is ours to run
     # "pending"  -> claimed earlier but NEVER finished; must be run, not acked
     # "duplicate"-> genuinely finished before; idempotent acknowledgement
+    # "failed"   -> dead-lettered; TERMINAL, no further domain work
     # "conflict" -> same id, different bytes; a security event
     status: str
     delivery_row_id: uuid.UUID | None
@@ -123,7 +126,7 @@ async def record_delivery(
     envelope: dict[str, Any],
     installation_external_id: int | None,
     repository_external_id: int | None,
-    scope_id: uuid.UUID | None = None,
+    scope_id: uuid.UUID,
 ) -> DeliveryOutcome:
     """Claim a delivery id AND record its durable work item, atomically.
 
@@ -175,10 +178,17 @@ async def record_delivery(
         # Same id, different bytes. The stored row is EVIDENCE of the
         # original delivery; a forged replay must not get to edit it.
         return DeliveryOutcome(status="conflict", delivery_row_id=row_id)
-    if str(existing[2]) == "processed":
+    status = str(existing[2])
+    if status == "processed":
         return DeliveryOutcome(status="duplicate", delivery_row_id=row_id)
-    # pending / failed: unfinished work, so this redelivery is a chance to
-    # finish it rather than a duplicate to wave through.
+    if status == "failed":
+        # Dead-lettered. Treating this as "unfinished, try again" would turn
+        # the retry ceiling into a suggestion: GitHub's redeliver button
+        # would become an unbounded retry loop. Recovery from here is an
+        # explicit operator action, not a webhook.
+        return DeliveryOutcome(status="failed", delivery_row_id=row_id)
+    # pending: unfinished work, so this redelivery is a chance to finish it
+    # rather than a duplicate to wave through.
     return DeliveryOutcome(status="pending", delivery_row_id=row_id)
 
 
@@ -257,10 +267,11 @@ async def process_delivery(engine: AsyncEngine, delivery_row_id: uuid.UUID) -> s
     the status flip commits in the same transaction as the domain work — so
     the row can never say `processed` about work that rolled back.
 
-    Returns "processed", "duplicate" (someone else finished it first), or
-    raises after recording a bounded failed attempt.
+    Returns "processed", "duplicate" (someone else finished it first),
+    "failed" (already dead-lettered, terminal), or raises after recording a
+    bounded failed attempt.
     """
-    conflicts: list[int] = []
+    result = _EnvelopeResult()
     try:
         async with engine.begin() as connection:
             locked = (
@@ -272,15 +283,19 @@ async def process_delivery(engine: AsyncEngine, delivery_row_id: uuid.UUID) -> s
                     {"id": delivery_row_id},
                 )
             ).one()
-            if str(locked[0]) == "processed":
+            status = str(locked[0])
+            if status == "processed":
                 return "duplicate"
+            if status == "failed":
+                # Terminal. The ceiling is a ceiling.
+                return "failed"
 
             envelope = locked[2] if isinstance(locked[2], dict) else json.loads(str(locked[2]))
-            scope_id = uuid.UUID(str(locked[3])) if locked[3] is not None else None
-            if scope_id is None:
-                scope_id = await organization_scope_id(connection)
+            scope_id = uuid.UUID(str(locked[3]))
 
-            await _apply_envelope(connection, str(locked[1]), envelope, scope_id, delivery_row_id)
+            result = await _apply_envelope(
+                connection, str(locked[1]), envelope, scope_id, delivery_row_id
+            )
             await connection.execute(
                 text(
                     "UPDATE github_webhook_deliveries "
@@ -295,15 +310,92 @@ async def process_delivery(engine: AsyncEngine, delivery_row_id: uuid.UUID) -> s
         await _record_failed_attempt(engine, delivery_row_id, type(error).__name__)
         raise
 
-    if conflicts:
+    # Audits are written only once the domain transaction has committed, so
+    # an audit never describes work that was rolled back.
+    if result.conflicts:
         await _audit(
             engine,
             action="github.repository.state_conflict",
             result="denied",
             target_type="github_repository",
-            metadata={"repositories": len(conflicts)},
+            metadata={
+                "repositories": len(result.conflicts),
+                "external_ids": sorted(result.conflicts)[:20],
+            },
+        )
+    if result.unsupported_action:
+        await _audit(
+            engine,
+            action="github.webhook.action_unsupported",
+            result="denied",
+            target_type="github_webhook",
+            metadata={"event": result.event, "action": result.action},
         )
     return "processed"
+
+
+@dataclass
+class _EnvelopeResult:
+    """What one envelope actually changed."""
+
+    touched: int = 0
+    conflicts: list[int] = field(default_factory=list)
+    unsupported_action: bool = False
+    event: str = ""
+    action: str = ""
+    reconciliation_queued: bool = False
+
+
+async def queue_installation_reconciliation(
+    connection: AsyncConnection,
+    *,
+    scope_id: uuid.UUID,
+    installation_external_id: int,
+    reason: str,
+) -> bool:
+    """Record durable intent to re-derive an installation's membership.
+
+    Written in the SAME transaction as the delivery it came from, so a
+    truncated or ambiguous event cannot be acknowledged before the work
+    that recovers its missing identities is durable. Repeated requests
+    coalesce onto the single outstanding job.
+    """
+    inserted = (
+        await connection.execute(
+            text(
+                """
+                INSERT INTO github_reconciliation_jobs
+                    (scope_id, installation_external_id, reason, status)
+                VALUES (:scope_id, :installation_id, :reason, 'pending')
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                """
+            ),
+            {
+                "scope_id": scope_id,
+                "installation_id": installation_external_id,
+                "reason": _error_code_slug(reason),
+            },
+        )
+    ).first()
+    return inserted is not None
+
+
+async def _installation_repository_ids(
+    connection: AsyncConnection, installation_external_id: int
+) -> list[int]:
+    """Every repository Drake already knows under this installation."""
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT r.external_id FROM github_repositories r "
+                "JOIN github_installations i ON i.id = r.installation_id "
+                "WHERE i.provider = :provider AND i.external_id = :external_id"
+            ),
+            {"provider": PROVIDER, "external_id": installation_external_id},
+        )
+    ).all()
+    return [int(row[0]) for row in rows]
 
 
 async def _apply_envelope(
@@ -312,27 +404,29 @@ async def _apply_envelope(
     envelope: dict[str, Any],
     scope_id: uuid.UUID,
     delivery_row_id: uuid.UUID | None = None,
-) -> tuple[int, list[int]]:
-    """The idempotent domain work for one delivery envelope.
-
-    Returns (repositories touched, repositories the state machine refused).
-    """
+) -> _EnvelopeResult:
+    """Apply one delivery according to its (event, action) plan."""
+    action = str(envelope.get("action") or "")
+    result = _EnvelopeResult(event=event, action=action)
     installation_external_id = envelope.get("installation_external_id")
     if installation_external_id is None:
-        return 0, []
-    action = str(envelope.get("action") or "")
+        return result
+    installation_external_id = int(installation_external_id)
+
+    plan = lifecycle.plan_for(event, action)
+    if not plan.supported:
+        # An action we do not model produces NO domain mutation. Guessing
+        # that an unknown action means "active" is how a future GitHub
+        # action silently re-enables something.
+        result.unsupported_action = True
+        return result
+
     installation_row = await upsert_installation(
         connection,
         scope_id=scope_id,
-        external_id=int(installation_external_id),
+        external_id=installation_external_id,
         account_login=str(envelope.get("account_login") or ""),
-        state=(
-            "suspended"
-            if action == "suspend"
-            else "deleted"
-            if action in ("deleted", "removed")
-            else "active"
-        ),
+        state=plan.installation,
     )
     if delivery_row_id is not None:
         await connection.execute(
@@ -340,69 +434,261 @@ async def _apply_envelope(
             {"inst": installation_row, "id": delivery_row_id},
         )
 
-    touched = 0
-    conflicts: list[int] = []
-    for summary in envelope.get("repositories") or []:
-        if not isinstance(summary, dict) or "external_id" not in summary:
+    truncated = bool(envelope.get("truncated"))
+    if truncated or plan.requires_reconciliation:
+        # A truncated list is not a statement of membership, and an action
+        # that says "something changed" without saying what needs the
+        # provider consulted. Either way the intent is durable BEFORE this
+        # delivery may be called finished.
+        result.reconciliation_queued = await queue_installation_reconciliation(
+            connection,
+            scope_id=scope_id,
+            installation_external_id=installation_external_id,
+            reason="envelope_truncated" if truncated else plan.reason,
+        )
+
+    summaries = [
+        summary
+        for summary in (envelope.get("repositories") or [])
+        if isinstance(summary, dict) and "external_id" in summary
+    ]
+
+    if plan.target == "all_of_installation":
+        known = await _installation_repository_ids(connection, installation_external_id)
+        if plan.outcome == "removed":
+            await mark_access_removed(connection, known, "removed")
+        elif plan.outcome == "suspended":
+            await mark_access_removed(connection, known, "suspended")
+        elif plan.outcome == "restored":
+            await restore_access(connection, known)
+        result.touched = len(known)
+        return result
+
+    if plan.target == "none":
+        return result
+
+    if truncated and plan.outcome == "removed":
+        # A partial list must never drive a destructive membership change:
+        # the repositories that fell outside the byte budget would look
+        # like the ones that stayed. The queued reconciliation settles it.
+        logger.warning(
+            "github truncated removal deferred to reconciliation",
+            extra={"installation": installation_external_id},
+        )
+        return result
+
+    for summary in summaries:
+        external_id = int(summary["external_id"])
+        membership = str(summary.get("membership") or "present")
+        outcome = "removed" if membership == "removed" else plan.outcome
+        full_name = str(summary.get("full_name") or "")
+        owner = webhook.summary_owner(summary)
+
+        if outcome == "removed":
+            await mark_access_removed(connection, [external_id], "removed")
+            result.touched += 1
             continue
-        if summary.get("membership") == "removed" or action in ("removed", "deleted"):
-            await mark_access_removed(connection, [int(summary["external_id"])], "removed")
+
+        if owner and owner.lower() != catalog.ORGANIZATION.lower():
+            # The repository has left the organization. Leaving it
+            # accessible with stale metadata would be the worst outcome;
+            # soft access loss keeps the history and stops the reads.
+            await mark_access_removed(connection, [external_id], "removed")
+            await queue_installation_reconciliation(
+                connection,
+                scope_id=scope_id,
+                installation_external_id=installation_external_id,
+                reason="repository_transferred_out",
+            )
+            result.touched += 1
             continue
+
         repository_row_id, _created = await upsert_repository(
             connection,
             installation_row_id=installation_row,
             scope_id=scope_id,
-            external_id=int(summary["external_id"]),
-            full_name=str(summary.get("full_name") or ""),
+            external_id=external_id,
+            full_name=full_name,
             name=webhook.summary_name(summary),
-            owner_login=webhook.summary_owner(summary),
+            owner_login=owner,
             node_id=str(summary.get("node_id") or ""),
             private=bool(summary.get("private", True)),
         )
-        gate = catalog.security_gate_for(str(summary.get("full_name") or ""))
+        gate = catalog.security_gate_for(full_name)
         try:
             await apply_announced_state(connection, repository_row_id, gate)
         except onboarding.InvalidTransitionError:
             # The state machine refused. Keep the current state and let the
             # rest of the batch proceed; the caller audits the conflict
             # rather than letting it become an unhandled exception.
-            conflicts.append(int(summary["external_id"]))
+            result.conflicts.append(external_id)
             continue
-        touched += 1
+        result.touched += 1
 
-    if action == "suspend":
-        await set_installation_state(connection, int(installation_external_id), "suspended")
-    return touched, conflicts
+    return result
 
 
 async def drain_pending_deliveries(engine: AsyncEngine, limit: int = DRAIN_BATCH_SIZE) -> int:
     """Finish deliveries stranded by a crash, without waiting for GitHub.
 
     GitHub does not redeliver indefinitely, so a retry cannot be the only
-    recovery path. `SKIP LOCKED` keeps concurrent workers off each other's
-    rows, and the attempt ceiling keeps a poison row from being picked up
-    forever.
+    recovery path. `FOR UPDATE SKIP LOCKED` is what makes this safe across
+    several API or worker instances: each claims a disjoint set in its own
+    short transaction, and a worker that dies mid-batch releases its locks
+    with the connection instead of stranding rows in a `processing` state
+    nobody clears. Terminal (`failed`) rows are never selected.
     """
-    async with engine.connect() as connection:
+    async with engine.begin() as connection:
         rows = (
             await connection.execute(
                 text(
                     "SELECT id FROM github_webhook_deliveries "
                     "WHERE status = 'pending' AND attempts < :max "
-                    "ORDER BY received_at LIMIT :limit"
+                    "ORDER BY received_at "
+                    "LIMIT :limit FOR UPDATE SKIP LOCKED"
                 ),
                 {"max": MAX_DELIVERY_ATTEMPTS, "limit": limit},
             )
         ).all()
+        claimed = [uuid.UUID(str(row[0])) for row in rows]
 
     drained = 0
-    for row in rows:
+    for row_id in claimed:
         try:
-            if await process_delivery(engine, uuid.UUID(str(row[0]))) == "processed":
+            if await process_delivery(engine, row_id) == "processed":
                 drained += 1
         except Exception:
             logger.warning("github delivery drain attempt failed", extra={"drained": drained})
     return drained
+
+
+class DeliveryRecoveryWorker:
+    """Bounded background loop that finishes stranded work.
+
+    Owned by the application lifespan: started only when the integration is
+    enabled, and cancelled deterministically on shutdown so no task
+    outlives the process that created it.
+    """
+
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        *,
+        poll_seconds: float = 30.0,
+        batch_size: int = DRAIN_BATCH_SIZE,
+        reconciler: "GitHubReconciler | None" = None,
+    ) -> None:
+        self._engine = engine
+        self._poll = max(0.01, poll_seconds)
+        self._batch = max(1, batch_size)
+        self._reconciler = reconciler
+        self._task: asyncio.Task[None] | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    async def start(self) -> None:
+        if self.running:
+            return
+        self._task = asyncio.create_task(self._run(), name="github-delivery-recovery")
+
+    async def stop(self) -> None:
+        task, self._task = self._task, None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await drain_pending_deliveries(self._engine, self._batch)
+                if self._reconciler is not None:
+                    await drain_reconciliation_jobs(self._engine, self._reconciler, self._batch)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A failing sweep must not kill the loop; the next tick
+                # retries and the per-row attempt ceiling still applies.
+                logger.warning("github recovery sweep failed")
+            await asyncio.sleep(self._poll)
+
+
+async def drain_reconciliation_jobs(
+    engine: AsyncEngine, reconciler: "GitHubReconciler", limit: int = DRAIN_BATCH_SIZE
+) -> int:
+    """Run outstanding installation-level reconciliation intents."""
+    async with engine.begin() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT id, installation_external_id FROM github_reconciliation_jobs "
+                    "WHERE status = 'pending' AND attempts < :max "
+                    "ORDER BY created_at LIMIT :limit FOR UPDATE SKIP LOCKED"
+                ),
+                {"max": MAX_DELIVERY_ATTEMPTS, "limit": limit},
+            )
+        ).all()
+        claimed = [(uuid.UUID(str(row[0])), int(row[1])) for row in rows]
+
+    completed = 0
+    for job_id, installation_external_id in claimed:
+        try:
+            await reconciler.reconcile_installation(installation_external_id)
+        except Exception as error:
+            await _record_job_failure(engine, job_id, type(error).__name__)
+            continue
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE github_reconciliation_jobs "
+                    "SET status = 'processed', processed_at = now(), "
+                    "    attempts = attempts + 1, last_attempt_at = now() "
+                    "WHERE id = :id"
+                ),
+                {"id": job_id},
+            )
+        completed += 1
+    return completed
+
+
+async def _record_job_failure(engine: AsyncEngine, job_id: uuid.UUID, code: str) -> None:
+    async with engine.begin() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "UPDATE github_reconciliation_jobs "
+                    "SET attempts = attempts + 1, last_attempt_at = now(), "
+                    "    last_error_code = :code "
+                    "WHERE id = :id AND status = 'pending' RETURNING attempts"
+                ),
+                {"id": job_id, "code": _error_code_slug(code)},
+            )
+        ).first()
+        if row is not None and int(row[0]) >= MAX_DELIVERY_ATTEMPTS:
+            await connection.execute(
+                text("UPDATE github_reconciliation_jobs SET status = 'failed' WHERE id = :id"),
+                {"id": job_id},
+            )
+
+
+async def unknown_repository_ids(connection: AsyncConnection, external_ids: list[int]) -> list[int]:
+    """Which of these permanent ids Drake has never seen."""
+    if not external_ids:
+        return []
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT external_id FROM github_repositories "
+                "WHERE provider = :provider AND external_id = ANY(:ids)"
+            ),
+            {"provider": PROVIDER, "ids": external_ids},
+        )
+    ).all()
+    known = {int(row[0]) for row in rows}
+    return sorted(set(external_ids) - known)
 
 
 class InstallationScopeMismatchError(RuntimeError):
@@ -710,8 +996,18 @@ async def mark_access_removed(
                 """
                 UPDATE github_repositories
                 SET access_state = :access_state,
-                    onboarding_state = 'disabled',
-                    state_reason = :reason,
+                    -- An open security gate outranks an access observation:
+                    -- a blocked repository stays blocked, so losing sight of
+                    -- it can never quietly downgrade the reason it is closed.
+                    onboarding_state = CASE
+                        WHEN security_gate IS NOT NULL THEN 'blocked'
+                        ELSE 'disabled'
+                    END,
+                    state_reason = CASE
+                        WHEN security_gate IS NOT NULL
+                            THEN 'security_gate_' || security_gate
+                        ELSE :reason
+                    END,
                     updated_at = now()
                 WHERE provider = :provider AND external_id = ANY(:ids)
                 RETURNING full_name
@@ -723,6 +1019,40 @@ async def mark_access_removed(
                 "provider": PROVIDER,
                 "ids": external_ids,
             },
+        )
+    ).all()
+    return [str(row[0]) for row in rows]
+
+
+async def restore_access(connection: AsyncConnection, external_ids: list[int]) -> list[str]:
+    """Access came back. Compliance knowledge did not.
+
+    Repositories return to `discovered`, never straight to `ready`: an
+    unsuspend says we may look again, not that what we would find is fine.
+    A gated repository stays blocked regardless.
+    """
+    if not external_ids:
+        return []
+    rows = (
+        await connection.execute(
+            text(
+                """
+                UPDATE github_repositories
+                SET access_state = 'accessible',
+                    onboarding_state = CASE
+                        WHEN security_gate IS NOT NULL THEN 'blocked'
+                        ELSE 'discovered'
+                    END,
+                    state_reason = CASE
+                        WHEN security_gate IS NOT NULL THEN 'security_gate_' || security_gate
+                        ELSE 'awaiting_reconciliation'
+                    END,
+                    updated_at = now()
+                WHERE provider = :provider AND external_id = ANY(:ids)
+                RETURNING full_name
+                """
+            ),
+            {"provider": PROVIDER, "ids": external_ids},
         )
     ).all()
     return [str(row[0]) for row in rows]
@@ -790,33 +1120,56 @@ class GitHubReconciler:
         self._client = client
 
     async def gather_policy_inputs(
-        self, token: Any, owner: str, repo: str, repository: dict[str, Any]
+        self,
+        token: Any,
+        owner: str,
+        repo: str,
+        repository: dict[str, Any],
+        shortfall: list[str] | None = None,
     ) -> policy.PolicyInputs:
         """Fetch every fact a rule may need, converting each failure into
-        an explicit "not determinable" reason instead of a silent gap."""
+        an explicit "not determinable" reason instead of a silent gap.
+
+        A permission the token did not actually grant is one of those
+        reasons, recorded up front rather than rediscovered as a 403 per
+        call — and never something a later PASS can be built on.
+        """
         full_name = f"{owner}/{repo}"
         default_branch = str(repository.get("default_branch") or "")
+        missing = sorted(set(shortfall or ()))
+        administration_missing = (
+            f"missing permission ({PERMISSION_HINTS['protection']})"
+            if "administration" in missing
+            else None
+        )
+        actions_missing = (
+            f"missing permission ({PERMISSION_HINTS['workflows']})"
+            if "actions" in missing
+            else None
+        )
 
         protection: dict[str, Any] | None = None
-        protection_error: str | None = None
-        if default_branch:
-            try:
-                protection = await self._client.get_branch_protection(
-                    token, owner, repo, default_branch
-                )
-            except GitHubNotFoundError:
-                protection = None
-                protection_error = None  # a real "no protection" answer
-            except GitHubForbiddenError:
-                protection_error = f"missing permission ({PERMISSION_HINTS['protection']})"
-            except GitHubError as error:
-                protection_error = error_code(error)
-        else:
-            protection_error = "default branch unknown"
+        protection_error: str | None = administration_missing
+        if administration_missing is None:
+            if default_branch:
+                try:
+                    protection = await self._client.get_branch_protection(
+                        token, owner, repo, default_branch
+                    )
+                except GitHubNotFoundError:
+                    protection = None
+                    protection_error = None  # a real "no protection" answer
+                except GitHubForbiddenError:
+                    protection_error = f"missing permission ({PERMISSION_HINTS['protection']})"
+                except GitHubError as error:
+                    protection_error = error_code(error)
+            else:
+                protection_error = "default branch unknown"
 
         # Rules actually in effect on the default branch. The ruleset LIST
         # endpoint returns summaries without a `rules` member, so it cannot
-        # answer "is this rule configured".
+        # answer "is this rule configured". This endpoint needs only
+        # Metadata:read, which is proven present before we get here.
         branch_rules: list[dict[str, Any]] | None = None
         branch_rules_error: str | None = None
         if default_branch:
@@ -825,7 +1178,7 @@ class GitHubReconciler:
                     token, owner, repo, default_branch
                 )
             except GitHubForbiddenError:
-                branch_rules_error = f"missing permission ({PERMISSION_HINTS['rulesets']})"
+                branch_rules_error = "missing permission (metadata:read)"
             except GitHubNotFoundError:
                 branch_rules = []  # a real "no rules apply" answer
             except GitHubError as error:
@@ -834,42 +1187,44 @@ class GitHubReconciler:
             branch_rules_error = "default branch unknown"
 
         workflows: list[dict[str, Any]] | None = None
-        workflows_error: str | None = None
-        try:
-            workflows = await self._client.list_workflows(token, owner, repo)
-        except GitHubForbiddenError:
-            workflows_error = f"missing permission ({PERMISSION_HINTS['workflows']})"
-        except GitHubError as error:
-            workflows_error = error_code(error)
+        workflows_error: str | None = actions_missing
+        if actions_missing is None:
+            try:
+                workflows = await self._client.list_workflows(token, owner, repo)
+            except GitHubForbiddenError:
+                workflows_error = f"missing permission ({PERMISSION_HINTS['workflows']})"
+            except GitHubError as error:
+                workflows_error = error_code(error)
 
         environments: list[dict[str, Any]] | None = None
-        environments_error: str | None = None
+        environments_error: str | None = actions_missing
         environment_details: dict[str, dict[str, Any]] = {}
         environment_errors: dict[str, str] = {}
-        try:
-            environments = await self._client.list_environments(token, owner, repo)
-            for environment in environments:
-                name = str(environment.get("name") or "")
-                if not name:
-                    continue
-                if not any(hint in name.lower() for hint in ("production", "prod", "live")):
-                    continue
-                try:
-                    environment_details[name] = await self._client.get_environment(
-                        token, owner, repo, name
-                    )
-                except GitHubForbiddenError:
-                    # Recorded, not swallowed: a production environment we
-                    # could not read must keep the aggregate off PASS.
-                    environment_errors[name] = (
-                        f"missing permission ({PERMISSION_HINTS['environments']})"
-                    )
-                except GitHubError as error:
-                    environment_errors[name] = error_code(error)
-        except GitHubForbiddenError:
-            environments_error = f"missing permission ({PERMISSION_HINTS['environments']})"
-        except GitHubError as error:
-            environments_error = error_code(error)
+        if actions_missing is None:
+            try:
+                environments = await self._client.list_environments(token, owner, repo)
+                for environment in environments:
+                    name = str(environment.get("name") or "")
+                    if not name:
+                        continue
+                    if not any(hint in name.lower() for hint in ("production", "prod", "live")):
+                        continue
+                    try:
+                        environment_details[name] = await self._client.get_environment(
+                            token, owner, repo, name
+                        )
+                    except GitHubForbiddenError:
+                        # Recorded, not swallowed: a production environment
+                        # we could not read must keep the aggregate off PASS.
+                        environment_errors[name] = (
+                            f"missing permission ({PERMISSION_HINTS['environments']})"
+                        )
+                    except GitHubError as error:
+                        environment_errors[name] = error_code(error)
+            except GitHubForbiddenError:
+                environments_error = f"missing permission ({PERMISSION_HINTS['environments']})"
+            except GitHubError as error:
+                environments_error = error_code(error)
 
         security_analysis = repository.get("security_and_analysis")
         return policy.PolicyInputs(
@@ -892,6 +1247,7 @@ class GitHubReconciler:
                 else "security analysis settings are not visible to this installation"
             ),
             archived=bool(repository.get("archived")),
+            missing_permissions=tuple(missing),
         )
 
     async def evaluate_repository(
@@ -900,8 +1256,8 @@ class GitHubReconciler:
         full_name: str,
         profile: str = policy.DEFAULT_PROFILE,
         repository_external_id: int | None = None,
-    ) -> policy.PolicyEvaluation:
-        """Dry-run evaluation for ONE repository. Read-only throughout.
+    ) -> "ReconcileResult":
+        """Reconcile ONE repository, then evaluate it. Read-only throughout.
 
         The manual security gate is checked BEFORE any credential is
         minted, so a blocked repository never reaches the network.
@@ -919,14 +1275,190 @@ class GitHubReconciler:
             repository_ids=[repository_external_id] if repository_external_id else None,
             permissions=dict(EVALUATION_PERMISSIONS),
         )
-        # A grant narrower than requested is reported through the rules that
-        # depended on it; it is never a reason to ask for more.
+        # A grant narrower than requested is carried into the evaluation as
+        # missing evidence. It is never a reason to ask for more, and never
+        # something a later PASS may be built on.
         shortfall = missing_permissions(token.permissions, dict(EVALUATION_PERMISSIONS))
+        if "metadata" in shortfall:
+            # Without Metadata:read nothing about the repository is
+            # readable, so there is nothing honest to evaluate.
+            raise PermissionShortfallError(full_name, shortfall)
+
         repository = await self._client.get_repository(token, owner, repo)
-        inputs = await self.gather_policy_inputs(token, owner, repo, repository)
-        if shortfall:
-            logger.info(
-                "github installation token granted fewer permissions than requested",
-                extra={"missing": sorted(shortfall)},
+        inputs = await self.gather_policy_inputs(
+            token, owner, repo, repository, shortfall=shortfall
+        )
+        evaluation = policy.evaluate(inputs, profile)
+        return ReconcileResult(
+            evaluation=evaluation,
+            repository=repository,
+            shortfall=tuple(sorted(shortfall)),
+            complete=inputs.evidence_complete(),
+        )
+
+    async def reconcile_repository(
+        self,
+        repository_row_id: uuid.UUID,
+        installation_external_id: int,
+        full_name: str,
+        repository_external_id: int,
+        profile: str = policy.DEFAULT_PROFILE,
+    ) -> "ReconcileResult":
+        """Re-derive one repository's projection AND evaluate it.
+
+        Reconciliation is what makes the projection true again; policy
+        evaluation is a stage inside it, not the whole of it. A missed
+        rename or a repository that quietly went archived is corrected
+        here, on the permanent id, without waiting for a webhook.
+        """
+        result = await self.evaluate_repository(
+            installation_external_id,
+            full_name,
+            profile,
+            repository_external_id=repository_external_id,
+        )
+        async with self._engine.begin() as connection:
+            await update_repository_projection(connection, repository_row_id, result.repository)
+        return result
+
+    async def reconcile_installation(self, installation_external_id: int) -> "InstallationSync":
+        """Re-derive an installation's full repository membership.
+
+        This is the recovery path for everything a webhook could not tell
+        us: truncated envelopes, missed deliveries, drift while Drake was
+        down. Membership is only applied when the provider listing came
+        back COMPLETE — a partial page set is a reason to fail, never to
+        conclude that the missing repositories are gone.
+        """
+        detail = await self._client.get_installation(installation_external_id)
+        state = "active"
+        if detail.get("suspended_at"):
+            state = "suspended"
+
+        token = await self._client.installation_token(
+            installation_external_id, permissions=dict(EVALUATION_PERMISSIONS)
+        )
+        # Raises GitHubContractError if the listing was truncated, so a
+        # partial membership can never be committed as complete.
+        listed = await self._client.list_installation_repositories(token)
+
+        present: list[dict[str, Any]] = []
+        for item in listed:
+            external_id = item.get("id")
+            full_name = str(item.get("full_name") or "")
+            if not isinstance(external_id, int) or not full_name:
+                continue
+            owner = full_name.split("/")[0] if "/" in full_name else ""
+            if owner.lower() != catalog.ORGANIZATION.lower():
+                # Outside the organization we govern: not ours to onboard.
+                continue
+            present.append(item)
+
+        async with self._engine.begin() as connection:
+            scope_id = await organization_scope_id(connection)
+            installation_row = await upsert_installation(
+                connection,
+                scope_id=scope_id,
+                external_id=installation_external_id,
+                account_login=str((detail.get("account") or {}).get("login") or ""),
+                state=state,
             )
-        return policy.evaluate(inputs, profile)
+            known = set(await _installation_repository_ids(connection, installation_external_id))
+            seen: set[int] = set()
+            for item in present:
+                external_id = int(item["id"])
+                seen.add(external_id)
+                full_name = str(item["full_name"])
+                repository_row_id, _created = await upsert_repository(
+                    connection,
+                    installation_row_id=installation_row,
+                    scope_id=scope_id,
+                    external_id=external_id,
+                    full_name=full_name,
+                    name=str(item.get("name") or full_name.split("/")[-1]),
+                    owner_login=full_name.split("/")[0],
+                    node_id=str(item.get("node_id") or ""),
+                    private=bool(item.get("private", True)),
+                )
+                await update_repository_projection(connection, repository_row_id, item)
+                gate = catalog.security_gate_for(full_name)
+                with contextlib.suppress(onboarding.InvalidTransitionError):
+                    await apply_announced_state(connection, repository_row_id, gate)
+
+            # Anything we knew about that the provider no longer lists has
+            # left the installation. Soft state: the row stays.
+            vanished = sorted(known - seen)
+            if vanished:
+                await mark_access_removed(connection, vanished, "removed")
+
+        return InstallationSync(
+            installation_external_id=installation_external_id,
+            state=state,
+            present=len(present),
+            removed=len(vanished),
+        )
+
+
+@dataclass(frozen=True)
+class ReconcileResult:
+    """The outcome of reconciling one repository."""
+
+    evaluation: policy.PolicyEvaluation
+    repository: dict[str, Any]
+    shortfall: tuple[str, ...]
+    complete: bool
+
+
+@dataclass(frozen=True)
+class InstallationSync:
+    installation_external_id: int
+    state: str
+    present: int
+    removed: int
+
+
+class PermissionShortfallError(RuntimeError):
+    """A required read permission was not granted to the installation."""
+
+    def __init__(self, full_name: str, missing: list[str]) -> None:
+        super().__init__(f"installation is missing required read permissions for {full_name}")
+        self.full_name = full_name
+        self.missing = sorted(missing)
+
+
+async def update_repository_projection(
+    connection: AsyncConnection, repository_row_id: uuid.UUID, repository: dict[str, Any]
+) -> None:
+    """Write the observed attributes a provider read just confirmed."""
+    full_name = str(repository.get("full_name") or "")
+    owner = full_name.split("/")[0] if "/" in full_name else ""
+    await connection.execute(
+        text(
+            """
+            UPDATE github_repositories
+            SET full_name = COALESCE(NULLIF(:full_name, ''), full_name),
+                name = COALESCE(NULLIF(:name, ''), name),
+                owner_login = COALESCE(NULLIF(:owner, ''), owner_login),
+                node_id = COALESCE(NULLIF(:node_id, ''), node_id),
+                default_branch = COALESCE(NULLIF(:default_branch, ''), default_branch),
+                private = :private,
+                visibility = COALESCE(NULLIF(:visibility, ''), visibility),
+                archived = :archived,
+                disabled = :disabled,
+                updated_at = now()
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": repository_row_id,
+            "full_name": full_name[:512],
+            "name": str(repository.get("name") or "")[:255],
+            "owner": owner[:255],
+            "node_id": str(repository.get("node_id") or "")[:128],
+            "default_branch": str(repository.get("default_branch") or "")[:255],
+            "private": bool(repository.get("private", True)),
+            "visibility": str(repository.get("visibility") or "")[:32],
+            "archived": bool(repository.get("archived", False)),
+            "disabled": bool(repository.get("disabled", False)),
+        },
+    )
