@@ -414,7 +414,13 @@ async def list_deliveries(
     auth: AuthContext = Depends(require_auth),
     limit: int = Query(default=_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
 ) -> dict[str, Any]:
-    """Safe delivery metadata only — never headers, signatures, or bodies."""
+    """Safe delivery metadata only — never headers, signatures, or bodies.
+
+    Holding manage authority *somewhere* is not authority over everything:
+    the rows are filtered to the caller's manageable scopes, so delivery
+    metadata for another tenant is not readable by anyone who happens to
+    manage their own.
+    """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
@@ -426,12 +432,13 @@ async def list_deliveries(
                 text(
                     """
                     SELECT delivery_id, event_type, status, installation_external_id,
-                           repository_external_id, received_at, processed_at
+                           repository_external_id, received_at, processed_at, attempts
                     FROM github_webhook_deliveries
+                    WHERE scope_id = ANY(:scopes)
                     ORDER BY received_at DESC LIMIT :limit
                     """
                 ),
-                {"limit": limit},
+                {"limit": limit, "scopes": manageable},
             )
         ).all()
     return {
@@ -444,6 +451,7 @@ async def list_deliveries(
                 "repository_external_id": row[4],
                 "received_at": row[5].isoformat(),
                 "processed_at": row[6].isoformat() if row[6] else None,
+                "attempts": row[7],
             }
             for row in rows
         ],

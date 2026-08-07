@@ -14,17 +14,13 @@ from typing import Any
 
 import httpx
 import pytest
-from alembic import command
-from alembic.config import Config
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from drake_api.db import dispose_engines
 from drake_api.github_app import catalog
 from harness_s1 import build_harness, grant_platform_owner, require_it_settings
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 from test_catalog_api_integration import build_users, grant, login_all, make_role
-from test_catalog_persistence_integration import reset_catalog
 
 pytestmark = pytest.mark.integration
 
@@ -35,25 +31,6 @@ HERMES_ID = 900001
 LOGISLOT_ID = 900002
 DATALAKE_ID = 900003
 INSTALLATION_ID = 55501
-
-
-@pytest.fixture(scope="module", autouse=True)
-def migrated_db() -> None:
-    settings = require_it_settings()
-    config = Config(str(API_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(API_ROOT / "alembic"))
-    config.set_main_option("sqlalchemy.url", settings.database_url)
-    command.upgrade(config, "head")
-
-
-@pytest.fixture
-async def engine() -> Any:
-    settings = require_it_settings()
-    eng = create_async_engine(settings.database_url)
-    await reset_catalog(eng)
-    yield eng
-    await eng.dispose()
-    await dispose_engines()
 
 
 def _write_app_credentials(tmp_path: Path) -> tuple[str, str]:
@@ -831,7 +808,21 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
         )
         again = await deliver(client, "installation", announced, str(uuidlib.uuid4()))
         assert again.status_code == 202, again.text
-        assert again.json()["conflicts"] == 0
+
+        # No state-machine conflict was recorded: the re-announcement was a
+        # legal no-op, not a refusal the code quietly swallowed.
+        async with engine.connect() as connection:
+            conflicts = int(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM audit_events "
+                            "WHERE action = 'github.repository.state_conflict'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        assert conflicts == 0
 
         async with engine.connect() as connection:
             rows = dict(

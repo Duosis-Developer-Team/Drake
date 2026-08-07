@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.audit import AuditEventData, record_audit_event
-from drake_api.github_app import catalog, onboarding, policy
+from drake_api.github_app import catalog, onboarding, policy, webhook
 from drake_api.github_app.client import (
     GitHubClient,
     GitHubError,
@@ -48,9 +48,21 @@ class SecurityGateBlockedError(RuntimeError):
         self.gate = gate
 
 
+# A poison delivery must stop, not spin. Past this many attempts the row
+# is dead-lettered as `failed` and audited, so it is visible rather than
+# retried forever.
+MAX_DELIVERY_ATTEMPTS = 5
+# One drain pass stays bounded so a backlog cannot monopolise a worker.
+DRAIN_BATCH_SIZE = 50
+
+
 @dataclass(frozen=True)
 class DeliveryOutcome:
-    status: str  # "new" | "duplicate" | "conflict"
+    # "new"      -> we claimed it; the durable work item is ours to run
+    # "pending"  -> claimed earlier but NEVER finished; must be run, not acked
+    # "duplicate"-> genuinely finished before; idempotent acknowledgement
+    # "conflict" -> same id, different bytes; a security event
+    status: str
     delivery_row_id: uuid.UUID | None
 
 
@@ -102,12 +114,16 @@ async def record_delivery(
     envelope: dict[str, Any],
     installation_external_id: int | None,
     repository_external_id: int | None,
+    scope_id: uuid.UUID | None = None,
 ) -> DeliveryOutcome:
-    """Claim a delivery id. The UNIQUE index is the replay defence.
+    """Claim a delivery id AND record its durable work item, atomically.
 
-    Returns "new" for the single winner, "duplicate" for an identical
-    replay, and "conflict" when the same delivery id arrives with a
-    DIFFERENT payload digest — which is a tampering signal, not a retry.
+    The UNIQUE index is the replay defence and decides a concurrent race.
+    The row starts `pending`: it is not an acknowledgement that the work
+    happened, only that the work is now recoverable. Anything that reads
+    `pending` as "already handled" reintroduces the loss this guards
+    against — a crash before the domain mutation would be answered with a
+    202 on every retry, and the event would vanish.
     """
     inserted = (
         await connection.execute(
@@ -115,9 +131,9 @@ async def record_delivery(
                 """
                 INSERT INTO github_webhook_deliveries
                     (delivery_id, event_type, payload_digest, envelope,
-                     installation_external_id, repository_external_id, status)
+                     installation_external_id, repository_external_id, scope_id, status)
                 VALUES (:delivery_id, :event_type, :digest, CAST(:envelope AS jsonb),
-                        :installation_id, :repository_id, 'accepted')
+                        :installation_id, :repository_id, :scope_id, 'pending')
                 ON CONFLICT (delivery_id) DO NOTHING
                 RETURNING id
                 """
@@ -129,24 +145,32 @@ async def record_delivery(
                 "envelope": json.dumps(envelope),
                 "installation_id": installation_external_id,
                 "repository_id": repository_external_id,
+                "scope_id": scope_id,
             },
         )
     ).first()
     if inserted is not None:
-        return DeliveryOutcome(status="new", delivery_row_id=inserted[0])
+        return DeliveryOutcome(status="new", delivery_row_id=uuid.UUID(str(inserted[0])))
 
     existing = (
         await connection.execute(
             text(
-                "SELECT id, payload_digest FROM github_webhook_deliveries "
+                "SELECT id, payload_digest, status FROM github_webhook_deliveries "
                 "WHERE delivery_id = :delivery_id"
             ),
             {"delivery_id": delivery_id},
         )
     ).one()
+    row_id = uuid.UUID(str(existing[0]))
     if str(existing[1]) != payload_digest:
-        return DeliveryOutcome(status="conflict", delivery_row_id=existing[0])
-    return DeliveryOutcome(status="duplicate", delivery_row_id=existing[0])
+        # Same id, different bytes. The stored row is EVIDENCE of the
+        # original delivery; a forged replay must not get to edit it.
+        return DeliveryOutcome(status="conflict", delivery_row_id=row_id)
+    if str(existing[2]) == "processed":
+        return DeliveryOutcome(status="duplicate", delivery_row_id=row_id)
+    # pending / failed: unfinished work, so this redelivery is a chance to
+    # finish it rather than a duplicate to wave through.
+    return DeliveryOutcome(status="pending", delivery_row_id=row_id)
 
 
 async def mark_delivery_processed(
@@ -159,6 +183,256 @@ async def mark_delivery_processed(
         ),
         {"status": status, "id": delivery_row_id},
     )
+
+
+def _error_code_slug(value: str) -> str:
+    """Coerce a label into the bounded snake-case shape the schema accepts.
+
+    The `last_error_code` CHECK is deliberately narrow. Writing a raw
+    exception name into it fails the constraint, which would roll back the
+    very transaction that counts the attempt — leaving a poison delivery to
+    be retried forever with its counter perpetually reset.
+    """
+    lowered = "".join(char if char.isalnum() or char in "_.-" else "_" for char in value.lower())
+    lowered = lowered.lstrip("_.-")
+    return (lowered or "unknown")[:64]
+
+
+async def _record_failed_attempt(
+    engine: AsyncEngine, delivery_row_id: uuid.UUID, error_code_value: str
+) -> None:
+    """Count the attempt in its OWN transaction.
+
+    The work transaction rolled back, so anything it wrote is gone —
+    including an attempt counter. Bounding retries therefore has to happen
+    outside it, or a poison delivery would be retried forever with the
+    count perpetually reset to zero.
+    """
+    async with engine.begin() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "UPDATE github_webhook_deliveries "
+                    "SET attempts = attempts + 1, last_attempt_at = now(), "
+                    "    last_error_code = :code "
+                    "WHERE id = :id AND status <> 'processed' "
+                    "RETURNING attempts, delivery_id"
+                ),
+                {"id": delivery_row_id, "code": _error_code_slug(error_code_value)},
+            )
+        ).first()
+        if row is None:
+            return
+        attempts, delivery_id = int(row[0]), str(row[1])
+        exhausted = attempts >= MAX_DELIVERY_ATTEMPTS
+        if exhausted:
+            await connection.execute(
+                text("UPDATE github_webhook_deliveries SET status = 'failed' WHERE id = :id"),
+                {"id": delivery_row_id},
+            )
+    if exhausted:
+        await _audit(
+            engine,
+            action="github.webhook.exhausted",
+            result="failure",
+            target_type="github_webhook",
+            target_id=delivery_id,
+            metadata={"attempts": attempts, "reason": _error_code_slug(error_code_value)},
+        )
+
+
+async def process_delivery(engine: AsyncEngine, delivery_row_id: uuid.UUID) -> str:
+    """Run a claimed delivery's domain work and close it out ATOMICALLY.
+
+    The row lock serialises concurrent processors of the same delivery, and
+    the status flip commits in the same transaction as the domain work — so
+    the row can never say `processed` about work that rolled back.
+
+    Returns "processed", "duplicate" (someone else finished it first), or
+    raises after recording a bounded failed attempt.
+    """
+    conflicts: list[int] = []
+    try:
+        async with engine.begin() as connection:
+            locked = (
+                await connection.execute(
+                    text(
+                        "SELECT status, event_type, envelope, scope_id "
+                        "FROM github_webhook_deliveries WHERE id = :id FOR UPDATE"
+                    ),
+                    {"id": delivery_row_id},
+                )
+            ).one()
+            if str(locked[0]) == "processed":
+                return "duplicate"
+
+            envelope = locked[2] if isinstance(locked[2], dict) else json.loads(str(locked[2]))
+            scope_id = uuid.UUID(str(locked[3])) if locked[3] is not None else None
+            if scope_id is None:
+                scope_id = await organization_scope_id(connection)
+
+            await _apply_envelope(connection, str(locked[1]), envelope, scope_id, delivery_row_id)
+            await connection.execute(
+                text(
+                    "UPDATE github_webhook_deliveries "
+                    "SET status = 'processed', processed_at = now(), "
+                    "    attempts = attempts + 1, last_attempt_at = now(), "
+                    "    last_error_code = NULL "
+                    "WHERE id = :id"
+                ),
+                {"id": delivery_row_id},
+            )
+    except Exception as error:
+        await _record_failed_attempt(engine, delivery_row_id, type(error).__name__)
+        raise
+
+    if conflicts:
+        await _audit(
+            engine,
+            action="github.repository.state_conflict",
+            result="denied",
+            target_type="github_repository",
+            metadata={"repositories": len(conflicts)},
+        )
+    return "processed"
+
+
+async def _apply_envelope(
+    connection: AsyncConnection,
+    event: str,
+    envelope: dict[str, Any],
+    scope_id: uuid.UUID,
+    delivery_row_id: uuid.UUID | None = None,
+) -> tuple[int, list[int]]:
+    """The idempotent domain work for one delivery envelope.
+
+    Returns (repositories touched, repositories the state machine refused).
+    """
+    installation_external_id = envelope.get("installation_external_id")
+    if installation_external_id is None:
+        return 0, []
+    action = str(envelope.get("action") or "")
+    installation_row = await upsert_installation(
+        connection,
+        scope_id=scope_id,
+        external_id=int(installation_external_id),
+        account_login=str(envelope.get("account_login") or ""),
+        state=(
+            "suspended"
+            if action == "suspend"
+            else "deleted"
+            if action in ("deleted", "removed")
+            else "active"
+        ),
+    )
+    if delivery_row_id is not None:
+        await connection.execute(
+            text("UPDATE github_webhook_deliveries SET installation_id = :inst WHERE id = :id"),
+            {"inst": installation_row, "id": delivery_row_id},
+        )
+
+    touched = 0
+    conflicts: list[int] = []
+    for summary in envelope.get("repositories") or []:
+        if not isinstance(summary, dict) or "external_id" not in summary:
+            continue
+        if summary.get("membership") == "removed" or action in ("removed", "deleted"):
+            await mark_access_removed(connection, [int(summary["external_id"])], "removed")
+            continue
+        repository_row_id, _created = await upsert_repository(
+            connection,
+            installation_row_id=installation_row,
+            scope_id=scope_id,
+            external_id=int(summary["external_id"]),
+            full_name=str(summary.get("full_name") or ""),
+            name=webhook.summary_name(summary),
+            owner_login=webhook.summary_owner(summary),
+            node_id=str(summary.get("node_id") or ""),
+            private=bool(summary.get("private", True)),
+        )
+        gate = catalog.security_gate_for(str(summary.get("full_name") or ""))
+        try:
+            await apply_announced_state(connection, repository_row_id, gate)
+        except onboarding.InvalidTransitionError:
+            # The state machine refused. Keep the current state and let the
+            # rest of the batch proceed; the caller audits the conflict
+            # rather than letting it become an unhandled exception.
+            conflicts.append(int(summary["external_id"]))
+            continue
+        touched += 1
+
+    if action == "suspend":
+        await set_installation_state(connection, int(installation_external_id), "suspended")
+    return touched, conflicts
+
+
+async def drain_pending_deliveries(engine: AsyncEngine, limit: int = DRAIN_BATCH_SIZE) -> int:
+    """Finish deliveries stranded by a crash, without waiting for GitHub.
+
+    GitHub does not redeliver indefinitely, so a retry cannot be the only
+    recovery path. `SKIP LOCKED` keeps concurrent workers off each other's
+    rows, and the attempt ceiling keeps a poison row from being picked up
+    forever.
+    """
+    async with engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT id FROM github_webhook_deliveries "
+                    "WHERE status = 'pending' AND attempts < :max "
+                    "ORDER BY received_at LIMIT :limit"
+                ),
+                {"max": MAX_DELIVERY_ATTEMPTS, "limit": limit},
+            )
+        ).all()
+
+    drained = 0
+    for row in rows:
+        try:
+            if await process_delivery(engine, uuid.UUID(str(row[0]))) == "processed":
+                drained += 1
+        except Exception:
+            logger.warning("github delivery drain attempt failed", extra={"drained": drained})
+    return drained
+
+
+class InstallationScopeMismatchError(RuntimeError):
+    """A delivery claims an installation that is bound to another scope."""
+
+
+async def assert_installation_scope(
+    connection: AsyncConnection, installation_external_id: int, scope_id: uuid.UUID
+) -> None:
+    """Refuse an event that contradicts the persisted installation/scope link.
+
+    If the installation is already known under a different scope, the
+    delivery is either misrouted or forged. Either way it must not be
+    allowed to reassign ownership of that installation's data.
+    """
+    row = (
+        await connection.execute(
+            text(
+                "SELECT scope_id FROM github_installations "
+                "WHERE provider = :provider AND external_id = :external_id"
+            ),
+            {"provider": PROVIDER, "external_id": installation_external_id},
+        )
+    ).first()
+    if row is not None and uuid.UUID(str(row[0])) != scope_id:
+        raise InstallationScopeMismatchError("installation is bound to a different scope")
+
+
+async def organization_scope_id(connection: AsyncConnection) -> uuid.UUID:
+    row = (
+        await connection.execute(
+            text(
+                "SELECT id FROM scopes WHERE scope_type = 'organization' AND external_ref = 'root'"
+            )
+        )
+    ).first()
+    if row is None:  # pragma: no cover - bootstrap invariant
+        raise RuntimeError("organization scope is not seeded")
+    return uuid.UUID(str(row[0]))
 
 
 # --- installations ------------------------------------------------------

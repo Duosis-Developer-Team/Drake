@@ -5,14 +5,13 @@ identity. Trust is the HMAC over the raw bytes and nothing else. The
 order below is the security contract — read it top to bottom.
 """
 
-import uuid
+import json as jsonlib
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import text
 
 from drake_api.db import get_engine
-from drake_api.github_app import catalog, onboarding, service
+from drake_api.github_app import service
 from drake_api.github_app.auth import GitHubAuthError, load_webhook_secret
 from drake_api.github_app.webhook import (
     DELIVERY_HEADER,
@@ -21,6 +20,7 @@ from drake_api.github_app.webhook import (
     SUPPORTED_EVENTS,
     WebhookRejectedError,
     build_envelope,
+    check_ownership,
     payload_digest,
     validate_delivery_id,
     validate_event_name,
@@ -38,27 +38,31 @@ def _refused(reason: str) -> HTTPException:
 
 
 async def _read_bounded_body(request: Request, limit: int) -> bytes:
-    """Read the raw body ONCE, under a hard ceiling."""
+    """Stream the raw body ONCE and stop the moment it exceeds the limit.
+
+    `await request.body()` is not a limit: it buffers whatever arrives
+    first and only then lets us measure it, so a chunked body or a lying
+    `Content-Length` puts the entire payload in memory before any check
+    runs. Reading chunk by chunk means at most `limit + 1` bytes are ever
+    held, and the declared length is treated as a hint that lets us refuse
+    early — never as the security boundary.
+    """
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > limit:
         raise HTTPException(status_code=413, detail="webhook payload too large")
-    body = await request.body()
-    if len(body) > limit:
-        raise HTTPException(status_code=413, detail="webhook payload too large")
-    return body
 
-
-async def _organization_scope_id(connection: Any) -> uuid.UUID:
-    row = (
-        await connection.execute(
-            text(
-                "SELECT id FROM scopes WHERE scope_type = 'organization' AND external_ref = 'root'"
-            )
-        )
-    ).first()
-    if row is None:  # pragma: no cover - bootstrap invariant
-        raise HTTPException(status_code=503, detail="organization scope is not seeded")
-    return uuid.UUID(str(row[0]))
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > limit:
+            # Refuse as soon as the ceiling is crossed. The partial body is
+            # dropped rather than assembled.
+            raise HTTPException(status_code=413, detail="webhook payload too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.post("/webhook", status_code=202)
@@ -67,7 +71,7 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
     if not settings.github_app_enabled:
         raise HTTPException(status_code=404, detail="not found")
 
-    # 1. raw bytes, once, bounded.
+    # 1. raw bytes, once, streamed under a hard ceiling.
     raw_body = await _read_bounded_body(request, settings.github_webhook_max_body_bytes)
 
     # 2-4. required headers, then the HMAC over those exact bytes.
@@ -92,8 +96,6 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
         raise _refused(rejection.reason) from rejection
 
     # 5. ONLY now is the body parsed.
-    import json as jsonlib
-
     try:
         payload = jsonlib.loads(raw_body)
     except ValueError as error:
@@ -108,31 +110,36 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
     envelope = build_envelope(event, payload)
     digest = payload_digest(raw_body)
 
-    # 7. installation/owner consistency.
-    if envelope.installation_external_id is None:
+    # 7. installation and owner identity, fail-closed: absent evidence is a
+    # refusal, never a pass-through.
+    try:
+        check_ownership(envelope)
+    except WebhookRejectedError as rejection:
         await service._audit(
             engine,
-            action="github.webhook.rejected",
+            action="github.webhook.ownership_rejected",
             result="denied",
             target_type="github_webhook",
-            metadata={"reason": "installation_missing", "event": event},
+            target_id=delivery_id,
+            metadata={"reason": rejection.reason, "event": event},
         )
-        raise _refused("installation_missing")
-    if envelope.account_login and envelope.account_login.lower() != catalog.ORGANIZATION.lower():
-        await service._audit(
-            engine,
-            action="github.webhook.ownership_mismatch",
-            result="denied",
-            target_type="github_webhook",
-            metadata={"reason": "owner_mismatch", "event": event},
-        )
-        raise _refused("owner_mismatch")
+        raise _refused(rejection.reason) from rejection
 
+    assert envelope.installation_external_id is not None  # guaranteed by check_ownership
     repository_external_id = (
         envelope.repositories[0]["external_id"] if envelope.repositories else None
     )
 
+    # 8-9. Claim the delivery AND make its work durable in ONE transaction.
+    # Only after this commits may the endpoint acknowledge anything.
     async with engine.begin() as connection:
+        scope_id = await service.organization_scope_id(connection)
+        try:
+            await service.assert_installation_scope(
+                connection, envelope.installation_external_id, scope_id
+            )
+        except service.InstallationScopeMismatchError as mismatch:
+            raise _refused("installation_scope_mismatch") from mismatch
         outcome = await service.record_delivery(
             connection,
             delivery_id=delivery_id,
@@ -141,11 +148,14 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             envelope=envelope.as_json(),
             installation_external_id=envelope.installation_external_id,
             repository_external_id=repository_external_id,
+            scope_id=scope_id,
         )
-        if outcome.status == "conflict" and outcome.delivery_row_id is not None:
-            await service.mark_delivery_processed(connection, outcome.delivery_row_id, "rejected")
+
     if outcome.status == "conflict":
         # Same delivery id, different bytes: a security signal, not a retry.
+        # The stored row is evidence of the ORIGINAL delivery and is left
+        # exactly as it was — a forger does not get to edit the record, nor
+        # to close out honest work that is still pending.
         await service._audit(
             engine,
             action="github.webhook.replay_conflict",
@@ -155,82 +165,24 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             metadata={"reason": "digest_mismatch", "event": event},
         )
         raise HTTPException(status_code=409, detail="webhook delivery conflict")
+
     if outcome.status == "duplicate":
         return {"status": "duplicate", "delivery_id": delivery_id}
 
-    # 10. domain work, idempotent, after the claim is ours.
-    async with engine.begin() as connection:
-        scope_id = await _organization_scope_id(connection)
-        installation_row = await service.upsert_installation(
-            connection,
-            scope_id=scope_id,
-            external_id=envelope.installation_external_id,
-            account_login=envelope.account_login,
-            state=(
-                "suspended"
-                if envelope.action == "suspend"
-                else "deleted"
-                if envelope.action in ("deleted", "removed")
-                else "active"
-            ),
-        )
-        touched = 0
-        conflicts: list[int] = []
-        for summary in envelope.repositories:
-            if summary.get("membership") == "removed" or envelope.action in (
-                "removed",
-                "deleted",
-            ):
-                await service.mark_access_removed(connection, [summary["external_id"]], "removed")
-                continue
-            repository_row_id, _created = await service.upsert_repository(
-                connection,
-                installation_row_id=installation_row,
-                scope_id=scope_id,
-                external_id=summary["external_id"],
-                full_name=summary["full_name"],
-                name=summary.get("name", ""),
-                owner_login=summary.get("owner_login", ""),
-                node_id=summary.get("node_id", ""),
-                private=bool(summary.get("private", True)),
-            )
-            gate = catalog.security_gate_for(summary["full_name"])
-            try:
-                await service.apply_announced_state(connection, repository_row_id, gate)
-            except onboarding.InvalidTransitionError:
-                # The state machine refused. A validly signed delivery must
-                # not become a 500 — GitHub would retry it forever against
-                # an invariant that will not change. Keep the current state,
-                # record the conflict, and carry on with the rest.
-                conflicts.append(summary["external_id"])
-                continue
-            touched += 1
-        if envelope.action == "suspend":
-            await service.set_installation_state(
-                connection, envelope.installation_external_id, "suspended"
-            )
-        if outcome.delivery_row_id is not None:
-            await service.mark_delivery_processed(connection, outcome.delivery_row_id, "processed")
+    # 10. Run the durable work item now. If this fails the row stays
+    # `pending`, so a redelivery or the drain worker finishes it — the
+    # event cannot be acknowledged into nothing.
+    assert outcome.delivery_row_id is not None
+    result = await service.process_delivery(engine, outcome.delivery_row_id)
+    if result == "duplicate":
+        return {"status": "duplicate", "delivery_id": delivery_id}
 
-    if conflicts:
-        await service._audit(
-            engine,
-            action="github.repository.state_conflict",
-            result="denied",
-            target_type="github_repository",
-            metadata={"event": event, "repositories": len(conflicts)},
-        )
     await service._audit(
         engine,
         action=f"github.webhook.{event}",
         result="success",
         target_type="github_installation",
         target_id=str(envelope.installation_external_id),
-        metadata={"event": event, "action": envelope.action, "repositories": touched},
+        metadata={"event": event, "action": envelope.action},
     )
-    return {
-        "status": "processed",
-        "delivery_id": delivery_id,
-        "repositories": touched,
-        "conflicts": len(conflicts),
-    }
+    return {"status": "processed", "delivery_id": delivery_id}

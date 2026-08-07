@@ -205,7 +205,28 @@ def upgrade() -> None:
         sa.Column("payload_digest", sa.Text(), nullable=False),
         sa.Column("installation_external_id", sa.BigInteger(), nullable=True),
         sa.Column("repository_external_id", sa.BigInteger(), nullable=True),
-        sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'accepted'")),
+        # The row IS the durable work item (inbox pattern): it is claimed
+        # and the work is recorded in ONE transaction, so a crash between
+        # the claim and the domain work leaves recoverable state rather
+        # than an acknowledged-but-lost event.
+        sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'pending'")),
+        sa.Column("attempts", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("last_error_code", sa.Text(), nullable=True),
+        sa.Column("last_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        # Scope ownership of the delivery metadata itself, so the operator
+        # listing can be filtered per tenant instead of returning the table.
+        sa.Column(
+            "scope_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("scopes.id", ondelete="RESTRICT"),
+            nullable=True,
+        ),
+        sa.Column(
+            "installation_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("github_installations.id", ondelete="RESTRICT"),
+            nullable=True,
+        ),
         # A bounded envelope of explicitly chosen fields — NEVER the raw
         # payload, and never headers.
         sa.Column(
@@ -220,8 +241,13 @@ def upgrade() -> None:
         sa.Column("processed_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.UniqueConstraint("delivery_id", name="uq_github_delivery_id"),
         sa.CheckConstraint(
-            "status IN ('accepted', 'processed', 'duplicate', 'rejected')",
+            "status IN ('pending', 'processed', 'failed', 'rejected')",
             name="ck_github_delivery_status",
+        ),
+        sa.CheckConstraint("attempts >= 0", name="ck_github_delivery_attempts"),
+        sa.CheckConstraint(
+            f"last_error_code IS NULL OR last_error_code {_ERROR_CODE_SHAPE}",
+            name="ck_github_delivery_error_code",
         ),
         sa.CheckConstraint("length(delivery_id) <= 128", name="ck_github_delivery_id_len"),
         sa.CheckConstraint("length(payload_digest) = 64", name="ck_github_delivery_digest_len"),
@@ -230,6 +256,13 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_github_deliveries_received", "github_webhook_deliveries", ["received_at"])
+    op.create_index("ix_github_deliveries_scope", "github_webhook_deliveries", ["scope_id"])
+    # The drain worker's claim query: unfinished work, oldest first.
+    op.create_index(
+        "ix_github_deliveries_pending",
+        "github_webhook_deliveries",
+        ["status", "received_at"],
+    )
 
     op.create_table(
         "github_policy_evaluations",
