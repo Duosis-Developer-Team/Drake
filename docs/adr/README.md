@@ -24,3 +24,5 @@ or operational details.
 | [ADR-0016](ADR-0016-agent-enrollment-and-mtls-trust-boundary.md) | Agent enrollment and the mTLS trust boundary |
 | [ADR-0017](ADR-0017-snapshot-watch-ordering-and-atomic-projection.md) | Snapshot/watch ordering and atomic inventory projection |
 | [ADR-0018](ADR-0018-inventory-allowlist-bounded-metadata-and-health.md) | Inventory allowlist, bounded metadata, and health derivation |
+| [ADR-0019](ADR-0019-github-app-identity-and-webhook-trust-boundary.md) | GitHub App identity and the webhook trust boundary |
+| [ADR-0020](ADR-0020-repository-onboarding-and-policy-evaluation.md) | Repository onboarding and read-only policy evaluation |
