@@ -36,7 +36,8 @@ def main() -> None:
     secret_path = TARGET / "webhook-secret"
     # Deterministic for the E2E run so the spec can sign requests, but
     # freshly generated per setup and never committed.
-    secret_path.write_text(os.environ.get("DRAKE_E2E_GITHUB_WEBHOOK_SECRET") or secrets.token_hex(16))
+    configured = os.environ.get("DRAKE_E2E_GITHUB_WEBHOOK_SECRET")
+    secret_path.write_text(configured or secrets.token_hex(16))
     secret_path.chmod(0o600)
 
     sys.stdout.write(f"e2e github material written to {TARGET}/\n")

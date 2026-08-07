@@ -79,7 +79,7 @@ PROTECTED = {
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
 
-    def log_message(self, *_args) -> None:  # noqa: ANN002 - silence access logs
+    def log_message(self, *_args) -> None:
         return
 
     def _send(self, status: int, payload) -> None:
@@ -94,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
         with _LOCK:
             _STATE["calls"].append(f"{self.command} {self.path.split('?')[0]}")
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib contract
+    def do_GET(self) -> None:
         path = self.path.split("?")[0]
         if path == "/__health":
             self._send(200, {"status": "ok"})
@@ -163,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
         self._send(404, {"message": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib contract
+    def do_POST(self) -> None:
         path = self.path.split("?")[0]
         if path.startswith("/__mode/"):
             with _LOCK:
