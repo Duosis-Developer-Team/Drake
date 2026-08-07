@@ -131,6 +131,8 @@ async def reset_rbac_state(engine: AsyncEngine) -> None:
             # RESTRICT — cleared before anything they point at.
             "github_policy_evaluations",
             "github_webhook_deliveries",
+            "github_repository_projects",
+            "github_onboarding_drafts",
             "github_repositories",
             "github_reconciliation_jobs",
             "github_installations",

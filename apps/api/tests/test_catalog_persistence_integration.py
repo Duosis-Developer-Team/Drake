@@ -45,6 +45,8 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         for table in (
             "github_policy_evaluations",
             "github_webhook_deliveries",
+            "github_repository_projects",
+            "github_onboarding_drafts",
             "github_repositories",
             "github_reconciliation_jobs",
             "github_installations",

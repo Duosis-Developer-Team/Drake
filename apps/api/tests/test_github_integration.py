@@ -5,6 +5,7 @@ injected `httpx.MockTransport`, and the fake counts its calls so a test
 can prove that a blocked repository produced ZERO of them.
 """
 
+import base64
 import hashlib
 import hmac
 import json as jsonlib
@@ -62,7 +63,13 @@ class FakeGitHub:
         self.branch_rules_status = 200
         # What the access-token mint actually grants, so a narrower grant
         # than requested can be exercised.
-        self.granted_permissions = {"metadata": "read", "administration": "read", "actions": "read"}
+        # Sprint 5B adds contents:read; still read-only throughout.
+        self.granted_permissions = {
+            "metadata": "read",
+            "administration": "read",
+            "actions": "read",
+            "contents": "read",
+        }
         # Force an always-full page set to exercise the pagination cap.
         self.installation_repositories_pages = 1
         # Provider-side installation identity, so identity verification and
@@ -72,6 +79,11 @@ class FakeGitHub:
         self.installation_id_override: int | None = None
         # Every access-token request body, so least privilege is checkable.
         self.token_requests: list[dict[str, Any]] = []
+        # Sprint 5B: repository file trees, per repository name. Values are
+        # either a str (file content) or one of the sentinel dicts below.
+        self.trees: dict[str, dict[str, Any]] = {}
+        # Branch head SHAs, so a test can move a branch after a scan.
+        self.branch_heads: dict[str, str] = {}
         # Effective rules per repository, shaped like
         # GET /repos/{owner}/{repo}/rules/branches/{branch}.
         self.branch_rules: dict[str, list[dict[str, Any]]] = {}
@@ -104,6 +116,57 @@ class FakeGitHub:
             },
         }
 
+    def head_sha(self, name: str) -> str:
+        return self.branch_heads.get(name, "a" * 40)
+
+    def _contents_response(self, name: str, target: str, ref: str) -> httpx.Response:
+        """The documented Contents API shapes: a file object or a listing."""
+        tree = self.trees.get(name, {})
+        if ref != self.head_sha(name):
+            return httpx.Response(404, json={"message": "No commit found for the ref"})
+
+        if target in tree:
+            entry = tree[target]
+            if isinstance(entry, dict):
+                # A pre-shaped entry: symlink, submodule, or binary.
+                return httpx.Response(
+                    200, json={"name": target.rsplit("/", 1)[-1], "path": target, **entry}
+                )
+            encoded = base64.b64encode(str(entry).encode()).decode()
+            return httpx.Response(
+                200,
+                json={
+                    "type": "file",
+                    "encoding": "base64",
+                    "name": target.rsplit("/", 1)[-1],
+                    "path": target,
+                    "size": len(str(entry).encode()),
+                    "sha": hashlib.sha1(str(entry).encode()).hexdigest(),  # noqa: S324
+                    "content": encoded,
+                },
+            )
+
+        prefix = f"{target}/" if target else ""
+        children = [
+            key
+            for key in tree
+            if key.startswith(prefix) and "/" not in key[len(prefix) :] and key != target
+        ]
+        if children:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "type": "file",
+                        "name": key.rsplit("/", 1)[-1],
+                        "path": key,
+                        "size": len(str(tree[key]).encode()) if isinstance(tree[key], str) else 0,
+                    }
+                    for key in sorted(children)
+                ],
+            )
+        return httpx.Response(404, json={"message": "Not Found"})
+
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append(f"{request.method} {path}")
@@ -129,6 +192,15 @@ class FakeGitHub:
                     "repository_selection": "selected",
                 },
             )
+        # Sprint 5B source metadata: commits and Contents, both pinned.
+        for repo_name in list(self.repositories):
+            base = f"/repos/Duosis-Developer-Team/{repo_name}"
+            if path.startswith(f"{base}/commits/"):
+                return httpx.Response(200, json={"sha": self.head_sha(repo_name)})
+            if path.startswith(f"{base}/contents"):
+                target = path[len(f"{base}/contents") :].lstrip("/")
+                return self._contents_response(repo_name, target, request.url.params.get("ref", ""))
+
         if path == "/app/installations":
             return httpx.Response(200, json=[{"id": INSTALLATION_ID}])
         if path == f"/app/installations/{INSTALLATION_ID}":
