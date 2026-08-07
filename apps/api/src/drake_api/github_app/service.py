@@ -525,7 +525,9 @@ async def _apply_envelope(
             result.touched += 1
             continue
 
-        repository_row_id, _created = await upsert_repository(
+        # Only what this message actually carried. Everything else keeps
+        # whatever the last verified read established.
+        repository_row_id, created = await upsert_repository(
             connection,
             installation_row_id=installation_row,
             scope_id=scope_id,
@@ -534,8 +536,19 @@ async def _apply_envelope(
             name=webhook.summary_name(summary),
             owner_login=owner,
             node_id=str(summary.get("node_id") or ""),
-            private=bool(summary.get("private", True)),
+            private=summary.get("private") if isinstance(summary.get("private"), bool) else None,
         )
+        if not created:
+            # A webhook is a notification, never evidence. Whatever it just
+            # changed, the verdict we hold was gathered before it.
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET reconciliation_state = "
+                    "CASE WHEN reconciliation_state = 'complete' THEN 'stale' "
+                    "ELSE reconciliation_state END, updated_at = now() WHERE id = :id"
+                ),
+                {"id": repository_row_id},
+            )
         gate = catalog.security_gate_for(full_name)
         try:
             await apply_announced_state(connection, repository_row_id, gate)
@@ -639,98 +652,208 @@ class DeliveryRecoveryWorker:
 
 
 async def drain_reconciliation_jobs(
-    engine: AsyncEngine, reconciler: "GitHubReconciler", limit: int = DRAIN_BATCH_SIZE
+    engine: AsyncEngine,
+    reconciler: "GitHubReconciler",
+    limit: int = DRAIN_BATCH_SIZE,
+    lease_seconds: int = JOB_LEASE_SECONDS,
 ) -> int:
     """Run outstanding installation-level reconciliation intents.
 
-    `FOR UPDATE SKIP LOCKED` alone is not enough here. The provider work
-    happens AFTER the claim transaction commits, and committing releases
-    the lock — so a second worker arriving a moment later would find the
-    row unlocked and still pending, and both would call GitHub. The claim
-    therefore takes a durable LEASE in the same statement that selects the
-    row: a conditional update that only one worker can win. The lease
-    expires so a worker that dies mid-job cannot strand it forever.
+    Ownership is one job at a time. Claiming a batch up front and then
+    running it serially means the last job's lease starts burning while the
+    first job is still in the provider — by the time it runs, another
+    worker may legitimately have taken it. So each job is claimed
+    immediately before it runs, held by a lease that is renewed while the
+    work is in flight, and finished only if the fencing token we claimed
+    with is still the current one.
+    """
+    completed = 0
+    for _ in range(max(1, limit)):
+        claim = await _claim_next_job(engine, lease_seconds)
+        if claim is None:
+            return completed
+        if await _run_claimed_job(engine, reconciler, claim, lease_seconds):
+            completed += 1
+    return completed
+
+
+@dataclass(frozen=True)
+class _JobClaim:
+    job_id: uuid.UUID
+    installation_external_id: int
+    scope_id: uuid.UUID
+    owner: str
+    generation: int
+
+
+async def _claim_next_job(engine: AsyncEngine, lease_seconds: int) -> "_JobClaim | None":
+    """Take exclusive ownership of exactly one job.
+
+    The attempt is spent HERE, atomically with the claim. A worker that
+    dies immediately afterwards has still used one of its chances, which is
+    what keeps a job that reliably kills its worker from being retried
+    without end.
     """
     owner = str(uuid.uuid4())
     async with engine.begin() as connection:
-        rows = (
+        row = (
             await connection.execute(
                 text(
                     """
                     UPDATE github_reconciliation_jobs
                     SET lease_owner = :owner,
+                        lease_generation = lease_generation + 1,
                         lease_expires_at = now() + make_interval(secs => :lease),
+                        attempts = attempts + 1,
                         last_attempt_at = now(),
                         updated_at = now()
-                    WHERE id IN (
+                    WHERE id = (
                         SELECT id FROM github_reconciliation_jobs
                         WHERE status = 'pending'
                           AND attempts < :max
                           AND (lease_expires_at IS NULL OR lease_expires_at < now())
                         ORDER BY created_at
-                        LIMIT :limit
+                        LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
-                    RETURNING id, installation_external_id, scope_id
+                    RETURNING id, installation_external_id, scope_id, lease_generation, attempts
                     """
                 ),
-                {
-                    "owner": owner,
-                    "lease": JOB_LEASE_SECONDS,
-                    "max": MAX_DELIVERY_ATTEMPTS,
-                    "limit": limit,
-                },
+                {"owner": owner, "lease": max(0, lease_seconds), "max": MAX_DELIVERY_ATTEMPTS},
             )
-        ).all()
-        claimed = [(uuid.UUID(str(row[0])), int(row[1]), uuid.UUID(str(row[2]))) for row in rows]
-
-    completed = 0
-    for job_id, installation_external_id, scope_id in claimed:
-        try:
-            await reconciler.reconcile_installation(installation_external_id, scope_id=scope_id)
-        except Exception as error:
-            await _record_job_failure(engine, job_id, type(error).__name__, owner)
-            continue
-        async with engine.begin() as connection:
-            # Compare-and-set on the lease: only the owner may close it, so
-            # a job reclaimed after an expiry cannot be completed twice.
-            await connection.execute(
-                text(
-                    "UPDATE github_reconciliation_jobs "
-                    "SET status = 'processed', processed_at = now(), "
-                    "    attempts = attempts + 1, lease_owner = NULL, "
-                    "    lease_expires_at = NULL, updated_at = now() "
-                    "WHERE id = :id AND lease_owner = :owner AND status = 'pending'"
-                ),
-                {"id": job_id, "owner": owner},
-            )
-        completed += 1
-    return completed
+        ).first()
+    if row is None:
+        return None
+    return _JobClaim(
+        job_id=uuid.UUID(str(row[0])),
+        installation_external_id=int(row[1]),
+        scope_id=uuid.UUID(str(row[2])),
+        owner=owner,
+        generation=int(row[3]),
+    )
 
 
-async def _record_job_failure(
-    engine: AsyncEngine, job_id: uuid.UUID, code: str, owner: str
-) -> None:
-    """Count the attempt and release the lease, once, for the owner only."""
+async def _renew_lease(engine: AsyncEngine, claim: "_JobClaim", lease_seconds: int) -> bool:
+    """Extend our hold, but only while it is still ours."""
+    async with engine.begin() as connection:
+        result = await connection.execute(
+            text(
+                "UPDATE github_reconciliation_jobs "
+                "SET lease_expires_at = now() + make_interval(secs => :lease), "
+                "    updated_at = now() "
+                "WHERE id = :id AND lease_owner = :owner AND lease_generation = :generation"
+            ),
+            {
+                "id": claim.job_id,
+                "owner": claim.owner,
+                "generation": claim.generation,
+                "lease": max(1, lease_seconds),
+            },
+        )
+        return int(result.rowcount or 0) == 1
+
+
+async def _run_claimed_job(
+    engine: AsyncEngine,
+    reconciler: "GitHubReconciler",
+    claim: "_JobClaim",
+    lease_seconds: int,
+) -> bool:
+    """Run one owned job, keeping the lease alive while it is in flight."""
+    heartbeat_interval = max(0.2, min(5.0, max(1, lease_seconds) / 3))
+    lost = asyncio.Event()
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(heartbeat_interval)
+            if not await _renew_lease(engine, claim, lease_seconds):
+                # Someone else owns it now. Stop renewing and let the
+                # fencing check refuse our result.
+                lost.set()
+                return
+
+    beat = asyncio.create_task(heartbeat(), name="github-job-lease")
+    try:
+        await reconciler.reconcile_installation(
+            claim.installation_external_id, scope_id=claim.scope_id
+        )
+    except Exception as error:
+        await _record_job_failure(engine, claim, type(error).__name__)
+        return False
+    finally:
+        beat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beat
+
+    if lost.is_set():
+        logger.warning(
+            "github reconciliation job lease was lost mid-flight",
+            extra={"installation": claim.installation_external_id},
+        )
+        return False
+
+    # Fencing: only the current owner may close the job. A worker whose
+    # lease was taken over writes nothing.
+    async with engine.begin() as connection:
+        result = await connection.execute(
+            text(
+                "UPDATE github_reconciliation_jobs "
+                "SET status = 'processed', processed_at = now(), lease_owner = NULL, "
+                "    lease_expires_at = NULL, updated_at = now() "
+                "WHERE id = :id AND status = 'pending' "
+                "  AND lease_owner = :owner AND lease_generation = :generation"
+            ),
+            {"id": claim.job_id, "owner": claim.owner, "generation": claim.generation},
+        )
+        applied = int(result.rowcount or 0) == 1
+    return applied
+
+
+async def _record_job_failure(engine: AsyncEngine, claim: "_JobClaim", code: str) -> None:
+    """Record why the job failed, for the current owner only.
+
+    The attempt was already spent at claim time, so nothing is counted
+    twice here — and a crash between the two still costs one attempt.
+
+    The lease is deliberately NOT released. Clearing it would make the job
+    immediately re-claimable by the very sweep that just failed it, and one
+    pass would burn the whole attempt budget on a job that is simply slow
+    to recover. Letting the lease expire is what spaces the retries out.
+    """
+    exhausted = False
     async with engine.begin() as connection:
         row = (
             await connection.execute(
                 text(
                     "UPDATE github_reconciliation_jobs "
-                    "SET attempts = attempts + 1, last_attempt_at = now(), "
-                    "    last_error_code = :code, lease_owner = NULL, "
-                    "    lease_expires_at = NULL, updated_at = now() "
-                    "WHERE id = :id AND status = 'pending' AND lease_owner = :owner "
+                    "SET last_error_code = :code, updated_at = now() "
+                    "WHERE id = :id AND status = 'pending' "
+                    "  AND lease_owner = :owner AND lease_generation = :generation "
                     "RETURNING attempts"
                 ),
-                {"id": job_id, "code": _error_code_slug(code), "owner": owner},
+                {
+                    "id": claim.job_id,
+                    "code": _error_code_slug(code),
+                    "owner": claim.owner,
+                    "generation": claim.generation,
+                },
             )
         ).first()
         if row is not None and int(row[0]) >= MAX_DELIVERY_ATTEMPTS:
             await connection.execute(
                 text("UPDATE github_reconciliation_jobs SET status = 'failed' WHERE id = :id"),
-                {"id": job_id},
+                {"id": claim.job_id},
             )
+            exhausted = True
+    if exhausted:
+        await _audit(
+            engine,
+            action="github.reconciliation.exhausted",
+            result="failure",
+            target_type="github_installation",
+            target_id=str(claim.installation_external_id),
+            metadata={"attempts": MAX_DELIVERY_ATTEMPTS, "reason": _error_code_slug(code)},
+        )
 
 
 async def unknown_repository_ids(connection: AsyncConnection, external_ids: list[int]) -> list[int]:
@@ -944,16 +1067,21 @@ async def upsert_repository(
     name: str = "",
     owner_login: str = "",
     node_id: str = "",
-    private: bool = True,
-    visibility: str = "private",
-    archived: bool = False,
-    disabled: bool = False,
+    private: bool | None = None,
+    visibility: str = "",
+    archived: bool | None = None,
+    disabled: bool | None = None,
     default_branch: str = "",
 ) -> tuple[uuid.UUID, bool]:
-    """Insert or reconcile a repository by PERMANENT id.
+    """Insert or PATCH a repository by PERMANENT id.
 
     Returns (row id, created). A rename or transfer updates attributes on
     the SAME row, so history and audit stay attached.
+
+    Optional attributes default to "not carried". A webhook envelope has no
+    `archived`, `disabled`, `visibility` or `default_branch`, so passing
+    them as concrete defaults would make every rename assert facts the
+    message never stated. Only a verified provider read supplies them.
     """
     gate = catalog.security_gate_for(full_name)
     inserted = (
@@ -966,9 +1094,9 @@ async def upsert_repository(
                      disabled, default_branch, onboarding_state, state_reason,
                      security_gate, access_state)
                 VALUES (:provider, :external_id, :node_id, :installation_id, :scope_id,
-                        :owner, :name, :full_name, :private, :visibility, :archived,
-                        :disabled, :default_branch, :initial_state, :initial_reason,
-                        :gate, 'accessible')
+                        :owner, :name, :full_name, :private_default, :visibility_default,
+                        :archived_default, :disabled_default, :default_branch,
+                        :initial_state, :initial_reason, :gate, 'accessible')
                 ON CONFLICT (provider, external_id) DO NOTHING
                 RETURNING id
                 """
@@ -978,6 +1106,10 @@ async def upsert_repository(
                 "external_id": external_id,
                 "node_id": node_id[:128],
                 "installation_id": installation_row_id,
+                "private_default": True if private is None else private,
+                "visibility_default": visibility[:32] or "private",
+                "archived_default": False if archived is None else archived,
+                "disabled_default": False if disabled is None else disabled,
                 "scope_id": scope_id,
                 "owner": owner_login[:255],
                 "name": (name or full_name.split("/")[-1])[:255],
@@ -1007,13 +1139,18 @@ async def upsert_repository(
                 UPDATE github_repositories SET
                     node_id = COALESCE(NULLIF(:node_id, ''), node_id),
                     installation_id = :installation_id,
-                    owner_login = :owner,
-                    name = :name,
-                    full_name = :full_name,
-                    private = :private,
-                    visibility = :visibility,
-                    archived = :archived,
-                    disabled = :disabled,
+                    owner_login = COALESCE(NULLIF(:owner, ''), owner_login),
+                    name = COALESCE(NULLIF(:name, ''), name),
+                    full_name = COALESCE(NULLIF(:full_name, ''), full_name),
+                    -- Absent is not False, and absent is not 'private'. A
+                    -- webhook envelope carries none of these, so writing
+                    -- them from defaults would report every repository as
+                    -- un-archived, enabled and on a guessed branch after
+                    -- any rename.
+                    private = COALESCE(:private, private),
+                    visibility = COALESCE(NULLIF(:visibility, ''), visibility),
+                    archived = COALESCE(:archived, archived),
+                    disabled = COALESCE(:disabled, disabled),
                     default_branch = COALESCE(NULLIF(:default_branch, ''), default_branch),
                     -- A gate may be OPENED by an observation (a rename into
                     -- a gated name) but never closed by one. Closing it is a
@@ -1035,6 +1172,10 @@ async def upsert_repository(
                 "external_id": external_id,
                 "node_id": node_id[:128],
                 "installation_id": installation_row_id,
+                "private_default": True if private is None else private,
+                "visibility_default": visibility[:32] or "private",
+                "archived_default": False if archived is None else archived,
+                "disabled_default": False if disabled is None else disabled,
                 "owner": owner_login[:255],
                 "name": (name or full_name.split("/")[-1])[:255],
                 "full_name": full_name[:512],
@@ -1137,6 +1278,14 @@ async def mark_access_removed(
                         WHEN security_gate IS NOT NULL THEN 'blocked'
                         ELSE 'disabled'
                     END,
+                    -- While we cannot see it we hold no CURRENT evidence
+                    -- at all — not stale evidence, none. Keeping `complete`
+                    -- would let the precedence chain derive READY again the
+                    -- moment access returns, from a reading taken before we
+                    -- lost sight of the repository. The last-good snapshot
+                    -- and `last_reconciled_at` are untouched; they record
+                    -- history, not the present.
+                    reconciliation_state = 'never',
                     state_reason = CASE
                         WHEN security_gate IS NOT NULL
                             THEN 'security_gate_' || security_gate
@@ -1528,17 +1677,37 @@ class GitHubReconciler:
         # never be committed as complete.
         listed = await self._client.list_installation_repositories(token)
 
+        # Validate the WHOLE listing before applying any of it. Skipping a
+        # malformed entry would make the repository it describes look like
+        # one that had vanished, and mark it removed.
         present: list[dict[str, Any]] = []
+        malformed = 0
         for item in listed:
             external_id = item.get("id")
             full_name = str(item.get("full_name") or "")
             if not isinstance(external_id, int) or isinstance(external_id, bool):
+                malformed += 1
                 continue
             if not full_name or "/" not in full_name:
+                malformed += 1
                 continue
             if full_name.split("/")[0].lower() != catalog.ORGANIZATION.lower():
+                # Outside the organization we govern: legitimately not ours,
+                # not a malformed entry.
                 continue
             present.append(item)
+        if malformed:
+            await _audit(
+                self._engine,
+                action="github.installation.membership_malformed",
+                result="denied",
+                target_type="github_installation",
+                target_id=str(installation_external_id),
+                metadata={"entries": malformed},
+            )
+            raise MembershipContractError(
+                f"{malformed} membership entries were unusable; the listing is not trustworthy"
+            )
 
         vanished: list[int] = []
         async with self._engine.begin() as connection:
@@ -1565,6 +1734,9 @@ class GitHubReconciler:
                 reconciled=True,
             )
             known = set(await _installation_repository_ids(connection, installation_external_id))
+            # One read of every existing projection, BEFORE anything is
+            # written, so comparisons are against what we actually held.
+            previous_by_id = await _repository_projections(connection, sorted(known))
             seen: set[int] = set()
             for item in present:
                 external_id = int(item["id"])
@@ -1581,6 +1753,10 @@ class GitHubReconciler:
                     owner_login=full_name.split("/")[0],
                     node_id=str(item.get("node_id") or ""),
                     private=bool(item.get("private", True)),
+                    visibility=str(item.get("visibility") or ""),
+                    archived=bool(item.get("archived", False)),
+                    disabled=bool(item.get("disabled", False)),
+                    default_branch=str(item.get("default_branch") or ""),
                 )
                 if gate:
                     # Gated: recorded as present, never read any further.
@@ -1593,7 +1769,10 @@ class GitHubReconciler:
                     )
                 else:
                     await self._settle_membership_evidence(
-                        connection, repository_row_id, item, created
+                        connection,
+                        repository_row_id,
+                        item,
+                        None if created else previous_by_id.get(external_id),
                     )
                 with contextlib.suppress(onboarding.InvalidTransitionError):
                     await apply_announced_state(connection, repository_row_id, gate)
@@ -1614,17 +1793,21 @@ class GitHubReconciler:
         connection: AsyncConnection,
         repository_row_id: uuid.UUID,
         observed: dict[str, Any],
-        created: bool,
+        previous: dict[str, Any] | None,
     ) -> None:
         """Decide whether previously gathered evidence still applies.
+
+        `previous` is the projection read BEFORE anything was written. That
+        matters: comparing after a partial update means a field the update
+        already overwrote compares equal to itself, and the change that
+        invalidated the evidence goes unnoticed.
 
         A membership sync reads repository ATTRIBUTES, not governance. If an
         attribute the evidence depended on has moved — the default branch
         above all, since every branch-scoped verdict was gathered against
-        it — the stored verdict describes something that no longer exists,
-        so it is marked stale rather than left looking current.
+        it — the stored verdict describes something that no longer exists.
         """
-        if created:
+        if previous is None:
             await connection.execute(
                 text(
                     "UPDATE github_repositories SET reconciliation_state = 'never', "
@@ -1634,26 +1817,29 @@ class GitHubReconciler:
             )
             return
 
-        current = (
-            await connection.execute(
-                text(
-                    "SELECT default_branch, archived, disabled, visibility, owner_login "
-                    "FROM github_repositories WHERE id = :id"
-                ),
-                {"id": repository_row_id},
-            )
-        ).one()
         observed_full_name = str(observed.get("full_name") or "")
         observed_owner = (
-            observed_full_name.split("/")[0] if "/" in observed_full_name else str(current[4])
+            observed_full_name.split("/")[0]
+            if "/" in observed_full_name
+            else str(previous["owner_login"])
         )
-        changed = (
-            str(observed.get("default_branch") or current[0]) != str(current[0])
-            or bool(observed.get("archived", current[1])) != bool(current[1])
-            or bool(observed.get("disabled", current[2])) != bool(current[2])
-            or str(observed.get("visibility") or current[3]) != str(current[3])
-            or observed_owner != str(current[4])
+        comparisons = (
+            (observed_full_name or str(previous["full_name"]), str(previous["full_name"])),
+            (observed_owner, str(previous["owner_login"])),
+            (
+                str(observed.get("default_branch") or previous["default_branch"]),
+                str(previous["default_branch"]),
+            ),
+            (
+                str(observed.get("visibility") or previous["visibility"]),
+                str(previous["visibility"]),
+            ),
+            (bool(observed.get("private", previous["private"])), bool(previous["private"])),
+            (bool(observed.get("archived", previous["archived"])), bool(previous["archived"])),
+            (bool(observed.get("disabled", previous["disabled"])), bool(previous["disabled"])),
         )
+        changed = any(now != before for now, before in comparisons)
+
         await update_repository_projection(connection, repository_row_id, observed)
         if changed:
             await connection.execute(
@@ -1723,7 +1909,12 @@ class GitHubReconciler:
         response is verified against the identity we meant before a single
         column is written.
         """
-        gate = catalog.security_gate_for(full_name)
+        # The gate is authoritative from whichever source has it OPEN. A
+        # rename away from the gated name changes what the name derives,
+        # but it is not permission to start talking to the provider — the
+        # recorded gate has to be consulted first, before a token is even
+        # looked up.
+        gate = await effective_security_gate(self._engine, repository_row_id, full_name)
         if gate:
             raise SecurityGateBlockedError(full_name, gate)
         owner, _, repo = full_name.partition("/")
@@ -1870,6 +2061,26 @@ class GitHubReconciler:
             )
             raise RepositoryIdentityError(expected_full_name, "id_mismatch")
 
+        # The numeric id stays the identity, but a node id we already hold
+        # and one the provider reports must agree: two different node ids
+        # for the same number means one of them is not what we think it is.
+        # An empty stored value is a legacy row, filled in from this
+        # verified response rather than treated as a conflict.
+        observed_node = str(repository.get("node_id") or "")
+        async with self._engine.connect() as connection:
+            stored_row = (
+                await connection.execute(
+                    text("SELECT node_id FROM github_repositories WHERE id = :id"),
+                    {"id": repository_row_id},
+                )
+            ).first()
+        stored_node = str(stored_row[0]) if stored_row is not None and stored_row[0] else ""
+        if stored_node and observed_node and stored_node != observed_node:
+            await self._reject_identity(
+                repository_row_id, "node_id_mismatch", expected_external_id, observed_id
+            )
+            raise RepositoryIdentityError(expected_full_name, "node_id_mismatch")
+
         observed_full_name = str(repository.get("full_name") or "")
         observed_owner = observed_full_name.split("/")[0] if "/" in observed_full_name else ""
         if not observed_owner:
@@ -1942,6 +2153,63 @@ class InstallationSync:
     state: str
     present: int
     removed: int
+
+
+async def effective_security_gate(
+    engine: AsyncEngine, repository_row_id: uuid.UUID, full_name: str
+) -> str | None:
+    """The gate that actually applies, before any network access.
+
+    Two sources, and OPEN wins: the gate recorded on the row, and the gate
+    the current name derives. Consulting only the name would let a rename
+    decide when Drake may start calling the provider; consulting only the
+    row would miss a repository that has just been renamed INTO a gated
+    name. Closing a gate stays a manual operator action either way.
+    """
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text("SELECT security_gate FROM github_repositories WHERE id = :id"),
+                {"id": repository_row_id},
+            )
+        ).first()
+    persisted = str(row[0]) if row is not None and row[0] else None
+    return persisted or catalog.security_gate_for(full_name)
+
+
+async def _repository_projections(
+    connection: AsyncConnection, external_ids: list[int]
+) -> dict[int, dict[str, Any]]:
+    """Snapshot the projection of each repository, before any write."""
+    if not external_ids:
+        return {}
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT external_id, full_name, owner_login, default_branch, visibility, "
+                "private, archived, disabled, node_id FROM github_repositories "
+                "WHERE provider = :provider AND external_id = ANY(:ids)"
+            ),
+            {"provider": PROVIDER, "ids": external_ids},
+        )
+    ).all()
+    return {
+        int(row[0]): {
+            "full_name": row[1],
+            "owner_login": row[2],
+            "default_branch": row[3],
+            "visibility": row[4],
+            "private": row[5],
+            "archived": row[6],
+            "disabled": row[7],
+            "node_id": row[8],
+        }
+        for row in rows
+    }
+
+
+class MembershipContractError(RuntimeError):
+    """The membership listing was not usable as a statement of membership."""
 
 
 class RepositoryIdentityError(RuntimeError):

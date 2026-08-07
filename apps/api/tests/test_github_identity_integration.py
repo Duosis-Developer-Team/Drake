@@ -469,6 +469,9 @@ async def test_reconciliation_writes_into_the_installation_scope_not_root(
             {"s": other, "e": INSTALLATION_ID},
         )
         await connection.execute(text("UPDATE github_repositories SET scope_id = :s"), {"s": other})
+        await connection.execute(
+            text("UPDATE github_webhook_deliveries SET scope_id = :s"), {"s": other}
+        )
     other_scope = uuidlib.UUID(str(other))
 
     # A repository the provider knows about but Drake has never seen.

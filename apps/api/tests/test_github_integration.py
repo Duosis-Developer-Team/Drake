@@ -927,6 +927,9 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
                     )
                 ).all()
             )
-    # READY survives the re-announcement, and the gate still wins outright.
-    assert rows[HERMES_ID] == "ready"
+    # The re-announcement is a legal transition, not the 500 this test was
+    # written for, and it does not push the repository backwards to
+    # DISCOVERED. It DOES leave it degraded: a webhook is a notification,
+    # so evidence gathered before it is no longer current (fix gate 4 §3).
+    assert rows[HERMES_ID] == "degraded"
     assert rows[DATALAKE_ID] == "blocked"

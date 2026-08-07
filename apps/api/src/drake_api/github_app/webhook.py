@@ -154,12 +154,18 @@ def _repository_summary(item: Any) -> dict[str, Any] | None:
         # An entry with no full name has no owner we can verify, so it
         # cannot be checked against the expected organization.
         return None
-    return {
+    summary: dict[str, Any] = {
         "external_id": external_id,
         "node_id": _bounded_text(item.get("node_id"), 128),
         "full_name": full_name,
-        "private": bool(item.get("private", True)),
     }
+    # Only recorded when the payload actually said so. Defaulting it here
+    # would make "the message did not mention visibility" indistinguishable
+    # from "the repository is private", and the difference matters when the
+    # value is about to be written over what we already know.
+    if isinstance(item.get("private"), bool):
+        summary["private"] = bool(item["private"])
+    return summary
 
 
 def summary_name(summary: dict[str, Any]) -> str:

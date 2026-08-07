@@ -436,9 +436,15 @@ async def test_a_mixed_owner_repository_list_is_refused_entirely(
     assert rows == 0, "not even the legitimate half may be written"
 
 
-async def test_a_repository_without_a_resolvable_owner_is_refused(
+async def test_a_repository_without_a_resolvable_owner_is_never_written(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
+    """No `full_name` means no owner to verify against the organization.
+
+    The envelope builder drops the entry, so the delivery is processed and
+    simply carries no repositories. The invariant that matters is that
+    nothing unidentifiable is ever written.
+    """
     harness, _fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
     payload = installation_payload(
@@ -446,9 +452,8 @@ async def test_a_repository_without_a_resolvable_owner_is_refused(
     )
     async with harness.api_client() as client:
         response = await deliver(client, "installation", payload, str(uuidlib.uuid4()))
-    # Either the entry is dropped as unidentifiable and the event carries no
-    # repositories, or the delivery is refused — never a silent write.
-    assert response.status_code in (202, 401)
+    assert response.status_code == 202
+    assert response.json()["status"] == "processed"
     async with engine.connect() as connection:
         assert (
             int(
@@ -482,6 +487,10 @@ async def test_installation_bound_to_another_scope_is_refused(
             )
             await connection.execute(
                 text("UPDATE github_repositories SET scope_id = :scope"),
+                {"scope": other_scope},
+            )
+            await connection.execute(
+                text("UPDATE github_webhook_deliveries SET scope_id = :scope"),
                 {"scope": other_scope},
             )
 

@@ -274,6 +274,17 @@ def upgrade() -> None:
         ),
         sa.Column("processed_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.UniqueConstraint("delivery_id", name="uq_github_delivery_id"),
+        # The same invariant the repositories carry: once a delivery names
+        # an installation, its scope must be that installation's scope.
+        # NULL installation_id is the pre-binding state and is allowed.
+        sa.ForeignKeyConstraint(
+            ["installation_id", "scope_id"],
+            ["github_installations.id", "github_installations.scope_id"],
+            name="fk_github_delivery_installation_scope",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         sa.CheckConstraint(
             "status IN ('pending', 'processed', 'failed', 'rejected')",
             name="ck_github_delivery_status",
@@ -324,6 +335,10 @@ def upgrade() -> None:
         # dead worker cannot strand the job forever.
         sa.Column("lease_expires_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("lease_owner", sa.Text(), nullable=True),
+        # Monotonic fencing token. A worker proves it still owns the job by
+        # presenting the generation it claimed with; anyone who takes the
+        # job over bumps it, so a stale owner's writes match nothing.
+        sa.Column("lease_generation", sa.BigInteger(), nullable=False, server_default=sa.text("0")),
         *_timestamps(),
         sa.CheckConstraint(
             "status IN ('pending', 'processed', 'failed')", name="ck_github_job_status"

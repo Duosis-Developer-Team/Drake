@@ -206,9 +206,8 @@ async def test_a_dead_lettered_delivery_is_never_processed_by_a_redelivery(
     async with harness.api_client() as client:
         for _ in range(10):
             again = await deliver(client, "installation", payload, delivery)
-            assert again.status_code in (200, 202, 409), again.text
-            body = again.json()
-            assert body.get("status") != "processed", body
+            assert again.status_code == 202, again.text
+            assert again.json()["status"] == "failed"
 
     final = await _delivery(engine, delivery)
     assert final["attempts"] == attempts_at_death, "the ceiling must be a ceiling"
@@ -542,14 +541,16 @@ async def test_a_transfer_out_of_the_organization_is_fail_closed(
     payload["repository"] = _repo(LOGISLOT_ID, "logislot", owner="another-org")
     async with harness.api_client() as client:
         response = await deliver(client, "repository", payload, str(uuidlib.uuid4()))
-    # Refused outright, or accepted as an access loss — never a silent
-    # accessible row still claiming the old owner.
-    assert response.status_code in (202, 401), response.text
+    # A repository Drake already tracks by permanent id is accepted and
+    # recorded as an access loss. (Refusing it would strand the row as
+    # accessible with stale metadata; a repository we have NEVER seen with
+    # a foreign owner is the separate case refused in
+    # test_a_repository_owned_by_another_organization_is_refused.)
+    assert response.status_code == 202, response.text
 
     state = await _repository_state(engine, LOGISLOT_ID)
-    assert state["access_state"] != "accessible", (
-        "a repository transferred out of the organization must not stay accessible"
-    )
+    assert state["access_state"] == "removed"
+    assert state["onboarding_state"] == "disabled"
 
 
 @pytest.mark.parametrize(
@@ -563,18 +564,22 @@ async def test_a_transfer_out_of_the_organization_is_fail_closed(
 async def test_an_unknown_action_makes_no_domain_mutation(
     engine: AsyncEngine, tmp_path: Path, event: str, action: str
 ) -> None:
+    """One exact contract, for every unknown (event, action) pair."""
     harness, _fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
     await _onboard(harness)
     before = await _repository_state(engine, HERMES_ID)
+    success_before = await _audit_count(engine, f"github.webhook.{event}")
+    unsupported_before = await _audit_count(engine, "github.webhook.action_unsupported")
 
     payload = installation_payload(action=action)
     async with harness.api_client() as client:
         response = await deliver(client, event, payload, str(uuidlib.uuid4()))
-    assert response.status_code in (202, 401), response.text
-    if response.status_code == 202:
-        assert response.json().get("status") != "processed" or True
 
+    assert response.status_code == 202
+    assert response.json()["status"] == "unsupported"
+    assert await _audit_count(engine, f"github.webhook.{event}") == success_before
+    assert await _audit_count(engine, "github.webhook.action_unsupported") == unsupported_before + 1
     assert await _repository_state(engine, HERMES_ID) == before
     assert await _installation_state(engine) == "active"
 
@@ -655,6 +660,9 @@ async def test_security_refusals_are_audited(engine: AsyncEngine, tmp_path: Path
             {"s": other, "e": INSTALLATION_ID},
         )
         await connection.execute(text("UPDATE github_repositories SET scope_id = :s"), {"s": other})
+        await connection.execute(
+            text("UPDATE github_webhook_deliveries SET scope_id = :s"), {"s": other}
+        )
     scope_before = await _audit_count(engine, "github.installation.scope_mismatch")
     async with harness.api_client() as client:
         assert (
