@@ -20,6 +20,11 @@ from drake_api.catalog.router import router as catalog_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines, get_engine
 from drake_api.errors import register_error_handlers
+from drake_api.github_app.auth import GitHubAppAuth
+from drake_api.github_app.client import GitHubClient
+from drake_api.github_app.router import router as github_router
+from drake_api.github_app.router_webhook import router as github_webhook_router
+from drake_api.github_app.service import GitHubReconciler
 from drake_api.health import router as health_router
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
@@ -47,6 +52,7 @@ def create_app(
     settings: Settings | None = None,
     oidc_client: OidcClient | None = None,
     telemetry_transport: "httpx.AsyncBaseTransport | None" = None,
+    github_transport: "httpx.AsyncBaseTransport | None" = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast on insecure identity configuration outside local/test —
@@ -87,6 +93,13 @@ def create_app(
     app.state.telemetry_registry = get_registry()
     app.state.telemetry_metrics = BrokerMetrics()
     app.state.telemetry_redis = aioredis.from_url(settings.redis_url)
+    # GitHub App: credentials stay in process memory; only the reconciler
+    # and its bounded client live on app.state.
+    github_auth = GitHubAppAuth(settings)
+    github_client = GitHubClient(settings, github_auth, transport=github_transport)
+    app.state.github_auth = github_auth
+    app.state.github_client = github_client
+    app.state.github_reconciler = GitHubReconciler(get_engine(settings), github_client)
     app.state.telemetry_broker = TelemetryBroker(
         settings=settings,
         engine=get_engine(settings),
@@ -105,6 +118,8 @@ def create_app(
     app.include_router(cluster_inventory_router)
     app.include_router(catalog_router)
     app.include_router(integrations_router)
+    app.include_router(github_router)
+    app.include_router(github_webhook_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):
         # Explicit local/test opt-in only; validate_runtime_security refuses
