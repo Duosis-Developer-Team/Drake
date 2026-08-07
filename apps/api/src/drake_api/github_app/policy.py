@@ -254,8 +254,13 @@ def _rule_protection_present(inputs: PolicyInputs, facts: dict[str, Any]) -> Rul
     remediation = (
         "Protect the default branch with classic branch protection or an active repository ruleset."
     )
-    if inputs.protection_error and inputs.rulesets_error:
-        return _unreadable(rule_id, title, "high", expected, inputs.protection_error, remediation)
+    # Absence of evidence is not evidence of absence: if EITHER source was
+    # unreadable and the readable ones show nothing, protection may well
+    # exist where we cannot see it. Only "both readable, both empty" is a
+    # real FAIL.
+    unreadable_reason = inputs.protection_error or inputs.rulesets_error
+    if facts["source"] == "none" and unreadable_reason:
+        return _unreadable(rule_id, title, "high", expected, unreadable_reason, remediation)
     if facts["source"] == "none":
         return RuleResult(
             rule_id=rule_id,

@@ -191,9 +191,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_github_repositories_installation", "github_repositories", ["installation_id"]
     )
-    op.create_index(
-        "ix_github_repositories_state", "github_repositories", ["onboarding_state"]
-    )
+    op.create_index("ix_github_repositories_state", "github_repositories", ["onboarding_state"])
 
     op.create_table(
         "github_webhook_deliveries",
@@ -231,9 +229,7 @@ def upgrade() -> None:
             "pg_column_size(envelope) <= 8192", name="ck_github_delivery_envelope_bound"
         ),
     )
-    op.create_index(
-        "ix_github_deliveries_received", "github_webhook_deliveries", ["received_at"]
-    )
+    op.create_index("ix_github_deliveries_received", "github_webhook_deliveries", ["received_at"])
 
     op.create_table(
         "github_policy_evaluations",

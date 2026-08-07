@@ -279,10 +279,7 @@ async def upsert_repository(
                      security_gate, access_state)
                 VALUES (:provider, :external_id, :node_id, :installation_id, :scope_id,
                         :owner, :name, :full_name, :private, :visibility, :archived,
-                        :disabled, :default_branch,
-                        CASE WHEN :gate IS NULL THEN 'discovered' ELSE 'blocked' END,
-                        CASE WHEN :gate IS NULL THEN 'awaiting_reconciliation'
-                             ELSE 'security_gate_' || :gate END,
+                        :disabled, :default_branch, :initial_state, :initial_reason,
                         :gate, 'accessible')
                 ON CONFLICT (provider, external_id) DO NOTHING
                 RETURNING id
@@ -303,11 +300,17 @@ async def upsert_repository(
                 "disabled": disabled,
                 "default_branch": default_branch[:255],
                 "gate": gate,
+                # Derived in Python so the SQL carries no untyped CASE
+                # parameter — the initial state IS the gate decision.
+                "initial_state": onboarding.BLOCKED if gate else onboarding.DISCOVERED,
+                "initial_reason": (f"security_gate_{gate}" if gate else "awaiting_reconciliation")[
+                    :64
+                ],
             },
         )
     ).first()
     if inserted is not None:
-        return inserted[0], True
+        return uuid.UUID(str(inserted[0])), True
 
     updated = (
         await connection.execute(
@@ -348,7 +351,7 @@ async def upsert_repository(
             },
         )
     ).one()
-    return updated[0], False
+    return uuid.UUID(str(updated[0])), False
 
 
 async def apply_state(
