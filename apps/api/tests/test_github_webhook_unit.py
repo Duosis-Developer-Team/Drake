@@ -37,7 +37,7 @@ def test_official_github_test_vector() -> None:
 
 def test_unicode_body_is_hashed_over_raw_bytes() -> None:
     """A UTF-8 body must hash over the bytes GitHub actually sent."""
-    body = '{"repository":{"name":"kırmızı-çilek","emoji":"🍓"}}'.encode()
+    body = '{"repository":{"name":"crème-brûlée","emoji":"🍓"}}'.encode()
     signature = _sign(OFFICIAL_SECRET, body)
     verify_signature(body, OFFICIAL_SECRET, signature)
     # Re-encoding through a different normalization must NOT verify.
