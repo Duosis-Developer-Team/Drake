@@ -38,7 +38,7 @@ def _healthy_inputs() -> PolicyInputs:
         full_name="Duosis-Developer-Team/Hermes",
         default_branch="main",
         protection=_healthy_protection(),
-        rulesets=[],
+        branch_rules=[],
         workflows=[
             {"name": "build", "path": ".github/workflows/build.yml", "state": "active"},
             {"name": "test suite", "path": ".github/workflows/test.yml", "state": "active"},
@@ -76,7 +76,7 @@ def test_every_catalogued_rule_is_evaluated() -> None:
 
 def test_missing_protection_is_a_blocking_failure() -> None:
     inputs = PolicyInputs(
-        full_name="o/r", default_branch="main", protection=None, rulesets=[], workflows=[]
+        full_name="o/r", default_branch="main", protection=None, branch_rules=[], workflows=[]
     )
     evaluation = evaluate(inputs)
     protection = next(
@@ -94,8 +94,8 @@ def test_missing_permission_is_unknown_never_pass() -> None:
         default_branch="main",
         protection=None,
         protection_error="missing permission (administration:read)",
-        rulesets=None,
-        rulesets_error="missing permission (administration:read)",
+        branch_rules=None,
+        branch_rules_error="missing permission (administration:read)",
         workflows=None,
         workflows_error="missing permission (actions:read)",
         environments=None,
@@ -122,8 +122,8 @@ def test_rate_limit_and_timeout_are_unknown() -> None:
             default_branch="main",
             protection=None,
             protection_error=reason,
-            rulesets=None,
-            rulesets_error=reason,
+            branch_rules=None,
+            branch_rules_error=reason,
         )
         assert _verdict(inputs, "branch.protection.present") == "unknown"
 
@@ -157,26 +157,29 @@ def test_missing_required_checks_fails_and_strict_is_reported() -> None:
 
 
 def test_rulesets_can_satisfy_protection_without_classic_branch_protection() -> None:
+    """Shaped like `GET /repos/{o}/{r}/rules/branches/{branch}` really is.
+
+    That endpoint returns the effective rules directly — each entry is a
+    rule object with `type`, `ruleset_id` and `ruleset_source_type` — not a
+    ruleset wrapper with a nested `rules` array.
+    """
     inputs = PolicyInputs(
         full_name="o/r",
         default_branch="main",
         protection=None,
-        rulesets=[
+        branch_rules=[
+            {"type": "pull_request", "ruleset_id": 42, "ruleset_source_type": "Repository"},
+            {"type": "non_fast_forward", "ruleset_id": 42, "ruleset_source_type": "Repository"},
+            {"type": "deletion", "ruleset_id": 42, "ruleset_source_type": "Repository"},
             {
-                "enforcement": "active",
-                "rules": [
-                    {"type": "pull_request"},
-                    {"type": "non_fast_forward"},
-                    {"type": "deletion"},
-                    {
-                        "type": "required_status_checks",
-                        "parameters": {
-                            "required_status_checks": [{"context": "ci"}],
-                            "strict_required_status_checks_policy": True,
-                        },
-                    },
-                ],
-            }
+                "type": "required_status_checks",
+                "ruleset_id": 42,
+                "ruleset_source_type": "Organization",
+                "parameters": {
+                    "required_status_checks": [{"context": "ci"}],
+                    "strict_required_status_checks_policy": True,
+                },
+            },
         ],
         workflows=[],
         environments=[],
@@ -192,12 +195,18 @@ def test_rulesets_can_satisfy_protection_without_classic_branch_protection() -> 
     assert source.evidence["source"] == "ruleset"
 
 
-def test_evaluation_ignores_a_disabled_ruleset() -> None:
+def test_no_effective_rules_is_an_honest_fail() -> None:
+    """An empty effective-rules answer is a real "nothing applies here".
+
+    Rulesets that exist but are disabled, scoped to tags, or targeted at
+    other branches simply do not appear in this response, so there is no
+    way for an irrelevant ruleset to be mistaken for protection.
+    """
     inputs = PolicyInputs(
         full_name="o/r",
         default_branch="main",
         protection=None,
-        rulesets=[{"enforcement": "disabled", "rules": [{"type": "pull_request"}]}],
+        branch_rules=[],
         workflows=[],
     )
     assert _verdict(inputs, "branch.protection.present") == "fail"

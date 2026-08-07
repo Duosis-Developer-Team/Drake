@@ -482,6 +482,7 @@ async def reconcile_repository(
         row = await _require_manageable_repository(connection, repository_id, auth)
 
     full_name = str(row[5])
+    repository_external_id = int(row[2])
     installation_external_id = int(row[18])
     gate = catalog.security_gate_for(full_name)
     if gate:
@@ -510,7 +511,9 @@ async def reconcile_repository(
             connection, repository_id, onboarding.VALIDATING, "reconciliation_started"
         )
     try:
-        evaluation = await reconciler.evaluate_repository(installation_external_id, full_name)
+        evaluation = await reconciler.evaluate_repository(
+            installation_external_id, full_name, repository_external_id=repository_external_id
+        )
     except service.SecurityGateBlockedError as blocked:
         raise HTTPException(
             status_code=409, detail="repository is blocked by a security gate"

@@ -21,6 +21,7 @@ from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines, get_engine
 from drake_api.errors import register_error_handlers
 from drake_api.github_app.auth import GitHubAppAuth
+from drake_api.github_app.auth import validate_credentials as validate_github_credentials
 from drake_api.github_app.client import GitHubClient
 from drake_api.github_app.router import router as github_router
 from drake_api.github_app.router_webhook import router as github_webhook_router
@@ -95,6 +96,9 @@ def create_app(
     app.state.telemetry_redis = aioredis.from_url(settings.redis_url)
     # GitHub App: credentials stay in process memory; only the reconciler
     # and its bounded client live on app.state.
+    # An enabled GitHub App must prove its credentials are usable now, not
+    # discover at the first webhook that the key never parsed.
+    validate_github_credentials(settings)
     github_auth = GitHubAppAuth(settings)
     github_client = GitHubClient(settings, github_auth, transport=github_transport)
     app.state.github_auth = github_auth

@@ -109,3 +109,23 @@ remediation, and a safe `.env.example` contract first.
 - Because evaluation never writes, a wrong rule costs a wrong report —
   never a changed repository setting. Remediation stays a human decision
   in this sprint.
+
+
+## Amendment — evidence sources (CTO fix gate)
+
+Two corrections to how evidence is gathered, both of which could have
+produced a PASS that was not true.
+
+**Ruleset evidence comes from the effective-rules endpoint.** The ruleset
+list endpoint returns summaries with no `rules` member, so an entry there
+says a ruleset exists — not what it enforces, nor whether it applies to
+the default branch. Rule evidence now comes from
+`GET /repos/{owner}/{repo}/rules/branches/{branch}`, which reports the
+rules actually in effect for that branch and already accounts for
+organization-level rulesets, enforcement status, and target conditions.
+
+**A partial answer is never a PASS.** An aggregate rule that spans several
+objects — production environments especially — states something about all
+of them. If any one was unreadable, that statement cannot be made, so the
+verdict is UNKNOWN with the per-object reason recorded. A *known*
+violation still outranks an unknown: FAIL survives, PASS does not.

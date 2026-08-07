@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.audit import AuditEventData, record_audit_event
 from drake_api.github_app import catalog, onboarding, policy, webhook
+from drake_api.github_app.auth import missing_permissions
 from drake_api.github_app.client import (
     GitHubClient,
     GitHubError,
@@ -31,6 +32,14 @@ PROVIDER = catalog.PROVIDER
 
 # The read permission a policy rule needs, by rule family. Used to turn a
 # 403 into an honest "we were not granted this", never into a PASS.
+# The read permissions a dry-run evaluation needs. Requested explicitly so
+# the minted token is no wider than the job.
+EVALUATION_PERMISSIONS: dict[str, str] = {
+    "metadata": "read",
+    "administration": "read",
+    "actions": "read",
+}
+
 PERMISSION_HINTS = {
     "protection": "administration:read",
     "rulesets": "administration:read",
@@ -805,16 +814,24 @@ class GitHubReconciler:
         else:
             protection_error = "default branch unknown"
 
-        rulesets: list[dict[str, Any]] | None = None
-        rulesets_error: str | None = None
-        try:
-            rulesets = await self._client.list_rulesets(token, owner, repo)
-        except GitHubForbiddenError:
-            rulesets_error = f"missing permission ({PERMISSION_HINTS['rulesets']})"
-        except GitHubNotFoundError:
-            rulesets = []
-        except GitHubError as error:
-            rulesets_error = error_code(error)
+        # Rules actually in effect on the default branch. The ruleset LIST
+        # endpoint returns summaries without a `rules` member, so it cannot
+        # answer "is this rule configured".
+        branch_rules: list[dict[str, Any]] | None = None
+        branch_rules_error: str | None = None
+        if default_branch:
+            try:
+                branch_rules = await self._client.get_branch_rules(
+                    token, owner, repo, default_branch
+                )
+            except GitHubForbiddenError:
+                branch_rules_error = f"missing permission ({PERMISSION_HINTS['rulesets']})"
+            except GitHubNotFoundError:
+                branch_rules = []  # a real "no rules apply" answer
+            except GitHubError as error:
+                branch_rules_error = error_code(error)
+        else:
+            branch_rules_error = "default branch unknown"
 
         workflows: list[dict[str, Any]] | None = None
         workflows_error: str | None = None
@@ -828,6 +845,7 @@ class GitHubReconciler:
         environments: list[dict[str, Any]] | None = None
         environments_error: str | None = None
         environment_details: dict[str, dict[str, Any]] = {}
+        environment_errors: dict[str, str] = {}
         try:
             environments = await self._client.list_environments(token, owner, repo)
             for environment in environments:
@@ -840,8 +858,14 @@ class GitHubReconciler:
                     environment_details[name] = await self._client.get_environment(
                         token, owner, repo, name
                     )
-                except GitHubError:
-                    continue
+                except GitHubForbiddenError:
+                    # Recorded, not swallowed: a production environment we
+                    # could not read must keep the aggregate off PASS.
+                    environment_errors[name] = (
+                        f"missing permission ({PERMISSION_HINTS['environments']})"
+                    )
+                except GitHubError as error:
+                    environment_errors[name] = error_code(error)
         except GitHubForbiddenError:
             environments_error = f"missing permission ({PERMISSION_HINTS['environments']})"
         except GitHubError as error:
@@ -853,13 +877,14 @@ class GitHubReconciler:
             default_branch=default_branch,
             protection=protection,
             protection_error=protection_error,
-            rulesets=rulesets,
-            rulesets_error=rulesets_error,
+            branch_rules=branch_rules,
+            branch_rules_error=branch_rules_error,
             workflows=workflows,
             workflows_error=workflows_error,
             environments=environments,
             environments_error=environments_error,
             environment_details=environment_details,
+            environment_errors=environment_errors,
             security_analysis=(security_analysis if isinstance(security_analysis, dict) else None),
             security_analysis_error=(
                 None
@@ -870,18 +895,38 @@ class GitHubReconciler:
         )
 
     async def evaluate_repository(
-        self, installation_external_id: int, full_name: str, profile: str = policy.DEFAULT_PROFILE
+        self,
+        installation_external_id: int,
+        full_name: str,
+        profile: str = policy.DEFAULT_PROFILE,
+        repository_external_id: int | None = None,
     ) -> policy.PolicyEvaluation:
         """Dry-run evaluation for ONE repository. Read-only throughout.
 
         The manual security gate is checked BEFORE any credential is
         minted, so a blocked repository never reaches the network.
+
+        The token is requested for this repository's permanent id and for
+        the read permissions this evaluation actually needs — never wider,
+        and never reused from a differently scoped request.
         """
         gate = catalog.security_gate_for(full_name)
         if gate:
             raise SecurityGateBlockedError(full_name, gate)
         owner, _, repo = full_name.partition("/")
-        token = await self._client.installation_token(installation_external_id)
+        token = await self._client.installation_token(
+            installation_external_id,
+            repository_ids=[repository_external_id] if repository_external_id else None,
+            permissions=dict(EVALUATION_PERMISSIONS),
+        )
+        # A grant narrower than requested is reported through the rules that
+        # depended on it; it is never a reason to ask for more.
+        shortfall = missing_permissions(token.permissions, dict(EVALUATION_PERMISSIONS))
         repository = await self._client.get_repository(token, owner, repo)
         inputs = await self.gather_policy_inputs(token, owner, repo, repository)
+        if shortfall:
+            logger.info(
+                "github installation token granted fewer permissions than requested",
+                extra={"missing": sorted(shortfall)},
+            )
         return policy.evaluate(inputs, profile)

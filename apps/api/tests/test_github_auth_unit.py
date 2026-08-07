@@ -17,6 +17,7 @@ from drake_api.github_app.auth import (
     GitHubAuthError,
     InstallationToken,
     InstallationTokenCache,
+    TokenScope,
     load_webhook_secret,
     looks_like_installation_token,
 )
@@ -180,31 +181,36 @@ def _token(expires_in: int, value: str = "ghs_example") -> InstallationToken:
 
 def test_cache_returns_a_live_token_and_drops_one_inside_the_buffer() -> None:
     cache = InstallationTokenCache(refresh_buffer_seconds=300)
-    cache.put(42, _token(3600))
-    assert cache.get(42) is not None
+    live = TokenScope.build(42, [1], {"metadata": "read"})
+    cache.put(live, _token(3600))
+    assert cache.get(live) is not None
 
     # A token that expires INSIDE the buffer is already unusable.
-    cache.put(43, _token(120))
-    assert cache.get(43) is None, "a token inside the refresh buffer must be refreshed"
+    expiring = TokenScope.build(43, [1], {"metadata": "read"})
+    cache.put(expiring, _token(120))
+    assert cache.get(expiring) is None, "a token inside the refresh buffer must be refreshed"
 
 
 def test_cache_is_installation_scoped_and_invalidatable() -> None:
     cache = InstallationTokenCache(refresh_buffer_seconds=0)
-    cache.put(1, _token(3600, "ghs_one"))
-    cache.put(2, _token(3600, "ghs_two"))
-    assert cache.get(1) is not None and cache.get(2) is not None
-    assert cache.get(1).token != cache.get(2).token
+    one = TokenScope.build(1, [11], {"metadata": "read"})
+    two = TokenScope.build(2, [22], {"metadata": "read"})
+    cache.put(one, _token(3600, "ghs_one"))
+    cache.put(two, _token(3600, "ghs_two"))
+    assert cache.get(one) is not None and cache.get(two) is not None
+    assert cache.get(one).token != cache.get(two).token
     cache.invalidate(1)
-    assert cache.get(1) is None
-    assert cache.get(2) is not None
+    assert cache.get(one) is None
+    assert cache.get(two) is not None
     cache.clear()
-    assert cache.get(2) is None
+    assert cache.get(two) is None
 
 
 def test_expired_token_is_never_served() -> None:
     cache = InstallationTokenCache(refresh_buffer_seconds=0)
-    cache.put(7, _token(-1))
-    assert cache.get(7) is None
+    scope = TokenScope.build(7, [77], {"metadata": "read"})
+    cache.put(scope, _token(-1))
+    assert cache.get(scope) is None
 
 
 @pytest.mark.parametrize(

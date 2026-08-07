@@ -80,14 +80,21 @@ class PolicyInputs:
     default_branch: str = ""
     protection: dict[str, Any] | None = None
     protection_error: str | None = None
-    rulesets: list[dict[str, Any]] | None = None
-    rulesets_error: str | None = None
+    # Rules ACTUALLY in effect on the default branch, from
+    # `GET /repos/{owner}/{repo}/rules/branches/{branch}`. The ruleset LIST
+    # endpoint returns summaries with no `rules` member at all, so it can
+    # never be evidence that a particular rule is or is not configured.
+    branch_rules: list[dict[str, Any]] | None = None
+    branch_rules_error: str | None = None
     workflows: list[dict[str, Any]] | None = None
     workflows_error: str | None = None
     environments: list[dict[str, Any]] | None = None
     environments_error: str | None = None
     # Per-environment protection rules, keyed by environment name.
     environment_details: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Why a specific environment could not be read. An entry here means the
+    # aggregate verdict cannot be a PASS, however healthy its siblings look.
+    environment_errors: dict[str, str] = field(default_factory=dict)
     security_analysis: dict[str, Any] | None = None
     security_analysis_error: str | None = None
     archived: bool = False
@@ -181,46 +188,35 @@ def _protection_facts(inputs: PolicyInputs) -> dict[str, Any]:
         if isinstance(enforce_admins, dict):
             facts["admin_enforced"] = bool(enforce_admins.get("enabled"))
 
-    rulesets = inputs.rulesets
-    if isinstance(rulesets, list) and rulesets:
-        active = [
-            ruleset
-            for ruleset in rulesets
-            if str(ruleset.get("enforcement", "")).lower() == "active"
-        ]
-        if active:
-            facts["source"] = (
-                "ruleset" if facts["source"] == "none" else f"{facts['source']}+ruleset"
-            )
-            rule_types = {
-                str(rule.get("type"))
-                for ruleset in active
-                for rule in (ruleset.get("rules") or [])
-                if isinstance(rule, dict)
-            }
-            if "pull_request" in rule_types:
-                facts["pull_request_required"] = True
-            if "non_fast_forward" in rule_types:
-                facts["force_push_blocked"] = True
-            if "deletion" in rule_types:
-                facts["deletion_blocked"] = True
-            for ruleset in active:
-                for rule in ruleset.get("rules") or []:
-                    if not isinstance(rule, dict):
-                        continue
-                    if rule.get("type") != "required_status_checks":
-                        continue
-                    parameters = rule.get("parameters") or {}
-                    declared = parameters.get("required_status_checks") or []
-                    contexts = [
-                        str(item.get("context"))
-                        for item in declared
-                        if isinstance(item, dict) and item.get("context")
-                    ]
-                    existing = facts["required_checks"] or []
-                    facts["required_checks"] = sorted({*existing, *contexts})
-                    if parameters.get("strict_required_status_checks_policy"):
-                        facts["strict_checks"] = True
+    branch_rules = inputs.branch_rules
+    if isinstance(branch_rules, list) and branch_rules:
+        # Every entry from this endpoint is a rule already resolved as
+        # applying to this branch, across repository AND organization
+        # rulesets, and already filtered to active enforcement.
+        facts["source"] = "ruleset" if facts["source"] == "none" else f"{facts['source']}+ruleset"
+        rule_types = {
+            str(rule.get("type")) for rule in branch_rules if isinstance(rule, dict)
+        }
+        if "pull_request" in rule_types:
+            facts["pull_request_required"] = True
+        if "non_fast_forward" in rule_types:
+            facts["force_push_blocked"] = True
+        if "deletion" in rule_types:
+            facts["deletion_blocked"] = True
+        for rule in branch_rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            parameters = rule.get("parameters") or {}
+            declared = parameters.get("required_status_checks") or []
+            contexts = [
+                str(item.get("context"))
+                for item in declared
+                if isinstance(item, dict) and item.get("context")
+            ]
+            existing = facts["required_checks"] or []
+            facts["required_checks"] = sorted({*existing, *contexts})
+            if parameters.get("strict_required_status_checks_policy"):
+                facts["strict_checks"] = True
     return facts
 
 
@@ -258,7 +254,7 @@ def _rule_protection_present(inputs: PolicyInputs, facts: dict[str, Any]) -> Rul
     # unreadable and the readable ones show nothing, protection may well
     # exist where we cannot see it. Only "both readable, both empty" is a
     # real FAIL.
-    unreadable_reason = inputs.protection_error or inputs.rulesets_error
+    unreadable_reason = inputs.protection_error or inputs.branch_rules_error
     if facts["source"] == "none" and unreadable_reason:
         return _unreadable(rule_id, title, "high", expected, unreadable_reason, remediation)
     if facts["source"] == "none":
@@ -615,6 +611,8 @@ def _rule_production_gates(inputs: PolicyInputs, profile: dict[str, Any]) -> lis
     for name in production:
         detail = inputs.environment_details.get(name)
         if not isinstance(detail, dict):
+            # We asked and did not get an answer. This environment is not
+            # evidence of compliance OR of a violation.
             unreadable.append(name)
             continue
         rules = detail.get("protection_rules")
@@ -627,59 +625,87 @@ def _rule_production_gates(inputs: PolicyInputs, profile: dict[str, Any]) -> lis
         branch_policy = detail.get("deployment_branch_policy")
         (mapped if isinstance(branch_policy, dict) and branch_policy else unmapped).append(name)
 
-    if unreadable and not approved and not unapproved:
-        return [
-            _unreadable(
-                approval_id,
-                approval_title,
-                "critical",
-                approval_expected,
-                "environment protection rules were not readable",
-                approval_fix,
-            ),
-            _unreadable(
-                mapping_id,
-                mapping_title,
-                "high",
-                mapping_expected,
-                "environment protection rules were not readable",
-                mapping_fix,
-            ),
-        ]
+    # A PASS here is a statement about EVERY production environment. One
+    # environment we could not read is enough to make that statement
+    # unsupportable, no matter how compliant the ones we did read look.
+    # A known violation still outranks an unknown: FAIL survives, PASS does
+    # not degrade into it.
+    unreadable_note = (
+        "; ".join(
+            f"{name}: {inputs.environment_errors.get(name, 'not readable')}"
+            for name in sorted(unreadable)
+        )
+        or "environment protection rules were not readable"
+    )
 
-    results = [
-        RuleResult(
-            rule_id=approval_id,
-            title=approval_title,
-            verdict=VERDICT_FAIL if unapproved else VERDICT_PASS,
-            severity="critical",
-            expected=approval_expected,
-            observed=(
-                f"no required reviewers on: {', '.join(sorted(unapproved))}"
-                if unapproved
-                else f"required reviewers configured on: {', '.join(sorted(approved))}"
-            ),
+    def _aggregate(
+        rule_id: str,
+        title: str,
+        severity: Severity,
+        expected: str,
+        violating: list[str],
+        compliant: list[str],
+        violation_text: str,
+        compliant_text: str,
+        remediation: str,
+        blocking: bool,
+    ) -> RuleResult:
+        if violating:
+            return RuleResult(
+                rule_id=rule_id,
+                title=title,
+                verdict=VERDICT_FAIL,
+                severity=severity,
+                expected=expected,
+                observed=f"{violation_text}: {', '.join(sorted(violating))}",
+                blocking=blocking,
+                remediation=remediation,
+                evidence={
+                    "compliant": sorted(compliant),
+                    "violating": sorted(violating),
+                    "unreadable": sorted(unreadable),
+                },
+            )
+        if unreadable:
+            return _unreadable(rule_id, title, severity, expected, unreadable_note, remediation)
+        return RuleResult(
+            rule_id=rule_id,
+            title=title,
+            verdict=VERDICT_PASS,
+            severity=severity,
+            expected=expected,
+            observed=f"{compliant_text}: {', '.join(sorted(compliant))}",
+            blocking=blocking,
+            remediation="",
+            evidence={"compliant": sorted(compliant), "violating": []},
+        )
+
+    return [
+        _aggregate(
+            approval_id,
+            approval_title,
+            "critical",
+            approval_expected,
+            unapproved,
+            approved,
+            "no required reviewers on",
+            "required reviewers configured on",
+            approval_fix,
             blocking=True,
-            remediation=approval_fix if unapproved else "",
-            evidence={"approved": sorted(approved), "unapproved": sorted(unapproved)},
         ),
-        RuleResult(
-            rule_id=mapping_id,
-            title=mapping_title,
-            verdict=VERDICT_FAIL if unmapped else VERDICT_PASS,
-            severity="high",
-            expected=mapping_expected,
-            observed=(
-                f"no deployment branch policy on: {', '.join(sorted(unmapped))}"
-                if unmapped
-                else f"deployment branch policy set on: {', '.join(sorted(mapped))}"
-            ),
+        _aggregate(
+            mapping_id,
+            mapping_title,
+            "high",
+            mapping_expected,
+            unmapped,
+            mapped,
+            "no deployment branch policy on",
+            "deployment branch policy set on",
+            mapping_fix,
             blocking=False,
-            remediation=mapping_fix if unmapped else "",
-            evidence={"mapped": sorted(mapped), "unmapped": sorted(unmapped)},
         ),
     ]
-    return results
 
 
 def evaluate(inputs: PolicyInputs, profile_name: str = DEFAULT_PROFILE) -> PolicyEvaluation:

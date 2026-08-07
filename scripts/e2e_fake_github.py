@@ -63,8 +63,63 @@ REPOSITORIES = {
     },
 }
 
-# Hermes is fully governed; logislot deliberately is not, so the E2E can
-# assert a blocking violation without inventing one.
+# Fikir-Sepeti is governed by a ruleset rather than classic protection, so
+# the E2E covers both evidence paths. The summary carries no `rules`
+# member; only the effective-rules endpoint answers "what applies here".
+RULESET_SUMMARIES = {
+    "Fikir-Sepeti": [
+        {
+            "id": 42,
+            "name": "default branch guard",
+            "target": "branch",
+            "source_type": "Repository",
+            "source": "Duosis-Developer-Team/Fikir-Sepeti",
+            "enforcement": "active",
+            "node_id": "RRS_lACkVXNlcgQ",
+            "created_at": "2026-01-15T08:43:03Z",
+            "updated_at": "2026-02-23T16:29:47Z",
+        }
+    ]
+}
+
+BRANCH_RULES = {
+    "Fikir-Sepeti": [
+        {
+            "type": "pull_request",
+            "ruleset_source_type": "Repository",
+            "ruleset_source": "Duosis-Developer-Team/Fikir-Sepeti",
+            "ruleset_id": 42,
+            "parameters": {"required_approving_review_count": 1},
+        },
+        {
+            "type": "non_fast_forward",
+            "ruleset_source_type": "Organization",
+            "ruleset_source": "Duosis-Developer-Team",
+            "ruleset_id": 73,
+            "parameters": {},
+        },
+        {
+            "type": "deletion",
+            "ruleset_source_type": "Organization",
+            "ruleset_source": "Duosis-Developer-Team",
+            "ruleset_id": 73,
+            "parameters": {},
+        },
+        {
+            "type": "required_status_checks",
+            "ruleset_source_type": "Repository",
+            "ruleset_source": "Duosis-Developer-Team/Fikir-Sepeti",
+            "ruleset_id": 42,
+            "parameters": {
+                "required_status_checks": [{"context": "ci"}],
+                "strict_required_status_checks_policy": True,
+            },
+        },
+    ]
+}
+
+# Hermes is fully governed by classic protection; logislot deliberately is
+# not, so the E2E can assert a blocking violation without inventing one.
 PROTECTED = {
     "Hermes": {
         "required_pull_request_reviews": {"required_approving_review_count": 1},
@@ -135,7 +190,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, protection)
                 return
             if path == f"{prefix}/rulesets":
-                self._send(200, [])
+                # Ruleset SUMMARIES: the documented list response carries
+                # no `rules` member, so it can never be rule evidence.
+                self._send(200, RULESET_SUMMARIES.get(name, []))
+                return
+            if path.startswith(f"{prefix}/rules/branches/"):
+                self._send(200, BRANCH_RULES.get(name, []))
                 return
             if path == f"{prefix}/actions/workflows":
                 self._send(

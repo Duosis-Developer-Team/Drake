@@ -20,6 +20,7 @@ from drake_api.github_app.auth import (
     GitHubAuthError,
     InstallationToken,
     InstallationTokenCache,
+    TokenScope,
 )
 from drake_api.settings import Settings
 
@@ -148,21 +149,38 @@ class GitHubClient:
                 # Bounded jittered backoff; never a tight retry loop.
                 delay = min(2.0 * (2 ** (attempt - 1)), 8.0)
                 await asyncio.sleep(delay + random.uniform(0, 0.25))  # noqa: S311 - jitter only
+            oversized = False
             try:
                 async with self._client() as client:
-                    response = await client.request(
+                    request = client.build_request(
                         method,
                         path,
                         headers=self._headers(credential),
                         params=params,
                         json=json_body,
                     )
-                    body = response.content[: _MAX_RESPONSE_BYTES + 1]
+                    response = await client.send(request, stream=True)
+                    try:
+                        # Read incrementally and abandon the connection the
+                        # moment the budget is crossed. Reading `.content`
+                        # first would buffer the whole upstream response and
+                        # only then measure it, which is not a limit at all.
+                        chunks: list[bytes] = []
+                        total = 0
+                        async for chunk in response.aiter_bytes():
+                            total += len(chunk)
+                            if total > _MAX_RESPONSE_BYTES:
+                                oversized = True
+                                break
+                            chunks.append(chunk)
+                        body = b"".join(chunks)
+                    finally:
+                        await response.aclose()
             except httpx.HTTPError as error:
                 last_error = GitHubUnavailableError("github is unreachable")
                 last_error.__cause__ = error
                 continue
-            if len(body) > _MAX_RESPONSE_BYTES:
+            if oversized:
                 raise GitHubContractError("github response exceeded the size budget")
             try:
                 self._classify(response)
@@ -209,8 +227,15 @@ class GitHubClient:
         repository_ids: list[int] | None = None,
         permissions: dict[str, str] | None = None,
     ) -> InstallationToken:
-        """Mint (or reuse) an installation token, scoped where possible."""
-        cached = self._tokens.get(installation_id)
+        """Mint (or reuse) an installation token, scoped where possible.
+
+        The cache key is the requested SCOPE, not the installation id: a
+        token narrowed to one repository must not be handed to a caller
+        asking about another, and a metadata-only token must not satisfy a
+        caller that asked for more.
+        """
+        scope = TokenScope.build(installation_id, repository_ids, permissions)
+        cached = self._tokens.get(scope)
         if cached is not None:
             return cached
         jwt_token = self._auth.mint_app_jwt()
@@ -244,7 +269,16 @@ class GitHubClient:
             permissions=granted if isinstance(granted, dict) else {},
             repository_selection=str(payload.get("repository_selection") or "selected"),
         )
-        self._tokens.put(installation_id, token)
+        if permissions:
+            # Narrower than requested is an honest outcome to report, never a
+            # reason to retry for more.
+            token = InstallationToken(
+                token=token.token,
+                expires_at=token.expires_at,
+                permissions=token.permissions,
+                repository_selection=token.repository_selection,
+            )
+        self._tokens.put(scope, token)
         return token
 
     # --- installation-level ---------------------------------------------
@@ -252,6 +286,13 @@ class GitHubClient:
     async def _paginated(
         self, path: str, credential: str, key: str | None = None
     ) -> list[dict[str, Any]]:
+        """Collect every page, or say plainly that we could not.
+
+        Stopping at the page cap with a full final page means there was
+        more to read. Returning the partial list would let a policy rule
+        conclude "no violation found" from an answer that was cut short, so
+        the truncation is raised instead of returned.
+        """
         collected: list[dict[str, Any]] = []
         for page in range(1, _MAX_PAGES + 1):
             response = await self._request(
@@ -263,8 +304,8 @@ class GitHubClient:
                 raise GitHubContractError(f"{path} response was not a list")
             collected.extend(item for item in items if isinstance(item, dict))
             if len(items) < _PER_PAGE:
-                break
-        return collected
+                return collected
+        raise GitHubContractError(f"{path} exceeded the page budget; the listing is incomplete")
 
     async def list_installation_repositories(
         self, token: InstallationToken
@@ -289,9 +330,29 @@ class GitHubClient:
             raise GitHubContractError("branch protection response was not an object")
         return response.payload
 
+    async def get_branch_rules(
+        self, token: InstallationToken, owner: str, repo: str, branch: str
+    ) -> list[dict[str, Any]]:
+        """Rules ACTUALLY applying to a branch, per the documented API.
+
+        `GET /repos/{owner}/{repo}/rulesets` returns ruleset *summaries* —
+        no `rules` member at all — so treating an entry there as evidence of
+        a rule is reading something the response never contained. This
+        endpoint returns the effective rules for the branch, already
+        resolved across repository and organization rulesets and already
+        filtered to active enforcement.
+        """
+        response = await self._request(
+            "GET", f"/repos/{owner}/{repo}/rules/branches/{branch}", token.token
+        )
+        if not isinstance(response.payload, list):
+            raise GitHubContractError("branch rules response was not a list")
+        return [item for item in response.payload if isinstance(item, dict)]
+
     async def list_rulesets(
         self, token: InstallationToken, owner: str, repo: str
     ) -> list[dict[str, Any]]:
+        """Ruleset SUMMARIES. These carry no `rules` member by contract."""
         return await self._paginated(f"/repos/{owner}/{repo}/rulesets", token.token)
 
     async def list_workflows(

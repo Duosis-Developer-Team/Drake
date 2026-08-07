@@ -58,6 +58,10 @@ class FakeGitHub:
         self.calls: list[str] = []
         self.mode = "ok"
         self.protection_status = 200
+        self.branch_rules_status = 200
+        # Effective rules per repository, shaped like
+        # GET /repos/{owner}/{repo}/rules/branches/{branch}.
+        self.branch_rules: dict[str, list[dict[str, Any]]] = {}
         self.repositories = {
             "Hermes": {
                 "id": HERMES_ID,
@@ -127,7 +131,13 @@ class FakeGitHub:
                     },
                 )
             if path == f"/repos/Duosis-Developer-Team/{name}/rulesets":
+                # Ruleset SUMMARIES — no `rules` member, exactly as
+                # documented. They are never rule evidence.
                 return httpx.Response(200, json=[])
+            if path.startswith(f"/repos/Duosis-Developer-Team/{name}/rules/branches/"):
+                if self.branch_rules_status != 200:
+                    return httpx.Response(self.branch_rules_status, json={"message": "no"})
+                return httpx.Response(200, json=self.branch_rules.get(name, []))
             if path == f"/repos/Duosis-Developer-Team/{name}/actions/workflows":
                 return httpx.Response(
                     200,

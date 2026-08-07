@@ -31,7 +31,8 @@ configuration).
 | `GET /installation/repositories` | list repositories the installation can see | Metadata | read | `installation`, `installation_repositories` | yes |
 | `GET /repos/{owner}/{repo}` | permanent repository id, owner, name, visibility, archived/disabled, **default branch** | Metadata | read | `repository`, `installation_repositories` | yes |
 | `GET /repos/{owner}/{repo}/branches/{branch}/protection` | classic branch protection: required status checks (+ `strict`), enforce admins, force-push and deletion protection, required reviews | Administration | read | `repository` | yes |
-| `GET /repos/{owner}/{repo}/rulesets` | modern rulesets covering the same guarantees when classic protection is absent | Administration | read | `repository` | yes |
+| `GET /repos/{owner}/{repo}/rules/branches/{branch}` | the rules **actually in effect** on the default branch, already resolved across repository and organization rulesets and already filtered to active enforcement | Administration | read | `repository` | yes |
+| `GET /repos/{owner}/{repo}/rulesets` | ruleset **summaries** only — used for attribution, never as rule evidence | Administration | read | `repository` | no |
 | `GET /repos/{owner}/{repo}/actions/workflows` | workflow inventory (names, paths, state) for CI-gate presence | Actions | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/environments` | environment inventory, to locate production-like environments | Actions | read | `repository` | yes |
 | `GET /repos/{owner}/{repo}/environments/{environment_name}` | environment protection rules: required reviewers, wait timer, deployment branch policy | Actions | read | `repository` | yes |
@@ -69,6 +70,21 @@ Not requested, not used, and rejected in review if proposed:
 
 - **Administration: write** — would allow changing branch protection or
   rulesets. Drake evaluates; it does not remediate.
+
+## Why the effective-rules endpoint, not the ruleset list
+
+`GET /repos/{owner}/{repo}/rulesets` returns ruleset *summaries*: `id`,
+`name`, `target`, `source_type`, `enforcement`, timestamps. There is **no
+`rules` member in that response**. Treating an entry from it as evidence
+that a particular rule is configured reads something the payload never
+contained, and an absent `rules` key must never be read as "no rules".
+
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` answers the question
+the policy engine actually asks: which rules apply to *this* branch. The
+endpoint already excludes rulesets that are disabled, that target tags,
+or whose conditions do not cover the branch, and it already includes
+rules inherited from organization-level rulesets. An unreadable response
+is `UNKNOWN`, never a pass.
 - **Contents: write** (and read) — no source access is needed to answer
   the Sprint 5A questions; workflow *file* parsing is deliberately out
   of scope.
