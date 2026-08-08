@@ -1,0 +1,57 @@
+{{- include "drake.validateAll" . }}
+{{- if .Values.ingress.enabled }}
+{{- $host := include "drake.publicHost" . }}
+{{/*
+ONE public origin, two prefixes. Kubernetes picks the longest matching
+path, so `/v1` wins over `/` for API requests without any regex, any
+rewrite, or any ordering trick.
+
+The API owns the whole `/v1` route space, so the path must arrive
+UNCHANGED: `GET /v1/projects?limit=20` has to reach the API as
+`/v1/projects?limit=20`, not `/projects`. That is why there is no
+`rewrite-target` here — with one, every API route would 404 and the fix
+would look like an application bug.
+
+Routing `/v1` straight to the API (rather than through the Next.js
+application proxy used in development) is also what makes client
+disconnects propagate: the proxy hop drains the upstream response to reuse
+its pooled connection, so server-side query cancellation never fires.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "drake.name" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          # Longest prefix wins: /v1 is matched before /.
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "drake.name" . }}-api
+                port:
+                  number: {{ .Values.api.port }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "drake.name" . }}-web
+                port:
+                  number: {{ .Values.web.port }}
+{{- end }}

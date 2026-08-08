@@ -1,0 +1,92 @@
+# Drake control plane values.
+#
+# Defaults here are DEVELOPMENT defaults. `deploymentMode: production`
+# turns on the fail-closed checks in _helpers.tpl: every value the
+# production edge contract needs must then be supplied explicitly, because
+# a plausible default is exactly how an environment ends up unprotected
+# without anyone deciding that it should be.
+#
+# No secret VALUE ever belongs in this file. Secrets are referenced by the
+# name of a Kubernetes Secret created out of band.
+
+deploymentMode: development
+
+# The single public origin. `/` serves the web app and `/v1` the API.
+# Must equal `https://<ingress.host>` in production.
+publicOrigin: ""
+
+namespaceOverride: ""
+
+ingress:
+  enabled: false
+  # No default class: the right one is cluster-specific, and guessing it
+  # produces an Ingress that silently matches nothing.
+  className: ""
+  host: ""
+  annotations: {}
+  tls:
+    enabled: false
+    # Name of a Secret holding the certificate. Never the certificate.
+    secretName: ""
+
+api:
+  replicas: 2
+  port: 8000
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    # Digest-pinned in production. `tag` exists for disposable clusters.
+    digest: ""
+    tag: ""
+  # Names of Secrets created out of band. Never values.
+  existingSecret: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+
+web:
+  replicas: 2
+  port: 3000
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-web
+    digest: ""
+    tag: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+migration:
+  # One owner, one path: a pre-install/pre-upgrade Job running
+  # `alembic upgrade head`. Never a downgrade, never a second mechanism.
+  enabled: true
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    digest: ""
+    tag: ""
+  backoffLimit: 0
+
+networkPolicy:
+  enabled: true
+  # Which namespace and pods the ingress controller runs as. Required in
+  # production: without them a default-deny policy silently blocks the
+  # route that was just configured.
+  ingressControllerNamespaceSelector: {}
+  ingressControllerPodSelector: {}
+  # Egress targets the API genuinely needs, as explicit CIDRs.
+  databaseCIDR: ""
+  redisCIDR: ""
+
+github:
+  # Drake must be deployable before the real App exists. Disabled means
+  # no token mint, no webhook registration, no provider call.
+  enabled: false
+  # Name of a Secret holding TWO keys, both mounted as files:
+  #   private-key.pem  — the App's private key
+  #   webhook-secret   — the webhook signing secret
+  # Mounted, not envFrom'd: the API reads both from disk precisely so the
+  # material never becomes an environment variable visible in `kubectl
+  # describe pod`, a crash dump, or a child process environment.
+  existingSecret: ""
+  secretMountPath: /etc/drake/github
+  # Public identifiers, not secrets. Required when enabled.
+  appId: ""
+  clientId: ""

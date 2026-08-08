@@ -26,3 +26,4 @@ or operational details.
 | [ADR-0018](ADR-0018-inventory-allowlist-bounded-metadata-and-health.md) | Inventory allowlist, bounded metadata, and health derivation |
 | [ADR-0019](ADR-0019-github-app-identity-and-webhook-trust-boundary.md) | GitHub App identity and the webhook trust boundary |
 | [ADR-0020](ADR-0020-repository-onboarding-and-policy-evaluation.md) | Repository onboarding and read-only policy evaluation |
+| [ADR-0021](ADR-0021-production-edge-contract.md) | Production edge contract: one origin, /v1 direct to the API |

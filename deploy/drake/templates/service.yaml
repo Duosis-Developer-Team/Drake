@@ -1,0 +1,39 @@
+{{- include "drake.validateAll" . }}
+{{/*
+Both Services are ClusterIP. The Ingress is the only public entry point;
+a NodePort or LoadBalancer here would be a second, unmanaged front door
+that bypasses TLS termination and the route contract above.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "drake.name" . }}-api
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ include "drake.serviceType" . }}
+  selector:
+    app.kubernetes.io/name: {{ include "drake.name" . }}
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "drake.name" . }}-web
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: {{ include "drake.serviceType" . }}
+  selector:
+    app.kubernetes.io/name: {{ include "drake.name" . }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: {{ .Values.web.port }}
+      targetPort: http

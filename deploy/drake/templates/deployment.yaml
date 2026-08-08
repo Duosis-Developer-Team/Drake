@@ -1,0 +1,149 @@
+{{- include "drake.validateAll" . }}
+{{- $host := include "drake.publicHost" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "drake.name" . }}-api
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "drake.name" . }}
+        app.kubernetes.io/component: api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          image: {{ include "drake.image" (dict "ctx" . "image" .Values.api.image "name" "api") | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          env:
+            - name: DRAKE_ENV
+              value: production
+            # Every externally visible URL derives from this one value, not
+            # from the incoming request.
+            - name: DRAKE_PUBLIC_ORIGIN
+              value: {{ printf "https://%s" $host | quote }}
+            # Exactly one proxy hop: the ingress controller. Forwarded
+            # headers from anywhere else are not trusted.
+            - name: DRAKE_TRUSTED_PROXY_COUNT
+              value: "1"
+            - name: DRAKE_ALLOWED_WEB_ORIGINS
+              value: {{ printf "[\"https://%s\"]" $host | quote }}
+            - name: DRAKE_OIDC_REDIRECT_URL
+              value: {{ printf "https://%s/v1/auth/callback" $host | quote }}
+            - name: DRAKE_API_HOST
+              value: "0.0.0.0"
+            - name: DRAKE_GITHUB_APP_ENABLED
+              value: {{ .Values.github.enabled | quote }}
+            {{- if .Values.github.enabled }}
+            # Paths, not material. The API loads both from disk, so the
+            # private key and the webhook secret never appear in the
+            # process environment.
+            - name: DRAKE_GITHUB_APP_PRIVATE_KEY_FILE
+              value: {{ printf "%s/private-key.pem" .Values.github.secretMountPath | quote }}
+            - name: DRAKE_GITHUB_WEBHOOK_SECRET_FILE
+              value: {{ printf "%s/webhook-secret" .Values.github.secretMountPath | quote }}
+            {{- if .Values.github.appId }}
+            - name: DRAKE_GITHUB_APP_ID
+              value: {{ .Values.github.appId | quote }}
+            {{- end }}
+            {{- if .Values.github.clientId }}
+            - name: DRAKE_GITHUB_APP_CLIENT_ID
+              value: {{ .Values.github.clientId | quote }}
+            {{- end }}
+            {{- end }}
+          envFrom:
+            # Secret REFERENCES only; no value is ever rendered here.
+            - secretRef:
+                name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
+          {{- if .Values.github.enabled }}
+          volumeMounts:
+            - name: github-app
+              mountPath: {{ .Values.github.secretMountPath | quote }}
+              readOnly: true
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if .Values.github.enabled }}
+      volumes:
+        - name: github-app
+          secret:
+            secretName: {{ .Values.github.existingSecret }}
+            defaultMode: 0400
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "drake.name" . }}-web
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "drake.name" . }}
+        app.kubernetes.io/component: web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: web
+          image: {{ include "drake.image" (dict "ctx" . "image" .Values.web.image "name" "web") | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+          env:
+            - name: NODE_ENV
+              value: production
+            # Deliberately NO DRAKE_API_URL and no NEXT_PUBLIC_* API origin.
+            # In production the browser calls same-origin /v1 and the
+            # ingress routes it straight to the API; the web container
+            # never proxies API traffic.
+            - name: DRAKE_DEPLOYMENT_MODE
+              value: production
+          # Next serves / as soon as it is listening. Without a readiness
+          # probe a rolling update routes traffic to a pod that has not
+          # finished starting, and the first users of a new release get
+          # connection resets.
+          livenessProbe:
+            httpGet: {path: /, port: http}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
