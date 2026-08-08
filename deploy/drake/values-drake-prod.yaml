@@ -4,12 +4,13 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Two things an operator must fill in before this deploys:
-#   1. api.image.digest / web.image.digest / migration.image.digest —
-#      the real digests printed by a `publish images` run. The chart
-#      refuses placeholder-free rendering without them.
-#   2. networkPolicy.databaseCIDR / redisCIDR — the actual addresses of
-#      PostgreSQL and Redis.
+# Images are pinned to real digests published from main@501c954
+# (run 31246802303). Both were built from that one commit, so the API, the
+# web app and the migration cannot drift apart.
+#
+# One thing an operator must still fill in before this deploys:
+#   networkPolicy.databaseCIDR / redisCIDR — the actual addresses of
+#   PostgreSQL and Redis.
 #
 # Everything else here is deliberate and should not be changed casually.
 
@@ -30,6 +31,10 @@ ingress:
 
 # REQUIRED even though nothing is published yet.
 #
+# Writing this hostname creates NO DNS record, NO certificate and NO
+# Ingress. edge.mode stays `internal`; this is only the origin Drake will
+# answer on once a route is added.
+#
 # This is the deployment's identity, not merely its address: the session
 # cookie, the CSRF origin comparison and the OIDC redirect URL all derive
 # from it, and the API refuses to start in production without a valid
@@ -39,7 +44,7 @@ ingress:
 # The operator supplies the real hostname. It is deliberately not guessed
 # here — an invented hostname would render, deploy, and then mint cookies
 # and callbacks for a name nobody owns.
-publicOrigin: ""
+publicOrigin: https://drake.duosis.com
 
 # Drake's GHCR packages are private. Without this every pod stops at
 # ImagePullBackOff. Created out of band:
@@ -51,8 +56,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # REPLACE with the digest from a publish-images run.
-    digest: ""
+    # Source commit 501c954829a5a342e35d30db4267d71a7a0cfaaa
+    # Published as the tag of the same name; pinned here by digest because
+    # the chart accepts only one immutable reference in production, and a
+    # tag — even a commit-SHA tag — can in principle be repointed.
+    digest: "sha256:8cd200c141f469f7418aeed7dabc018e9c0dee267e871c4eeddd9317d1984ef5"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -64,8 +72,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # REPLACE with the digest from a publish-images run.
-    digest: ""
+    # Source commit 501c954829a5a342e35d30db4267d71a7a0cfaaa
+    digest: "sha256:59b77162ac3bde81d25b4e77957886a4b99bb621f216a137361709fb69122675"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -76,7 +84,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: ""
+    digest: "sha256:8cd200c141f469f7418aeed7dabc018e9c0dee267e871c4eeddd9317d1984ef5"
   backoffLimit: 0
 
 networkPolicy:
