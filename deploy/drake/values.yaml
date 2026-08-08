@@ -12,10 +12,25 @@
 deploymentMode: development
 
 # The single public origin. `/` serves the web app and `/v1` the API.
-# Must equal `https://<ingress.host>` in production.
+# This is the ONE source of truth for the public hostname; in `ingress`
+# edge mode `ingress.host` must agree with it.
 publicOrigin: ""
 
 namespaceOverride: ""
+
+# How Drake is reached.
+#
+#   internal — no public route at all. Drake runs and is reachable inside
+#              the cluster on its ClusterIP Services. This is the honest
+#              state of a first deployment: the application is proven to
+#              start, migrate and serve before a hostname, a certificate
+#              and an identity provider are wired to it.
+#   ingress  — a Kubernetes Ingress terminating TLS on the public origin
+#              (ADR-0021).
+#
+# Exactly one mode is active, and each fails closed on its own inputs.
+edge:
+  mode: internal
 
 ingress:
   enabled: false
@@ -28,6 +43,11 @@ ingress:
     enabled: false
     # Name of a Secret holding the certificate. Never the certificate.
     secretName: ""
+
+# Names of Secrets of type kubernetes.io/dockerconfigjson, created out of
+# band. Drake's images are private, so without this every pod stops at
+# ImagePullBackOff. The chart never creates or contains the Secret itself.
+imagePullSecrets: []
 
 api:
   replicas: 2

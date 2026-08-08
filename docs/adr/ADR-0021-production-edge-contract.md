@@ -95,3 +95,30 @@ sync with the web origin — three ways to drift for one avoided prefix.
 Rejected: the API's route space, its OpenAPI document, its OIDC callback
 and its webhook URL are all `/v1`-prefixed. Stripping the prefix at the
 edge means every one of those has to be rewritten back somewhere else.
+
+---
+
+## Amendment (Sprint 5D): deploying before publishing
+
+The contract above describes how Drake is reached once it is public. It
+said nothing about the state in between, and the first real deployment
+needs one: the application should be proven to start, migrate, pass its
+probes and answer on its Services before a hostname, a certificate and an
+identity provider are attached to it.
+
+So `edge.mode` is explicit:
+
+- **`internal`** — no Ingress, no public route. Drake is reachable only on
+  its ClusterIP Services.
+- **`ingress`** — everything above, unchanged.
+
+`internal` still requires `publicOrigin`. That is not an oversight: the
+session cookie, the CSRF origin comparison and the OIDC redirect URL all
+derive from it, so it is the deployment's identity rather than merely its
+address. Declaring it up front means publishing later changes the route
+and nothing about identity.
+
+One constraint became explicit here: **a public origin may not carry a
+port.** An Ingress host is port-less, so `https://host:30772` cannot be
+expressed and is now refused at render time rather than producing a
+manifest that silently drops the port.

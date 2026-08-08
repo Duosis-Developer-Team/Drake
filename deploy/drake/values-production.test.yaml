@@ -6,6 +6,10 @@
 deploymentMode: production
 publicOrigin: https://drake.example.test
 
+# This fixture exercises the public-Ingress edge (ADR-0021).
+edge:
+  mode: ingress
+
 ingress:
   enabled: true
   className: nginx

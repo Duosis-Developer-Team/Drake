@@ -1,0 +1,94 @@
+# Drake production values — drake-prod namespace, first deployment.
+#
+# This file is committed on purpose: it contains no secret value, only the
+# NAMES of Secrets created out of band, and the shape of the release. What
+# it does contain is the deployment decision, which belongs under review.
+#
+# Two things an operator must fill in before this deploys:
+#   1. api.image.digest / web.image.digest / migration.image.digest —
+#      the real digests printed by a `publish images` run. The chart
+#      refuses placeholder-free rendering without them.
+#   2. networkPolicy.databaseCIDR / redisCIDR — the actual addresses of
+#      PostgreSQL and Redis.
+#
+# Everything else here is deliberate and should not be changed casually.
+
+deploymentMode: production
+
+# The first deployment publishes NO public route.
+#
+# Drake is proven to start, migrate, pass its probes and serve on its
+# ClusterIP Services before a hostname, a certificate and an identity
+# provider are attached to it. Those are a separate integration task, and
+# coupling them to "does the application run at all" is how a failure in
+# one gets diagnosed as the other.
+edge:
+  mode: internal
+
+ingress:
+  enabled: false
+
+# REQUIRED even though nothing is published yet.
+#
+# This is the deployment's identity, not merely its address: the session
+# cookie, the CSRF origin comparison and the OIDC redirect URL all derive
+# from it, and the API refuses to start in production without a valid
+# https origin. Declaring it now means flipping edge.mode to `ingress`
+# later changes the route and nothing about identity.
+#
+# The operator supplies the real hostname. It is deliberately not guessed
+# here — an invented hostname would render, deploy, and then mint cookies
+# and callbacks for a name nobody owns.
+publicOrigin: ""
+
+# Drake's GHCR packages are private. Without this every pod stops at
+# ImagePullBackOff. Created out of band:
+#   kubectl -n drake-prod create secret docker-registry drake-ghcr ...
+imagePullSecrets:
+  - drake-ghcr
+
+api:
+  replicas: 2
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    # REPLACE with the digest from a publish-images run.
+    digest: ""
+  # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
+  # for the exact key list. The chart creates no Secret.
+  existingSecret: drake-api-config
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+
+web:
+  replicas: 2
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-web
+    # REPLACE with the digest from a publish-images run.
+    digest: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+migration:
+  enabled: true
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    # Same digest as the API: the migration must run the exact code that
+    # is about to serve.
+    digest: ""
+  backoffLimit: 0
+
+networkPolicy:
+  # The target cluster runs Flannel and policy enforcement has not been
+  # demonstrated there. These policies are correct if something enforces
+  # them; they must not be counted as a control until that is verified.
+  enabled: true
+  # REPLACE with the real datastore addresses.
+  databaseCIDR: ""
+  redisCIDR: ""
+
+# Drake deploys before the GitHub App exists. The integration UI reports
+# NOT_CONFIGURED, no token is minted, and no provider call is made.
+github:
+  enabled: false

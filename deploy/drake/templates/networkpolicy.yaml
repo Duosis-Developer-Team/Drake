@@ -10,16 +10,19 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "drake.name" . }}-default-deny
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
+{{- if eq (include "drake.ingressMode" .) "true" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "drake.name" . }}-ingress-controller
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
 spec:
@@ -42,11 +45,13 @@ spec:
           port: {{ .Values.api.port }}
         - protocol: TCP
           port: {{ .Values.web.port }}
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "drake.name" . }}-api-egress
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
 spec:
