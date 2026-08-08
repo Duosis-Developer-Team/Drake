@@ -5,6 +5,7 @@ what would install. A chart that renders something plausible from a
 missing value is how an edge ends up without TLS.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -994,3 +995,45 @@ def test_the_cleanup_command_leaves_helm_managed_policies_alone() -> None:
     assert "drake-database-migration-ingress" in command
     assert "drake-database-api-ingress" not in command, "Helm manages that one"
     assert "drake-redis-ingress" not in command, "Helm manages that one"
+
+
+def test_the_runbook_never_tells_an_operator_to_set_an_unsupported_field() -> None:
+    """The runbook drifted once: it advised setting a field the chart refuses.
+
+    A document that recommends a value the render rejects is worse than
+    silence — the operator follows it and the deploy stops. Markdown wraps,
+    so the advice and the field name land on different lines; this inspects
+    the surrounding sentence rather than the line.
+    """
+    text = RUNBOOK.read_text()
+    unsupported = (
+        "networkPolicy.database.namespaceSelector",
+        "networkPolicy.redis.namespaceSelector",
+    )
+    # Collapse wrapping so a sentence is one string.
+    flat = " ".join(text.split())
+
+    for field in unsupported:
+        for match in re.finditer(re.escape(field), flat):
+            window = flat[max(0, match.start() - 200) : match.end() + 200].lower()
+            advises = any(
+                phrase in window
+                for phrase in ("set `network", "set network", "supply ", "configure ", "only if")
+            )
+            refuses = any(
+                phrase in window for phrase in ("not supported", "refus", "fail", "stops the")
+            )
+            assert not advises or refuses, (
+                f"the runbook appears to advise setting {field}, which the chart refuses"
+            )
+
+    assert "not supported" in text
+    assert "must live in Drake's own namespace" in text
+
+
+def test_the_runbook_states_the_same_namespace_requirement() -> None:
+    text = RUNBOOK.read_text().lower()
+    assert "own namespace" in text
+    assert "separate architectural change" in text, (
+        "the runbook must say cross-namespace needs a design change, not a value"
+    )

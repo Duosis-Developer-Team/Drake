@@ -65,10 +65,23 @@ rescheduled pod keeps them:
 | PostgreSQL | `app.kubernetes.io/name: drake-postgres` |
 | Redis | `app.kubernetes.io/name: drake-redis` |
 
-Both live in Drake's own namespace. The chart emits no `namespaceSelector`
-for them, which is what confines the peer to this namespace; set
-`networkPolicy.database.namespaceSelector` only if a datastore genuinely
-runs elsewhere.
+**Both datastores must live in Drake's own namespace.** That is a
+requirement of this deployment model, not a default to be overridden.
+
+The datastore egress peers carry no `namespaceSelector` at all, and in
+Kubernetes semantics a peer without one selects pods in the policy's own
+namespace — which is exactly the confinement wanted here.
+
+`networkPolicy.database.namespaceSelector` and
+`networkPolicy.redis.namespaceSelector` are **not supported**. Supplying
+either — empty `{}` or populated — stops the production render rather than
+being silently ignored, so a stale overlay cannot quietly widen the peer.
+
+Moving a datastore to another namespace is not a matter of setting that
+value. The chart also creates the datastore *ingress* policy, and a
+NetworkPolicy only governs pods in its own namespace, so the ingress side
+would have to be created and managed in the other namespace too. That is a
+separate architectural change, deliberately not in this chart.
 
 Addresses are deliberately not used. A pod connecting to a Service is
 redirected to a backing pod address, and where that rewrite sits relative
