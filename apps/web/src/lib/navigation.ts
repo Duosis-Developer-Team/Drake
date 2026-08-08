@@ -69,7 +69,13 @@ export const NAVIGATION: NavItem[] = [
     enabled: true,
     anyPermission: ["notification.view", "notification.manage"],
   },
-  { label: "Protection", href: "/protection", icon: ShieldCheck, enabled: false },
+  {
+    label: "Protection",
+    href: "/protection",
+    icon: ShieldCheck,
+    enabled: true,
+    anyPermission: ["protection.view"],
+  },
   {
     label: "Deployments",
     href: "/deployments",

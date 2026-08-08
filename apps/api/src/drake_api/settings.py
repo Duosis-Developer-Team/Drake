@@ -49,6 +49,31 @@ class WebhookDestination(BaseModel):
     payload_schema_version: int = 1
 
 
+class ProtectionConnector(BaseModel):
+    """A backup reporter Drake will accept evidence from.
+
+    The connector key in this map decides which project the evidence may
+    touch — a payload cannot name its own project, environment or store
+    outside what its connector is registered for. That is the whole reason
+    the registry exists rather than a `project_id` field in the event.
+
+    `signing_secret_file` is a REFERENCE, following the same `*_file`
+    convention as the Agent CA and webhook signing material. The secret is
+    read at verification time and never becomes a settings value, a column,
+    a log line, or part of any response.
+    """
+
+    project_key: str
+    display_name: str = ""
+    signing_secret_file: str = ""
+    # How far out of clock a signed request may be before it is refused.
+    # Bounded, because a wide window is a replay window.
+    replay_window_seconds: int = 300
+    # How long this reporter may go quiet before its evidence is treated as
+    # stale rather than current.
+    stale_after_seconds: int = 129_600
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DRAKE_",
@@ -230,6 +255,18 @@ class Settings(BaseSettings):
     deployment_ingest_enabled: bool = False
     deployment_ingest_interval_seconds: float = 120.0
     deployment_ingest_batch_size: int = 200
+
+    # --- Protection Center (Sprint 9) -------------------------------
+    # Server-owned registry of backup reporters. Empty by default: a
+    # deployment that registers no connector accepts no protection
+    # evidence at all.
+    protection_connectors: dict[str, ProtectionConnector] = {}
+    protection_max_body_bytes: int = 256 * 1024
+    protection_max_page_records: int = 500
+    # Periodic re-evaluation. Off by default like every other background
+    # actor here; evaluation also runs inline after ingest.
+    protection_evaluation_enabled: bool = False
+    protection_evaluation_interval_seconds: float = 300.0
 
     @property
     def effective_session_cookie_name(self) -> str:

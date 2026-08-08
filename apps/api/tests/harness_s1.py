@@ -149,6 +149,17 @@ async def reset_rbac_state(engine: AsyncEngine) -> None:
             # identities with RESTRICT — cleared first when they exist.
             # Sprint 5A GitHub tables reference scopes/installations with
             # RESTRICT — cleared before anything they point at.
+            # Sprint 9 protection tables reference the catalog with
+            # RESTRICT, so they clear before projects and environments.
+            "protection_snapshots",
+            "protection_ingest_events",
+            "protection_evaluations",
+            "restore_drills",
+            "integrity_checks",
+            "replication_copies",
+            "backup_artifacts",
+            "backup_runs",
+            "backup_policies",
             # Sprint 8 deployment revisions reference clusters, bindings
             # and the catalog with RESTRICT, so they clear first.
             "deployment_health_comparisons",

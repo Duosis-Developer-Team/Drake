@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "description": "Backup reporter contracts. Drake accepts protection evidence only for policies declared here, so a reporter cannot invent an RPO, an offsite requirement, or a store it was not registered for. No URL, credential or storage path appears in this file, and none is accepted from a reporter.",
+  "connectors": [
+    {
+      "connectorKey": "hermes-backup",
+      "displayName": "Hermes backup reporter",
+      "projectKey": "hermes",
+      "policies": [
+        {
+          "policyExternalKey": "hermes-dev-core",
+          "displayName": "Hermes core database (dev)",
+          "environmentKey": "dev",
+          "storeKey": "hermes-core",
+          "storeKind": "postgresql",
+          "providerKey": "postgresql-dump",
+          "scheduleDescription": "Weekly",
+          "rpoSeconds": 604800,
+          "rtoSeconds": 14400,
+          "retentionSeconds": 2592000,
+          "requiresOffsite": true,
+          "requiresIntegrityCheck": true,
+          "restoreVerificationTtlSeconds": 7776000,
+          "notes": "Core and auth are separate stores. Evidence for one is never evidence for the other, which is why they are two policies rather than one with two artifacts."
+        },
+        {
+          "policyExternalKey": "hermes-dev-auth",
+          "displayName": "Hermes auth database (dev)",
+          "environmentKey": "dev",
+          "storeKey": "hermes-auth",
+          "storeKind": "postgresql",
+          "providerKey": "postgresql-dump",
+          "scheduleDescription": "Weekly",
+          "rpoSeconds": 604800,
+          "rtoSeconds": 14400,
+          "retentionSeconds": 2592000,
+          "requiresOffsite": true,
+          "requiresIntegrityCheck": true,
+          "restoreVerificationTtlSeconds": 7776000
+        },
+        {
+          "policyExternalKey": "hermes-test-core",
+          "displayName": "Hermes core database (test)",
+          "environmentKey": "test",
+          "storeKey": "hermes-core",
+          "storeKind": "postgresql",
+          "providerKey": "postgresql-dump",
+          "scheduleDescription": "Weekly",
+          "rpoSeconds": 604800,
+          "rtoSeconds": 14400,
+          "retentionSeconds": 2592000,
+          "requiresOffsite": true,
+          "requiresIntegrityCheck": true,
+          "restoreVerificationTtlSeconds": 7776000
+        }
+      ],
+      "sites": [
+        {
+          "siteKey": "onedrive-primary",
+          "providerKey": "onedrive",
+          "isOffsite": true,
+          "notes": "Represented as provider and site METADATA only. Drake stores no OneDrive token, no share link and no file path — the site key is an opaque handle into the operator's own registry."
+        }
+      ]
+    },
+    {
+      "connectorKey": "logislot-backup",
+      "displayName": "LogiSlot backup reporter",
+      "projectKey": "logislot",
+      "policies": [
+        {
+          "policyExternalKey": "logislot-prod-db",
+          "displayName": "LogiSlot PostgreSQL",
+          "environmentKey": "prod",
+          "storeKey": "logislot-db",
+          "storeKind": "postgresql",
+          "providerKey": "pg-dump",
+          "scheduleDescription": "Daily",
+          "rpoSeconds": 86400,
+          "rtoSeconds": 7200,
+          "retentionSeconds": 1209600,
+          "requiresOffsite": true,
+          "requiresIntegrityCheck": true,
+          "restoreVerificationTtlSeconds": 1209600,
+          "notes": "Shared-table multi-tenancy: one dump covers every tenant. The artifact is NOT presented as if it separated them, and no tenant or facility data enters a protection payload."
+        }
+      ],
+      "sites": [
+        {
+          "siteKey": "offsite-object-store",
+          "providerKey": "object-storage",
+          "isOffsite": true
+        }
+      ]
+    }
+  ],
+  "supportingEvidence": {
+    "kubernetesCronJobCompletion": "A CronJob that exits 0 is supporting evidence that the job ran. It is never treated as proof that an artifact exists, is valid, or was copied offsite — those need their own observations."
+  }
+}

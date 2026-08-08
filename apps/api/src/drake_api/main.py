@@ -37,6 +37,8 @@ from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
 from drake_api.notifications.worker import NotificationWorker
+from drake_api.protection.router import router as protection_router
+from drake_api.protection.router_ingest import router as protection_ingest_router
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
 from drake_api.service_health.cache import HealthCache
@@ -217,6 +219,8 @@ def create_app(
     app.include_router(github_onboarding_router)
     app.include_router(github_webhook_router)
     app.include_router(deployments_router)
+    app.include_router(protection_router)
+    app.include_router(protection_ingest_router)
     app.include_router(service_health_router)
     app.include_router(incidents_router)
     app.include_router(notifications_router)

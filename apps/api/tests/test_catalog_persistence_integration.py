@@ -43,6 +43,17 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         # Sprint 4 agent/inventory tables reference clusters with RESTRICT;
         # clear them first whenever they exist (order-independent resets).
         for table in (
+            # Sprint 9 protection tables reference the catalog with
+            # RESTRICT, so they clear before projects and environments.
+            "protection_snapshots",
+            "protection_ingest_events",
+            "protection_evaluations",
+            "restore_drills",
+            "integrity_checks",
+            "replication_copies",
+            "backup_artifacts",
+            "backup_runs",
+            "backup_policies",
             # Sprint 8 deployment revisions reference clusters, bindings
             # and the catalog with RESTRICT, so they clear first.
             "deployment_health_comparisons",
