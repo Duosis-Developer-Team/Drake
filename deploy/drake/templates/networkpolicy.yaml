@@ -10,16 +10,19 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "drake.name" . }}-default-deny
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
+{{- if eq (include "drake.ingressMode" .) "true" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "drake.name" . }}-ingress-controller
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
 spec:
@@ -42,11 +45,87 @@ spec:
           port: {{ .Values.api.port }}
         - protocol: TCP
           port: {{ .Values.web.port }}
+{{- end }}
+{{- if eq (include "drake.cloudflaredMode" .) "true" }}
+---
+{{/*
+In Tunnel mode the connector is the only thing that may reach the
+application ports, and it reaches them from inside this namespace. Nothing
+outside is admitted at all, because nothing outside has a route in.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-cloudflared-to-apps
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+              app.kubernetes.io/component: cloudflared
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+        - protocol: TCP
+          port: {{ .Values.web.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-cloudflared-egress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: cloudflared
+  policyTypes: [Egress]
+  egress:
+    # DNS, so Service names and the Cloudflare edge resolve.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The two application Services this connector fronts.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+        - protocol: TCP
+          port: {{ .Values.web.port }}
+    # Outbound to Cloudflare's edge: QUIC/HTTP2 on 7844, and 443 for
+    # registration and fallback. This is the only path to the internet the
+    # connector needs, and the only one it is given.
+    - ports:
+        - protocol: TCP
+          port: 7844
+        - protocol: UDP
+          port: 7844
+        - protocol: TCP
+          port: 443
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "drake.name" . }}-api-egress
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
 spec:

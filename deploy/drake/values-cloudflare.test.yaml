@@ -1,0 +1,51 @@
+# Production-SHAPED values for the Cloudflare Tunnel edge, used by the
+# chart contract tests and by `validate.sh`.
+#
+# Image digests are placeholders with the right SHAPE, not real images:
+# the real digests come from a publication run and are filled in by the
+# operator at deployment time. Secret NAMES are real; no secret VALUE
+# appears here or anywhere else in this repository.
+deploymentMode: production
+publicOrigin: https://drake.duosis.com
+
+edge:
+  mode: cloudflared
+
+# No Ingress, no TLS Secret, no inbound port. Cloudflare terminates TLS at
+# its edge and the connector dials out.
+ingress:
+  enabled: false
+
+imagePullSecrets:
+  - drake-ghcr
+
+api:
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  existingSecret: drake-api-config
+
+web:
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-web
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+
+migration:
+  enabled: true
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+cloudflared:
+  replicas: 2
+  # Created out of band in drake-prod, holding `tunnel-id` and
+  # `credentials.json`. Never created by this chart.
+  tunnelSecretName: drake-tunnel-credentials
+
+networkPolicy:
+  enabled: true
+  databaseCIDR: 10.0.10.5/32
+  redisCIDR: 10.0.10.6/32
+
+github:
+  enabled: false

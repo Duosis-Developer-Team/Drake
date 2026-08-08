@@ -343,3 +343,222 @@ def test_both_deployments_declare_readiness() -> None:
         container = doc["spec"]["template"]["spec"]["containers"][0]
         assert container["readinessProbe"]["httpGet"]["port"] == "http", doc["metadata"]["name"]
         assert container["livenessProbe"]["httpGet"]["port"] == "http", doc["metadata"]["name"]
+
+
+# --- the Cloudflare Tunnel edge (Sprint 5D-B) -----------------------------
+
+CF_VALUES = CHART / "values-cloudflare.test.yaml"
+
+
+def render_cf(*overrides: str) -> list[dict[str, Any]]:
+    result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
+        [
+            str(HELM),
+            "template",
+            "drake",
+            str(CHART),
+            "-f",
+            str(CF_VALUES),
+            "--namespace",
+            "drake-prod",
+            *overrides,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+
+
+def refuses_cf(*overrides: str) -> bool:
+    result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
+        [
+            str(HELM),
+            "template",
+            "drake",
+            str(CHART),
+            "-f",
+            str(CF_VALUES),
+            "--namespace",
+            "drake-prod",
+            *overrides,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode != 0
+
+
+def cf_config() -> dict[str, Any]:
+    """The routing table the connector will actually load."""
+    cm = next(
+        d for d in by_kind(render_cf(), "ConfigMap") if d["metadata"]["name"] == "drake-cloudflared"
+    )
+    parsed: dict[str, Any] = yaml.safe_load(cm["data"]["config.yaml"])
+    return parsed
+
+
+def test_tunnel_mode_creates_no_inbound_route() -> None:
+    """The whole point: reach the internet without opening a port."""
+    docs = render_cf()
+    kinds = {d["kind"] for d in docs}
+    assert "Ingress" not in kinds
+    for service in by_kind(docs, "Service"):
+        assert service["spec"]["type"] == "ClusterIP", service["metadata"]["name"]
+        for port in service["spec"]["ports"]:
+            assert "nodePort" not in port, "a NodePort would be a second, unmanaged front door"
+    # The connector's metrics/readiness port stays pod-local.
+    assert not [s for s in by_kind(docs, "Service") if "cloudflared" in s["metadata"]["name"]]
+
+
+def test_v1_goes_straight_to_the_api_not_through_the_web_app() -> None:
+    """Sprint 3: a proxy hop in front of /v1 breaks query cancellation."""
+    rules = cf_config()["ingress"]
+    api_rule = next(r for r in rules if r.get("path"))
+    assert api_rule["hostname"] == "drake.duosis.com"
+    assert api_rule["service"] == "http://drake-api:8000"
+    assert "drake-web" not in api_rule["service"]
+
+
+def test_routes_are_ordered_most_specific_first_and_end_in_a_catch_all() -> None:
+    rules = cf_config()["ingress"]
+    assert rules[0].get("path"), "the /v1 rule must be evaluated before the catch-all host rule"
+    assert rules[1].get("path") is None and rules[1]["service"] == "http://drake-web:3000"
+    assert rules[-1] == {"service": "http_status:404"}, "unmatched traffic must be refused"
+    assert "hostname" not in rules[-1]
+
+
+def test_the_connector_holds_no_kubernetes_credentials() -> None:
+    docs = render_cf()
+    dep = next(
+        d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-cloudflared"
+    )
+    pod = dep["spec"]["template"]["spec"]
+    assert pod["automountServiceAccountToken"] is False
+    assert "serviceAccountName" not in pod
+    # Nothing in this chart grants the connector any API permission.
+    assert not by_kind(docs, "Role") and not by_kind(docs, "RoleBinding")
+
+
+def test_the_connector_is_hardened_and_pinned() -> None:
+    dep = next(
+        d
+        for d in by_kind(render_cf(), "Deployment")
+        if d["metadata"]["name"] == "drake-cloudflared"
+    )
+    pod = dep["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+
+    assert dep["spec"]["replicas"] == 2
+    assert pod["securityContext"]["runAsNonRoot"] is True
+    assert pod["securityContext"]["seccompProfile"]["type"] == "RuntimeDefault"
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert container["securityContext"]["allowPrivilegeEscalation"] is False
+    assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
+    assert "@sha256:" in container["image"] and ":latest" not in container["image"]
+    assert "--no-autoupdate" in container["args"]
+    # Both mounts are read-only; the credential is a Secret volume, never env.
+    assert all(m["readOnly"] for m in container["volumeMounts"])
+    assert {v["name"] for v in pod["volumes"]} == {"config", "credentials"}
+
+
+def test_a_rollout_never_drops_both_connectors() -> None:
+    docs = render_cf()
+    dep = next(
+        d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-cloudflared"
+    )
+    assert dep["spec"]["strategy"]["rollingUpdate"]["maxUnavailable"] == 0
+    pdb = by_kind(docs, "PodDisruptionBudget")[0]
+    assert pdb["spec"]["minAvailable"] == 1
+    # Replicas prefer separate nodes, but not so hard that a drain wedges.
+    affinity = dep["spec"]["template"]["spec"]["affinity"]["podAntiAffinity"]
+    assert "requiredDuringSchedulingIgnoredDuringExecution" not in affinity
+    term = affinity["preferredDuringSchedulingIgnoredDuringExecution"][0]["podAffinityTerm"]
+    assert term["topologyKey"] == "kubernetes.io/hostname"
+
+
+def test_the_tunnel_credential_is_referenced_never_contained() -> None:
+    docs = render_cf()
+    text = yaml.safe_dump_all(docs)
+    assert "credentials.json" in text, "the config must point at the mounted file"
+    # ...but the chart creates no Secret and carries no credential value.
+    assert not by_kind(docs, "Secret")
+    assert "TunnelSecret" not in text
+    assert "AccountTag" not in text
+
+    dep = next(
+        d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-cloudflared"
+    )
+    container = dep["spec"]["template"]["spec"]["containers"][0]
+    tunnel_id = next(e for e in container["env"] if e["name"] == "TUNNEL_ID")
+    assert "value" not in tunnel_id, "the tunnel UUID must come from the Secret, not the manifest"
+    assert tunnel_id["valueFrom"]["secretKeyRef"] == {
+        "name": "drake-tunnel-credentials",
+        "key": "tunnel-id",
+    }
+    assert "$(TUNNEL_ID)" in container["args"]
+
+
+def test_every_workload_can_pull_private_images() -> None:
+    docs = render_cf()
+    workloads = by_kind(docs, "Deployment") + by_kind(docs, "Job")
+    assert len(workloads) == 4, "api, web, cloudflared, migration"
+    for doc in workloads:
+        pod = doc["spec"]["template"]["spec"]
+        assert pod["imagePullSecrets"] == [{"name": "drake-ghcr"}], doc["metadata"]["name"]
+        for container in pod["containers"]:
+            assert ":latest" not in container["image"], doc["metadata"]["name"]
+            assert "@sha256:" in container["image"], doc["metadata"]["name"]
+
+
+def test_an_unset_pull_secret_emits_no_key_at_all() -> None:
+    """An empty `imagePullSecrets: []` hides 'nobody set one' as 'none needed'."""
+    docs = render_cf("--set", "imagePullSecrets=null")
+    for doc in by_kind(docs, "Deployment") + by_kind(docs, "Job"):
+        assert "imagePullSecrets" not in doc["spec"]["template"]["spec"], doc["metadata"]["name"]
+
+
+def test_everything_lands_in_the_named_namespace() -> None:
+    for doc in render_cf():
+        assert doc["metadata"]["namespace"] == "drake-prod", doc["metadata"]["name"]
+
+
+def test_the_api_still_derives_its_public_urls_from_the_one_origin() -> None:
+    dep = next(
+        d for d in by_kind(render_cf(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    env = {
+        e["name"]: e.get("value") for e in dep["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert env["DRAKE_PUBLIC_ORIGIN"] == "https://drake.duosis.com"
+    assert env["DRAKE_OIDC_REDIRECT_URL"] == "https://drake.duosis.com/v1/auth/callback"
+    assert env["DRAKE_ALLOWED_WEB_ORIGINS"] == '["https://drake.duosis.com"]'
+
+
+def test_the_web_app_still_proxies_nothing() -> None:
+    dep = next(
+        d for d in by_kind(render_cf(), "Deployment") if d["metadata"]["name"] == "drake-web"
+    )
+    env = {
+        e["name"]: e.get("value") for e in dep["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert env["DRAKE_DEPLOYMENT_MODE"] == "production"
+    assert "DRAKE_API_URL" not in env
+    assert not any(k.startswith("NEXT_PUBLIC") for k in env)
+
+
+@pytest.mark.parametrize(
+    ("override", "because"),
+    [
+        ("cloudflared.tunnelSecretName=", "the connector cannot authenticate without credentials"),
+        ("cloudflared.image.digest=", "an unpinned connector can change under you"),
+        ("cloudflared.replicas=1", "one connector means a drain is an outage"),
+        ("ingress.enabled=true", "tunnel mode must not also open an inbound route"),
+        ("edge.mode=bogus", "an unknown edge mode must not silently pick one"),
+        ("publicOrigin=http://drake.duosis.com", "plaintext origin"),
+        ("publicOrigin=https://drake.duosis.com:30772", "a tunnel hostname carries no port"),
+    ],
+)
+def test_tunnel_mode_fails_closed(override: str, because: str) -> None:
+    assert refuses_cf("--set", override), because

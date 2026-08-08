@@ -58,7 +58,7 @@ refuses "with the github integration enabled but no secret reference" \
 
 echo "[helm] template"
 RENDERED="$(mktemp)"
-trap 'rm -f "$RENDERED"' EXIT
+trap 'rm -f "$RENDERED" "${CF_RENDERED:-}"' EXIT
 helm template drake . "${PROD[@]}" --namespace drake-system > "$RENDERED"
 
 echo "[policy] edge contract"
@@ -193,3 +193,123 @@ if job["spec"].get("backoffLimit") != 0:
 
 print(f"[policy] drake chart OK ({len(docs)} documents checked)")
 PY
+
+# --- The Cloudflare Tunnel edge -------------------------------------------
+#
+# Same chart, different edge. Nothing about the Tunnel mode may open an
+# inbound route, and the connector's routing table must send /v1 straight
+# to the API.
+echo "[policy] cloudflare tunnel edge"
+CF=(-f values-cloudflare.test.yaml --namespace drake-prod)
+CF_RENDERED="$(mktemp)"
+helm template drake . "${CF[@]}" > "$CF_RENDERED"
+
+echo "[policy] tunnel fail-closed renders"
+for override in \
+  "cloudflared.tunnelSecretName=" \
+  "cloudflared.image.digest=" \
+  "cloudflared.replicas=1" \
+  "ingress.enabled=true" \
+  "edge.mode=bogus" \
+  "publicOrigin=http://drake.duosis.com"
+do
+  if helm template drake . "${CF[@]}" --set "$override" >/dev/null 2>&1; then
+    echo "  chart rendered with '$override' but should have refused" >&2
+    exit 1
+  fi
+done
+
+python3 - "$CF_RENDERED" <<'PY'
+import sys, yaml
+
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+kinds: dict[str, list] = {}
+for d in docs:
+    kinds.setdefault(d["kind"], []).append(d)
+
+def die(message: str) -> None:
+    print(f"  {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+if "Ingress" in kinds:
+    die("tunnel mode must not create an Ingress")
+for svc in kinds.get("Service", []):
+    if svc["spec"]["type"] != "ClusterIP":
+        die(f"{svc['metadata']['name']} must stay ClusterIP")
+    if any("nodePort" in p for p in svc["spec"]["ports"]):
+        die(f"{svc['metadata']['name']} must not allocate a NodePort")
+
+for d in docs:
+    if d["metadata"].get("namespace") != "drake-prod":
+        die(f"{d['kind']}/{d['metadata']['name']} is not namespaced to drake-prod")
+
+dep = next(d for d in kinds["Deployment"] if d["metadata"]["name"] == "drake-cloudflared")
+pod = dep["spec"]["template"]["spec"]
+if dep["spec"]["replicas"] != 2:
+    die("exactly two connectors are expected")
+if pod.get("automountServiceAccountToken") is not False:
+    die("the connector must not receive a Kubernetes API token")
+if kinds.get("Role") or kinds.get("RoleBinding"):
+    die("the connector needs no RBAC; none should be created")
+if kinds.get("Secret"):
+    die("the chart must never create a Secret")
+
+container = pod["containers"][0]
+if "@sha256:" not in container["image"] or ":latest" in container["image"]:
+    die("the connector image must be digest-pinned and never :latest")
+
+# The routing table the connector actually loads.
+cm = next(c for c in kinds["ConfigMap"] if c["metadata"]["name"] == "drake-cloudflared")
+rules = yaml.safe_load(cm["data"]["config.yaml"])["ingress"]
+api_rule = rules[0]
+if not api_rule.get("path") or api_rule["service"] != "http://drake-api:8000":
+    die("/v1 must be the first rule and must reach the API Service directly")
+if "drake-web" in api_rule["service"]:
+    die("/v1 must not pass through the web app: it breaks query cancellation")
+if rules[-1] != {"service": "http_status:404"}:
+    die("the last rule must refuse everything unmatched")
+
+text = yaml.safe_dump_all(docs)
+for marker in ("BEGIN PRIVATE KEY", "TunnelSecret", "AccountTag", "ghs_"):
+    if marker in text:
+        die(f"rendered manifests must not contain {marker}")
+
+print(f"[policy] cloudflare tunnel edge OK ({len(docs)} documents checked)")
+PY
+
+# --- The connector's own opinion of the routing table ----------------------
+# Validated with the pinned cloudflared binary, so the rules are checked by
+# the program that will run them rather than by our reading of the docs.
+CF_IMAGE="docker.io/cloudflare/cloudflared@sha256:59bab8d3aceec09bf6bdb07d6beca0225ca5cd7ab79436a87ea97978fe1dc4f9"
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo "[policy] cloudflared ingress rules"
+  CFDIR="$(mktemp -d)"
+  trap 'rm -f "$RENDERED" "$CF_RENDERED"; rm -rf "$CFDIR"' EXIT
+  python3 -c "
+import sys, yaml
+for d in yaml.safe_load_all(open('$CF_RENDERED')):
+    if d and d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'drake-cloudflared':
+        open('$CFDIR/config.yaml', 'w').write(d['data']['config.yaml'])
+"
+  docker run --rm -v "$CFDIR:/cfg:ro" "$CF_IMAGE" \
+    --config /cfg/config.yaml tunnel ingress validate >/dev/null
+
+  check_rule() {
+    expected="$2"
+    actual="$(docker run --rm -v "$CFDIR:/cfg:ro" "$CF_IMAGE" \
+      --config /cfg/config.yaml tunnel ingress rule "$1" 2>/dev/null \
+      | grep -oE 'http://[a-z-]+:[0-9]+|http_status:404' | tail -1)"
+    if [ "$actual" != "$expected" ]; then
+      echo "  $1 resolved to '$actual', expected '$expected'" >&2
+      exit 1
+    fi
+  }
+  check_rule "https://drake.duosis.com/v1/me"            "http://drake-api:8000"
+  check_rule "https://drake.duosis.com/v1/projects?x=1"  "http://drake-api:8000"
+  check_rule "https://drake.duosis.com/"                 "http://drake-web:3000"
+  check_rule "https://drake.duosis.com/integrations"     "http://drake-web:3000"
+  check_rule "https://wrong.duosis.com/"                 "http_status:404"
+  echo "[policy] cloudflared ingress rules OK"
+else
+  echo "[policy] cloudflared ingress rules SKIPPED (docker unavailable)"
+fi

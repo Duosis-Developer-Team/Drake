@@ -17,6 +17,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "drake.name" . }}-migrate
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
@@ -33,6 +34,7 @@ spec:
         app.kubernetes.io/name: {{ include "drake.name" . }}
         app.kubernetes.io/component: migration
     spec:
+      {{- include "drake.imagePullSecrets" . | nindent 6 }}
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true

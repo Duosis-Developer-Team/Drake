@@ -12,10 +12,26 @@
 deploymentMode: development
 
 # The single public origin. `/` serves the web app and `/v1` the API.
-# Must equal `https://<ingress.host>` in production.
+# This is the ONE source of truth for the public hostname; in `ingress`
+# edge mode `ingress.host` must agree with it.
 publicOrigin: ""
 
 namespaceOverride: ""
+
+# How Drake reaches the public internet.
+#
+#   ingress     — a Kubernetes Ingress on a shared controller, terminating
+#                 TLS with a certificate this cluster holds (ADR-0021).
+#   cloudflared — an outbound-only Cloudflare Tunnel. No Ingress, no
+#                 inbound port, no certificate in the cluster: TLS is
+#                 terminated at Cloudflare's edge and the connector dials
+#                 out. Chosen when opening an inbound port would mean
+#                 touching NAT rules or an ingress controller that other
+#                 applications already depend on.
+#
+# Exactly one mode is active. Both are fail-closed: see drake.validateEdge.
+edge:
+  mode: ingress
 
 ingress:
   enabled: false
@@ -28,6 +44,11 @@ ingress:
     enabled: false
     # Name of a Secret holding the certificate. Never the certificate.
     secretName: ""
+
+# Names of Secrets of type kubernetes.io/dockerconfigjson, created out of
+# band. Drake's images are private, so without this every pod stops at
+# ImagePullBackOff. The chart never creates or contains the Secret itself.
+imagePullSecrets: []
 
 api:
   replicas: 2
@@ -90,3 +111,27 @@ github:
   # Public identifiers, not secrets. Required when enabled.
   appId: ""
   clientId: ""
+
+# Cloudflare Tunnel connector. Only rendered when edge.mode is
+# "cloudflared".
+cloudflared:
+  # Pinned by version AND digest. The tag is documentation; the digest is
+  # what actually runs.
+  image:
+    repository: docker.io/cloudflare/cloudflared
+    version: "2026.5.0"
+    digest: "sha256:59bab8d3aceec09bf6bdb07d6beca0225ca5cd7ab79436a87ea97978fe1dc4f9"
+  # Two connectors so one node failing does not take Drake offline.
+  # Deliberately no HPA: connector count is a topology decision, not a
+  # load-driven one.
+  replicas: 2
+  # Name of a Secret created out of band in this namespace, holding
+  # exactly two keys: `tunnel-id` and `credentials.json`.
+  # The Secret is NEVER created by this chart and never enters Git.
+  tunnelSecretName: ""
+  # Port the connector serves its own /ready and /metrics on. Pod-local:
+  # no Service, no NodePort, no Ingress is created for it.
+  metricsPort: 2000
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}

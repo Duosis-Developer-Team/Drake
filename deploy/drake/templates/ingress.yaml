@@ -1,5 +1,5 @@
 {{- include "drake.validateAll" . }}
-{{- if .Values.ingress.enabled }}
+{{- if and .Values.ingress.enabled (eq (include "drake.ingressMode" .) "true") }}
 {{- $host := include "drake.publicHost" . }}
 {{/*
 ONE public origin, two prefixes. Kubernetes picks the longest matching
@@ -21,6 +21,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "drake.name" . }}
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}

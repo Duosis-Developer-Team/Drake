@@ -1,0 +1,182 @@
+{{- include "drake.validateAll" . }}
+{{- if eq (include "drake.cloudflaredMode" .) "true" }}
+{{- $host := include "drake.publicHost" . }}
+{{- $cf := .Values.cloudflared }}
+{{/*
+Cloudflare Tunnel connector.
+
+Drake reaches the internet without an inbound port. The connector dials
+OUT to Cloudflare over 7844 and traffic arrives through that established
+connection, so no NAT rule changes, no ingress-controller changes, and no
+certificate in the cluster. TLS terminates at Cloudflare's edge.
+
+The routing table lives in the ConfigMap below rather than in Cloudflare's
+dashboard. Remotely-managed routes would mean the origin mapping for a
+production system is editable outside review, and invisible in Git.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "drake.name" . }}-cloudflared
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloudflared
+data:
+  config.yaml: |
+    # Credentials come from the mounted Secret; the tunnel UUID is passed
+    # on the command line from the same Secret, so neither is in Git.
+    credentials-file: /etc/cloudflared/credentials/credentials.json
+    metrics: 0.0.0.0:{{ $cf.metricsPort }}
+    no-autoupdate: true
+
+    # Ordered most specific to least. cloudflared takes the FIRST match.
+    ingress:
+      # /v1 goes straight to FastAPI. Not through the web app: Next's proxy
+      # hop does not propagate client aborts upstream, which silently
+      # breaks server-side query cancellation (ADR-0021, Sprint 3).
+      - hostname: {{ $host }}
+        path: ^/v1(?:/.*)?$
+        service: http://{{ include "drake.name" . }}-api:{{ .Values.api.port }}
+
+      # Everything else on the Drake hostname is the web app.
+      - hostname: {{ $host }}
+        service: http://{{ include "drake.name" . }}-web:{{ .Values.web.port }}
+
+      # Anything else — another hostname pointed here, a probe, a stray
+      # route — is refused rather than defaulted into an application.
+      - service: http_status:404
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "drake.name" . }}-cloudflared
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloudflared
+spec:
+  replicas: {{ $cf.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never take a connector down before its replacement is serving.
+      # maxUnavailable > 0 here can leave a single connector — or none —
+      # mid-rollout, which is exactly the outage this Deployment exists to
+      # prevent.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: cloudflared
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "drake.name" . }}
+        app.kubernetes.io/component: cloudflared
+      annotations:
+        # A routing change must actually restart the connectors; without
+        # this the ConfigMap updates and the running pods keep the old
+        # table until something unrelated evicts them.
+        drake.io/config-checksum: {{ printf "%s|%s|%v|%v" $host (include "drake.name" .) .Values.api.port .Values.web.port | sha256sum }}
+    spec:
+      {{- include "drake.imagePullSecrets" . | nindent 6 }}
+      # The connector talks to Cloudflare and to two ClusterIP Services.
+      # It has no reason to hold a Kubernetes API token, so it is not given
+      # one, and no ServiceAccount, Role or RoleBinding is created for it.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      affinity:
+        podAntiAffinity:
+          # Preferred, not required: on a two-node cluster a hard rule
+          # would make the second replica unschedulable during a drain,
+          # turning a maintenance window into an outage.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ include "drake.name" . }}
+                    app.kubernetes.io/component: cloudflared
+      containers:
+        - name: cloudflared
+          image: {{ printf "%s@%s" $cf.image.repository $cf.image.digest | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["cloudflared"]
+          args:
+            - --no-autoupdate
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - tunnel
+            - run
+            # Expanded by the kubelet from the env var below, so the tunnel
+            # UUID stays in the Secret and out of the manifest.
+            - $(TUNNEL_ID)
+          env:
+            - name: TUNNEL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cf.tunnelSecretName }}
+                  key: tunnel-id
+          ports:
+            - name: metrics
+              containerPort: {{ $cf.metricsPort }}
+          # /ready reports whether this connector has live edge
+          # connections, so it is the honest readiness signal.
+          readinessProbe:
+            httpGet: {path: /ready, port: metrics}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /ready, port: metrics}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            - name: credentials
+              mountPath: /etc/cloudflared/credentials
+              readOnly: true
+          resources:
+            {{- toYaml $cf.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "drake.name" . }}-cloudflared
+            defaultMode: 0444
+        - name: credentials
+          secret:
+            # Created out of band by an operator. This chart never contains
+            # it, never creates it, and never prints it.
+            secretName: {{ $cf.tunnelSecretName }}
+            defaultMode: 0400
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "drake.name" . }}-cloudflared
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloudflared
+spec:
+  # Voluntary disruption may never leave Drake with zero connectors.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: cloudflared
+{{- end }}

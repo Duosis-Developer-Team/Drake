@@ -95,3 +95,38 @@ sync with the web origin — three ways to drift for one avoided prefix.
 Rejected: the API's route space, its OpenAPI document, its OIDC callback
 and its webhook URL are all `/v1`-prefixed. Stripping the prefix at the
 edge means every one of those has to be rewritten back somewhere else.
+
+---
+
+## Amendment (Sprint 5D-B): a second edge mode
+
+The contract above assumed the public origin is reached through a
+Kubernetes Ingress. The first real target cluster cannot offer one without
+collateral damage: `node1`'s 80/443 NAT rules belong to Hermes-test, and
+the single-replica `ingress-nginx` is shared with Hermes-dev and LogiSlot.
+Publishing Drake there would mean editing infrastructure that running
+applications depend on.
+
+So the chart now has an explicit `edge.mode`:
+
+- **`ingress`** — everything above, unchanged.
+- **`cloudflared`** — an outbound-only Cloudflare Tunnel. No Ingress, no
+  inbound port, no certificate in the cluster.
+
+**What does not change is the part that matters.** In both modes there is
+exactly one public origin, `/v1` reaches the API **directly**, the path
+arrives unmodified, and the web app proxies nothing. The Tunnel's routing
+table is a ConfigMap in this repository rather than dashboard
+configuration, so the origin mapping stays reviewable; its first rule is
+`^/v1(?:/.*)?$ → drake-api:8000` and its last is `http_status:404`.
+
+The mode is chosen per environment, not per request, and each fails closed
+on its own inputs: `cloudflared` refuses to render without a tunnel Secret
+name, a digest-pinned connector, at least two replicas, or with
+`ingress.enabled` also set.
+
+One constraint became explicit here: **a public origin may not carry a
+port.** A Kubernetes Ingress host and a Cloudflare Tunnel hostname are both
+port-less, so `https://host:30772` cannot be expressed by either and is now
+refused at render time rather than producing a manifest that silently drops
+the port.
