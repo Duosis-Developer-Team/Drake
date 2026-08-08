@@ -29,13 +29,13 @@ describe("AppShell (authenticated)", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders all ten primary navigation sections", async () => {
+  it("renders all eleven primary navigation sections", async () => {
     await renderAuthenticated();
     const nav = screen.getByRole("navigation", { name: "Primary" });
     for (const item of NAVIGATION) {
       expect(within(nav).getByText(item.label)).toBeInTheDocument();
     }
-    expect(NAVIGATION).toHaveLength(10);
+    expect(NAVIGATION).toHaveLength(11);
   });
 
   it("marks the active section and labels future sections honestly", async () => {
@@ -43,8 +43,8 @@ describe("AppShell (authenticated)", () => {
     const active = screen.getByRole("link", { name: /command center/i });
     expect(active).toHaveAttribute("aria-current", "page");
     const nav = screen.getByRole("navigation", { name: "Primary" });
-    // 10 items; Command Center + Access Control unlocked → 8 remain "soon".
-    expect(within(nav).getAllByText("soon").length).toBe(8);
+    // 11 items; Command Center + Access Control unlocked → 9 remain "soon".
+    expect(within(nav).getAllByText("soon").length).toBe(9);
   });
 
   it("theme toggle switches the dark class and persists the choice", async () => {

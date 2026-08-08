@@ -62,6 +62,46 @@ binding id into project, environment, service, cluster, namespace, workload
 name and kind. The caller supplies an id; every label a query matches on
 comes from the row behind it.
 
+## The read path
+
+    binding → preset + policy → curated templates → Query Broker
+            → typed signals → health engine → API response
+
+The orchestrator sits between a provider that answers vaguely and an engine
+that answers precisely, so it is where every ambiguity is resolved — once,
+in one place:
+
+- An empty result leaves its signal `None`. It is reported as missing, not
+  as `0`. This is the failure mode the layer exists for: reading an absent
+  `replicas-ready` as zero would page for a healthy service.
+- A broker error sets telemetry state, never a signal value. Every query
+  failing yields `unknown` + `datasource_unavailable`; one failing yields a
+  `partial` result that cannot become `critical`.
+- A datasource answering "not configured" for everything is
+  `not_configured` — distinct from failing, and distinct from empty.
+- A binding that is disabled or unresolved is answered without querying at
+  all: the verdict is already determined.
+
+Queries for one read run concurrently under a small semaphore, and a
+cancelled read cancels and awaits every query it started, so no provider
+work outlives the request that asked for it.
+
+## Caching decision
+
+Verdicts are cached, and **invalidated by identity rather than by
+deletion**: the key hashes everything a verdict depends on — binding
+revision, resolved workload uid, preset, policy, datasource configuration,
+registry hash, project/environment/service, window and step. A mutation
+bumps the revision, so the previous answer stops being addressable. There
+is no delete to miss, lose, or race.
+
+The last-good fallback is written only from live readings and never deleted
+by a failure. It is served with its original `computed_at` plus a separate
+`served_at` and `age_seconds`; a `healthy` verdict served this way becomes
+`stale`, while `degraded` and `critical` survive intact. Restamping
+`computed_at` would present an old answer as current, which is worse than
+showing nothing.
+
 ## Consequences
 
 - A deployment whose Prometheus uses different metric names is a new
@@ -80,7 +120,13 @@ comes from the row behind it.
 two services share a prefix, and the failure is silent.
 
 **Compute health in the frontend.** Rejected: two clients would drift, and
-a threshold would be unreviewable and untestable.
+a threshold would be unreviewable and untestable. The UI therefore receives
+a status and reason codes and renders them; it holds no threshold and does
+no arithmetic on a status.
+
+**Restamp last-good answers as current.** Rejected: it makes an hour-old
+reading indistinguishable from a fresh one, which is the precise deception
+the freshness contract exists to prevent.
 
 **Let operators write PromQL per service.** Rejected: it turns the binding
 form into a query console, makes every response a potential label leak, and

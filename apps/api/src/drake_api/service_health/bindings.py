@@ -320,6 +320,89 @@ async def set_lifecycle(
     }
 
 
+async def update_binding(
+    connection: AsyncConnection,
+    principal: Principal,
+    binding_id: uuid.UUID,
+    preset_key: str,
+    health_policy_key: str,
+    expected_revision: int | None,
+    known_presets: frozenset[str],
+    actor_identity_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    """Change which metrics and thresholds a binding is read with.
+
+    The workload itself is not editable: repointing a service at a different
+    workload is a different binding, and keeping it that way means a health
+    history always refers to one thing.
+    """
+    if preset_key not in known_presets:
+        raise BindingError("unknown_preset", "unknown metric preset")
+    if health_policy_key not in policy_keys():
+        raise BindingError("unknown_health_policy", "unknown health policy")
+
+    manageable = await visible_scope_ids(connection, principal, "integration.manage")
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT b.revision, b.preset_key, b.health_policy_key, es.scope_id
+                FROM service_workload_bindings b
+                JOIN environment_services es ON es.id = b.environment_service_id
+                WHERE b.id = :id
+                """
+            ),
+            {"id": binding_id},
+        )
+    ).first()
+    if row is None or row[3] not in manageable:
+        raise BindingError("not_found", "not found")
+
+    if expected_revision is not None and expected_revision != row[0]:
+        raise BindingError("revision_conflict", "the binding changed since it was read")
+
+    changed = row[1] != preset_key or row[2] != health_policy_key
+    if not changed:
+        return {
+            "id": str(binding_id),
+            "revision": row[0],
+            "preset_key": row[1],
+            "health_policy_key": row[2],
+            "changed": False,
+        }
+
+    # The revision bump is what invalidates every cached verdict computed
+    # under the old preset or policy: it is part of the cache identity, so
+    # the next read cannot address the previous answer.
+    updated = (
+        await connection.execute(
+            text(
+                """
+                UPDATE service_workload_bindings
+                SET preset_key = :preset, health_policy_key = :policy,
+                    revision = revision + 1, updated_at = now(), updated_by = :actor
+                WHERE id = :id
+                RETURNING revision, preset_key, health_policy_key
+                """
+            ),
+            {
+                "id": binding_id,
+                "preset": preset_key,
+                "policy": health_policy_key,
+                "actor": actor_identity_id,
+            },
+        )
+    ).first()
+    assert updated is not None
+    return {
+        "id": str(binding_id),
+        "revision": updated[0],
+        "preset_key": updated[1],
+        "health_policy_key": updated[2],
+        "changed": True,
+    }
+
+
 async def get_binding(
     connection: AsyncConnection, principal: Principal, binding_id: uuid.UUID
 ) -> dict[str, Any] | None:
@@ -446,6 +529,264 @@ async def list_bindings(
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+async def list_service_rows(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    project_id: uuid.UUID | None = None,
+    environment_id: uuid.UUID | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Services in scope, each with the binding that answers for it.
+
+    A service with no binding is listed with `binding: null` rather than
+    omitted. A list that quietly dropped unbound services would make an
+    unobserved estate look like a healthy one, which is the exact reading
+    error this screen exists to prevent.
+    """
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    offset = max(0, offset)
+    visible = await visible_scope_ids(connection, principal, "environment.view")
+
+    filters = "es.scope_id = ANY(:visible) AND es.lifecycle = 'active'"
+    params: dict[str, Any] = {"visible": _sentinel(visible), "limit": limit, "offset": offset}
+    if project_id is not None:
+        filters += " AND e.project_id = :project"
+        params["project"] = project_id
+    if environment_id is not None:
+        filters += " AND es.environment_id = :environment"
+        params["environment"] = environment_id
+
+    total = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT count(*)
+                FROM environment_services es
+                JOIN environments e ON e.id = es.environment_id
+                WHERE {filters}
+                """  # noqa: S608 - `filters` is built from fixed fragments only
+            ),
+            params,
+        )
+    ).scalar_one()
+
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT es.id, p.id, p.project_key, e.id, e.environment_key,
+                       sd.service_key, sd.display_name, sd.component,
+                       b.id, b.lifecycle, b.namespace, b.workload_kind, b.workload_name,
+                       b.resolved_resource_uid, b.preset_key, b.health_policy_key,
+                       b.revision, c.cluster_ref, c.id
+                FROM environment_services es
+                JOIN environments e ON e.id = es.environment_id
+                JOIN projects p ON p.id = e.project_id
+                JOIN service_definitions sd ON sd.id = es.service_id
+                -- One binding per service row, chosen deterministically:
+                -- an active binding wins over a disabled one, then the most
+                -- recently created. Which binding answered is always named
+                -- in the response, never implied.
+                LEFT JOIN LATERAL (
+                    SELECT * FROM service_workload_bindings sb
+                    WHERE sb.environment_service_id = es.id
+                    ORDER BY (sb.lifecycle = 'active') DESC, sb.created_at DESC, sb.id
+                    LIMIT 1
+                ) b ON true
+                LEFT JOIN clusters c ON c.id = b.cluster_id
+                WHERE {filters}
+                ORDER BY p.project_key, e.environment_key, sd.service_key
+                LIMIT :limit OFFSET :offset
+                """  # noqa: S608 - `filters` is built from fixed fragments only
+            ),
+            params,
+        )
+    ).all()
+
+    return {
+        "items": [
+            {
+                "environment_service_id": str(row[0]),
+                "project_id": str(row[1]),
+                "project_key": row[2],
+                "environment_id": str(row[3]),
+                "environment_key": row[4],
+                "service_key": row[5],
+                "display_name": row[6],
+                "component": row[7],
+                "binding": (
+                    None
+                    if row[8] is None
+                    else {
+                        "id": str(row[8]),
+                        "lifecycle": row[9],
+                        "namespace": row[10],
+                        "workload_kind": row[11],
+                        "workload_name": row[12],
+                        "resolved": row[13] is not None,
+                        "preset_key": row[14],
+                        "health_policy_key": row[15],
+                        "revision": row[16],
+                        "cluster": {"cluster_ref": row[17], "id": str(row[18])},
+                    }
+                ),
+            }
+            for row in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+async def binding_options(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    cluster_id: uuid.UUID | None,
+    namespace: str | None,
+) -> dict[str, Any]:
+    """The choices a binding form may offer, one dependent level at a time.
+
+    Every option comes from cluster inventory the caller can already see.
+    That is what lets the form be a set of selects rather than a text box:
+    there is nothing to type, so there is nothing to inject.
+    """
+    visible = await visible_scope_ids(connection, principal, "cluster.view")
+
+    clusters = (
+        await connection.execute(
+            text(
+                """
+                SELECT id, cluster_ref, display_name
+                FROM clusters
+                WHERE lifecycle = 'active' AND scope_id = ANY(:visible)
+                ORDER BY cluster_ref
+                LIMIT :limit
+                """
+            ),
+            {"visible": _sentinel(visible), "limit": MAX_PAGE_SIZE},
+        )
+    ).all()
+
+    namespaces: list[str] = []
+    workloads: list[dict[str, Any]] = []
+
+    # A cluster the caller cannot see yields no namespaces — the same answer
+    # as a cluster with none, so the form cannot be used to probe for one.
+    authorized_cluster = cluster_id is not None and any(row[0] == cluster_id for row in clusters)
+
+    if authorized_cluster:
+        namespaces = [
+            str(row[0])
+            for row in (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT DISTINCT namespace
+                        FROM inventory_resources
+                        WHERE cluster_id = :cluster AND namespace IS NOT NULL
+                          AND kind = ANY(:kinds) AND lifecycle = 'active'
+                        ORDER BY namespace
+                        LIMIT :limit
+                        """
+                    ),
+                    {
+                        "cluster": cluster_id,
+                        "kinds": sorted(WORKLOAD_KINDS),
+                        "limit": MAX_PAGE_SIZE,
+                    },
+                )
+            ).all()
+        ]
+
+        if namespace is not None:
+            workloads = [
+                {
+                    "kind": row[0],
+                    "name": row[1],
+                    "last_seen_at": row[2].isoformat() if row[2] else None,
+                }
+                for row in (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT kind, name, last_seen_at
+                            FROM inventory_resources
+                            WHERE cluster_id = :cluster AND namespace = :namespace
+                              AND kind = ANY(:kinds) AND lifecycle = 'active'
+                            ORDER BY kind, name
+                            LIMIT :limit
+                            """
+                        ),
+                        {
+                            "cluster": cluster_id,
+                            "namespace": namespace,
+                            "kinds": sorted(WORKLOAD_KINDS),
+                            "limit": MAX_PAGE_SIZE,
+                        },
+                    )
+                ).all()
+            ]
+
+    return {
+        "clusters": [
+            {"id": str(row[0]), "cluster_ref": row[1], "display_name": row[2]} for row in clusters
+        ],
+        "namespaces": namespaces,
+        "workloads": workloads,
+        "workload_kinds": sorted(WORKLOAD_KINDS),
+    }
+
+
+async def datasource_state(
+    connection: AsyncConnection, environment_service_id: uuid.UUID
+) -> dict[str, Any]:
+    """Whether a telemetry datasource exists for this service's project.
+
+    Reports state only. There is no URL, no credential and no config ref in
+    this payload, and the binding form offers no way to enter one: a
+    datasource is configured by an operator with integration access, not
+    typed into a health screen.
+    """
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT i.integration_type, i.configuration_state, i.observed_state,
+                       i.last_success_at
+                FROM environment_services es
+                JOIN environments e ON e.id = es.environment_id
+                JOIN projects p ON p.id = e.project_id
+                LEFT JOIN integrations i
+                       ON i.scope_id = p.scope_id
+                      AND i.integration_type = 'prometheus'
+                      AND i.lifecycle = 'active'
+                WHERE es.id = :id
+                """
+            ),
+            {"id": environment_service_id},
+        )
+    ).first()
+    if row is None or row[0] is None:
+        return {
+            "configured": False,
+            "integration_type": "prometheus",
+            "configuration_state": "not_configured",
+            "observed_state": "unknown",
+            "last_success_at": None,
+        }
+    return {
+        "configured": row[1] == "configured",
+        "integration_type": row[0],
+        "configuration_state": row[1],
+        "observed_state": row[2],
+        "last_success_at": row[3].isoformat() if row[3] else None,
     }
 
 
