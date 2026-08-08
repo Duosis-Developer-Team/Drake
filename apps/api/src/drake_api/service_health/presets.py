@@ -110,7 +110,12 @@ HTTP_SERVICE: Final[MetricPreset] = MetricPreset(
 # from a list — deliberately not a code branch, and carrying no namespace
 # or workload name: those are chosen per binding, from inventory.
 HERMES_PILOT: Final[MetricPreset] = MetricPreset(
-    key="hermes.pilot.v1",
+    # The trailing marker suppresses THIS occurrence only: gitleaks' generic
+    # API-key rule flags the dotted key on entropy alone. It is a preset
+    # contract identifier, published by GET /v1/service-health/presets and
+    # typed by operators into a binding — it authenticates nothing and
+    # grants nothing.
+    key="hermes.pilot.v1",  # gitleaks:allow - preset identifier, not a credential
     title="Hermes (pilot)",
     description=(
         "The HTTP service preset, selected for the first pilot onboarding. "

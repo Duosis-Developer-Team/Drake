@@ -10,10 +10,20 @@
 # detects it — proving that directory is NOT exempt.
 #
 # Do not add path allowlists or value-shape allowlists to silence a
-# finding; fix the finding. The ONLY sanctioned exemption mechanism is an
-# exact single-finding fingerprint in .gitleaksignore with a written
-# justification — shape rules were removed after review because a
-# credential COULD be committed inside an innocuous-looking field shape.
+# finding; fix the finding. Only two exemption mechanisms are sanctioned,
+# both of which exempt one occurrence and nothing else:
+#
+#   1. An inline `gitleaks:allow` marker on the flagged line itself, with a
+#      comment saying why that literal is not a credential. Preferred: it
+#      lives next to the value, survives edits that move the line, and
+#      cannot widen to a second occurrence. It is LINE-scoped, not
+#      value-scoped — the line it sits on is no longer scanned at all, so
+#      only put it on a line whose content is a fixed, public identifier.
+#   2. An exact single-finding fingerprint in .gitleaksignore, for findings
+#      in files or historical commits where no inline marker can be placed.
+#
+# Shape rules were removed after review because a credential COULD be
+# committed inside an innocuous-looking field shape.
 
 [extend]
 useDefault = true

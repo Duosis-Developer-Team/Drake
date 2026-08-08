@@ -23,7 +23,7 @@ POST /v1/service-health/bindings
   "namespace": "hermes-dev",
   "workload_kind": "Deployment",
   "workload_name": "hermes-frontend",
-  "preset_key": "hermes.pilot.v1",
+  "preset_key": "hermes.pilot.v1",   // gitleaks:allow - preset id, not a credential
   "health_policy_key": "default.v1"
 }
 ```
@@ -211,7 +211,7 @@ Prometheus is a deployment step:
    file or a binding.
 2. Confirm the cluster agent has reported inventory for the Hermes
    namespace, so the workload can be selected rather than typed.
-3. Create the binding with `preset_key: hermes.pilot.v1`, choosing the
+3. Create the binding with `preset_key: hermes.pilot.v1`, choosing the <!-- gitleaks:allow - preset id, not a credential -->
    namespace and workload from inventory.
 4. Call the resolve endpoint and confirm `resolved: true`.
 5. If Hermes does not publish `http_server_requests_total` and
