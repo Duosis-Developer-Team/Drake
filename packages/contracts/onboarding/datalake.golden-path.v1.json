@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "note": "A SANITIZED representation of what Drake's static importer would see for the Datalake platform. This is a Drake-owned fixture, not a copy of that repository: no file body, no dependency list, no source, and above all no .env and no credential of any kind. It exists so the onboarding chain can be proven end to end without contacting a real repository. The real Duosis-Developer-Team/Datalake-Platform-GUI is closed by a manual security gate and is NOT scanned by anything here.",
+  "repository": {
+    "provider": "github",
+    "owner": "Duosis-Developer-Team",
+    "name": "Datalake-Platform-GUI",
+    "defaultBranch": "main",
+    "commitSha": "4f1c9a2b7e5d3086c1a4b9e7f2d0538ac6b1e492",
+    "note": "owner/name are shown for orientation only. Real identity is the numeric repository id and the installation id; a name is not a trust boundary."
+  },
+  "tree": [
+    { "path": ".drake/project.yaml", "kind": "manifest" },
+    { "path": "package.json", "kind": "package_manifest" },
+    { "path": "pyproject.toml", "kind": "package_manifest" },
+    { "path": "Dockerfile", "kind": "container" },
+    { "path": "README.md", "kind": "documentation" },
+    { "path": ".github/workflows/ci.yaml", "kind": "ci" },
+    { "path": "deploy/deployment.yaml", "kind": "kubernetes" },
+    { "path": ".env", "kind": "refused", "note": "Present in the fixture ONLY so a test can prove the importer never reads it and produces no finding for it." },
+    { "path": ".env.production", "kind": "refused" },
+    { "path": "secrets/service-account.key", "kind": "refused" },
+    { "path": "id_rsa", "kind": "refused" },
+    { "path": "kubeconfig", "kind": "refused" },
+    { "path": "node_modules/left-pad/index.js", "kind": "refused" },
+    { "path": "scripts/bootstrap.sh", "kind": "never_executed", "note": "Present so a test can prove no script in a scanned repository is ever run." }
+  ],
+  "expectedDiscovery": {
+    "runtimes": ["node", "python"],
+    "packaging": ["container"],
+    "ci": ["github-actions"],
+    "note": "Two runtimes is evidence of at least two services. Drake does not collapse them into one, and does not invent a third."
+  },
+  "expectedPlan": {
+    "project": "create",
+    "environments": ["dev"],
+    "services": ["datalake-api", "datalake-gui"],
+    "note": "Every proposal here is derived from the manifest. Anything the manifest does not state — ownership, criticality, tenant model, cluster — is a human decision and appears as unmapped or needs_review rather than as a guess."
+  }
+}

@@ -442,10 +442,12 @@ async def test_webhook_verification_and_replay_semantics(
         assert bad_delivery.status_code == 401
 
         # 6) An unsupported event is refused before any domain work.
+        # `pull_request` rather than `push`: Sprint 11 gave `push` a
+        # consumer, and this assertion is about events Drake does not act on.
         unsupported = await client.post(
             "/v1/integrations/github/webhook",
             content=body,
-            headers=webhook_headers("push", str(uuidlib.uuid4()), body),
+            headers=webhook_headers("pull_request", str(uuidlib.uuid4()), body),
         )
         assert unsupported.status_code == 401
 

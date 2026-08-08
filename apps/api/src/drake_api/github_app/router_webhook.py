@@ -6,9 +6,11 @@ order below is the security contract — read it top to bottom.
 """
 
 import json as jsonlib
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy import text
 
 from drake_api.db import get_engine
 from drake_api.github_app import service
@@ -21,12 +23,14 @@ from drake_api.github_app.webhook import (
     WebhookRejectedError,
     build_envelope,
     check_ownership,
+    default_branch_push,
     foreign_repositories,
     payload_digest,
     validate_delivery_id,
     validate_event_name,
     verify_signature,
 )
+from drake_api.onboarding.service import mark_stale_for_commit
 from drake_api.settings import Settings
 
 router = APIRouter(prefix="/v1/integrations/github", tags=["github-webhook"])
@@ -237,12 +241,45 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             "action": envelope.action,
         }
 
+    # A default-branch push invalidates reviews of the commit it replaced.
+    # Nothing else: no catalog write, no provider call, no token.
+    stale_plans = await _mark_plans_stale(engine, event, payload)
+
     await service._audit(
         engine,
         action=f"github.webhook.{event}",
         result="success",
         target_type="github_installation",
         target_id=str(envelope.installation_external_id),
-        metadata={"event": event, "action": envelope.action},
+        metadata={"event": event, "action": envelope.action, "stale_plans": stale_plans},
     )
     return {"status": "processed", "delivery_id": delivery_id}
+
+
+async def _mark_plans_stale(engine: Any, event: str, payload: dict[str, Any]) -> int:
+    """Mark onboarding plans stale when the branch they describe moves.
+
+    Runs after the delivery is durable and outside its transaction, so a
+    slow catalog update cannot hold the webhook open. Returning zero is the
+    normal case: most pushes touch a repository nobody is onboarding.
+    """
+    if event != "push":
+        return 0
+    moved = default_branch_push(payload)
+    if moved is None:
+        return 0
+    external_id, after = moved
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text("SELECT id FROM github_repositories WHERE external_id = :external"),
+                {"external": external_id},
+            )
+        ).first()
+    if row is None:
+        # A push for a repository Drake does not project. Fail closed by
+        # doing nothing rather than by guessing which row it meant.
+        return 0
+    return await mark_stale_for_commit(
+        engine, repository_row_id=uuid.UUID(str(row[0])), new_commit_sha=after
+    )

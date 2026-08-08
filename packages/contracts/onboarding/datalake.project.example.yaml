@@ -1,0 +1,88 @@
+# A SANITIZED example of what `.drake/project.yaml` would look like for the
+# Datalake platform. Drake-owned, and not a copy of that repository.
+#
+# ---------------------------------------------------------------------------
+# What a manifest may say
+# ---------------------------------------------------------------------------
+#
+# Project identity, owning team, environment intent, service intent, and
+# REFERENCES into Drake's curated registries. That is all.
+#
+# ---------------------------------------------------------------------------
+# What a manifest may never contain — enforced by schema and policy, not by
+# convention
+# ---------------------------------------------------------------------------
+#
+#   credentials, secrets, tokens, private keys, certificates
+#   raw environment variable values or .env content
+#   provider base URLs or arbitrary external URLs
+#   Kubernetes credentials or kubeconfig
+#   raw PromQL or LogQL
+#   webhook URLs or Alertmanager matchers
+#   tenant IDs, RBAC grants or Drake permission definitions
+#   Helm/Kubernetes apply instructions, shell commands, scripts or CI commands
+#   absolute local filesystem paths
+#
+# A manifest states INTENT. It does not get to be right, it cannot choose
+# infrastructure, and it cannot grant anyone anything: clusters, owner teams
+# and metric profiles are resolved against server-controlled catalog rows,
+# and a reference Drake cannot resolve becomes an `unmapped` plan item a
+# human has to settle.
+
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+
+metadata:
+  name: datalake
+  displayName: Datalake Platform
+
+spec:
+  repository:
+    provider: github
+    owner: Duosis-Developer-Team
+    name: Datalake-Platform-GUI
+    defaultBranch: main
+
+  owners:
+    - team: data-platform
+      role: primary
+
+  environments:
+    - name: dev
+      runtime: kubernetes
+      branch: main
+      # Must already exist in Drake. A manifest naming an unknown cluster is
+      # an unmapped plan item, never a reason to create one.
+      clusterRef: drake-local
+      namespace: datalake-dev
+      criticality: medium
+
+  services:
+    # Two services because discovery found two runtimes. If only one had
+    # been evidenced, only one would be here — Drake does not assume a
+    # single service, and it does not invent a second.
+    - name: datalake-api
+      component: api
+      runtime: python
+      # A KEY into Drake's curated metric registry, not a query. A profile
+      # Drake does not have becomes an `unmapped` plan item rather than a
+      # silently ignored line.
+      metricsProfile: fastapi-v1
+      health:
+        livePath: /healthz
+        readyPath: /readyz
+
+    - name: datalake-gui
+      component: web
+      runtime: node
+      metricsProfile: nextjs-v1
+
+  tenantModel:
+    mode: none
+
+  slos:
+    - name: datalake-api-availability
+      serviceRef: datalake-api
+      indicator: availability
+      objective: 99.5
+      windowDays: 30

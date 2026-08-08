@@ -237,6 +237,18 @@ class Settings(BaseSettings):
     # outstanding reconciliation intents, and how many to take per sweep.
     github_recovery_poll_seconds: float = 30.0
     github_recovery_batch_size: int = 50
+    # Which organizations and repositories this deployment will look at.
+    # Empty means "whatever the installation grants", which is already
+    # bounded by the App installation itself; a non-empty list narrows it
+    # further and is checked server-side, never against a payload's claim.
+    github_allowed_organizations: list[str] = []
+    github_allowed_repositories: list[str] = []
+    # GitOps pull requests are the only path through which Drake would ever
+    # WRITE to a repository. Off by default: while it is off no token is
+    # minted and no provider call is made.
+    github_gitops_pr_enabled: bool = False
+    gitops_worker_enabled: bool = False
+    gitops_worker_interval_seconds: float = 60.0
 
     # --- Incident evaluation runner (Sprint 6) ----------------------
     # OFF by default, like every other background actor here: a feature
@@ -418,6 +430,11 @@ class Settings(BaseSettings):
                 raise RuntimeError("GitHub App requires a client id (or app id) outside local/test")
             if not self.github_api_base_url.startswith("https://"):
                 raise RuntimeError("GitHub API base URL must be https outside local/test")
+        if self.github_gitops_pr_enabled and not self.github_app_enabled:
+            raise RuntimeError(
+                "GitOps pull requests require the GitHub App: a write path cannot be "
+                "enabled while the integration that authenticates it is off"
+            )
         if self.github_jwt_ttl_seconds > 600:
             raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
         for key, destination in self.notification_webhooks.items():

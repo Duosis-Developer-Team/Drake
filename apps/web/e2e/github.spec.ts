@@ -195,7 +195,11 @@ test("replay is idempotent and a forged replay is refused", async ({ page }) => 
   expect(notJson.status()).toBe(400);
 
   // An event outside the allowlist is refused, not silently absorbed.
-  const outside = await deliver(request, { event: "push", body: payload });
+  // `pull_request` rather than `push`: Sprint 11 gave `push` a consumer (a
+  // default-branch push marks onboarding plans stale), so it is now in the
+  // allowlist. This assertion is about events Drake does not act on, and
+  // `pull_request` is still one of them.
+  const outside = await deliver(request, { event: "pull_request", body: payload });
   expect(outside.status()).toBe(401);
 
   // `ping` is the one event we acknowledge without doing domain work.

@@ -149,6 +149,15 @@ async def reset_rbac_state(engine: AsyncEngine) -> None:
             # identities with RESTRICT — cleared first when they exist.
             # Sprint 5A GitHub tables reference scopes/installations with
             # RESTRICT — cleared before anything they point at.
+            # Sprint 11 onboarding tables reference github projections,
+            # identities and the catalog with RESTRICT, so they clear first.
+            "gitops_requests",
+            "onboarding_applies",
+            "onboarding_plan_items",
+            "onboarding_plans",
+            "onboarding_findings",
+            "onboarding_analyses",
+            "onboarding_sessions",
             # Sprint 10 alerting tables reference integrations, incidents
             # and the catalog with RESTRICT, so they clear before any of them.
             "silence_requests",
