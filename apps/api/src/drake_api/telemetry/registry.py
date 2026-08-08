@@ -51,8 +51,19 @@ _KEY_SHAPE = re.compile(r"^[a-z0-9]([a-z0-9_.-]{0,62}[a-z0-9])?$")
 _LABEL_SHAPE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
 _ALLOWED_PLACEHOLDERS = frozenset({"matchers", "window"})
+# Every value a template may match on. All of them come from resolved
+# server-side state — a binding row or a catalog row — never from a caller,
+# which is what keeps a template from becoming a free-text query.
 _MATCHER_SOURCES = frozenset(
-    {"project_key", "environment_key", "service_key", "cluster_ref", "namespace"}
+    {
+        "project_key",
+        "environment_key",
+        "service_key",
+        "cluster_ref",
+        "namespace",
+        "workload_name",
+        "workload_kind",
+    }
 )
 
 # Global hard ceilings — templates may narrow, never widen.
@@ -286,7 +297,9 @@ def load_registry(registry_dir: Path | None = None) -> TelemetryRegistry:
             f"{where}: cache TTLs must be positive",
         )
         _require(
-            set(template.scope_types) <= {"environment", "service", "cluster"},
+            # `workload` scopes a query to one bound workload; its source
+            # values come from a binding row, not from the caller.
+            set(template.scope_types) <= {"environment", "service", "cluster", "workload"},
             f"{where}: unsupported scope type",
         )
         templates[template_id] = template

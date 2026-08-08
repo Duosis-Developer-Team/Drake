@@ -35,8 +35,10 @@ from drake_api.testing import make_settings
 
 def test_authoritative_registry_loads_and_hashes() -> None:
     registry = load_registry()
-    assert len(registry.metrics) == 7
-    assert len(registry.templates) == 10
+    # Counts move whenever the curated registry grows; they are asserted so
+    # that a template or metric cannot be added without someone noticing.
+    assert len(registry.metrics) == 19
+    assert len(registry.templates) == 22
     assert len(registry.dashboards) == 2
     assert len(registry.content_hash) == 64
     assert registry.content_hash == load_registry().content_hash  # deterministic

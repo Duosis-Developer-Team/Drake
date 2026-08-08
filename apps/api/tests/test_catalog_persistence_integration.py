@@ -43,6 +43,9 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         # Sprint 4 agent/inventory tables reference clusters with RESTRICT;
         # clear them first whenever they exist (order-independent resets).
         for table in (
+            # Sprint 5 bindings reference environment_services and clusters
+            # with RESTRICT, so they clear before either.
+            "service_workload_bindings",
             "github_policy_evaluations",
             "github_webhook_deliveries",
             "github_repository_projects",

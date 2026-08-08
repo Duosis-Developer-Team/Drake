@@ -417,6 +417,45 @@ class TelemetryBroker:
                 },
                 provider_scope_id=row[4],
             )
+        if scope_type == "workload":
+            # The scope id is a binding id. Every matcher value below comes
+            # from that row — the caller supplies an id and nothing else,
+            # which is what keeps a workload query from being caller-shaped.
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT es.scope_id, b.namespace, b.workload_name, b.workload_kind,
+                               c.cluster_ref, p.project_key, e.environment_key, sd.service_key,
+                               p.scope_id
+                        FROM service_workload_bindings b
+                        JOIN environment_services es ON es.id = b.environment_service_id
+                        JOIN clusters c ON c.id = b.cluster_id
+                        JOIN projects p ON p.id = b.project_id
+                        JOIN environments e ON e.id = b.environment_id
+                        JOIN service_definitions sd ON sd.id = b.service_id
+                        WHERE b.id = :id AND b.lifecycle = 'active'
+                        """
+                    ),
+                    {"id": scope_id},
+                )
+            ).first()
+            if row is None:
+                return None
+            return ResolvedScope(
+                scope_id=row[0],
+                scope_ref=f"{row[5]}/{row[6]}/{row[7]}/{row[4]}/{row[1]}/{row[2]}",
+                source_values={
+                    "project_key": str(row[5]),
+                    "environment_key": str(row[6]),
+                    "service_key": str(row[7]),
+                    "cluster_ref": str(row[4]),
+                    "namespace": str(row[1]),
+                    "workload_name": str(row[2]),
+                    "workload_kind": str(row[3]),
+                },
+                provider_scope_id=row[8],
+            )
         if scope_type == "cluster":
             row = (
                 await connection.execute(

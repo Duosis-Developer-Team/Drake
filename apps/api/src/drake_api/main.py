@@ -33,6 +33,7 @@ from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
+from drake_api.service_health.router import router as service_health_router
 from drake_api.settings import Settings, get_settings
 from drake_api.telemetry.broker import TelemetryBroker
 from drake_api.telemetry.metrics import BrokerMetrics
@@ -150,6 +151,7 @@ def create_app(
     app.include_router(github_router)
     app.include_router(github_onboarding_router)
     app.include_router(github_webhook_router)
+    app.include_router(service_health_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):
         # Explicit local/test opt-in only; validate_runtime_security refuses

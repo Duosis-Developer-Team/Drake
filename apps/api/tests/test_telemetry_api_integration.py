@@ -24,6 +24,7 @@ from drake_api.catalog.service import CatalogValidationError
 from drake_api.db import dispose_engines
 from drake_api.settings import TelemetryConnector
 from drake_api.telemetry.observations import record_provider_observation
+from drake_api.telemetry.registry import load_registry
 from harness_s1 import S1Harness, build_harness, grant_platform_owner, require_it_settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -557,11 +558,17 @@ async def test_catalog_and_dashboard_endpoints(engine: AsyncEngine) -> None:
         page = (await plain.get("/v1/metrics/catalog?limit=3")).json()
         assert len(page["metrics"]) == 3
         assert page["next_cursor"]
-        rest = (
-            await plain.get(f"/v1/metrics/catalog?limit=10&cursor={page['next_cursor']}")
-        ).json()
-        assert len(page["metrics"]) + len(rest["metrics"]) == 7
-        assert rest["next_cursor"] is None
+        # Follow the cursor to exhaustion rather than assuming the registry
+        # fits in two pages: it grows, and the contract under test is that
+        # paging covers everything exactly once.
+        seen: list[str] = [metric["key"] for metric in page["metrics"]]
+        cursor = page["next_cursor"]
+        while cursor:
+            nxt = (await plain.get(f"/v1/metrics/catalog?limit=10&cursor={cursor}")).json()
+            seen.extend(metric["key"] for metric in nxt["metrics"])
+            cursor = nxt["next_cursor"]
+        assert len(seen) == len(set(seen)), "paging must not repeat a metric"
+        assert len(seen) == len(load_registry().metrics)
         assert (await plain.get("/v1/metrics/catalog?cursor=garbage")).status_code == 422
 
         dashboard = (await plain.get("/v1/dashboard-templates/service-golden-signals-v1")).json()
@@ -652,6 +659,10 @@ async def test_real_prometheus_query_smoke(engine: AsyncEngine) -> None:
         "service_key": "api",
         "cluster_ref": "cluster-a",
         "namespace": "alpha-dev",
+        # Workload-scoped templates (Sprint 5) match on the bound workload;
+        # these stand in for what a binding row supplies.
+        "workload_name": "alpha-api",
+        "workload_kind": "Deployment",
     }
     now = int(time_module.time())
     async with httpx.AsyncClient(base_url=prometheus_url, timeout=10.0) as prometheus:

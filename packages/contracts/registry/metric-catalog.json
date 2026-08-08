@@ -238,6 +238,426 @@
         "ref": "sprint-3",
         "revision": "1"
       }
+    },
+    {
+      "key": "workload.cpu_limit_cores",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_limits_cpu_cores",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU limit configured for the workload.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.cpu_throttled_ratio",
+      "version": 1,
+      "type": "ratio",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_cpu_cfs_throttled_periods_total",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Share of CPU periods that were throttled.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.cpu_usage_cores",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_cpu_usage_seconds_total",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU consumed by the workload's containers.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.error_ratio",
+      "version": 1,
+      "type": "ratio",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_requests_total",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Share of requests answered with a 5xx status.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.latency_p95",
+      "version": 1,
+      "type": "histogram_quantile",
+      "unit": "seconds",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_request_duration_seconds_bucket",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "95th percentile request duration.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.memory_limit_bytes",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_limits_memory_bytes",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory limit configured for the workload.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.memory_working_set_bytes",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_memory_working_set_bytes",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory working set of the workload.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.replicas_desired",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_workload_spec_replicas",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Replicas the controller is asked to run.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.replicas_ready",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_workload_status_ready_replicas",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Replicas currently reporting ready.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.request_rate",
+      "version": 1,
+      "type": "counter_rate",
+      "unit": "requests_per_second",
+      "sourceType": "prometheus",
+      "sourceFamily": "http_server_requests_total",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Requests served per second.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.restarts_delta",
+      "version": 1,
+      "type": "counter_rate",
+      "unit": "restarts",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_status_restarts_total",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Container restarts over the window.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.scrape_up",
+      "version": 1,
+      "type": "gauge",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "up",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Whether the workload's targets are being scraped.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-5",
+        "revision": "1"
+      }
     }
   ]
 }
