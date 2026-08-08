@@ -1,0 +1,81 @@
+{{- include "drake.validateAll" . }}
+{{- if .Values.networkPolicy.enabled }}
+{{/*
+Default-deny stays. The ingress controller is admitted to exactly the two
+application ports — not to the namespace, and not pod-to-pod generally.
+Opening it wider to "make the route work" would undo the policy in the
+same change that configures the route.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-default-deny
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-ingress-controller
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.ingressControllerPodSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+        - protocol: TCP
+          port: {{ .Values.web.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-api-egress
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: api
+  policyTypes: [Egress]
+  egress:
+    # DNS, then exactly the two datastores. PostgreSQL and Redis are never
+    # reachable from outside the cluster and are not exposed by any Service
+    # this chart creates.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.databaseCIDR | quote }}
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.redisCIDR | quote }}
+      ports:
+        - protocol: TCP
+          port: 6379
+{{- end }}

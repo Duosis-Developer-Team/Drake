@@ -1,0 +1,89 @@
+# Publish deployable Drake images.
+#
+# Manual only, and only from `main`. There is deliberately no push trigger:
+# a deployable artifact should be a decision someone makes, not a side
+# effect of merging. This workflow does not deploy anything and holds no
+# cluster credentials.
+name: publish images
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm building deployable images from main'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: build and publish (main only)
+    runs-on: ubuntu-latest
+    # Package write is scoped to THIS job. Nothing else in the repository
+    # can push an image.
+    permissions:
+      contents: read
+      packages: write
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        include:
+          - component: api
+            dockerfile: apps/api/Dockerfile
+          - component: web
+            dockerfile: apps/web/Dockerfile
+    steps:
+      - name: refuse without explicit confirmation
+        if: inputs.confirm != 'publish'
+        run: |
+          echo "confirmation input was not 'publish'; refusing" >&2
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3
+
+      - name: log in to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # The scoped workflow token. No long-lived registry credential
+          # exists in this repository.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build and push
+        id: build
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # One platform, deliberately: the clusters Drake targets are
+          # amd64, and a multi-arch manifest would make the digest recorded
+          # below ambiguous about what actually runs.
+          platforms: linux/amd64
+          push: true
+          # Immutable by construction: the tag is the commit SHA and is
+          # never moved. `latest` is not produced at all.
+          tags: ghcr.io/${{ github.repository_owner }}/drake-${{ matrix.component }}:${{ github.sha }}
+          provenance: false
+
+      - name: record the release mapping
+        run: |
+          {
+            echo "### drake-${{ matrix.component }}"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| source commit | \`${{ github.sha }}\` |"
+            echo "| image | \`ghcr.io/${{ github.repository_owner }}/drake-${{ matrix.component }}\` |"
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo
+            echo "Pin this digest in \`values-production.yaml\`; never a tag."
+          } >> "$GITHUB_STEP_SUMMARY"

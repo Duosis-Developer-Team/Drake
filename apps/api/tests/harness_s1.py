@@ -41,8 +41,21 @@ class S1Harness:
     def api_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app, raise_app_exceptions=False),
-            base_url=API_BASE,
+            base_url=self.client_base_url,
         )
+
+    @property
+    def client_base_url(self) -> str:
+        """Where the test client addresses the app.
+
+        A production-shaped harness is addressed on its canonical origin:
+        the session cookie is `Secure` there, so an http base URL would
+        silently drop it and every authenticated assertion would fail for
+        the wrong reason.
+        """
+        if self.settings.env in ("local", "test"):
+            return API_BASE
+        return str(self.settings.resolved_public_origin())
 
     def provider_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -65,9 +78,11 @@ class S1Harness:
             )
         assert authorize.status_code == 302
         callback_url = authorize.headers["location"]
-        assert callback_url.startswith(CALLBACK_URL)
-
         callback_parsed = urlparse(callback_url)
+        # Compare the PATH, not the whole URL: a production-shaped harness
+        # redirects to the canonical public origin while the test client
+        # still serves the app locally.
+        assert callback_parsed.path == urlparse(CALLBACK_URL).path
         callback = await client.get(f"{callback_parsed.path}?{callback_parsed.query}")
         assert callback.status_code == 302, callback.text
 
@@ -95,16 +110,21 @@ def build_harness(
     github_transport: httpx.AsyncBaseTransport | None = None,
 ) -> S1Harness:
     base = settings or require_it_settings()
-    wired = base.model_copy(
-        update={
-            "oidc_issuer": DEFAULT_ISSUER,
-            "oidc_client_id": DEFAULT_CLIENT_ID,
-            "oidc_redirect_url": CALLBACK_URL,
-        }
-    )
-    provider = FakeOidcProvider()
+    update = {"oidc_issuer": DEFAULT_ISSUER, "oidc_client_id": DEFAULT_CLIENT_ID}
+    if base.env in ("local", "test"):
+        update["oidc_redirect_url"] = CALLBACK_URL
+    else:
+        # A production-shaped harness keeps its canonical redirect URL:
+        # overwriting it here would make the production edge guard
+        # untestable, since the guard is exactly that the two agree.
+        update["oidc_issuer"] = base.oidc_issuer or DEFAULT_ISSUER
+    wired = base.model_copy(update=update)
+    # The provider answers on whatever issuer the settings name. It is all
+    # in-process ASGI, so an https issuer costs nothing and lets a
+    # production-shaped harness satisfy the plaintext-issuer guard.
+    provider = FakeOidcProvider(issuer=wired.oidc_issuer)
     oidc_http = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=provider.build_app()), base_url=DEFAULT_ISSUER
+        transport=httpx.ASGITransport(app=provider.build_app()), base_url=wired.oidc_issuer
     )
     oidc_client = OidcClient(wired, http_client=oidc_http)
     app = create_app(

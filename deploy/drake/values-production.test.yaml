@@ -1,0 +1,44 @@
+# Production-SHAPED values for chart contract tests.
+#
+# drake.example.test is a documentation host and always will be; the real
+# FQDN is chosen by an operator at deployment time and is deliberately not
+# committed. Secret NAMES are fake and no secret VALUE appears anywhere.
+deploymentMode: production
+publicOrigin: https://drake.example.test
+
+ingress:
+  enabled: true
+  className: nginx
+  host: drake.example.test
+  tls:
+    enabled: true
+    secretName: drake-tls
+
+api:
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  existingSecret: drake-api-config
+
+web:
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-web
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+
+migration:
+  enabled: true
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-api
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+networkPolicy:
+  enabled: true
+  ingressControllerNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  ingressControllerPodSelector:
+    app.kubernetes.io/name: ingress-nginx
+  databaseCIDR: 10.0.10.5/32
+  redisCIDR: 10.0.10.6/32
+
+github:
+  enabled: false

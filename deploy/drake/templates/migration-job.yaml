@@ -1,0 +1,55 @@
+{{- include "drake.validateAll" . }}
+{{- if .Values.migration.enabled }}
+{{/*
+ONE migration owner and ONE path: this Job, running `alembic upgrade head`.
+
+It is a Helm pre-install/pre-upgrade hook, so it completes before any new
+application pod starts — two replicas cannot race the schema, and a failed
+migration stops the release instead of letting pods roll out against a
+database that is not ready for them.
+
+`backoffLimit: 0` because a migration that failed once should be looked at,
+not retried blindly. There is deliberately no downgrade path here: undoing
+a schema change is a decision with data consequences, and a Helm rollback
+of the application does NOT undo it.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "drake.name" . }}-migrate
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    # Kept after a failure so the logs can be read.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "drake.name" . }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: {{ include "drake.image" (dict "ctx" . "image" .Values.migration.image "name" "migration") | quote }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            # The database URL is a Secret reference. It is never an
+            # argument, so it cannot land in `kubectl describe` output or
+            # in a process listing.
+            - secretRef:
+                name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+{{- end }}

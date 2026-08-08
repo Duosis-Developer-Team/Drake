@@ -14,6 +14,10 @@ UNREACHABLE_DB_URL = "postgresql+psycopg://drake@127.0.0.1:59432/drake"
 UNREACHABLE_REDIS_URL = "redis://127.0.0.1:59379/0"
 
 
+# A test-only public host. Never a real domain, and never the final one.
+TEST_PUBLIC_ORIGIN = "https://drake.example.test"
+
+
 def make_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "env": "local",
@@ -22,6 +26,14 @@ def make_settings(**overrides: object) -> Settings:
         "ready_check_timeout_seconds": 0.5,
     }
     values.update(overrides)
+    if str(values.get("env")) not in ("local", "test"):
+        # Production-like settings need a production-shaped edge, otherwise
+        # every guard test would trip the origin check first and stop
+        # proving whatever it was actually written for.
+        values.setdefault("public_origin", TEST_PUBLIC_ORIGIN)
+        values.setdefault("trusted_proxy_count", 1)
+        values.setdefault("allowed_web_origins", [TEST_PUBLIC_ORIGIN])
+        values.setdefault("oidc_redirect_url", f"{TEST_PUBLIC_ORIGIN}/v1/auth/callback")
     return Settings(**values)  # type: ignore[arg-type]
 
 

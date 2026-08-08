@@ -64,10 +64,11 @@ def test_internal_metrics_explicit_local_enable_serves_exposition() -> None:
 
 
 def test_internal_metrics_refused_outside_local_test() -> None:
+    # The redirect URL has to agree with the canonical public origin, or
+    # the edge guard fires first and this stops testing internal metrics.
     settings = make_settings(
         env="prod",
         oidc_issuer="https://issuer.example",
-        oidc_redirect_url="https://drake.example/v1/auth/callback",
     ).model_copy(update={"internal_metrics_enabled": True})
     with pytest.raises(RuntimeError, match="internal metrics"):
         create_app(settings)

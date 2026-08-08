@@ -10,6 +10,8 @@ from functools import lru_cache
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from drake_api.origin import PublicOrigin, oidc_redirect_url, parse_public_origin
+
 
 class TelemetryConnector(BaseModel):
     """Server-owned provider connector configuration.
@@ -35,6 +37,19 @@ class Settings(BaseSettings):
     env: str = "local"
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+
+    # --- production edge (ADR-0021) ---
+    # The ONE public origin Drake is served from. `/` is the web app and
+    # `/v1` is the API on this same origin, so cookies and CSRF work with
+    # no CORS and no second hostname. Every externally visible URL derives
+    # from this value rather than from the incoming request, because a
+    # forged Host header must not be able to decide where Drake redirects.
+    public_origin: str = "http://127.0.0.1:3000"
+    # How many reverse proxies sit in front of the API. Forwarded headers
+    # are honoured only when this is set AND the request arrived through
+    # that many hops — a client cannot promote its own X-Forwarded-* by
+    # simply sending them.
+    trusted_proxy_count: int = 0
 
     # Local default carries no password on purpose; real local values come
     # from .env (see .env.example). Never point this at shared infrastructure.
@@ -123,6 +138,14 @@ class Settings(BaseSettings):
     github_recovery_poll_seconds: float = 30.0
     github_recovery_batch_size: int = 50
 
+    @property
+    def is_production_like(self) -> bool:
+        return self.env not in ("local", "test")
+
+    def resolved_public_origin(self) -> "PublicOrigin":
+        """The validated canonical origin. Raises if it is unusable."""
+        return parse_public_origin(self.public_origin, require_https=self.is_production_like)
+
     def validate_runtime_security(self) -> None:
         """Reject insecure identity configuration outside local/test.
 
@@ -131,6 +154,29 @@ class Settings(BaseSettings):
         """
         if self.env in ("local", "test"):
             return
+        # The public origin is the root of every externally visible URL, so
+        # it is validated before anything derived from it is used.
+        origin = self.resolved_public_origin()
+        if self.trusted_proxy_count < 1:
+            raise RuntimeError(
+                "production runs behind an ingress: trusted_proxy_count must be at least 1 "
+                "so forwarded host/proto are honoured only from that boundary"
+            )
+        for allowed in self.allowed_web_origins:
+            if allowed and allowed != str(origin):
+                raise RuntimeError(
+                    "allowed_web_origins must contain only the canonical public origin "
+                    "outside local/test"
+                )
+        if self.cors_origins:
+            raise RuntimeError(
+                "single-origin deployments need no CORS; cors_origins must be empty "
+                "outside local/test"
+            )
+        if self.oidc_redirect_url != oidc_redirect_url(origin):
+            raise RuntimeError(
+                "oidc_redirect_url must be the canonical public origin's callback path"
+            )
         if self.oidc_issuer.startswith("http://"):
             raise RuntimeError("plaintext OIDC issuer is not allowed outside local/test")
         if self.oidc_redirect_url.startswith("http://"):

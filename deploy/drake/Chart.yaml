@@ -1,0 +1,9 @@
+apiVersion: v2
+name: drake
+description: >-
+  Drake control plane: API and web behind one public origin. Renders the
+  production edge contract from ADR-0021 and fails closed when a required
+  production value is absent.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

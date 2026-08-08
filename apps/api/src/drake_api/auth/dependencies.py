@@ -77,7 +77,16 @@ async def require_csrf(request: Request, auth: AuthContext = Depends(require_aut
     origin = request.headers.get("Origin")
     if origin:
         allowed = set(settings.allowed_web_origins)
-        allowed.add(str(request.base_url).rstrip("/"))
+        if settings.is_production_like:
+            # Production compares against the CONFIGURED origin only. Adding
+            # `request.base_url` would fold a forged Host or X-Forwarded-Host
+            # into the allow-list, which is the whole attack this check
+            # exists to stop.
+            allowed = {str(settings.resolved_public_origin())}
+        else:
+            # Local and E2E reach the API on several equivalent loopback
+            # spellings; trusting the request there costs nothing.
+            allowed.add(str(request.base_url).rstrip("/"))
         if origin.rstrip("/") not in allowed:
             raise HTTPException(status_code=403, detail="origin not allowed")
     return auth
