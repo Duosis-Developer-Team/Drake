@@ -83,9 +83,13 @@ async def unplanned_events(connection: AsyncConnection, limit: int) -> list[Noti
                 JOIN incidents i ON i.id = ev.incident_id
                 JOIN projects p ON p.id = i.project_id
                 JOIN environments e ON e.id = i.environment_id
-                JOIN service_definitions sd ON sd.id = i.service_id
-                JOIN service_workload_bindings b ON b.id = i.binding_id
-                JOIN clusters c ON c.id = b.cluster_id
+                -- OUTER from here down: an alert or protection incident has
+                -- no workload binding, and inner-joining one would silently
+                -- drop it from routing. A notification that is never planned
+                -- looks exactly like a policy that matched nothing.
+                LEFT JOIN service_definitions sd ON sd.id = i.service_id
+                LEFT JOIN service_workload_bindings b ON b.id = i.binding_id
+                LEFT JOIN clusters c ON c.id = b.cluster_id
                 LEFT JOIN notification_event_plans pl ON pl.incident_event_id = ev.id
                 WHERE pl.incident_event_id IS NULL
                   AND ev.event_type = ANY(:types)
@@ -119,11 +123,13 @@ async def unplanned_events(connection: AsyncConnection, limit: int) -> list[Noti
             service_id=row[14],
             project_key=row[15],
             environment_key=row[16],
-            service_key=row[17],
+            # Empty rather than absent: a message reads the same way whether
+            # a fact is unknown or the incident genuinely has no workload.
+            service_key=row[17] or "",
             binding_id=row[18],
-            namespace=row[19],
-            workload_name=row[20],
-            cluster_ref=row[21],
+            namespace=row[19] or "",
+            workload_name=row[20] or "",
+            cluster_ref=row[21] or "",
         )
         for row in rows
     ]

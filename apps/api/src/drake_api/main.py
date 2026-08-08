@@ -11,6 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
+from drake_api.alerting.router import router as alerting_router
+from drake_api.alerting.router_webhook import router as alertmanager_webhook_router
+from drake_api.alerting.silences import SilenceWorker
+from drake_api.alerting.slo_service import SloEvaluator
 from drake_api.audit.router import router as audit_router
 from drake_api.auth.flows import AuthFlows
 from drake_api.auth.oidc import OidcClient
@@ -73,9 +77,19 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     ingestor = getattr(app.state, "deployment_ingest_worker", None)
     if ingestor is not None:
         await ingestor.start()
+    slo_evaluator = getattr(app.state, "slo_evaluator", None)
+    if slo_evaluator is not None:
+        await slo_evaluator.start()
+    silence_worker = getattr(app.state, "silence_worker", None)
+    if silence_worker is not None:
+        await silence_worker.start()
     try:
         yield
     finally:
+        if silence_worker is not None:
+            await silence_worker.stop()
+        if slo_evaluator is not None:
+            await slo_evaluator.stop()
         if ingestor is not None:
             await ingestor.stop()
         if notifier is not None:
@@ -205,6 +219,27 @@ def create_app(
         if settings.deployment_ingest_enabled
         else None
     )
+    # The SLO evaluator reuses the Sprint 5 broker exactly as the API does,
+    # so a scheduled evaluation and a screen refresh can never disagree.
+    app.state.slo_evaluator = (
+        SloEvaluator(
+            get_engine(settings),
+            app.state.telemetry_broker,
+            app.state.telemetry_redis,
+            interval_seconds=settings.slo_evaluator_interval_seconds,
+            batch_size=settings.slo_evaluator_batch_size,
+            lease_seconds=settings.slo_evaluator_lease_seconds,
+        )
+        if settings.slo_evaluator_enabled
+        else None
+    )
+    # The only outbound provider MUTATION in Drake. Off unless an operator
+    # turned it on and registered an Alertmanager.
+    app.state.silence_worker = (
+        SilenceWorker(get_engine(settings), settings, transport=webhook_transport)
+        if settings.silence_worker_enabled
+        else None
+    )
 
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -223,6 +258,8 @@ def create_app(
     app.include_router(protection_ingest_router)
     app.include_router(service_health_router)
     app.include_router(incidents_router)
+    app.include_router(alerting_router)
+    app.include_router(alertmanager_webhook_router)
     app.include_router(notifications_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):

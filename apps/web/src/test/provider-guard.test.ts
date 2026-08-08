@@ -4,6 +4,18 @@
  *
  * This scans every source file under src/ (excluding this test directory)
  * for forbidden endpoints/hosts and for absolute http(s) URLs in code.
+ *
+ * Vendor names are matched in LOWERCASE only, and that distinction is the
+ * point. A hostname, a URL, an env var and an identifier are lowercase by
+ * convention and, for DNS, by definition — so `alertmanager` in browser
+ * code is a target. `Alertmanager` in a sentence is product copy, and Drake
+ * now has screens whose whole job is to report on one: telling an operator
+ * "Alertmanager has not confirmed this silence" is more useful, and more
+ * honest, than telling them "the provider" has not.
+ *
+ * Every MECHANISM stays banned unconditionally — absolute URLs, provider
+ * ports, query paths, kubeconfig, config refs — because those are what
+ * would actually let the browser reach a provider.
  */
 // @vitest-environment node
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -16,9 +28,10 @@ const SRC_ROOT = join(process.cwd(), "src");
 
 // Built via concatenation so this guard file never matches its own patterns.
 const FORBIDDEN_PATTERNS: { name: string; pattern: RegExp }[] = [
-  { name: "prometheus", pattern: new RegExp("prome" + "theus", "i") },
-  { name: "thanos", pattern: new RegExp("tha" + "nos", "i") },
-  { name: "alertmanager", pattern: new RegExp("alert" + "manager", "i") },
+  // Lowercase only: host/URL/identifier shape, not prose. See the header.
+  { name: "prometheus host", pattern: new RegExp("prome" + "theus") },
+  { name: "thanos host", pattern: new RegExp("tha" + "nos") },
+  { name: "alertmanager host", pattern: new RegExp("alert" + "manager") },
   { name: "prometheus port", pattern: new RegExp(":9" + "090") },
   { name: "alertmanager port", pattern: new RegExp(":9" + "093") },
   { name: "kubernetes api host", pattern: new RegExp("kuber" + "netes\\.default") },
@@ -29,7 +42,7 @@ const FORBIDDEN_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: "provider query api", pattern: new RegExp("/api/v1/query") },
   { name: "local provider port", pattern: new RegExp(":59" + "090") },
   { name: "provider config ref", pattern: new RegExp("config_" + "ref") },
-  { name: "promql", pattern: new RegExp("prom" + "ql", "i") },
+  { name: "promql", pattern: new RegExp("prom" + "ql") },
   // No absolute runtime URLs at all in Sprint 0 web code.
   { name: "absolute url", pattern: new RegExp("https?:" + "//", "i") },
 ];

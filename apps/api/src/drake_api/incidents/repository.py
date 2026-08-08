@@ -30,6 +30,7 @@ from drake_api.rbac.service import Principal
 # same right as seeing that service's health.
 INCIDENT_READ_PERMISSION = "environment.view"
 INCIDENT_ACK_PERMISSION = "incident.ack"
+INCIDENT_ASSIGN_PERMISSION = "incident.assign"
 
 MAX_PAGE_SIZE = 50
 DEFAULT_PAGE_SIZE = 25
@@ -38,7 +39,9 @@ MAX_TRANSITIONS = 100
 DEFAULT_TRANSITIONS = 25
 
 INCIDENT_STATES = frozenset({"open", "acknowledged", "resolved"})
-INCIDENT_SEVERITIES = frozenset({"critical"})
+INCIDENT_SEVERITIES = frozenset({"critical", "high"})
+INCIDENT_SOURCES = frozenset({"service_health", "protection", "alert"})
+INCIDENT_PRIORITIES = frozenset({"P1", "P2", "P3", "P4"})
 
 # Fixed windows for "opened within". A free-form range would be another
 # input to bound; a short list is simply bounded.
@@ -87,14 +90,35 @@ def _row_summary(row: Any) -> dict[str, Any]:
         "project_key": row[10],
         "environment_key": row[11],
         "service_key": row[12],
-        "environment_service_id": str(row[13]),
-        "binding": {
-            "id": str(row[14]),
-            "namespace": row[15],
-            "workload_kind": row[16],
-            "workload_name": row[17],
-            "cluster_ref": row[18],
-        },
+        "environment_service_id": str(row[13]) if row[13] else None,
+        # `null` for an incident that is genuinely not about one workload.
+        # An empty object would read as "a workload with no name".
+        "binding": (
+            None
+            if row[14] is None
+            else {
+                "id": str(row[14]),
+                "namespace": row[15],
+                "workload_kind": row[16],
+                "workload_name": row[17],
+                "cluster_ref": row[18],
+            }
+        ),
+        "source": row[22],
+        "priority": row[23],
+        "owner_team": row[24],
+        "assignee": (
+            None
+            if row[25] is None
+            else {
+                "identity_id": str(row[25]),
+                "assigned_at": row[26].isoformat() if row[26] else None,
+                "display_name": row[27],
+            }
+        ),
+        # An alert clearing is evidence the CONDITION stopped, not that
+        # anyone handled it. Kept distinct from `resolved_at`.
+        "mitigated_at": row[29].isoformat() if row[29] else None,
         # The current verdict, so a list can show "still critical" next to
         # "opened 40 minutes ago" without a second round trip.
         "current_health": (
@@ -114,18 +138,25 @@ _SUMMARY_COLUMNS = """
     i.opened_at, i.last_critical_at, i.acknowledged_at, i.resolved_at, i.version,
     p.project_key, e.environment_key, sd.service_key, i.environment_service_id,
     b.id, b.namespace, b.workload_kind, b.workload_name, c.cluster_ref,
-    hs.current_status, hs.current_reasons, hs.last_observed_at
+    hs.current_status, hs.current_reasons, hs.last_observed_at,
+    i.source, i.priority, i.owner_team, i.assigned_identity_id, i.assigned_at,
+    ai.display_name, ai.email, i.mitigated_at
 """
 
+# Every join below is OUTER. An incident no longer requires a workload
+# binding: a protection or project-level signal is a real problem, and
+# dropping it from the list because it had no pod would be silence, not
+# safety.
 _SUMMARY_JOINS = """
     FROM incidents i
-    JOIN environment_services es ON es.id = i.environment_service_id
+    LEFT JOIN environment_services es ON es.id = i.environment_service_id
     JOIN projects p ON p.id = i.project_id
     JOIN environments e ON e.id = i.environment_id
-    JOIN service_definitions sd ON sd.id = i.service_id
-    JOIN service_workload_bindings b ON b.id = i.binding_id
-    JOIN clusters c ON c.id = b.cluster_id
+    LEFT JOIN service_definitions sd ON sd.id = i.service_id
+    LEFT JOIN service_workload_bindings b ON b.id = i.binding_id
+    LEFT JOIN clusters c ON c.id = b.cluster_id
     LEFT JOIN service_health_state hs ON hs.binding_id = i.binding_id
+    LEFT JOIN identities ai ON ai.id = i.assigned_identity_id
 """
 
 
@@ -153,7 +184,10 @@ async def list_incidents(
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     visible = await visible_scope_ids(connection, principal, INCIDENT_READ_PERMISSION)
 
-    filters = ["es.scope_id = ANY(:visible)"]
+    # A service-scoped incident is visible through its service scope; a
+    # project-level one through its project's. Both are checked in SQL
+    # before any count, page or cursor.
+    filters = ["COALESCE(es.scope_id, p.scope_id) = ANY(:visible)"]
     params: dict[str, Any] = {"visible": _sentinel(visible), "limit": limit + 1}
     if project_id is not None:
         filters.append("i.project_id = :project")
@@ -241,7 +275,7 @@ async def get_incident(
                        ack.display_name, ack.email, i.project_id, i.environment_id
                 {_SUMMARY_JOINS}
                 LEFT JOIN identities ack ON ack.id = i.acknowledged_by
-                WHERE i.id = :id AND es.scope_id = ANY(:visible)
+                WHERE i.id = :id AND COALESCE(es.scope_id, p.scope_id) = ANY(:visible)
                 """
             ),
             {"id": incident_id, "visible": _sentinel(visible)},
@@ -253,15 +287,15 @@ async def get_incident(
     summary = _row_summary(row)
     return {
         **summary,
-        "opening_reasons": list(row[22] or ()),
-        "binding_revision": row[23],
-        "resolution_source": row[24],
+        "opening_reasons": list(row[30] or ()),
+        "binding_revision": row[31],
+        "resolution_source": row[32],
         # Enough to say who acknowledged, and nothing more about them.
         "acknowledged_by": (
-            None if row[25] is None else {"display_name": row[25], "email": row[26]}
+            None if row[33] is None else {"display_name": row[33], "email": row[34]}
         ),
-        "project_id": str(row[27]),
-        "environment_id": str(row[28]),
+        "project_id": str(row[35]),
+        "environment_id": str(row[36]),
     }
 
 
@@ -280,8 +314,9 @@ async def list_incident_events(
             text(
                 """
                 SELECT 1 FROM incidents i
-                JOIN environment_services es ON es.id = i.environment_service_id
-                WHERE i.id = :id AND es.scope_id = ANY(:visible)
+                LEFT JOIN environment_services es ON es.id = i.environment_service_id
+                JOIN projects p ON p.id = i.project_id
+                WHERE i.id = :id AND COALESCE(es.scope_id, p.scope_id) = ANY(:visible)
                 """
             ),
             {"id": incident_id, "visible": _sentinel(visible)},
@@ -373,11 +408,79 @@ async def can_acknowledge(
             text(
                 """
                 SELECT 1 FROM incidents i
-                JOIN environment_services es ON es.id = i.environment_service_id
-                WHERE i.id = :id AND es.scope_id = ANY(:visible)
+                LEFT JOIN environment_services es ON es.id = i.environment_service_id
+                JOIN projects p ON p.id = i.project_id
+                WHERE i.id = :id AND COALESCE(es.scope_id, p.scope_id) = ANY(:visible)
                 """
             ),
             {"id": incident_id, "visible": _sentinel(manageable)},
+        )
+    ).first()
+    return row is not None
+
+
+async def can_assign(
+    connection: AsyncConnection, principal: Principal, incident_id: uuid.UUID
+) -> bool:
+    """Whether this principal may change this incident's owner."""
+    manageable = await visible_scope_ids(connection, principal, INCIDENT_ASSIGN_PERMISSION)
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT 1 FROM incidents i
+                LEFT JOIN environment_services es ON es.id = i.environment_service_id
+                JOIN projects p ON p.id = i.project_id
+                WHERE i.id = :id AND COALESCE(es.scope_id, p.scope_id) = ANY(:visible)
+                """
+            ),
+            {"id": incident_id, "visible": _sentinel(manageable)},
+        )
+    ).first()
+    return row is not None
+
+
+async def assignee_is_eligible(
+    connection: AsyncConnection, incident_id: uuid.UUID, identity_id: uuid.UUID
+) -> bool:
+    """Whether the proposed owner can actually see what they are being given.
+
+    Assigning an incident to someone with no access to its project would
+    produce an owner who cannot open the page, which is indistinguishable
+    from nobody owning it — except that it looks handled.
+    """
+    row = (
+        await connection.execute(
+            text(
+                """
+                WITH RECURSIVE target AS (
+                    SELECT COALESCE(es.scope_id, p.scope_id) AS scope_id
+                    FROM incidents i
+                    LEFT JOIN environment_services es ON es.id = i.environment_service_id
+                    JOIN projects p ON p.id = i.project_id
+                    WHERE i.id = :incident
+                ),
+                chain AS (
+                    SELECT id, parent_id FROM scopes
+                    WHERE id = (SELECT scope_id FROM target)
+                    UNION ALL
+                    SELECT s.id, s.parent_id FROM scopes s JOIN chain ON s.id = chain.parent_id
+                )
+                SELECT 1
+                FROM grants g
+                JOIN role_permissions rp ON rp.role_id = g.role_id
+                WHERE g.identity_id = :identity
+                  AND g.revoked_at IS NULL
+                  AND rp.permission_key = :permission
+                  AND g.scope_id IN (SELECT id FROM chain)
+                LIMIT 1
+                """
+            ),
+            {
+                "incident": incident_id,
+                "identity": identity_id,
+                "permission": INCIDENT_READ_PERMISSION,
+            },
         )
     ).first()
     return row is not None

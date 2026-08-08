@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from drake_api.alerting.model import protection_correlation_key
 from drake_api.protection.model import (
     ArtifactEvidence,
     DrillEvidence,
@@ -276,35 +277,50 @@ async def store_evaluation(
     )
 
 
-async def _binding_for_policy(
+async def _context_for_policy(
     connection: AsyncConnection, policy_id: uuid.UUID
 ) -> dict[str, Any] | None:
-    """A protection incident still needs an incident's shape.
+    """Where a protection incident for this policy belongs.
 
-    Incidents are anchored on a service binding, so a policy without one
-    cannot raise an incident yet — the protection verdict is still
-    recorded and shown, which is the part that matters.
+    A workload binding is used when one exists, because it makes the
+    incident appear on the service's own screens. But a backup policy
+    protects a STORE, not a pod, and plenty of policies have no service
+    binding at all — Sprint 9 recorded their verdicts and then declined to
+    raise an incident, which meant an overdue backup with no bound workload
+    was visible only to whoever thought to look.
+
+    So the project and environment the policy already names are enough. The
+    binding, when present, is extra context rather than a precondition.
     """
     row = (
         await connection.execute(
             text(
                 """
-                SELECT b.id, b.environment_service_id, b.project_id, b.environment_id,
+                SELECT b.id, b.environment_service_id, bp.project_id, bp.environment_id,
                        b.service_id, bp.display_name, bp.store_key
                 FROM backup_policies bp
-                JOIN projects p ON p.id = bp.project_id
-                JOIN environment_services es ON es.project_id = bp.project_id
-                    AND (bp.environment_id IS NULL OR es.environment_id = bp.environment_id)
-                JOIN service_workload_bindings b ON b.environment_service_id = es.id
-                WHERE bp.id = :id AND b.lifecycle = 'active'
-                ORDER BY b.created_at
+                LEFT JOIN environment_services es ON es.project_id = bp.project_id
+                    AND bp.environment_id IS NOT NULL
+                    AND es.environment_id = bp.environment_id
+                LEFT JOIN service_workload_bindings b
+                    ON b.environment_service_id = es.id AND b.lifecycle = 'active'
+                WHERE bp.id = :id
+                ORDER BY b.created_at NULLS LAST
                 LIMIT 1
                 """
             ),
             {"id": policy_id},
         )
     ).mappings().first()
-    return None if row is None else dict(row)
+    if row is None:
+        return None
+    context = dict(row)
+    if context.get("environment_id") is None:
+        # An incident needs an environment. A policy that names none has
+        # nothing to file against, and inventing one would put it in an
+        # environment it does not protect.
+        return None
+    return context
 
 
 async def sync_incident(
@@ -316,27 +332,27 @@ async def sync_incident(
 ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
     """Open or resolve a protection incident through the Sprint 6 lifecycle.
 
-    One incident per policy per active problem: while the problem persists,
-    each evaluation updates the existing incident rather than opening
-    another. When it clears, the incident resolves through the same
-    `auto_resolved` path health recoveries use.
+    One incident per policy per active problem, keyed on the policy itself
+    rather than on a workload: while the problem persists each evaluation
+    updates the existing incident, and when it clears the incident resolves
+    through the same auto-resolution path a health recovery uses.
     """
     problems = incident_reasons(verdict)
-    context = await _binding_for_policy(connection, policy_id)
+    context = await _context_for_policy(connection, policy_id)
     if context is None:
         return None, None
 
+    key = protection_correlation_key(policy_id)
     existing = (
         await connection.execute(
             text(
                 """
-                SELECT id, state, primary_reason FROM incidents
-                WHERE binding_id = :binding AND state IN ('open', 'acknowledged')
-                  AND primary_reason = ANY(:reasons)
+                SELECT id, state FROM incidents
+                WHERE correlation_key = :key AND state IN ('open', 'acknowledged')
                 FOR UPDATE
                 """
             ),
-            {"binding": context["id"], "reasons": sorted(INCIDENT_TITLES)},
+            {"key": key},
         )
     ).first()
 
@@ -353,7 +369,7 @@ async def sync_incident(
                 {"id": existing[0], "at": now},
             )
             return None, None
-        opened = await _open_incident(connection, context, primary, problems, now)
+        opened = await _open_incident(connection, context, primary, problems, now, key)
         return opened, None
 
     if existing is not None:
@@ -364,7 +380,7 @@ async def sync_incident(
                 """
                 UPDATE incidents
                 SET state = 'resolved', resolved_at = :at,
-                    resolution_source = 'health_recovered',
+                    resolution_source = 'protection_recovered',
                     version = version + 1, updated_at = now()
                 WHERE id = :id
                 """
@@ -390,6 +406,7 @@ async def _open_incident(
     primary: str,
     problems: list[str],
     now: datetime,
+    key: str,
 ) -> uuid.UUID | None:
     from sqlalchemy.exc import IntegrityError
 
@@ -401,15 +418,20 @@ async def _open_incident(
                 text(
                     """
                     INSERT INTO incidents
-                        (binding_id, environment_service_id, project_id, environment_id,
-                         service_id, state, severity, title, primary_reason,
-                         opening_reasons, binding_revision, opened_at, last_critical_at)
-                    VALUES (:binding, :es, :project, :environment, :service, 'open',
-                            :severity, :title, :primary, CAST(:reasons AS jsonb), 1, :at, :at)
+                        (source, correlation_key, binding_id, environment_service_id,
+                         project_id, environment_id, service_id, state, severity,
+                         title, primary_reason, opening_reasons, binding_revision,
+                         opened_at, last_critical_at)
+                    VALUES ('protection', :key, :binding, :es, :project, :environment,
+                            :service, 'open', :severity, :title, :primary,
+                            CAST(:reasons AS jsonb), 1, :at, :at)
                     RETURNING id
                     """
                 ),
                 {
+                    "key": key,
+                    # All three may be NULL: a policy protecting a store with
+                    # no bound workload still has a real problem.
                     "binding": context["id"],
                     "es": context["environment_service_id"],
                     "project": context["project_id"],
@@ -425,7 +447,7 @@ async def _open_incident(
         ).first()
     except IntegrityError:
         # The partial unique index on active incidents already holds one
-        # for this binding. Losing that race is success.
+        # for this policy. Losing that race is success.
         await savepoint.rollback()
         return None
     await savepoint.commit()

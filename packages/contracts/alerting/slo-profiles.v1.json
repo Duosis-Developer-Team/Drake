@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "note": "Server-controlled SLO measurement policy. Reviewed like code. No PromQL, no URL, no credential — SLI queries are named by curated template key and resolved through the Sprint 5 Query Broker.",
+  "burnProfiles": [
+    {
+      "key": "standard.30d.v1",
+      "windowSeconds": 2592000,
+      "description": "Multi-window multi-burn-rate for a 30-day objective. A level fires only when its long AND short windows both exceed the factor.",
+      "levels": [
+        { "name": "page_fast", "factor": 14.4, "longSeconds": 3600, "shortSeconds": 300, "severity": "critical" },
+        { "name": "page_slow", "factor": 6.0, "longSeconds": 21600, "shortSeconds": 1800, "severity": "critical" },
+        { "name": "ticket_fast", "factor": 3.0, "longSeconds": 86400, "shortSeconds": 7200, "severity": "warning" },
+        { "name": "ticket_slow", "factor": 1.0, "longSeconds": 259200, "shortSeconds": 21600, "severity": "warning" }
+      ]
+    }
+  ],
+  "latencyThresholds": [
+    { "key": "api.interactive.v1", "description": "User-facing API request", "p95Seconds": 0.5 },
+    { "key": "api.standard.v1", "description": "Standard backend API request", "p95Seconds": 1.0 },
+    { "key": "api.batch.v1", "description": "Background or batch endpoint", "p95Seconds": 5.0 }
+  ],
+  "defaults": {
+    "burnProfileKey": "standard.30d.v1",
+    "latencyThresholdKey": "api.standard.v1",
+    "availabilityTemplateKey": "service.error-ratio.v1",
+    "latencyTemplateKey": "service.latency-p95.v1"
+  },
+  "indicators": [
+    {
+      "indicator": "availability",
+      "sliTemplateKey": "service.error-ratio.v1",
+      "weightTemplateKey": "service.request-rate.v1",
+      "measurement": "Error ratio weighted by request rate. A minute serving ten thousand requests counts for more than a minute serving three."
+    },
+    {
+      "indicator": "latency",
+      "sliTemplateKey": "service.latency-p95.v1",
+      "measurement": "Count of p95 samples above the curated threshold. A sample count, not a request count — reported as such rather than presented as a request-level percentage."
+    }
+  ],
+  "reasonCodes": [
+    { "key": "planned_maintenance", "label": "Planned maintenance" },
+    { "key": "known_issue", "label": "Known issue, already tracked" },
+    { "key": "noisy_rule", "label": "Rule is noisy, fix in progress" },
+    { "key": "dependency_outage", "label": "Upstream dependency outage" },
+    { "key": "deployment_in_progress", "label": "Deployment in progress" }
+  ]
+}

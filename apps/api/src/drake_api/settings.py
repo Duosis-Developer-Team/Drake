@@ -74,6 +74,41 @@ class ProtectionConnector(BaseModel):
     stale_after_seconds: int = 129_600
 
 
+class AlertmanagerIntegration(BaseModel):
+    """One Alertmanager Drake accepts alerts from and can silence at.
+
+    The opaque webhook key in this map decides which project the alerts may
+    resolve into — a payload cannot name its own project. That is the whole
+    reason the registry exists rather than a `project` field being trusted.
+
+    Both credentials are REFERENCES, following the same `*_file` convention
+    as the Agent CA, the GitHub App key and the webhook signing material.
+    Neither becomes a settings value, a column, a log line, or a response.
+
+    `api_base_url` is where silences are created. It lives here and nowhere
+    else: a browser never talks to Alertmanager, and no payload or request
+    can point Drake at a different one.
+    """
+
+    project_key: str
+    display_name: str = ""
+    # Inbound: the bearer token Alertmanager presents on its webhook calls.
+    # Native Alertmanager signs nothing, so this is the authentication —
+    # pretending a body HMAC exists would be inventing a guarantee.
+    webhook_token_file: str = ""
+    # Outbound: Alertmanager API v2 base and its credential.
+    api_base_url: str = ""
+    api_token_file: str = ""
+    allow_private: bool = False
+    api_timeout_seconds: float = 10.0
+    # How long this Alertmanager may go quiet before its alert projection is
+    # treated as possibly out of date.
+    stale_after_seconds: int = 900
+    # Silence duration bounds. A silence is a pause, not an off switch.
+    min_silence_seconds: int = 300
+    max_silence_seconds: int = 86_400
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DRAKE_",
@@ -268,6 +303,25 @@ class Settings(BaseSettings):
     protection_evaluation_enabled: bool = False
     protection_evaluation_interval_seconds: float = 300.0
 
+    # --- Alerts, SLO and incident operations (Sprint 10) ------------
+    # Server-owned registry of Alertmanagers. Empty by default: a
+    # deployment that registers none accepts no alerts and can silence
+    # nothing.
+    alertmanager_integrations: dict[str, AlertmanagerIntegration] = {}
+    alertmanager_max_body_bytes: int = 1_048_576
+    # The silence worker performs the only outbound provider mutation in
+    # Drake. Off by default, like every other background actor here.
+    silence_worker_enabled: bool = False
+    silence_worker_interval_seconds: float = 30.0
+    silence_worker_batch_size: int = 20
+    silence_max_attempts: int = 5
+    # SLO evaluation runs through the Sprint 5 broker, so it is a query
+    # load against someone's Prometheus. Off unless deliberately enabled.
+    slo_evaluator_enabled: bool = False
+    slo_evaluator_interval_seconds: float = 300.0
+    slo_evaluator_batch_size: int = 25
+    slo_evaluator_lease_seconds: int = 300
+
     @property
     def effective_session_cookie_name(self) -> str:
         """`__Host-` wherever the cookie is actually Secure.
@@ -375,6 +429,27 @@ class Settings(BaseSettings):
                 )
         if self.webhook_max_attempts > 10:
             raise RuntimeError("webhook retry budget above 10 attempts is not bounded delivery")
+        for key, alertmanager in self.alertmanager_integrations.items():
+            # Plaintext to Alertmanager would put the API credential on the
+            # wire, and a silence request is a privileged operation.
+            if alertmanager.api_base_url and not alertmanager.api_base_url.startswith("https://"):
+                raise RuntimeError(
+                    f"alertmanager integration {key!r} must use https outside local/test"
+                )
+            # An unauthenticated webhook endpoint would let anyone forge
+            # alerts into a project, which is worse than having no alerts.
+            if not alertmanager.webhook_token_file:
+                raise RuntimeError(
+                    f"alertmanager integration {key!r} requires a webhook token reference "
+                    "outside local/test"
+                )
+            if alertmanager.max_silence_seconds > 604_800:
+                raise RuntimeError(
+                    f"alertmanager integration {key!r} allows a silence longer than a week; "
+                    "that is an off switch, not a pause"
+                )
+        if self.slo_evaluator_enabled and self.slo_evaluator_interval_seconds < 60:
+            raise RuntimeError("SLO evaluator interval below 60s is local/test only")
         if self.incident_runner_enabled and self.incident_runner_interval_seconds < 30:
             # A tighter loop than this is a load generator pointed at
             # someone's Prometheus, not monitoring.

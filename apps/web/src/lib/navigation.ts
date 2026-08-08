@@ -7,6 +7,7 @@ import {
   Bell,
   Boxes,
   FolderKanban,
+  Gauge,
   HeartPulse,
   LayoutDashboard,
   Puzzle,
@@ -14,6 +15,7 @@ import {
   Send,
   Shield,
   ShieldCheck,
+  Siren,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -61,6 +63,20 @@ export const NAVIGATION: NavItem[] = [
     icon: Bell,
     enabled: true,
     anyPermission: ["environment.view"],
+  },
+  {
+    label: "Alerts",
+    href: "/alerts",
+    icon: Siren,
+    enabled: true,
+    anyPermission: ["alert.view"],
+  },
+  {
+    label: "Service Objectives",
+    href: "/slo",
+    icon: Gauge,
+    enabled: true,
+    anyPermission: ["slo.view"],
   },
   {
     label: "Notification Routing",

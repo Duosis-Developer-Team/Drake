@@ -27,7 +27,10 @@ NOTIFIABLE_EVENTS: tuple[str, ...] = ("opened", "acknowledged", "auto_resolved")
 # opt-in: on a large team it is mostly noise.
 DEFAULT_EVENT_TYPES: tuple[str, ...] = ("opened", "auto_resolved")
 
-SEVERITIES: tuple[str, ...] = ("critical",)
+# `high` joins the vocabulary with Sprint 10's P2 incidents. Existing
+# policies are untouched — widening what may be subscribed to is not the
+# same as widening a subscription someone already wrote.
+SEVERITIES: tuple[str, ...] = ("critical", "high")
 
 DESTINATION_TYPES: tuple[str, ...] = ("in_app_user", "webhook")
 
@@ -80,7 +83,9 @@ class NotifiableEvent:
     project_key: str
     environment_key: str
     service_key: str
-    binding_id: uuid.UUID
+    #: Absent for an incident that is genuinely not about one workload —
+    #: a protection policy or a project-level alert.
+    binding_id: uuid.UUID | None
     namespace: str
     workload_name: str
     cluster_ref: str

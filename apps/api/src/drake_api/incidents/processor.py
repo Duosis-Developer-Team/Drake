@@ -519,3 +519,107 @@ async def acknowledge_incident(
         "version": updated[0],
         "acknowledged_at": updated[1].isoformat(),
     }
+
+
+async def assign_incident(
+    connection: AsyncConnection,
+    incident_id: uuid.UUID,
+    *,
+    assignee_id: uuid.UUID | None,
+    actor_identity_id: uuid.UUID,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Set or clear an incident's owner.
+
+    Assignment is not acknowledgement and not resolution: it says who is
+    looking, not that anyone has looked or that the problem stopped. The
+    three are separate columns and separate timeline events for exactly
+    that reason.
+
+    Idempotent the same way acknowledge is: repeating the call with the
+    version that already produced this owner returns the same answer rather
+    than a conflict, so a client that lost the response can safely retry. A
+    genuinely stale version is a conflict, because proceeding would discard
+    whatever the other writer did.
+    """
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT id, state, version, assigned_identity_id, assigned_at
+                FROM incidents WHERE id = :id FOR UPDATE
+                """
+            ),
+            {"id": incident_id},
+        )
+    ).first()
+    if row is None:
+        return {"outcome": "not_found"}
+
+    state, version, current = row[1], row[2], row[3]
+
+    if state == "resolved":
+        # Resolved incidents are immutable. Reassigning one would describe
+        # an ownership that never existed while the problem did.
+        return {"outcome": "conflict", "version": version}
+    if current == assignee_id:
+        # Already there. A safe retry — the caller holds either the pre- or
+        # post-assignment version — is not a second assignment.
+        if expected_version in (version, version - 1):
+            return {
+                "outcome": "unchanged",
+                "id": str(incident_id),
+                "state": state,
+                "version": version,
+                "assigned_at": row[4].isoformat() if row[4] else None,
+            }
+        return {"outcome": "conflict", "version": version}
+    if expected_version != version:
+        return {"outcome": "conflict", "version": version}
+
+    now = datetime.now(UTC)
+    updated = (
+        await connection.execute(
+            text(
+                """
+                UPDATE incidents
+                SET assigned_identity_id = :assignee,
+                    assigned_at = CASE
+                        WHEN CAST(:assignee AS uuid) IS NULL THEN NULL ELSE :at END,
+                    assigned_by = CASE
+                        WHEN CAST(:assignee AS uuid) IS NULL THEN NULL ELSE :actor END,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE id = :id AND version = :expected
+                RETURNING version, assigned_at
+                """
+            ),
+            {
+                "id": incident_id,
+                "assignee": assignee_id,
+                "actor": actor_identity_id,
+                "at": now,
+                "expected": expected_version,
+            },
+        )
+    ).first()
+    if updated is None:
+        return {"outcome": "conflict", "version": version}
+
+    await _add_event(
+        connection,
+        incident_id,
+        "assigned" if assignee_id is not None else "unassigned",
+        now,
+        # The identity id only. A timeline entry naming an email would
+        # publish it to everyone who can read the incident.
+        {"assignee_id": str(assignee_id)} if assignee_id is not None else {},
+        actor_identity_id=actor_identity_id,
+    )
+    return {
+        "outcome": "assigned" if assignee_id is not None else "unassigned",
+        "id": str(incident_id),
+        "state": state,
+        "version": updated[0],
+        "assigned_at": updated[1].isoformat() if updated[1] else None,
+    }

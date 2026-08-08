@@ -7,7 +7,7 @@ never checks a role NAME — authority always flows through role_permissions.
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-CATALOG_VERSION = 2
+CATALOG_VERSION = 3
 
 # Atomic permissions (from the product authority). ``auth.session`` powers
 # nothing by itself — every authenticated user can read their own /v1/me.
@@ -19,6 +19,8 @@ PERMISSIONS: dict[str, str] = {
     "tenant.view": "View tenant directory and details",
     "tenant.usage.export": "Export tenant usage data",
     "protection.view": "View backup/restore posture",
+    "alert.view": "View Alertmanager alerts and their projection",
+    "slo.view": "View service SLOs and error budgets",
     "incident.ack": "Acknowledge incidents",
     "incident.assign": "Assign incidents",
     "alert.silence": "Create alert silences",
@@ -45,6 +47,8 @@ ROLE_TEMPLATES: dict[str, tuple[str, list[str]]] = {
             "telemetry.query",
             "tenant.view",
             "protection.view",
+            "alert.view",
+            "slo.view",
             "incident.ack",
             "incident.assign",
             "alert.silence",
@@ -63,6 +67,8 @@ ROLE_TEMPLATES: dict[str, tuple[str, list[str]]] = {
             "cluster.view",
             "telemetry.query",
             "protection.view",
+            "alert.view",
+            "slo.view",
             "incident.ack",
             "incident.assign",
             "alert.silence",
@@ -78,12 +84,17 @@ ROLE_TEMPLATES: dict[str, tuple[str, list[str]]] = {
             "telemetry.query",
             "tenant.view",
             "protection.view",
+            "alert.view",
+            "slo.view",
             "incident.ack",
             "notification.view",
         ],
     ),
     "Developer": (
         "Read project operational signals",
+        # Deliberately NOT widened with `slo.view` or `alert.view`: adding a
+        # permission to a starter template silently grants it to everyone
+        # who already holds that role. New rights are granted explicitly.
         ["project.view", "environment.view", "telemetry.query"],
     ),
     "Billing/Operations Analyst": (

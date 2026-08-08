@@ -23,7 +23,7 @@ from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
 from drake_api.incidents import repository as incident_repo
-from drake_api.incidents.processor import acknowledge_incident
+from drake_api.incidents.processor import acknowledge_incident, assign_incident
 from drake_api.service_health import bindings as binding_repo
 from drake_api.settings import Settings
 
@@ -34,6 +34,19 @@ router = APIRouter(prefix="/v1", tags=["incidents"])
 # Uniform for anything the caller may not see. A 403 would confirm the
 # incident exists, which is the enumeration this whole layer prevents.
 _NOT_FOUND = "not found"
+
+
+class AssignRequest(BaseModel):
+    """A version and, optionally, an owner. No note, no title, no team name.
+
+    `assignee_identity_id: None` is how an incident is UNassigned — an
+    explicit null rather than a second endpoint, so the concurrency check
+    covers both directions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    assignee_identity_id: uuid.UUID | None = None
 
 
 class AcknowledgeRequest(BaseModel):
@@ -95,6 +108,8 @@ async def incident_filter_options(auth: AuthContext = Depends(require_auth)) -> 
     return {
         "states": sorted(incident_repo.INCIDENT_STATES),
         "severities": sorted(incident_repo.INCIDENT_SEVERITIES),
+        "sources": sorted(incident_repo.INCIDENT_SOURCES),
+        "priorities": sorted(incident_repo.INCIDENT_PRIORITIES),
         "opened_within": sorted(incident_repo.OPENED_WINDOWS),
     }
 
@@ -112,7 +127,8 @@ async def get_incident(
         # UI gating only. The mutation endpoint re-checks; hiding a button
         # has never been an authorization boundary.
         can_ack = await incident_repo.can_acknowledge(connection, auth.principal, incident_id)
-    return {**incident, "can_acknowledge": can_ack}
+        can_assign = await incident_repo.can_assign(connection, auth.principal, incident_id)
+    return {**incident, "can_acknowledge": can_ack, "can_assign": can_assign}
 
 
 @router.get("/incidents/{incident_id}/events")
@@ -242,3 +258,86 @@ async def health_transitions(
             connection, auth.principal, binding_id, limit=limit
         )
     return {"transitions": transitions or []}
+
+
+@router.post("/incidents/{incident_id}/assign")
+async def assign(
+    request: Request,
+    incident_id: uuid.UUID,
+    payload: AssignRequest,
+    auth: AuthContext = Depends(require_csrf),
+) -> dict[str, Any]:
+    """Set or clear who owns this incident.
+
+    Assignment is not acknowledgement and not resolution: it records who is
+    looking. A responder can be assigned an incident nobody has
+    acknowledged, and acknowledging one does not make the acknowledger its
+    owner.
+
+    The proposed owner must actually be able to see the incident. Assigning
+    to someone without access produces an owner who cannot open the page —
+    which looks handled and is not.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+
+    async with engine.connect() as connection:
+        # Read visibility first, then write authority. Both answer 404, so
+        # neither distinguishes "not yours" from "not there".
+        visible = await incident_repo.get_incident(connection, auth.principal, incident_id)
+        if visible is None:
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+        if not await incident_repo.can_assign(connection, auth.principal, incident_id):
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+        if payload.assignee_identity_id is not None and not await (
+            incident_repo.assignee_is_eligible(
+                connection, incident_id, payload.assignee_identity_id
+            )
+        ):
+            raise HTTPException(
+                status_code=422, detail="the proposed owner cannot see this incident"
+            )
+
+    async with engine.begin() as connection:
+        result = await assign_incident(
+            connection,
+            incident_id,
+            assignee_id=payload.assignee_identity_id,
+            actor_identity_id=uuid.UUID(auth.session.identity_id),
+            expected_version=payload.expected_version,
+        )
+
+    if result["outcome"] == "not_found":
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    if result["outcome"] == "conflict":
+        raise HTTPException(status_code=409, detail="the incident changed since it was read")
+
+    # Audited only when something actually changed. A safe retry is not a
+    # second assignment and does not deserve a second audit row.
+    if result["outcome"] in ("assigned", "unassigned"):
+        await record_audit_event(
+            engine,
+            AuditEventData(
+                actor_type="user",
+                actor_id=auth.session.identity_id,
+                action=f"incident.{result['outcome']}",
+                result="success",
+                target_type="incident",
+                target_id=str(incident_id),
+                correlation_id=correlation_id_var.get(),
+                metadata={
+                    "assignee_identity_id": (
+                        str(payload.assignee_identity_id)
+                        if payload.assignee_identity_id
+                        else None
+                    )
+                },
+            ),
+        )
+    return {
+        "id": result["id"],
+        "state": result["state"],
+        "version": result["version"],
+        "assigned_at": result["assigned_at"],
+        "changed": result["outcome"] in ("assigned", "unassigned"),
+    }
