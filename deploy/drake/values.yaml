@@ -83,17 +83,69 @@ migration:
     digest: ""
     tag: ""
   backoffLimit: 0
+  # Alembic applies DDL and waits on the database; it is short-lived and
+  # single-threaded, so it is sized well below the API rather than copied
+  # from it. The memory limit is what matters — a large migration builds
+  # its plan in memory — and the CPU request stays small so a release is
+  # not delayed waiting for a scheduling slot.
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
 
 networkPolicy:
   enabled: true
   # Which namespace and pods the ingress controller runs as. Required in
-  # production: without them a default-deny policy silently blocks the
-  # route that was just configured.
+  # `ingress` edge mode: without them a default-deny policy silently blocks
+  # the route that was just configured.
   ingressControllerNamespaceSelector: {}
   ingressControllerPodSelector: {}
-  # Egress targets the API genuinely needs, as explicit CIDRs.
-  databaseCIDR: ""
-  redisCIDR: ""
+
+  # Drake's datastores are selected by LABEL, not by address.
+  #
+  # A pod connecting to a Service is redirected to a backing pod address
+  # before egress policy is evaluated, and where that rewrite sits relative
+  # to policy evaluation is up to the CNI. An `ipBlock` holding a ClusterIP
+  # is therefore not portable, and a pod address is not stable across a
+  # reschedule. `podSelector` is the construct Kubernetes defines for
+  # in-cluster peers, and it survives both.
+  # Both datastores must live in Drake's own namespace. There is no
+  # cross-namespace option, and setting one is refused rather than ignored:
+  # a NetworkPolicy only governs pods in its own namespace, so allowing the
+  # egress side to point elsewhere would produce a rule that looks complete
+  # while the matching ingress policy could never be created. Reaching a
+  # datastore in another namespace needs a design that manages the policy
+  # on that side too; that is deliberately not in this chart.
+  database:
+    # Required. A `{}` selector would match every pod in the namespace, so
+    # the chart refuses to render on one.
+    podSelector:
+      matchLabels: {}
+    port: 5432
+  redis:
+    podSelector:
+      matchLabels: {}
+    port: 6379
+
+  # DNS, narrowed to the resolver itself.
+  #
+  # `namespaceSelector: {}` on port 53 would permit every pod in every
+  # namespace on that port, which is not "DNS only". Both selectors are
+  # required and are combined in ONE peer, so they intersect: the named
+  # pods in the named namespace, and nothing else.
+  dns:
+    namespaceSelector:
+      matchLabels: {}
+    podSelector:
+      matchLabels: {}
+    port: 53
+
+  # Narrow, explicit outbound HTTPS for the API — a telemetry provider, or
+  # GitHub when that integration is enabled. Empty by default because a
+  # default Drake talks to neither. Each entry is one CIDR and one port;
+  # 0.0.0.0/0 and ::/0 are refused.
+  apiExternalEgress: []
+  #  - cidr: 10.20.30.40/32
+  #    port: 443
 
 github:
   # Drake must be deployable before the real App exists. Disabled means

@@ -1,10 +1,16 @@
 {{- include "drake.validateAll" . }}
 {{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
 {{/*
-Default-deny stays. The ingress controller is admitted to exactly the two
-application ports — not to the namespace, and not pod-to-pod generally.
-Opening it wider to "make the route work" would undo the policy in the
-same change that configures the route.
+Default-deny stays, and each component is granted only what its own code
+actually opens.
+
+Datastore peers are selected by LABEL. A pod connecting to a Service is
+redirected to a backing pod address, and where that rewrite sits relative
+to policy evaluation depends on the CNI — so an `ipBlock` holding a
+ClusterIP is not portable, and a pod address is not stable across a
+reschedule. `podSelector` is what Kubernetes defines for in-cluster peers
+and survives both.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -18,6 +24,12 @@ spec:
   policyTypes: [Ingress, Egress]
 {{- if eq (include "drake.ingressMode" .) "true" }}
 ---
+{{/*
+The ingress controller is admitted to exactly the two application ports —
+not to the namespace, and not pod-to-pod generally. Opening it wider to
+"make the route work" would undo the policy in the same change that
+configures the route.
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -34,8 +46,8 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 14 }}
-          {{- with .Values.networkPolicy.ingressControllerPodSelector }}
+              {{- toYaml $np.ingressControllerNamespaceSelector | nindent 14 }}
+          {{- with $np.ingressControllerPodSelector }}
           podSelector:
             matchLabels:
               {{- toYaml . | nindent 14 }}
@@ -47,6 +59,11 @@ spec:
           port: {{ .Values.web.port }}
 {{- end }}
 ---
+{{/*
+The API opens DNS, PostgreSQL and Redis, plus whatever outbound HTTPS the
+operator has explicitly declared. Nothing else: a default Drake calls no
+third party, so it is given no route to one.
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -61,26 +78,153 @@ spec:
       app.kubernetes.io/component: api
   policyTypes: [Egress]
   egress:
-    # DNS, then exactly the two datastores. PostgreSQL and Redis are never
-    # reachable from outside the cluster and are not exposed by any Service
-    # this chart creates.
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
+    {{- include "drake.dnsEgress" . | nindent 4 }}
+    {{- include "drake.datastoreEgress" (dict "root" . "peer" $np.database) | nindent 4 }}
+    {{- include "drake.datastoreEgress" (dict "root" . "peer" $np.redis) | nindent 4 }}
+    {{- range $np.apiExternalEgress }}
     - to:
         - ipBlock:
-            cidr: {{ .Values.networkPolicy.databaseCIDR | quote }}
+            cidr: {{ .cidr | quote }}
       ports:
         - protocol: TCP
-          port: 5432
-    - to:
-        - ipBlock:
-            cidr: {{ .Values.networkPolicy.redisCIDR | quote }}
+          port: {{ .port }}
+    {{- end }}
+---
+{{/*
+Ingress to the datastores.
+
+`drake-default-deny` above selects EVERY pod in the namespace, including
+the PostgreSQL and Redis pods an operator deploys alongside Drake. Egress
+permission alone is therefore not enough: without a matching ingress rule
+the connection leaves the API and is dropped at the datastore. The chart
+already knows which pods these are, so it grants exactly the access it just
+asked for rather than leaving a policy the deployment silently depends on
+to be remembered by hand.
+*/}}
+{{/*
+The API's route to PostgreSQL is a NORMAL release resource, not a hook.
+
+That split matters. `before-hook-creation` deletes and recreates a hook
+policy at the start of every upgrade. If one policy carried both the API's
+and the migration's access, that window would revoke the API's database
+access on a running system while default-deny stayed in force — and the
+k3s test showed policy programming is asynchronous, so the gap is real
+rather than theoretical. As a release resource this is left in place
+through the pre-upgrade hook phase and is removed by `helm uninstall` like
+anything else.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-database-api-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $np.database.podSelector.matchLabels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+              app.kubernetes.io/component: api
       ports:
         - protocol: TCP
-          port: 6379
+          port: {{ $np.database.port }}
+---
+{{/*
+The migration's route to PostgreSQL is a hook, because it must exist
+before the pre-install hook Pod runs. It admits ONLY the migration: a hook
+that also admitted the API is what would make an upgrade interrupt live
+traffic.
+
+Helm does not track hook resources as release resources, so this survives
+`helm uninstall`. The runbook names it and gives the cleanup command.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-database-migration-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $np.database.podSelector.matchLabels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+              app.kubernetes.io/component: migration
+      ports:
+        - protocol: TCP
+          port: {{ $np.database.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-redis-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $np.redis.podSelector.matchLabels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # Only the API. The migration reads no Redis key.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: {{ $np.redis.port }}
+---
+{{/*
+The migration Job runs `alembic upgrade head`, which opens exactly one
+connection: PostgreSQL. `alembic/env.py` reads DRAKE_DATABASE_URL and
+nothing else, so the Job is granted no Redis access.
+
+This policy is annotated as a pre-install/pre-upgrade hook with a weight
+lower than the Job's, so it EXISTS BEFORE the migration Pod starts. A plain
+release resource would be created only after the pre-install hook has
+already run, and under enforcement the migration would be denied DNS and
+PostgreSQL on a clean install.
+
+Helm does not track hook resources as release resources, so this survives
+`helm uninstall`. The runbook names it and gives the cleanup command.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-migration-egress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: migration
+  policyTypes: [Egress]
+  egress:
+    {{- include "drake.dnsEgress" . | nindent 4 }}
+    {{- include "drake.datastoreEgress" (dict "root" . "peer" $np.database) | nindent 4 }}
 {{- end }}

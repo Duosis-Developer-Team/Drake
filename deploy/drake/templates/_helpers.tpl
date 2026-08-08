@@ -181,6 +181,43 @@ imagePullSecrets:
 {{- end -}}
 {{- end -}}
 
+{{/* DNS, narrowed to the resolver pods themselves.
+
+     Both selectors sit in ONE peer entry so they intersect rather than
+     union: the named pods, in the named namespace. Two separate entries
+     would permit every pod in that namespace AND those pods everywhere. */}}
+{{- define "drake.dnsEgress" -}}
+{{- $dns := .Values.networkPolicy.dns -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          {{- toYaml $dns.namespaceSelector.matchLabels | nindent 10 }}
+      podSelector:
+        matchLabels:
+          {{- toYaml $dns.podSelector.matchLabels | nindent 10 }}
+  ports:
+    - protocol: UDP
+      port: {{ $dns.port }}
+    - protocol: TCP
+      port: {{ $dns.port }}
+{{- end -}}
+
+{{/* One in-cluster datastore peer, selected by label.
+
+     No namespaceSelector is emitted, which is what confines the peer to
+     Drake's own namespace — the only place this chart can also create the
+     matching ingress policy. */}}
+{{- define "drake.datastoreEgress" -}}
+{{- $peer := .peer -}}
+- to:
+    - podSelector:
+        matchLabels:
+          {{- toYaml $peer.podSelector.matchLabels | nindent 10 }}
+  ports:
+    - protocol: TCP
+      port: {{ $peer.port }}
+{{- end -}}
+
 {{/* Default-deny stays; the ingress controller is admitted explicitly. */}}
 {{- define "drake.validateNetworkPolicy" -}}
 {{- if eq (include "drake.production" .) "true" -}}
@@ -190,15 +227,54 @@ imagePullSecrets:
   {{- if and (eq (include "drake.ingressMode" .) "true") (not .Values.networkPolicy.ingressControllerNamespaceSelector) -}}
     {{- fail "networkPolicy.ingressControllerNamespaceSelector is required: default-deny would otherwise block the route just configured" -}}
   {{- end -}}
-  {{- if not .Values.networkPolicy.databaseCIDR -}}
-    {{- fail "networkPolicy.databaseCIDR is required in production" -}}
+  {{- range $name := list "database" "redis" -}}
+    {{- $peer := index $.Values.networkPolicy $name -}}
+    {{- if not $peer -}}
+      {{- fail (printf "networkPolicy.%s is required in production" $name) -}}
+    {{- end -}}
+    {{- if not (($peer.podSelector).matchLabels) -}}
+      {{- fail (printf "networkPolicy.%s.podSelector.matchLabels is required: an empty selector would match every pod in the namespace" $name) -}}
+    {{- end -}}
+    {{- if not $peer.port -}}
+      {{- fail (printf "networkPolicy.%s.port is required in production" $name) -}}
+    {{- end -}}
   {{- end -}}
-  {{- if not .Values.networkPolicy.redisCIDR -}}
-    {{- fail "networkPolicy.redisCIDR is required in production" -}}
+  {{- range $name := list "database" "redis" -}}
+    {{- $peer := index $.Values.networkPolicy $name -}}
+    {{/* hasKey, not truthiness: an empty `namespaceSelector: {}` left in a
+         stale overlay is exactly the case that must not pass silently. */}}
+    {{- if hasKey $peer "namespaceSelector" -}}
+      {{- fail (printf "networkPolicy.%s.namespaceSelector is not supported and must be removed: a NetworkPolicy governs only its own namespace, so the datastore must live in Drake's namespace" $name) -}}
+    {{- end -}}
   {{- end -}}
-  {{- range $cidr := list .Values.networkPolicy.databaseCIDR .Values.networkPolicy.redisCIDR -}}
-    {{- if or (eq $cidr "0.0.0.0/0") (eq $cidr "::/0") -}}
-      {{- fail "egress CIDRs must be specific; 0.0.0.0/0 defeats the policy" -}}
+  {{- $dns := .Values.networkPolicy.dns -}}
+  {{- if not (($dns.namespaceSelector).matchLabels) -}}
+    {{- fail "networkPolicy.dns.namespaceSelector.matchLabels is required: an empty selector permits port 53 on every pod in the cluster" -}}
+  {{- end -}}
+  {{- if not (($dns.podSelector).matchLabels) -}}
+    {{- fail "networkPolicy.dns.podSelector.matchLabels is required: an empty selector permits port 53 on every pod in the DNS namespace" -}}
+  {{- end -}}
+  {{- if not $dns.port -}}
+    {{- fail "networkPolicy.dns.port is required in production" -}}
+  {{- end -}}
+  {{- if ne (int $dns.port) 53 -}}
+    {{- fail (printf "networkPolicy.dns.port must be 53; %v would open a different port under the name \"DNS\"" $dns.port) -}}
+  {{- end -}}
+  {{- if eq (toYaml .Values.networkPolicy.database.podSelector.matchLabels) (toYaml .Values.networkPolicy.redis.podSelector.matchLabels) -}}
+    {{- fail "networkPolicy.database and networkPolicy.redis must select different pods; identical selectors grant each the other's access" -}}
+  {{- end -}}
+  {{- range $entry := .Values.networkPolicy.apiExternalEgress -}}
+    {{- if not $entry.cidr -}}
+      {{- fail "every networkPolicy.apiExternalEgress entry needs a cidr" -}}
+    {{- end -}}
+    {{- if or (eq $entry.cidr "0.0.0.0/0") (eq $entry.cidr "::/0") -}}
+      {{- fail "networkPolicy.apiExternalEgress entries must be specific; 0.0.0.0/0 defeats the policy" -}}
+    {{- end -}}
+    {{- if not $entry.port -}}
+      {{- fail "every networkPolicy.apiExternalEgress entry needs a port" -}}
+    {{- end -}}
+    {{- if ne (int $entry.port) 443 -}}
+      {{- fail (printf "networkPolicy.apiExternalEgress is for outbound HTTPS; port %v is not 443" $entry.port) -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}

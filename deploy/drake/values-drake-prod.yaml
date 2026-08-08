@@ -8,9 +8,8 @@
 # (run 31246802303). Both were built from that one commit, so the API, the
 # web app and the migration cannot drift apart.
 #
-# One thing an operator must still fill in before this deploys:
-#   networkPolicy.databaseCIDR / redisCIDR — the actual addresses of
-#   PostgreSQL and Redis.
+# Nothing is left blank: the datastores are selected by label rather than
+# by address, so this file is complete as committed.
 #
 # Everything else here is deliberate and should not be changed casually.
 
@@ -88,13 +87,39 @@ migration:
   backoffLimit: 0
 
 networkPolicy:
-  # The target cluster runs Flannel and policy enforcement has not been
-  # demonstrated there. These policies are correct if something enforces
-  # them; they must not be counted as a control until that is verified.
+  # The target cluster runs Flannel with no policy controller, so nothing
+  # enforces these today. They are declarative intent and must not be
+  # counted as a control until an enforcing CNI is present. They are still
+  # written correctly, so that the day one appears, Drake keeps working.
   enabled: true
-  # REPLACE with the real datastore addresses.
-  databaseCIDR: ""
-  redisCIDR: ""
+  # Selected by label, so a rescheduled datastore pod keeps its access and
+  # no ClusterIP or pod address is ever hard-coded. These labels must match
+  # the datastore pods deployed alongside Drake.
+  database:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: drake-postgres
+    port: 5432
+  redis:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: drake-redis
+    port: 6379
+  # The cluster's resolver, verified read-only on the target cluster:
+  # CoreDNS pods carry k8s-app=kube-dns in kube-system, and the namespace
+  # carries the standard kubernetes.io/metadata.name label.
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+    port: 53
+  # Drake calls no third party in this deployment: telemetry connectors are
+  # unset and the GitHub integration is disabled. Add narrow entries here
+  # when either is switched on.
+  apiExternalEgress: []
 
 # Drake deploys before the GitHub App exists. The integration UI reports
 # NOT_CONFIGURED, no token is minted, and no provider call is made.

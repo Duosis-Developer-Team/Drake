@@ -41,8 +41,27 @@ networkPolicy:
     kubernetes.io/metadata.name: ingress-nginx
   ingressControllerPodSelector:
     app.kubernetes.io/name: ingress-nginx
-  databaseCIDR: 10.0.10.5/32
-  redisCIDR: 10.0.10.6/32
+  database:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: drake-postgres
+    port: 5432
+  redis:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: drake-redis
+    port: 6379
+  # The cluster's resolver, verified read-only on the target cluster:
+  # CoreDNS pods carry k8s-app=kube-dns in kube-system, and the namespace
+  # carries the standard kubernetes.io/metadata.name label.
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+    port: 53
 
 github:
   enabled: false
