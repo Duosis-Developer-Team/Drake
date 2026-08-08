@@ -526,3 +526,30 @@ def test_no_placeholder_digest_survives_into_a_render() -> None:
 )
 def test_production_values_fail_closed(override: str, because: str) -> None:
     assert refuses_prod("--set", override), because
+
+
+def test_production_images_are_real_digests_from_one_commit() -> None:
+    """API, web and migration must not drift apart across releases.
+
+    The migration runs `alembic upgrade head` from the API image, so a
+    migration image older or newer than the API it precedes would apply a
+    schema the running code does not expect.
+    """
+    values = yaml.safe_load(PROD_VALUES.read_text())
+    api = values["api"]["image"]["digest"]
+    web = values["web"]["image"]["digest"]
+    migration = values["migration"]["image"]["digest"]
+
+    for name, digest in (("api", api), ("web", web), ("migration", migration)):
+        assert digest.startswith("sha256:"), name
+        assert len(digest) == len("sha256:") + 64, name
+        # A placeholder is a run of one repeated hex character.
+        body = digest.removeprefix("sha256:")
+        assert len(set(body)) > 4, f"{name} digest looks like a placeholder"
+
+    assert migration == api, "the migration must run the exact code that is about to serve"
+    assert web != api, "web and api are different images"
+
+    # And a tag must never accompany a digest in production.
+    for component in ("api", "web", "migration"):
+        assert not values[component]["image"].get("tag"), component
