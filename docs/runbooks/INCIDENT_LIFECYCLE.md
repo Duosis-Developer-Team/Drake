@@ -102,6 +102,14 @@ which the SRE/Operator, Platform Admin, Project Owner and Platform Owner
 templates already carry. An incident outside your scope answers 404 — the
 same answer an unknown id gives.
 
+## Telling people about it
+
+An incident that nobody hears about is a log line. Routing incident
+lifecycle events to an in-app inbox or an operator-configured webhook is
+covered in [NOTIFICATION_ROUTING.md](NOTIFICATION_ROUTING.md). Notification
+delivery is an outbox: it runs after the incident has committed and can
+never change it.
+
 ## Running the evaluator
 
 Incidents are produced by a periodic runner, never as a side effect of a

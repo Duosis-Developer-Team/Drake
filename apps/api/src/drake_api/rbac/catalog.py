@@ -7,7 +7,7 @@ never checks a role NAME — authority always flows through role_permissions.
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
 
 # Atomic permissions (from the product authority). ``auth.session`` powers
 # nothing by itself — every authenticated user can read their own /v1/me.
@@ -22,6 +22,8 @@ PERMISSIONS: dict[str, str] = {
     "incident.ack": "Acknowledge incidents",
     "incident.assign": "Assign incidents",
     "alert.silence": "Create alert silences",
+    "notification.view": "View notification policies and delivery audit",
+    "notification.manage": "Manage notification policies and destinations",
     "integration.manage": "Manage integrations and connectors",
     "template.manage": "Manage metric/dashboard templates",
     "rbac.manage": "Manage roles, grants and group mappings",
@@ -46,6 +48,8 @@ ROLE_TEMPLATES: dict[str, tuple[str, list[str]]] = {
             "incident.ack",
             "incident.assign",
             "alert.silence",
+            "notification.view",
+            "notification.manage",
             "integration.manage",
             "template.manage",
             "audit.view",
@@ -62,6 +66,8 @@ ROLE_TEMPLATES: dict[str, tuple[str, list[str]]] = {
             "incident.ack",
             "incident.assign",
             "alert.silence",
+            "notification.view",
+            "notification.manage",
         ],
     ),
     "Project Owner": (
@@ -73,6 +79,7 @@ ROLE_TEMPLATES: dict[str, tuple[str, list[str]]] = {
             "tenant.view",
             "protection.view",
             "incident.ack",
+            "notification.view",
         ],
     ),
     "Developer": (

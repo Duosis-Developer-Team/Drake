@@ -33,6 +33,8 @@ from drake_api.incidents.router import router as incidents_router
 from drake_api.incidents.runner import EvaluationRunner
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
+from drake_api.notifications.router import router as notifications_router
+from drake_api.notifications.worker import NotificationWorker
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
 from drake_api.service_health.cache import HealthCache
@@ -59,9 +61,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     evaluator = getattr(app.state, "incident_runner", None)
     if evaluator is not None:
         await evaluator.start()
+    # Planning and delivery each have their own flag; the worker exists
+    # only if at least one of them is on.
+    notifier = getattr(app.state, "notification_worker", None)
+    if notifier is not None:
+        await notifier.start()
     try:
         yield
     finally:
+        if notifier is not None:
+            await notifier.stop()
         if evaluator is not None:
             await evaluator.stop()
         if worker is not None:
@@ -78,6 +87,7 @@ def create_app(
     oidc_client: OidcClient | None = None,
     telemetry_transport: "httpx.AsyncBaseTransport | None" = None,
     github_transport: "httpx.AsyncBaseTransport | None" = None,
+    webhook_transport: "httpx.AsyncBaseTransport | None" = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast on insecure identity configuration outside local/test —
@@ -171,6 +181,16 @@ def create_app(
         if settings.incident_runner_enabled
         else None
     )
+    app.state.notification_worker = (
+        NotificationWorker(
+            get_engine(settings),
+            settings,
+            app.state.telemetry_redis,
+            transport=webhook_transport,
+        )
+        if (settings.notification_planner_enabled or settings.webhook_worker_enabled)
+        else None
+    )
 
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -186,6 +206,7 @@ def create_app(
     app.include_router(github_webhook_router)
     app.include_router(service_health_router)
     app.include_router(incidents_router)
+    app.include_router(notifications_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):
         # Explicit local/test opt-in only; validate_runtime_security refuses

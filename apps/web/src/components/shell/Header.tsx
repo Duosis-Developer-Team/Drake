@@ -6,6 +6,7 @@ import { Suspense } from "react";
 
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { IdentityMenu } from "@/components/shell/IdentityMenu";
+import { NotificationBell } from "@/components/shell/NotificationBell";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { TimeRangeControl } from "@/components/telemetry/TimeRangeControl";
 
@@ -44,6 +45,7 @@ export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             <TimeRangeControl />
           </Suspense>
         ) : null}
+        <NotificationBell />
         <ThemeToggle />
         <IdentityMenu />
       </div>

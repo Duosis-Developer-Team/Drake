@@ -149,6 +149,15 @@ async def reset_rbac_state(engine: AsyncEngine) -> None:
             # identities with RESTRICT — cleared first when they exist.
             # Sprint 5A GitHub tables reference scopes/installations with
             # RESTRICT — cleared before anything they point at.
+            # Sprint 7 notification tables reference incident events,
+            # identities and projects with RESTRICT, so they clear first.
+            "webhook_delivery_attempts",
+            "webhook_deliveries",
+            "in_app_notifications",
+            "notification_event_plans",
+            "notification_policy_destinations",
+            "notification_destinations",
+            "notification_policies",
             # Sprint 6 incident tables reference bindings and the catalog
             # with RESTRICT, so they clear before the binding they describe.
             "incident_events",

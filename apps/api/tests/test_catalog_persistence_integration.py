@@ -43,6 +43,15 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         # Sprint 4 agent/inventory tables reference clusters with RESTRICT;
         # clear them first whenever they exist (order-independent resets).
         for table in (
+            # Sprint 7 notification tables reference incident events,
+            # identities and projects with RESTRICT, so they clear first.
+            "webhook_delivery_attempts",
+            "webhook_deliveries",
+            "in_app_notifications",
+            "notification_event_plans",
+            "notification_policy_destinations",
+            "notification_destinations",
+            "notification_policies",
             # Sprint 6 incident tables reference bindings and the catalog
             # with RESTRICT, so they clear before the binding they describe.
             "incident_events",

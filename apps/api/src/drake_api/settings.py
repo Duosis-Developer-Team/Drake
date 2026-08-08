@@ -27,6 +27,28 @@ class TelemetryConnector(BaseModel):
     allow_private: bool = False
 
 
+class WebhookDestination(BaseModel):
+    """Operator-owned webhook target, resolved from an opaque key.
+
+    Modelled on `TelemetryConnector` for the same reason: the endpoint must
+    never come from a request. A policy references a KEY; this map is the
+    only place a URL exists, and it lives in settings (environment or
+    external-secret backed), never in the database or an API response.
+
+    `signing_secret_file` is a REFERENCE, following the same `*_file`
+    convention as the Agent CA and GitHub App material. The secret is read
+    at send time and never becomes a settings value, a column, a log line,
+    or part of any response.
+    """
+
+    url: str
+    display_name: str = ""
+    allow_private: bool = False
+    signing_secret_file: str = ""
+    timeout_seconds: float = 10.0
+    payload_schema_version: int = 1
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DRAKE_",
@@ -171,6 +193,35 @@ class Settings(BaseSettings):
     # rather than blocking evaluation until someone notices.
     incident_runner_lease_seconds: int = 120
 
+    # --- Notification routing and delivery (Sprint 7) ---------------
+    # Both actors are OFF by default. A control plane that starts calling
+    # external endpoints because a default said so is a control plane
+    # nobody can safely upgrade.
+    notification_planner_enabled: bool = False
+    notification_planner_interval_seconds: float = 60.0
+    notification_planner_batch_size: int = 50
+    webhook_worker_enabled: bool = False
+    webhook_worker_interval_seconds: float = 30.0
+    webhook_worker_batch_size: int = 20
+    # Two ceilings: how much Drake sends at once, and how much it sends to
+    # any single receiver. The second one stops one slow endpoint from
+    # consuming the whole worker.
+    webhook_worker_concurrency: int = 4
+    webhook_destination_concurrency: int = 2
+    # Bounded retry. Six attempts over at most a day, then dead-letter —
+    # retrying forever is how a queue becomes a permanent backlog.
+    webhook_max_attempts: int = 6
+    webhook_max_elapsed_seconds: int = 86_400
+    webhook_claim_seconds: int = 120
+    webhook_max_response_bytes: int = 64 * 1024
+    # Server-owned registry: opaque key → operator-controlled endpoint.
+    # Empty by default, so a deployment that configures nothing sends
+    # nothing.
+    notification_webhooks: dict[str, WebhookDestination] = {}
+    # Where a notification's incident link points. Empty means links are
+    # emitted as relative paths only.
+    public_app_base_url: str = ""
+
     @property
     def effective_session_cookie_name(self) -> str:
         """`__Host-` wherever the cookie is actually Secure.
@@ -269,6 +320,15 @@ class Settings(BaseSettings):
                 raise RuntimeError("GitHub API base URL must be https outside local/test")
         if self.github_jwt_ttl_seconds > 600:
             raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
+        for key, destination in self.notification_webhooks.items():
+            # Plaintext to an external receiver would put a signed incident
+            # payload on the wire in the clear.
+            if not destination.url.startswith("https://"):
+                raise RuntimeError(
+                    f"notification webhook {key!r} must use https outside local/test"
+                )
+        if self.webhook_max_attempts > 10:
+            raise RuntimeError("webhook retry budget above 10 attempts is not bounded delivery")
         if self.incident_runner_enabled and self.incident_runner_interval_seconds < 30:
             # A tighter loop than this is a load generator pointed at
             # someone's Prometheus, not monitoring.
