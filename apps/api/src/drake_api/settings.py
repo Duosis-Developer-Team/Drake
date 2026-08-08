@@ -6,6 +6,7 @@ localhost and no credential values are embedded in code.
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -61,6 +62,20 @@ class Settings(BaseSettings):
 
     ready_check_timeout_seconds: float = 1.5
 
+    # --- Authentication mode ---------------------------------------------
+    #
+    # `oidc`  — the identity provider is the only way in.
+    # `local` — Drake verifies an email and password itself.
+    #
+    # Exactly one is active. They are not additive: running both at once
+    # would mean a second, quieter way to obtain a session, which is not
+    # something an operator should be able to switch on by accident.
+    auth_mode: Literal["oidc", "local"] = "oidc"
+
+    # Local-mode login throttling, per (client address, normalized email).
+    local_login_max_attempts: int = 10
+    local_login_window_seconds: int = 300
+
     # --- OIDC / sessions (values come from the environment; never secrets in code) ---
     oidc_issuer: str = ""
     oidc_client_id: str = ""
@@ -69,6 +84,9 @@ class Settings(BaseSettings):
     oidc_client_secret: str = ""
     # Where the provider redirects back to (this API's callback endpoint).
     oidc_redirect_url: str = "http://127.0.0.1:8000/v1/auth/callback"
+    # The base name. Over HTTPS the effective name carries the `__Host-`
+    # prefix (see `effective_session_cookie_name`), which browsers only
+    # honour when the cookie is Secure, host-only and path `/`.
     session_cookie_name: str = "drake_session"
     session_ttl_seconds: int = 8 * 60 * 60
     login_state_ttl_seconds: int = 600
@@ -139,6 +157,22 @@ class Settings(BaseSettings):
     github_recovery_batch_size: int = 50
 
     @property
+    def effective_session_cookie_name(self) -> str:
+        """`__Host-` wherever the cookie is actually Secure.
+
+        The prefix is a browser-enforced promise: host-only, path `/`, and
+        Secure. Applying it over plaintext would simply make the cookie be
+        rejected, so local and test keep the bare name.
+        """
+        if self.is_production_like:
+            return f"__Host-{self.session_cookie_name}"
+        return self.session_cookie_name
+
+    @property
+    def local_auth_enabled(self) -> bool:
+        return self.auth_mode == "local"
+
+    @property
     def is_production_like(self) -> bool:
         return self.env not in ("local", "test")
 
@@ -173,14 +207,27 @@ class Settings(BaseSettings):
                 "single-origin deployments need no CORS; cors_origins must be empty "
                 "outside local/test"
             )
-        if self.oidc_redirect_url != oidc_redirect_url(origin):
-            raise RuntimeError(
-                "oidc_redirect_url must be the canonical public origin's callback path"
-            )
+        # The OIDC contract is enforced only when OIDC is the way in. In
+        # local mode an unset issuer is the honest state, not a
+        # misconfiguration, and demanding one would force an operator to
+        # invent values for a provider that is deliberately not in use.
+        # Plaintext is rejected first, whatever the mode: a http:// issuer
+        # left in configuration is a mistake worth naming precisely, and
+        # reporting "missing client id" instead would send the operator
+        # looking in the wrong place.
         if self.oidc_issuer.startswith("http://"):
             raise RuntimeError("plaintext OIDC issuer is not allowed outside local/test")
-        if self.oidc_redirect_url.startswith("http://"):
-            raise RuntimeError("plaintext OIDC redirect URL is not allowed outside local/test")
+        if self.auth_mode == "oidc":
+            if self.oidc_redirect_url.startswith("http://"):
+                raise RuntimeError("plaintext OIDC redirect URL is not allowed outside local/test")
+            if self.oidc_redirect_url != oidc_redirect_url(origin):
+                raise RuntimeError(
+                    "oidc_redirect_url must be the canonical public origin's callback path"
+                )
+            if not self.oidc_issuer:
+                raise RuntimeError("auth_mode=oidc requires an OIDC issuer outside local/test")
+            if not self.oidc_client_id:
+                raise RuntimeError("auth_mode=oidc requires an OIDC client id outside local/test")
         if self.internal_metrics_enabled:
             raise RuntimeError(
                 "internal metrics cannot be enabled on the public API outside local/test"

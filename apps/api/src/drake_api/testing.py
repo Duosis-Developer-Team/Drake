@@ -32,6 +32,11 @@ def make_settings(**overrides: object) -> Settings:
         # proving whatever it was actually written for.
         values.setdefault("public_origin", TEST_PUBLIC_ORIGIN)
         values.setdefault("trusted_proxy_count", 1)
+        # A production-shaped harness defaults to a usable OIDC identity
+        # configuration, so a test asserting some other guard is not
+        # tripped by the absence of one it does not care about.
+        values.setdefault("oidc_issuer", "https://login.example.test/v2.0")
+        values.setdefault("oidc_client_id", "drake-test-client")
         values.setdefault("allowed_web_origins", [TEST_PUBLIC_ORIGIN])
         values.setdefault("oidc_redirect_url", f"{TEST_PUBLIC_ORIGIN}/v1/auth/callback")
     return Settings(**values)  # type: ignore[arg-type]

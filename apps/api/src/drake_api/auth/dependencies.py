@@ -39,7 +39,7 @@ def get_session_store(request: Request) -> SessionStore:
 
 async def optional_auth(request: Request) -> AuthContext | None:
     settings: Settings = request.app.state.settings
-    session_id = request.cookies.get(settings.session_cookie_name)
+    session_id = request.cookies.get(settings.effective_session_cookie_name)
     if not session_id:
         return None
     store = get_session_store(request)

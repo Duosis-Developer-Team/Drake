@@ -29,13 +29,16 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className | quote }}
-  {{- if .Values.ingress.tls.enabled }}
+  ingressClassName: {{ if .Values.edge.dedicatedController.enabled }}{{ .Values.edge.dedicatedController.ingressClassName | quote }}{{ else }}{{ .Values.ingress.className | quote }}{{ end }}
+  {{- if and .Values.ingress.tls.enabled (eq .Values.ingress.tls.mode "secret") }}
   tls:
     - hosts:
         - {{ $host | quote }}
       secretName: {{ .Values.ingress.tls.secretName | quote }}
   {{- end }}
+  {{/* tls.mode=controller-default renders no `tls:` block on purpose: the
+       controller then serves its own default certificate. That certificate
+       is self-signed, so browsers warn — a stated, accepted limitation. */}}
   rules:
     - host: {{ $host | quote }}
       http:

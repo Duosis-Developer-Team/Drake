@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { AuthGate } from "@/components/auth/AuthGate";
 import { AppShell } from "@/components/shell/AppShell";
 
 import "./globals.css";
@@ -31,7 +32,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        <AppShell>{children}</AppShell>
+        <AuthGate>
+          <AppShell>{children}</AppShell>
+        </AuthGate>
       </body>
     </html>
   );
