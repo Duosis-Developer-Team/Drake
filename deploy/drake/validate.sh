@@ -193,3 +193,92 @@ if job["spec"].get("backoffLimit") != 0:
 
 print(f"[policy] drake chart OK ({len(docs)} documents checked)")
 PY
+
+# --- The drake-prod release ------------------------------------------------
+#
+# Same chart, first deployment: no public route yet. The application must be
+# provable on its ClusterIP Services before a hostname, a certificate and an
+# identity provider are attached to it.
+echo "[policy] drake-prod production values"
+
+# The committed values deliberately leave image digests and datastore CIDRs
+# blank. Rendering them as-is must FAIL rather than produce a release that
+# would install with placeholders.
+if helm template drake . -f values-drake-prod.yaml --namespace drake-prod >/dev/null 2>&1; then
+  fail "values-drake-prod.yaml rendered with unfilled operator inputs"
+fi
+
+FILL=(--set "publicOrigin=https://drake.example.test"
+      --set "api.image.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      --set "web.image.digest=sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      --set "migration.image.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      --set "networkPolicy.databaseCIDR=10.0.10.5/32"
+      --set "networkPolicy.redisCIDR=10.0.10.6/32")
+
+for override in \
+  "edge.mode=bogus" \
+  "ingress.enabled=true" \
+  "publicOrigin=" \
+  "api.image.digest=" \
+  "api.existingSecret="
+do
+  if helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
+      "${FILL[@]}" --set "$override" >/dev/null 2>&1; then
+    fail "drake-prod rendered with '$override' but should have refused"
+  fi
+done
+
+PROD_RENDERED="$(mktemp)"
+helm template drake . -f values-drake-prod.yaml --namespace drake-prod "${FILL[@]}" > "$PROD_RENDERED"
+
+python3 - "$PROD_RENDERED" <<'PY'
+import sys, yaml
+
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+kinds: dict[str, list] = {}
+for d in docs:
+    kinds.setdefault(d["kind"], []).append(d)
+
+def die(message: str) -> None:
+    print(f"  {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+if "Ingress" in kinds:
+    die("the first deployment must publish no public route")
+if "Secret" in kinds:
+    die("the chart must never create a Secret")
+for svc in kinds.get("Service", []):
+    if svc["spec"]["type"] != "ClusterIP":
+        die(f"{svc['metadata']['name']} must stay ClusterIP")
+    if any("nodePort" in p for p in svc["spec"]["ports"]):
+        die(f"{svc['metadata']['name']} must not allocate a NodePort")
+
+for d in docs:
+    if d["metadata"].get("namespace") != "drake-prod":
+        die(f"{d['kind']}/{d['metadata']['name']} is not namespaced to drake-prod")
+
+names = {d["metadata"]["name"] for d in docs}
+for expected in ("drake-api", "drake-web", "drake-migrate"):
+    if expected not in names:
+        die(f"expected workload {expected} is missing")
+
+for doc in kinds.get("Deployment", []) + kinds.get("Job", []):
+    pod = doc["spec"]["template"]["spec"]
+    if pod.get("imagePullSecrets") != [{"name": "drake-ghcr"}]:
+        die(f"{doc['metadata']['name']} cannot pull private images")
+    for container in pod["containers"]:
+        image = container["image"]
+        if ":latest" in image or "@sha256:" not in image:
+            die(f"{doc['metadata']['name']} image must be digest-pinned and never :latest")
+
+text = yaml.safe_dump_all(docs).lower()
+for marker in ("cloudflare", "cloudflared", "tunnel"):
+    if marker in text:
+        die(f"the standard deployment must contain no {marker} resource")
+for marker in ("begin private key", "ghs_"):
+    if marker in text:
+        die(f"rendered manifests must not contain {marker}")
+
+print(f"[policy] drake-prod release OK ({len(docs)} documents checked)")
+PY
+rm -f "$PROD_RENDERED"

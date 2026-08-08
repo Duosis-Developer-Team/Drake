@@ -49,6 +49,14 @@ jobs:
 
       - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3
 
+      - name: resolve the registry namespace
+        id: ns
+        # GHCR repository names must be lowercase, and the GitHub owner
+        # ("Duosis-Developer-Team") is not. Interpolating the owner
+        # verbatim produces an invalid tag and the build fails before it
+        # pushes anything.
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
       - name: log in to GHCR
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
         with:
@@ -71,7 +79,7 @@ jobs:
           push: true
           # Immutable by construction: the tag is the commit SHA and is
           # never moved. `latest` is not produced at all.
-          tags: ghcr.io/${{ github.repository_owner }}/drake-${{ matrix.component }}:${{ github.sha }}
+          tags: ghcr.io/${{ steps.ns.outputs.owner }}/drake-${{ matrix.component }}:${{ github.sha }}
           provenance: false
 
       - name: record the release mapping
@@ -82,7 +90,7 @@ jobs:
             echo "| field | value |"
             echo "|---|---|"
             echo "| source commit | \`${{ github.sha }}\` |"
-            echo "| image | \`ghcr.io/${{ github.repository_owner }}/drake-${{ matrix.component }}\` |"
+            echo "| image | \`ghcr.io/${{ steps.ns.outputs.owner }}/drake-${{ matrix.component }}\` |"
             echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
             echo
             echo "Pin this digest in \`values-production.yaml\`; never a tag."

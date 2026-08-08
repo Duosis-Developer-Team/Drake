@@ -19,6 +19,52 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/part-of: drake
 {{- end -}}
 
+{{/* Every resource carries its namespace explicitly. Under GitOps the
+     rendered YAML is the reviewed artifact, and "which namespace does this
+     land in" must be answerable from the file, not from the command line
+     someone happened to run. */}}
+{{- define "drake.namespace" -}}
+{{- .Values.namespaceOverride | default .Release.Namespace -}}
+{{- end -}}
+
+{{/* imagePullSecrets, or nothing at all.
+
+     Emitting `imagePullSecrets:` with an empty list is not harmless: it is
+     a valid field with a meaningless value, and it hides the difference
+     between "no pull secret is needed" and "someone forgot to set one".
+     This define produces no output when the list is empty, so the pod spec
+     simply does not carry the key. */}}
+{{- define "drake.imagePullSecrets" -}}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+{{- range . }}
+  - name: {{ . }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* Which edge mode is active. */}}
+{{- define "drake.internalMode" -}}
+{{- eq (.Values.edge).mode "internal" -}}
+{{- end -}}
+
+{{- define "drake.ingressMode" -}}
+{{- eq (.Values.edge).mode "ingress" -}}
+{{- end -}}
+
+{{/* Exactly one edge mode, and every input that mode needs. */}}
+{{- define "drake.validateEdge" -}}
+{{- $mode := (.Values.edge).mode | default "" -}}
+{{- if not (has $mode (list "internal" "ingress")) -}}
+  {{- fail (printf "edge.mode must be \"internal\" or \"ingress\", got %q" $mode) -}}
+{{- end -}}
+{{- if eq $mode "internal" -}}
+  {{- if .Values.ingress.enabled -}}
+    {{- fail "edge.mode=internal publishes no public route; set edge.mode=ingress to enable one" -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The public host, taken from the ingress and cross-checked against the
      public origin. Two sources of truth for one hostname is how a redirect
      ends up pointing somewhere the certificate does not cover. */}}
@@ -32,12 +78,18 @@ app.kubernetes.io/part-of: drake
   {{- if not (hasPrefix "https://" $origin) -}}
     {{- fail "publicOrigin must use https in production" -}}
   {{- end -}}
-  {{- if not $host -}}
-    {{- fail "ingress.host is required in production" -}}
-  {{- end -}}
   {{- $originHost := trimPrefix "https://" $origin | trimSuffix "/" -}}
-  {{- if ne $originHost $host -}}
-    {{- fail (printf "publicOrigin host (%s) and ingress.host (%s) must be the same origin" $originHost $host) -}}
+  {{- if eq (include "drake.ingressMode" .) "true" -}}
+    {{- if not $host -}}
+      {{- fail "ingress.host is required in production" -}}
+    {{- end -}}
+    {{- if ne $originHost $host -}}
+      {{- fail (printf "publicOrigin host (%s) and ingress.host (%s) must be the same origin" $originHost $host) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $host = $originHost -}}
+  {{- if contains ":" $host -}}
+    {{- fail (printf "publicOrigin %q carries a port; a Kubernetes Ingress host is port-less, so the port would be silently dropped. Publish Drake on 443." $origin) -}}
   {{- end -}}
   {{- if contains "*" $host -}}
     {{- fail "ingress.host must be an exact host, not a wildcard" -}}
@@ -53,12 +105,16 @@ app.kubernetes.io/part-of: drake
      manifest. */}}
 {{- define "drake.publicHost" -}}
 {{- include "drake.validateHost" . -}}
+{{- if eq (include "drake.production" .) "true" -}}
+{{- trimPrefix "https://" (.Values.publicOrigin | default "") | trimSuffix "/" -}}
+{{- else -}}
 {{- .Values.ingress.host | default "" -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Production requires an Ingress with a class and TLS. */}}
 {{- define "drake.validateIngress" -}}
-{{- if eq (include "drake.production" .) "true" -}}
+{{- if and (eq (include "drake.production" .) "true") (eq (include "drake.ingressMode" .) "true") -}}
   {{- if not .Values.ingress.enabled -}}
     {{- fail "ingress.enabled must be true in production: Drake is served from one public origin" -}}
   {{- end -}}
@@ -131,7 +187,7 @@ app.kubernetes.io/part-of: drake
   {{- if not .Values.networkPolicy.enabled -}}
     {{- fail "networkPolicy.enabled must be true in production" -}}
   {{- end -}}
-  {{- if not .Values.networkPolicy.ingressControllerNamespaceSelector -}}
+  {{- if and (eq (include "drake.ingressMode" .) "true") (not .Values.networkPolicy.ingressControllerNamespaceSelector) -}}
     {{- fail "networkPolicy.ingressControllerNamespaceSelector is required: default-deny would otherwise block the route just configured" -}}
   {{- end -}}
   {{- if not .Values.networkPolicy.databaseCIDR -}}
@@ -154,6 +210,7 @@ app.kubernetes.io/part-of: drake
 {{- end -}}
 
 {{- define "drake.validateAll" -}}
+{{- include "drake.validateEdge" . -}}
 {{- include "drake.validateIngress" . -}}
 {{- include "drake.validateSecrets" . -}}
 {{- include "drake.validateNetworkPolicy" . -}}

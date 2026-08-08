@@ -4,6 +4,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "drake.name" . }}-api
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
@@ -19,6 +20,7 @@ spec:
         app.kubernetes.io/name: {{ include "drake.name" . }}
         app.kubernetes.io/component: api
     spec:
+      {{- include "drake.imagePullSecrets" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -98,6 +100,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "drake.name" . }}-web
+  namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
     app.kubernetes.io/component: web
@@ -113,6 +116,7 @@ spec:
         app.kubernetes.io/name: {{ include "drake.name" . }}
         app.kubernetes.io/component: web
     spec:
+      {{- include "drake.imagePullSecrets" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

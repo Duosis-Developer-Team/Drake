@@ -343,3 +343,186 @@ def test_both_deployments_declare_readiness() -> None:
         container = doc["spec"]["template"]["spec"]["containers"][0]
         assert container["readinessProbe"]["httpGet"]["port"] == "http", doc["metadata"]["name"]
         assert container["livenessProbe"]["httpGet"]["port"] == "http", doc["metadata"]["name"]
+
+
+# --- private images, explicit namespace, and the internal edge (Sprint 5D)
+
+
+PROD_VALUES = CHART / "values-drake-prod.yaml"
+
+# The real production values leave digests and datastore CIDRs for the
+# operator, so tests supply shape-correct stand-ins to exercise the rest.
+_PROD_FILL = (
+    "--set",
+    "publicOrigin=https://drake.example.test",
+    "--set",
+    "api.image.digest=sha256:" + "1" * 64,
+    "--set",
+    "web.image.digest=sha256:" + "2" * 64,
+    "--set",
+    "migration.image.digest=sha256:" + "1" * 64,
+    "--set",
+    "networkPolicy.databaseCIDR=10.0.10.5/32",
+    "--set",
+    "networkPolicy.redisCIDR=10.0.10.6/32",
+)
+
+
+def render_prod(*overrides: str) -> list[dict[str, Any]]:
+    result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
+        [
+            str(HELM),
+            "template",
+            "drake",
+            str(CHART),
+            "-f",
+            str(PROD_VALUES),
+            "--namespace",
+            "drake-prod",
+            *_PROD_FILL,
+            *overrides,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+
+
+def refuses_prod(*overrides: str) -> bool:
+    result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
+        [
+            str(HELM),
+            "template",
+            "drake",
+            str(CHART),
+            "-f",
+            str(PROD_VALUES),
+            "--namespace",
+            "drake-prod",
+            *_PROD_FILL,
+            *overrides,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode != 0
+
+
+def test_the_first_deployment_publishes_no_public_route() -> None:
+    """Prove the application runs before attaching a name and a certificate."""
+    docs = render_prod()
+    kinds = {d["kind"] for d in docs}
+    assert "Ingress" not in kinds
+    for service in by_kind(docs, "Service"):
+        assert service["spec"]["type"] == "ClusterIP", service["metadata"]["name"]
+        for port in service["spec"]["ports"]:
+            assert "nodePort" not in port
+    assert "LoadBalancer" not in {s["spec"]["type"] for s in by_kind(docs, "Service")}
+
+
+def test_internal_mode_still_demands_a_real_identity() -> None:
+    """No public route does not mean no origin: cookies and OIDC need one."""
+    assert refuses_prod("--set", "publicOrigin="), "an unpublished deployment still has an identity"
+    api = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    env = {
+        e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert env["DRAKE_PUBLIC_ORIGIN"] == "https://drake.example.test"
+    assert env["DRAKE_OIDC_REDIRECT_URL"] == "https://drake.example.test/v1/auth/callback"
+
+
+def test_the_expected_production_workloads_and_nothing_else() -> None:
+    docs = render_prod()
+    assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Deployment")) == [
+        "drake-api",
+        "drake-web",
+    ]
+    assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
+    assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
+        "drake-api",
+        "drake-web",
+    ]
+
+
+def test_every_workload_can_pull_private_images() -> None:
+    docs = render_prod()
+    workloads = by_kind(docs, "Deployment") + by_kind(docs, "Job")
+    assert len(workloads) == 3, "api, web, migration"
+    for doc in workloads:
+        pod = doc["spec"]["template"]["spec"]
+        assert pod["imagePullSecrets"] == [{"name": "drake-ghcr"}], doc["metadata"]["name"]
+        for container in pod["containers"]:
+            assert ":latest" not in container["image"], doc["metadata"]["name"]
+            assert "@sha256:" in container["image"], doc["metadata"]["name"]
+
+
+def test_an_unset_pull_secret_emits_no_key_at_all() -> None:
+    """`imagePullSecrets: []` would hide 'nobody set one' as 'none needed'."""
+    docs = render_prod("--set", "imagePullSecrets=null")
+    for doc in by_kind(docs, "Deployment") + by_kind(docs, "Job"):
+        assert "imagePullSecrets" not in doc["spec"]["template"]["spec"], doc["metadata"]["name"]
+
+
+def test_every_resource_names_its_namespace() -> None:
+    """Under review, which namespace this lands in must be in the file."""
+    for doc in render_prod():
+        assert doc["metadata"]["namespace"] == "drake-prod", doc["metadata"]["name"]
+
+
+def test_probes_match_endpoints_the_api_actually_serves() -> None:
+    api = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    container = api["spec"]["template"]["spec"]["containers"][0]
+    assert container["livenessProbe"]["httpGet"]["path"] == "/health/live"
+    assert container["readinessProbe"]["httpGet"]["path"] == "/health/ready"
+
+
+def test_the_chart_creates_no_secret_and_references_one_by_name() -> None:
+    docs = render_prod()
+    assert not by_kind(docs, "Secret")
+    api = next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-api")
+    refs = [
+        source["secretRef"]["name"]
+        for source in api["spec"]["template"]["spec"]["containers"][0]["envFrom"]
+    ]
+    assert refs == ["drake-api-config"]
+
+
+def test_no_placeholder_digest_survives_into_a_render() -> None:
+    """The committed values leave digests empty on purpose."""
+    result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
+        [
+            str(HELM),
+            "template",
+            "drake",
+            str(CHART),
+            "-f",
+            str(PROD_VALUES),
+            "--namespace",
+            "drake-prod",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0, "an unfilled production values file must not render"
+
+
+@pytest.mark.parametrize(
+    ("override", "because"),
+    [
+        ("edge.mode=bogus", "an unknown edge mode must not silently pick one"),
+        ("ingress.enabled=true", "internal mode must not also publish a route"),
+        ("api.image.digest=", "an unpinned image can change under you"),
+        ("api.image.tag=latest", "latest is never deployable"),
+        ("networkPolicy.databaseCIDR=0.0.0.0/0", "an open egress CIDR defeats the policy"),
+        ("api.existingSecret=", "secrets are referenced, never inlined"),
+    ],
+)
+def test_production_values_fail_closed(override: str, because: str) -> None:
+    assert refuses_prod("--set", override), because
