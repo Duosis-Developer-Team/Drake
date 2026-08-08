@@ -249,9 +249,7 @@ async def _plan_destination(
         return "in_app"
 
     delivery_id = uuid.uuid4()
-    key = idempotency_key(
-        event.incident_event_id, "webhook", str(destination["destination_key"])
-    )
+    key = idempotency_key(event.incident_event_id, "webhook", str(destination["destination_key"]))
     await connection.execute(
         text(
             """
@@ -321,9 +319,7 @@ async def plan_event(
     return in_app, webhooks, failed
 
 
-async def plan_pending(
-    engine: AsyncEngine, *, limit: int = 50, base_url: str = ""
-) -> PlanReport:
+async def plan_pending(engine: AsyncEngine, *, limit: int = 50, base_url: str = "") -> PlanReport:
     """One bounded planning pass over unplanned incident events."""
     report = PlanReport()
     async with engine.connect() as connection:

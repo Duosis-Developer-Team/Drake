@@ -376,9 +376,7 @@ async def test_one_healthy_reading_starts_recovery_without_resolving(
 
     result = await process_evaluation(
         engine,
-        evaluation(
-            world, computed_at=BASE + timedelta(minutes=2), status="healthy", reasons=()
-        ),
+        evaluation(world, computed_at=BASE + timedelta(minutes=2), status="healthy", reasons=()),
     )
     assert result.incident_resolved is None
     assert result.consecutive_healthy == 1
@@ -793,9 +791,7 @@ async def test_a_failed_transaction_leaves_no_partial_incident(
 
     monkeypatch.setattr(processor_module, "_add_event", exploding)
     with pytest.raises(RuntimeError):
-        await process_evaluation(
-            engine, evaluation(world, computed_at=BASE + timedelta(minutes=1))
-        )
+        await process_evaluation(engine, evaluation(world, computed_at=BASE + timedelta(minutes=1)))
 
     assert await incidents_for(engine, world["binding_id"]) == []
     # The state write rolled back too, so the streak did not silently move.

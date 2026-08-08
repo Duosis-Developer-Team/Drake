@@ -154,9 +154,7 @@ def _row(row: Any, workflow_base_url: str) -> dict[str, Any]:
     }
 
 
-async def _scopes(
-    connection: AsyncConnection, principal: Principal
-) -> dict[str, list[uuid.UUID]]:
+async def _scopes(connection: AsyncConnection, principal: Principal) -> dict[str, list[uuid.UUID]]:
     return {
         "service_scopes": _sentinel(
             await visible_scope_ids(connection, principal, SERVICE_READ_PERMISSION)
@@ -235,9 +233,7 @@ async def list_deployments(
     ).all()
 
     page = rows[:limit]
-    next_cursor = (
-        encode_cursor(page[-1][21], page[-1][0]) if len(rows) > limit and page else None
-    )
+    next_cursor = encode_cursor(page[-1][21], page[-1][0]) if len(rows) > limit and page else None
     total = (
         await connection.execute(
             text(

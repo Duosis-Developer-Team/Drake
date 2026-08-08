@@ -173,9 +173,7 @@ class HealthCache:
 # Statuses that stale evidence cannot support. A workload that was failing
 # when last observed is not improved by the observation being old, so a bad
 # verdict survives the downgrade and a good one does not.
-_DOWNGRADED = frozenset(
-    {HealthStatus.HEALTHY, HealthStatus.UNKNOWN, HealthStatus.NOT_CONFIGURED}
-)
+_DOWNGRADED = frozenset({HealthStatus.HEALTHY, HealthStatus.UNKNOWN, HealthStatus.NOT_CONFIGURED})
 
 
 def as_last_good(payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:

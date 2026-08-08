@@ -378,9 +378,7 @@ async def binding_health(
     disagreeing about the same service.
     """
     context = await _visible_context(request, auth, binding_id)
-    health = await _orchestrator(request).current_health(
-        auth.principal, context, refresh=refresh
-    )
+    health = await _orchestrator(request).current_health(auth.principal, context, refresh=refresh)
     return {**health, "binding": _binding_summary(context)}
 
 
@@ -524,9 +522,7 @@ async def binding_form_options(
         **options,
         "datasource": datasource,
         "presets": describe_presets(),
-        "policies": [
-            {"key": key, "title": get_policy(key).title} for key in policy_keys()
-        ],
+        "policies": [{"key": key, "title": get_policy(key).title} for key in policy_keys()],
         "ranges": sorted(SERIES_RANGES),
     }
 

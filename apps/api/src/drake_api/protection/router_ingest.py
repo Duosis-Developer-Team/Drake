@@ -68,9 +68,7 @@ async def ingest_event(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="invalid_payload")
 
     try:
-        result = await ingest.apply_event(
-            engine, connector_key, envelope, now=datetime.now(UTC)
-        )
+        result = await ingest.apply_event(engine, connector_key, envelope, now=datetime.now(UTC))
     except ingest.IngestRejectedError as error:
         raise HTTPException(status_code=422, detail=error.code) from error
 

@@ -58,9 +58,7 @@ def make_ca() -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
         # CA key usage. Getting these wrong would make the negative tests
         # below pass for the wrong reason — every certificate would be
         # rejected, including the correct one.
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
-        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .add_extension(
             x509.KeyUsage(
                 digital_signature=False,
@@ -96,9 +94,7 @@ def make_leaf(
         # The SAN is the whole point: verification is against this name,
         # not against the address the socket connected to.
         .add_extension(x509.SubjectAlternativeName([x509.DNSName(san)]), critical=False)
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
-        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
             critical=False,
@@ -133,9 +129,7 @@ class TlsReceiver:
     async def start(self, cert_file: Any, key_file: Any) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(str(cert_file), str(key_file))
-        self._server = await asyncio.start_server(
-            self._handle, "127.0.0.1", 0, ssl=context
-        )
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0, ssl=context)
         self.port = self._server.sockets[0].getsockname()[1]
 
     async def stop(self) -> None:
@@ -143,9 +137,7 @@ class TlsReceiver:
             self._server.close()
             await self._server.wait_closed()
 
-    async def _handle(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             head = await reader.readuntil(b"\r\n\r\n")
         except (asyncio.IncompleteReadError, ConnectionError, ssl.SSLError):
@@ -276,9 +268,7 @@ async def test_a_certificate_for_the_wrong_name_fails_verification(
     assert receiver.requests == []
 
 
-async def test_an_untrusted_issuer_fails_verification(
-    ca: dict[str, Any], tmp_path: Any
-) -> None:
+async def test_an_untrusted_issuer_fails_verification(ca: dict[str, Any], tmp_path: Any) -> None:
     """A certificate for the right name from the wrong CA is still refused."""
     other_key, other_cert = make_ca()
     leaf_key, leaf_cert = make_leaf(other_key, other_cert, PINNED_HOSTNAME)

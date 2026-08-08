@@ -579,9 +579,7 @@ async def test_delivery_attempts_are_not_found_out_of_scope(engine: AsyncEngine)
         await harness.login(outsider, "user-b-only")
         await grant(engine, harness, "user-b-only", "Beta Notify 2", "project", "beta")
         hidden = await outsider.get(f"/v1/notification-deliveries/{delivery_id}/attempts")
-        missing = await outsider.get(
-            f"/v1/notification-deliveries/{uuidlib.uuid4()}/attempts"
-        )
+        missing = await outsider.get(f"/v1/notification-deliveries/{uuidlib.uuid4()}/attempts")
     assert hidden.status_code == 404
     assert missing.status_code == 404
     assert hidden.json()["error"]["message"] == missing.json()["error"]["message"]

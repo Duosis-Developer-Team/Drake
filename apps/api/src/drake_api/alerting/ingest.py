@@ -97,9 +97,7 @@ class DeliveryOutcome:
 # ---------------------------------------------------------------------------
 
 
-def resolve_integration(
-    settings: Settings, key: str | None
-) -> tuple[str, AlertmanagerIntegration]:
+def resolve_integration(settings: Settings, key: str | None) -> tuple[str, AlertmanagerIntegration]:
     """Server-side resolution. A payload never names its own integration."""
     if not key:
         raise IngestRejectedError("integration_missing")
@@ -465,9 +463,7 @@ async def _upsert_alert(
                 "ends_at": alert.ends_at,
                 "now": now,
                 "source_at": alert.source_event_at,
-                "resolved_at": (
-                    alert.ends_at if alert.status == AlertStatus.RESOLVED else None
-                ),
+                "resolved_at": (alert.ends_at if alert.status == AlertStatus.RESOLVED else None),
                 "labels": labels_json,
                 "annotations": annotations_json,
                 "occurrence": occurrence,
@@ -518,9 +514,7 @@ async def _record_alert_event(
                 "at": alert.source_event_at,
                 "key": alert.dedupe_key(occurrence),
                 "delivery": delivery_id,
-                "detail": json.dumps(
-                    {"severity": alert.severity, "priority": alert.priority}
-                ),
+                "detail": json.dumps({"severity": alert.severity, "priority": alert.priority}),
             },
         )
     except IntegrityError:
@@ -859,9 +853,7 @@ async def apply_delivery(
 
         for alert in delivery.alerts:
             binding = await resolve_catalog(connection, project_id, project_key, alert.labels)
-            alert_outcome = AlertOutcome(
-                fingerprint=alert.fingerprint, mapping_state=binding.state
-            )
+            alert_outcome = AlertOutcome(fingerprint=alert.fingerprint, mapping_state=binding.state)
             row, reopened, occurrence = await _upsert_alert(
                 connection,
                 integration_id,

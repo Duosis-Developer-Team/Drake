@@ -104,9 +104,7 @@ def build_matchers(
             continue
         value = alert_labels.get(label)
         if value:
-            matchers.append(
-                {"name": label, "value": value, "isRegex": False, "isEqual": True}
-            )
+            matchers.append({"name": label, "value": value, "isRegex": False, "isEqual": True})
         if len(matchers) >= MAX_MATCHERS:
             break
     return matchers
@@ -140,9 +138,7 @@ def idempotency_key(
     return hashlib.sha256(material.encode()).hexdigest()[:48]
 
 
-def _destination(
-    integration: AlertmanagerIntegration, path: str
-) -> WebhookDestination:
+def _destination(integration: AlertmanagerIntegration, path: str) -> WebhookDestination:
     """Reuse the webhook SSRF boundary for the Alertmanager API.
 
     Same validation, same pinning, same refusal to follow redirects. A
@@ -552,8 +548,10 @@ async def process_pending(
                 resolver=resolver,
                 ssl_context=ssl_context,
             )
-            state = "expired" if attempt.outcome == "active" else _retry_state(
-                attempt.outcome, item["attempts"], max_attempts, "cancel_pending"
+            state = (
+                "expired"
+                if attempt.outcome == "active"
+                else _retry_state(attempt.outcome, item["attempts"], max_attempts, "cancel_pending")
             )
         else:
             attempt = await create_silence(
@@ -570,8 +568,10 @@ async def process_pending(
                 resolver=resolver,
                 ssl_context=ssl_context,
             )
-            state = "active" if attempt.outcome == "active" else _retry_state(
-                attempt.outcome, item["attempts"], max_attempts, "pending"
+            state = (
+                "active"
+                if attempt.outcome == "active"
+                else _retry_state(attempt.outcome, item["attempts"], max_attempts, "pending")
             )
 
         if state in ("pending", "cancel_pending"):

@@ -198,9 +198,7 @@ async def _apply_run(
     started_at = _timestamp(data.get("started_at"), "invalid_started_at")
     completed_at = _optional_timestamp(data.get("completed_at"), "invalid_completed_at")
     duration = (
-        int((completed_at - started_at).total_seconds())
-        if completed_at is not None
-        else None
+        int((completed_at - started_at).total_seconds()) if completed_at is not None else None
     )
     result = await connection.execute(
         text(
@@ -536,9 +534,7 @@ async def apply_event(
         outcome = await _HANDLERS[event_type](connection, connector_key, data, event_at)
         if outcome != "applied":
             await connection.execute(
-                text(
-                    "UPDATE protection_ingest_events SET outcome = :outcome WHERE event_id = :id"
-                ),
+                text("UPDATE protection_ingest_events SET outcome = :outcome WHERE event_id = :id"),
                 {"outcome": outcome, "id": event_id},
             )
     return IngestResult(outcome)
@@ -659,9 +655,7 @@ async def complete_snapshot(engine: AsyncEngine, snapshot_id: uuid.UUID) -> bool
     return result.first() is not None
 
 
-async def reporter_seen_at(
-    connection: AsyncConnection, connector_key: str
-) -> datetime | None:
+async def reporter_seen_at(connection: AsyncConnection, connector_key: str) -> datetime | None:
     """When this connector last successfully reported anything."""
     return (
         await connection.execute(

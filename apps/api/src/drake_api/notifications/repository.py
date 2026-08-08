@@ -380,9 +380,7 @@ async def create_destination(
         if not await _identity_covers_project(connection, identity_id, project_scope):
             # Refused, not silently dropped: an operator picking a user who
             # cannot see the project should be told, not quietly ignored.
-            raise NotificationError(
-                "recipient_out_of_scope", "that user cannot see this project"
-            )
+            raise NotificationError("recipient_out_of_scope", "that user cannot see this project")
         destination_key = None
     elif destination_type == "webhook":
         if destination_key is None or destination_key not in settings.notification_webhooks:

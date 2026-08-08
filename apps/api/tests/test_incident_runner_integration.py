@@ -87,9 +87,7 @@ class FakeOrchestrator:
             self.in_flight -= 1
 
 
-async def test_the_lease_admits_one_cycle_at_a_time(
-    engine: AsyncEngine, redis: Any
-) -> None:
+async def test_the_lease_admits_one_cycle_at_a_time(engine: AsyncEngine, redis: Any) -> None:
     """Two replicas ticking together must not both evaluate.
 
     Doubling provider load for no extra information is the mild version;
@@ -123,9 +121,7 @@ async def test_the_lease_is_released_so_the_next_cycle_can_run(
     assert await redis.get(LEASE_KEY) is None
 
 
-async def test_one_failing_binding_does_not_stop_the_cycle(
-    engine: AsyncEngine, redis: Any
-) -> None:
+async def test_one_failing_binding_does_not_stop_the_cycle(engine: AsyncEngine, redis: Any) -> None:
     worlds = [await make_world(engine) for _ in range(3)]
     orchestrator = FakeOrchestrator()
     orchestrator.fail_for = {worlds[1]["binding_id"]}
@@ -170,9 +166,7 @@ async def test_the_batch_size_bounds_one_cycle(engine: AsyncEngine, redis: Any) 
     assert orchestrator.calls == 2
 
 
-async def test_only_active_resolved_bindings_are_evaluated(
-    engine: AsyncEngine, redis: Any
-) -> None:
+async def test_only_active_resolved_bindings_are_evaluated(engine: AsyncEngine, redis: Any) -> None:
     """A disabled or unresolved binding has nothing to say, so nothing is asked."""
     active = await make_world(engine)
     disabled = await make_world(engine)
@@ -192,9 +186,7 @@ async def test_only_active_resolved_bindings_are_evaluated(
 
     assert report.evaluated == 1
     async with engine.connect() as connection:
-        rows = (
-            await connection.execute(text("SELECT binding_id FROM service_health_state"))
-        ).all()
+        rows = (await connection.execute(text("SELECT binding_id FROM service_health_state"))).all()
     assert [row[0] for row in rows] == [active["binding_id"]]
 
 

@@ -198,9 +198,7 @@ def upgrade() -> None:
             nullable=True,
         ),
         *_timestamps(),
-        sa.CheckConstraint(
-            "destination_type IN ('in_app_user', 'webhook')", name="ck_nd_type"
-        ),
+        sa.CheckConstraint("destination_type IN ('in_app_user', 'webhook')", name="ck_nd_type"),
         sa.CheckConstraint("length(display_name) BETWEEN 1 AND 120", name="ck_nd_name_length"),
         # Each type carries exactly its own field and not the other's, so a
         # webhook row can never smuggle a recipient and vice versa.
@@ -280,7 +278,9 @@ def upgrade() -> None:
         sa.Column("attempts", sa.Integer(), nullable=False, server_default=sa.text("1")),
         # Bounded, server-owned classification. Never an exception message.
         sa.Column("error_code", sa.Text(), nullable=True),
-        sa.Column("matched_destinations", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "matched_destinations", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
         sa.CheckConstraint("state IN ('planned', 'failed')", name="ck_nep_state"),
         sa.CheckConstraint(
             "error_code IS NULL OR error_code ~ '^[a-z0-9_]{1,64}$'", name="ck_nep_error_code"
@@ -458,8 +458,10 @@ def upgrade() -> None:
             "last_error_code IS NULL OR last_error_code ~ '^[a-z0-9_]{1,64}$'",
             name="ck_webhook_error_code",
         ),
-        sa.CheckConstraint("(state = 'delivered') = (delivered_at IS NOT NULL)",
-                           name="ck_webhook_delivered_consistency"),
+        sa.CheckConstraint(
+            "(state = 'delivered') = (delivered_at IS NOT NULL)",
+            name="ck_webhook_delivered_consistency",
+        ),
         sa.CheckConstraint("pg_column_size(payload) <= 16384", name="ck_webhook_payload_size"),
         sa.CheckConstraint(f"destination_key {_KEY_SHAPE}", name="ck_webhook_key_shape"),
     )

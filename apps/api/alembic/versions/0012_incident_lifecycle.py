@@ -47,9 +47,7 @@ _KEY_SHAPE = "~ '^[a-z0-9][a-z0-9_.-]{0,63}$'"
 
 # The statuses the health engine can produce. Kept in the database too, so
 # a bug in a new caller cannot persist a status the UI has no meaning for.
-_HEALTH_STATUSES = (
-    "'healthy', 'degraded', 'critical', 'unknown', 'stale', 'not_configured'"
-)
+_HEALTH_STATUSES = "'healthy', 'degraded', 'critical', 'unknown', 'stale', 'not_configured'"
 
 
 def _timestamps() -> tuple[sa.Column, sa.Column]:
@@ -139,9 +137,7 @@ def upgrade() -> None:
         sa.Column(
             "consecutive_critical", sa.Integer(), nullable=False, server_default=sa.text("0")
         ),
-        sa.Column(
-            "consecutive_healthy", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("consecutive_healthy", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         *_timestamps(),
         sa.CheckConstraint(
@@ -329,9 +325,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_incidents_service", "incidents", ["environment_service_id"])
     op.create_index("ix_incidents_environment", "incidents", ["environment_id"])
-    op.create_index(
-        "ix_incidents_state_opened", "incidents", ["state", sa.text("opened_at DESC")]
-    )
+    op.create_index("ix_incidents_state_opened", "incidents", ["state", sa.text("opened_at DESC")])
 
     # --- incident timeline ----------------------------------------------
     op.create_table(
