@@ -21,6 +21,16 @@ spec:
         app.kubernetes.io/component: api
     spec:
       {{- include "drake.imagePullSecrets" . | nindent 6 }}
+      # Kubernetes injects a legacy Docker-style env var per Service in the
+      # namespace. The Service named `drake-api` produces
+      # DRAKE_API_PORT=tcp://<clusterIP>:8000, and Drake reads DRAKE_*
+      # settings — so that variable arrives as `api_port` and the process
+      # dies parsing "tcp://..." as an integer before it ever serves.
+      #
+      # Drake finds its peers through DNS and reads none of these, so they
+      # are switched off rather than worked around. Not configurable: an
+      # option here would only offer a way to reintroduce the crash.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -117,6 +127,16 @@ spec:
         app.kubernetes.io/component: web
     spec:
       {{- include "drake.imagePullSecrets" . | nindent 6 }}
+      # Kubernetes injects a legacy Docker-style env var per Service in the
+      # namespace. The Service named `drake-api` produces
+      # DRAKE_API_PORT=tcp://<clusterIP>:8000, and Drake reads DRAKE_*
+      # settings — so that variable arrives as `api_port` and the process
+      # dies parsing "tcp://..." as an integer before it ever serves.
+      #
+      # Drake finds its peers through DNS and reads none of these, so they
+      # are switched off rather than worked around. Not configurable: an
+      # option here would only offer a way to reintroduce the crash.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

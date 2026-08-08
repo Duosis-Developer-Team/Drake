@@ -1189,3 +1189,74 @@ def test_the_runbook_carries_no_point_in_time_status_claim() -> None:
     ):
         assert stale not in text, f"stale status claim in a permanent procedure: {stale}"
     assert "this is a procedure, not a status report" in text
+
+
+# --- Kubernetes service links must never reach a Drake pod ---------------
+
+
+def _pod_specs(docs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Every PodSpec this chart produces, keyed by workload name."""
+    return {
+        d["metadata"]["name"]: d["spec"]["template"]["spec"]
+        for d in docs
+        if d["kind"] in ("Deployment", "Job", "StatefulSet", "DaemonSet")
+    }
+
+
+def test_no_pod_receives_kubernetes_service_link_variables() -> None:
+    """The first production install died on exactly this.
+
+    Kubernetes injects a legacy Docker-style variable per Service in the
+    namespace. The Service named `drake-api` produces
+    `DRAKE_API_PORT=tcp://<clusterIP>:8000`, and Drake reads `DRAKE_*`
+    settings — so it arrived as `api_port` and the API crash-looped parsing
+    "tcp://..." as an integer. Drake resolves peers through DNS and reads
+    none of these variables.
+    """
+    specs = _pod_specs(render_prod())
+    assert set(specs) == {"drake-api", "drake-web", "drake-migrate"}
+    for name, spec in specs.items():
+        assert spec.get("enableServiceLinks") is False, (
+            f"{name} would receive DRAKE_API_PORT and fail to parse it as a setting"
+        )
+
+
+def test_the_ingress_edge_render_is_equally_protected() -> None:
+    """Both value sets, not just the one that happened to break."""
+    for name, spec in _pod_specs(render()).items():
+        assert spec.get("enableServiceLinks") is False, name
+
+
+def test_the_setting_that_collided_is_still_named_api_port() -> None:
+    """The fix is at the pod boundary, not a rename.
+
+    Renaming the setting or the Service would have hidden the collision
+    while leaving the mechanism intact for the next `DRAKE_*` name.
+    """
+    from drake_api.settings import Settings
+
+    assert "api_port" in Settings.model_fields
+    services = {s["metadata"]["name"] for s in by_kind(render_prod(), "Service")}
+    assert services == {"drake-api", "drake-web"}
+
+
+def test_the_fix_did_not_disturb_ownership_or_images() -> None:
+    """A one-field change must not move anything else."""
+    docs = render_prod()
+    kinds = {d["kind"] for d in docs}
+    for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet", "Ingress"):
+        assert forbidden not in kinds
+    for doc in docs:
+        if doc["kind"] in ("Deployment", "Service", "Job"):
+            assert not doc["metadata"]["name"].startswith(("drake-postgres", "drake-redis"))
+    assert {s["spec"]["type"] for s in by_kind(docs, "Service")} == {"ClusterIP"}
+
+    values = yaml.safe_load(PROD_VALUES.read_text())
+    images = {
+        d["metadata"]["name"]: d["spec"]["template"]["spec"]["containers"][0]["image"]
+        for d in docs
+        if d["kind"] in ("Deployment", "Job")
+    }
+    assert images["drake-api"].endswith(values["api"]["image"]["digest"])
+    assert images["drake-web"].endswith(values["web"]["image"]["digest"])
+    assert images["drake-migrate"] == images["drake-api"]
