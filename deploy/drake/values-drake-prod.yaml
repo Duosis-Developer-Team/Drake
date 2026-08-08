@@ -4,8 +4,8 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@501c954
-# (run 31246802303). Both were built from that one commit, so the API, the
+# Images are pinned to real digests published from main@a374937
+# (run 31264086090). Both were built from that one commit, so the API, the
 # web app and the migration cannot drift apart.
 #
 # Nothing is left blank: the datastores are selected by label rather than
@@ -78,11 +78,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 501c954829a5a342e35d30db4267d71a7a0cfaaa
+    # Source commit a3749374924e1bb888f73382e3bdbebdfc4a3246
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:8cd200c141f469f7418aeed7dabc018e9c0dee267e871c4eeddd9317d1984ef5"
+    digest: "sha256:5e134648329b5c477220c5bb06092603049b6bd54465619a9a7d33af671083e5"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -94,8 +94,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 501c954829a5a342e35d30db4267d71a7a0cfaaa
-    digest: "sha256:59b77162ac3bde81d25b4e77957886a4b99bb621f216a137361709fb69122675"
+    # Source commit a3749374924e1bb888f73382e3bdbebdfc4a3246
+    digest: "sha256:f97f3f728bdc5f4302f398412e66da01795a4afcf0c9e1e9c5792767009c2ffe"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -106,7 +106,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:8cd200c141f469f7418aeed7dabc018e9c0dee267e871c4eeddd9317d1984ef5"
+    digest: "sha256:5e134648329b5c477220c5bb06092603049b6bd54465619a9a7d33af671083e5"
   backoffLimit: 0
 
 networkPolicy:
