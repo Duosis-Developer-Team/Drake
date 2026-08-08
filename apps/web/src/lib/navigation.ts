@@ -10,6 +10,7 @@ import {
   Gauge,
   HeartPulse,
   LayoutDashboard,
+  PackagePlus,
   Puzzle,
   Rocket,
   Send,
@@ -98,6 +99,13 @@ export const NAVIGATION: NavItem[] = [
     icon: Rocket,
     enabled: true,
     anyPermission: ["environment.view", "cluster.view"],
+  },
+  {
+    label: "Onboard Project",
+    href: "/onboarding",
+    icon: PackagePlus,
+    enabled: true,
+    anyPermission: ["onboarding.view", "onboarding.manage"],
   },
   {
     label: "Integrations",

@@ -25,7 +25,17 @@ EXPECTED_ORGANIZATION = ORGANIZATION
 
 # Only these lifecycle events are processed. Adding one requires a
 # consumer and a permission-matrix update (ADR-0019 §6).
-SUPPORTED_EVENTS = frozenset({"installation", "installation_repositories", "repository"})
+# `push` earns its place in Sprint 11: a push to the default branch moves
+# the commit an onboarding plan was reviewed against, and a review of a
+# commit is not a review of its successor. Its consumer marks those plans
+# stale and does nothing else — no catalog write, no provider call.
+#
+# `pull_request` is deliberately absent. Drake has no consumer for it this
+# sprint, and accepting an event nothing acts on is a webhook surface with
+# no purpose and a parser to keep safe.
+SUPPORTED_EVENTS = frozenset(
+    {"installation", "installation_repositories", "repository", "push"}
+)
 # `ping` is answered but carries no domain work.
 ACKNOWLEDGED_EVENTS = frozenset({"ping"})
 
@@ -286,3 +296,36 @@ def foreign_repositories(envelope: WebhookEnvelope) -> list[int]:
         for summary in envelope.repositories
         if summary_owner(summary).lower() != expected
     ]
+
+
+# The push fields Drake reads. Bounded and few: a ref, the commit it now
+# points at, and nothing about who pushed or what changed.
+_REF_SHAPE = re.compile(r"^refs/heads/[A-Za-z0-9._/-]{1,120}$")
+_SHA_SHAPE = re.compile(r"^[0-9a-f]{7,64}$")
+
+
+def default_branch_push(payload: dict[str, Any]) -> tuple[int, str] | None:
+    """`(repository external id, new head sha)` for a default-branch push.
+
+    `None` for anything else — a branch push, a tag, a deletion, or a
+    payload whose shape does not match. A push to someone's feature branch
+    says nothing about the commit a plan was reviewed against.
+    """
+    repository = payload.get("repository")
+    if not isinstance(repository, dict):
+        return None
+    external_id = repository.get("id")
+    if not isinstance(external_id, int) or isinstance(external_id, bool):
+        return None
+    default_branch = str(repository.get("default_branch") or "")
+    ref = str(payload.get("ref") or "")
+    if not default_branch or not _REF_SHAPE.match(ref):
+        return None
+    if ref != f"refs/heads/{default_branch}":
+        return None
+    if payload.get("deleted") is True:
+        return None
+    after = str(payload.get("after") or "").lower()
+    if not _SHA_SHAPE.match(after) or set(after) == {"0"}:
+        return None
+    return external_id, after
