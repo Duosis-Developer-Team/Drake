@@ -697,8 +697,7 @@ async def slo_context(
         # Said out loud, in the payload, so a client cannot present this as
         # a causal claim without deliberately ignoring it.
         "correlation_note": (
-            "Temporal correlation only. Drake does not claim a deployment caused "
-            "an SLO breach."
+            "Temporal correlation only. Drake does not claim a deployment caused an SLO breach."
         ),
     }
 
@@ -747,9 +746,7 @@ async def list_silences(
     where = " AND ".join(conditions)
     joins = "FROM silence_requests s JOIN projects p ON p.id = s.project_id"
     total = (
-        await connection.execute(
-            text(f"SELECT count(*) {joins} WHERE {where}"), params
-        )
+        await connection.execute(text(f"SELECT count(*) {joins} WHERE {where}"), params)
     ).scalar_one()
     rows = (
         await connection.execute(

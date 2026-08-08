@@ -293,9 +293,10 @@ async def _context_for_policy(
     binding, when present, is extra context rather than a precondition.
     """
     row = (
-        await connection.execute(
-            text(
-                """
+        (
+            await connection.execute(
+                text(
+                    """
                 SELECT b.id, b.environment_service_id, bp.project_id, bp.environment_id,
                        b.service_id, bp.display_name, bp.store_key
                 FROM backup_policies bp
@@ -308,10 +309,13 @@ async def _context_for_policy(
                 ORDER BY b.created_at NULLS LAST
                 LIMIT 1
                 """
-            ),
-            {"id": policy_id},
+                ),
+                {"id": policy_id},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         return None
     context = dict(row)
@@ -363,8 +367,7 @@ async def sync_incident(
             # second incident for the same unresolved thing.
             await connection.execute(
                 text(
-                    "UPDATE incidents SET last_critical_at = :at, updated_at = now() "
-                    "WHERE id = :id"
+                    "UPDATE incidents SET last_critical_at = :at, updated_at = now() WHERE id = :id"
                 ),
                 {"id": existing[0], "at": now},
             )
@@ -489,16 +492,12 @@ async def evaluate_policy(
 
         connector = settings.protection_connectors.get(str(connector_key))
         seen_at = await reporter_seen_at(connection, str(connector_key))
-        promise, evidence = await gather_evidence(
-            connection, policy_id, reporter_seen_at=seen_at
-        )
+        promise, evidence = await gather_evidence(connection, policy_id, reporter_seen_at=seen_at)
         verdict = evaluate_protection(
             promise,
             evidence,
             now=moment,
-            **(
-                {"reporter_stale_after": stale_after(connector)} if connector else {}
-            ),
+            **({"reporter_stale_after": stale_after(connector)} if connector else {}),
         )
         await store_evaluation(
             connection, policy_id, promise, evidence, verdict, evaluated_for=moment

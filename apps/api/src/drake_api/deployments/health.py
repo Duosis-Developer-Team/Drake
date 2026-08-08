@@ -86,9 +86,7 @@ class SignalComparison:
         return {
             "before": self.before,
             "after": self.after,
-            "delta": (
-                None if not self.measured else (self.after or 0.0) - (self.before or 0.0)
-            ),
+            "delta": (None if not self.measured else (self.after or 0.0) - (self.before or 0.0)),
             "direction": self.direction,
             "lower_is_better": self.lower_is_better,
         }
@@ -180,9 +178,7 @@ async def compare_health(
             before = await _read(
                 broker, principal, binding_id, template_key, before_from, before_to
             )
-            after = await _read(
-                broker, principal, binding_id, template_key, after_from, after_to
-            )
+            after = await _read(broker, principal, binding_id, template_key, after_from, after_to)
             comparison = SignalComparison(before, after, lower_is_better)
             signals[name] = comparison
             if not comparison.measured:

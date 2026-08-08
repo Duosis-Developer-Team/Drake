@@ -184,9 +184,7 @@ async def attempts_for(engine: AsyncEngine, delivery_id: uuid.UUID) -> list[Any]
         ("unspecified", "0.0.0.0"),  # noqa: S104 - a refused target, not a bind address
     ],
 )
-async def test_dangerous_targets_are_refused_at_send_time(
-    label: str, address: str
-) -> None:
+async def test_dangerous_targets_are_refused_at_send_time(label: str, address: str) -> None:
     """Re-checked on every send, because DNS answers change.
 
     169.254.169.254 is the one that matters most: it is the cloud metadata

@@ -135,9 +135,7 @@ async def policy_incidents(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
-        incidents = await _found(
-            await repo.policy_incidents(connection, auth.principal, policy_id)
-        )
+        incidents = await _found(await repo.policy_incidents(connection, auth.principal, policy_id))
     return {"incidents": incidents}
 
 

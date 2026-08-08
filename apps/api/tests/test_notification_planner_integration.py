@@ -144,8 +144,7 @@ async def make_policy(
                     "service": service_id,
                     "events": json.dumps(list(event_types)),
                     "enabled": enabled,
-                    "effective_from": effective_from
-                    or datetime.now(UTC) - ALREADY_IN_FORCE,
+                    "effective_from": effective_from or datetime.now(UTC) - ALREADY_IN_FORCE,
                 },
             )
         ).scalar_one()
@@ -284,7 +283,7 @@ async def test_replanning_the_same_event_creates_nothing_new(engine: AsyncEngine
 async def test_an_event_with_no_matching_policy_is_not_rescanned_forever(
     engine: AsyncEngine,
 ) -> None:
-    """"Matched nothing" is a finished decision, and is recorded as one."""
+    """ "Matched nothing" is a finished decision, and is recorded as one."""
     world = await open_incident_world(engine)
 
     report = await plan_pending(engine)
@@ -346,9 +345,7 @@ async def test_nothing_is_delivered_without_an_active_match(
     world = await open_incident_world(engine)
     recipient = await make_recipient(engine, world["service_scope"])
     policy = await make_policy(engine, world, **policy_kwargs)
-    destination = await make_destination(
-        engine, world, identity_id=recipient, **destination_kwargs
-    )
+    destination = await make_destination(engine, world, identity_id=recipient, **destination_kwargs)
     await attach(engine, policy, destination)
 
     await plan_pending(engine)
@@ -443,9 +440,7 @@ async def test_a_webhook_destination_produces_a_frozen_delivery(
     """The payload is snapshotted at plan time, and carries no query material."""
     world = await open_incident_world(engine)
     policy = await make_policy(engine, world)
-    destination = await make_destination(
-        engine, world, destination_type="webhook", key=WEBHOOK_KEY
-    )
+    destination = await make_destination(engine, world, destination_type="webhook", key=WEBHOOK_KEY)
     await attach(engine, policy, destination)
 
     report = await plan_pending(engine, base_url="https://drake.example.test")
@@ -511,9 +506,7 @@ async def test_one_broken_destination_does_not_block_the_others(
 
     # A webhook destination whose planning blows up. Injected rather than
     # forced through the schema, because the schema is doing its job.
-    broken = await make_destination(
-        engine, world, destination_type="webhook", key=WEBHOOK_KEY
-    )
+    broken = await make_destination(engine, world, destination_type="webhook", key=WEBHOOK_KEY)
     await attach(engine, policy, broken)
 
     import drake_api.notifications.planner as planner_module
@@ -562,9 +555,7 @@ async def test_notification_planning_never_changes_the_incident(
     async with engine.connect() as connection:
         before = (
             await connection.execute(
-                text(
-                    "SELECT state, version, resolved_at FROM incidents WHERE id = :i"
-                ),
+                text("SELECT state, version, resolved_at FROM incidents WHERE id = :i"),
                 {"i": world["incident_id"]},
             )
         ).first()

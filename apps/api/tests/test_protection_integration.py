@@ -134,9 +134,7 @@ def test_missing_integrity_or_offsite_blocks_protected() -> None:
     no_offsite = evaluate_protection(
         promise(),
         evidence(
-            artifact=ArtifactEvidence(
-                exists=True, integrity_result="passed", offsite_present=False
-            )
+            artifact=ArtifactEvidence(exists=True, integrity_result="passed", offsite_present=False)
         ),
         now=NOW,
     )
@@ -150,9 +148,7 @@ def test_a_failed_integrity_check_counts_even_when_not_required() -> None:
     verdict = evaluate_protection(
         promise(requires_integrity_check=False),
         evidence(
-            artifact=ArtifactEvidence(
-                exists=True, integrity_result="failed", offsite_present=True
-            )
+            artifact=ArtifactEvidence(exists=True, integrity_result="failed", offsite_present=True)
         ),
         now=NOW,
     )
@@ -240,9 +236,7 @@ CONNECTOR = "hermes-backup"
 
 
 def signed(secret: bytes, body: bytes, timestamp: str) -> str:
-    return "v1=" + hmac.new(
-        secret, f"{timestamp}.".encode() + body, hashlib.sha256
-    ).hexdigest()
+    return "v1=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
 
 
 def connector_settings(tmp_path: Any, **overrides: Any):
@@ -278,9 +272,7 @@ async def policy_id_for(engine: AsyncEngine, key: str) -> uuidlib.UUID:
             str(
                 (
                     await connection.execute(
-                        text(
-                            "SELECT id FROM backup_policies WHERE policy_external_key = :k"
-                        ),
+                        text("SELECT id FROM backup_policies WHERE policy_external_key = :k"),
                         {"k": key},
                     )
                 ).scalar_one()
@@ -325,9 +317,7 @@ async def test_the_contract_seeds_hermes_policies_as_separate_stores(
     assert all(row[2] == WEEK and row[3] and row[4] for row in rows)
 
 
-async def test_a_run_and_artifact_flow_through_ingest(
-    engine: AsyncEngine, tmp_path: Any
-) -> None:
+async def test_a_run_and_artifact_flow_through_ingest(engine: AsyncEngine, tmp_path: Any) -> None:
     await seed_project(engine, "hermes", "dev")
     await seed_policies(engine, connector_key=CONNECTOR)
     at = datetime.now(UTC) - timedelta(hours=1)
@@ -384,9 +374,7 @@ async def test_a_run_and_artifact_flow_through_ingest(
     assert artifact[3] == "onedrive-primary"
 
 
-async def test_the_same_event_twice_changes_nothing(
-    engine: AsyncEngine, tmp_path: Any
-) -> None:
+async def test_the_same_event_twice_changes_nothing(engine: AsyncEngine, tmp_path: Any) -> None:
     await seed_project(engine, "hermes", "dev")
     await seed_policies(engine, connector_key=CONNECTOR)
     at = datetime.now(UTC) - timedelta(hours=1)
@@ -671,9 +659,7 @@ async def test_reconciliation_does_not_duplicate_streamed_evidence(
     await ingest.apply_event(engine, CONNECTOR, envelope, now=datetime.now(UTC))
 
     snapshot_id = await ingest.begin_snapshot(engine, CONNECTOR)
-    await ingest.snapshot_page(
-        engine, CONNECTOR, snapshot_id, [envelope], now=datetime.now(UTC)
-    )
+    await ingest.snapshot_page(engine, CONNECTOR, snapshot_id, [envelope], now=datetime.now(UTC))
     await ingest.complete_snapshot(engine, snapshot_id)
 
     async with engine.connect() as connection:
@@ -838,12 +824,8 @@ async def test_hermes_core_evidence_does_not_protect_hermes_auth(
     settings, _ = connector_settings(tmp_path)
     await build_evidence_chain(engine, "hermes-dev-core", with_drill="passed")
 
-    core = await evaluate_policy(
-        engine, settings, await policy_id_for(engine, "hermes-dev-core")
-    )
-    auth = await evaluate_policy(
-        engine, settings, await policy_id_for(engine, "hermes-dev-auth")
-    )
+    core = await evaluate_policy(engine, settings, await policy_id_for(engine, "hermes-dev-core"))
+    auth = await evaluate_policy(engine, settings, await policy_id_for(engine, "hermes-dev-auth"))
     assert core.verdict.overall_state is OverallState.RECOVERABLE_VERIFIED
     assert auth.verdict.overall_state is OverallState.OVERDUE
     assert "backup_overdue" in auth.verdict.reasons
@@ -1009,9 +991,7 @@ async def test_a_caller_outside_scope_sees_nothing_anywhere(
     await evaluate_policy(engine, settings, policy_id)
     await seed_catalog_world(engine)
     harness = protection_harness(tmp_path)
-    await make_role(
-        harness, engine, "Beta Protection", ["protection.view", "environment.view"]
-    )
+    await make_role(harness, engine, "Beta Protection", ["protection.view", "environment.view"])
 
     async with harness.api_client() as outsider:
         await harness.login(outsider, "user-b-only")
@@ -1030,9 +1010,7 @@ async def test_a_caller_outside_scope_sees_nothing_anywhere(
     assert hidden.json()["error"]["message"] == missing.json()["error"]["message"]
 
 
-async def test_protection_view_alone_is_not_enough(
-    engine: AsyncEngine, tmp_path: Any
-) -> None:
+async def test_protection_view_alone_is_not_enough(engine: AsyncEngine, tmp_path: Any) -> None:
     """Both rights are required: knowing a system is unprotected is
     sensitive, and so is knowing it exists."""
     await seed_project(engine, "hermes", "dev")
@@ -1069,9 +1047,7 @@ async def make_role_only(
             )
 
 
-async def grant_root(
-    engine: AsyncEngine, harness: S1Harness, subject: str, role: str
-) -> None:
+async def grant_root(engine: AsyncEngine, harness: S1Harness, subject: str, role: str) -> None:
     async with engine.begin() as connection:
         await connection.execute(
             text(

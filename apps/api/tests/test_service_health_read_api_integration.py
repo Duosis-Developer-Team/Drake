@@ -266,12 +266,8 @@ async def test_an_empty_signal_is_reported_as_missing_not_as_zero(
 
     async with owner(harness, engine) as client:
         binding = await create_binding(client, world)
-        body = (
-            await client.get(f"/v1/service-health/bindings/{binding['id']}/health")
-        ).json()
-        summary = (
-            await client.get(f"/v1/service-health/bindings/{binding['id']}/metrics")
-        ).json()
+        body = (await client.get(f"/v1/service-health/bindings/{binding['id']}/health")).json()
+        summary = (await client.get(f"/v1/service-health/bindings/{binding['id']}/metrics")).json()
 
     assert body["availability"]["ready_replicas"] is None
     assert "availability.replicas" in body["missing_signals"]
@@ -297,9 +293,7 @@ async def test_a_datasource_outage_degrades_to_stale_never_to_critical(
 
     async with owner(harness, engine) as client:
         binding = await create_binding(client, world)
-        good = (
-            await client.get(f"/v1/service-health/bindings/{binding['id']}/health")
-        ).json()
+        good = (await client.get(f"/v1/service-health/bindings/{binding['id']}/health")).json()
         assert good["status"] == "healthy"
 
         provider.mode = "down"
@@ -307,9 +301,7 @@ async def test_a_datasource_outage_degrades_to_stale_never_to_critical(
         # reached rather than absorbed by a cache hit.
         await asyncio.sleep(1.2)
         outage = (
-            await client.get(
-                f"/v1/service-health/bindings/{binding['id']}/health?refresh=true"
-            )
+            await client.get(f"/v1/service-health/bindings/{binding['id']}/health?refresh=true")
         ).json()
 
     assert outage["status"] == "stale"
@@ -334,9 +326,7 @@ async def test_mutating_a_binding_makes_the_cached_verdict_unreachable(
     async with owner(harness, engine) as client:
         binding = await create_binding(client, world)
         await client.get(f"/v1/service-health/bindings/{binding['id']}/health")
-        cached = (
-            await client.get(f"/v1/service-health/bindings/{binding['id']}/health")
-        ).json()
+        cached = (await client.get(f"/v1/service-health/bindings/{binding['id']}/health")).json()
         assert cached["cached"] is True
 
         updated = await client.post(
@@ -351,9 +341,7 @@ async def test_mutating_a_binding_makes_the_cached_verdict_unreachable(
         assert updated.status_code == 200, updated.text
         assert updated.json()["revision"] == 2
 
-        after = (
-            await client.get(f"/v1/service-health/bindings/{binding['id']}/health")
-        ).json()
+        after = (await client.get(f"/v1/service-health/bindings/{binding['id']}/health")).json()
 
     # The pre-mutation verdict is not merely scheduled for deletion — it is
     # not addressable, so the next read recomputes under the new policy.
@@ -399,9 +387,7 @@ async def test_a_disabled_binding_is_not_configured_rather_than_unhealthy(
         )
         assert disabled.status_code == 200, disabled.text
         before = provider.calls
-        body = (
-            await client.get(f"/v1/service-health/bindings/{binding['id']}/health")
-        ).json()
+        body = (await client.get(f"/v1/service-health/bindings/{binding['id']}/health")).json()
 
     assert body["status"] == "not_configured"
     assert body["reasons"] == ["binding_disabled"]

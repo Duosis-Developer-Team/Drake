@@ -221,9 +221,7 @@ async def slo_evaluations(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
-        evaluations = await repo.slo_evaluations(
-            connection, auth.principal, slo_id, limit=limit
-        )
+        evaluations = await repo.slo_evaluations(connection, auth.principal, slo_id, limit=limit)
     if evaluations is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"evaluations": evaluations}

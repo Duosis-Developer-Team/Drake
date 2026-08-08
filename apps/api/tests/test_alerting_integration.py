@@ -156,9 +156,7 @@ def test_severity_maps_to_priority() -> None:
         ("medium", "P3"),
         ("info", "P4"),
     ):
-        alert = normalize_alert(
-            alert_payload(labels={"alertname": "X", "severity": severity})
-        )
+        alert = normalize_alert(alert_payload(labels={"alertname": "X", "severity": severity}))
         assert alert.priority == priority
 
 
@@ -441,11 +439,7 @@ async def test_firing_resolved_firing_reopens_rather_than_duplicating(
     await deliver(
         engine,
         context,
-        [
-            alert_payload(
-                labels=labels, status="resolved", endsAt="2026-08-08T11:30:00Z"
-            )
-        ],
+        [alert_payload(labels=labels, status="resolved", endsAt="2026-08-08T11:30:00Z")],
     )
     await deliver(
         engine,
@@ -504,9 +498,7 @@ async def test_a_resolved_alert_mitigates_but_does_not_close_the_incident(
 
     async with engine.connect() as connection:
         row = (
-            await connection.execute(
-                text("SELECT state, mitigated_at, resolved_at FROM incidents")
-            )
+            await connection.execute(text("SELECT state, mitigated_at, resolved_at FROM incidents"))
         ).first()
     assert row is not None
     assert row[0] == "open"
@@ -543,9 +535,7 @@ async def test_an_old_resolved_event_does_not_drag_a_new_firing_backwards(
 
     assert stale.alerts[0].stale is True
     async with engine.connect() as connection:
-        status = (
-            await connection.execute(text("SELECT status FROM alert_instances"))
-        ).scalar_one()
+        status = (await connection.execute(text("SELECT status FROM alert_instances"))).scalar_one()
     assert status == "firing"
 
 
@@ -661,9 +651,7 @@ async def test_an_unmapped_alert_is_quarantined_not_filed_elsewhere(
 
 
 @pytest.mark.anyio
-async def test_an_ambiguous_service_fails_closed(
-    engine: AsyncEngine, migrated_db: None
-) -> None:
+async def test_an_ambiguous_service_fails_closed(engine: AsyncEngine, migrated_db: None) -> None:
     """One service in two environments, and no environment label to choose."""
     world = await make_world(engine)
     context = await make_alertmanager(engine, world)
@@ -718,9 +706,7 @@ async def test_an_ambiguous_service_fails_closed(
     async with engine.connect() as connection:
         row = (
             await connection.execute(
-                text(
-                    "SELECT mapping_state, mapping_error_code, incident_id FROM alert_instances"
-                )
+                text("SELECT mapping_state, mapping_error_code, incident_id FROM alert_instances")
             )
         ).first()
     assert row is not None
@@ -800,17 +786,13 @@ async def test_an_alert_and_the_protection_evaluator_link_instead_of_duplicating
 
     labels = labels_for(context, signal="protection")
     labels.pop("service")
-    await deliver(
-        engine, context, [alert_payload(fingerprint="eeee5555", labels=labels)]
-    )
+    await deliver(engine, context, [alert_payload(fingerprint="eeee5555", labels=labels)])
 
     async with engine.connect() as connection:
         incidents = (
             await connection.execute(text("SELECT source, correlation_key FROM incidents"))
         ).all()
-        links = (
-            await connection.execute(text("SELECT link_type FROM alert_incident_links"))
-        ).all()
+        links = (await connection.execute(text("SELECT link_type FROM alert_incident_links"))).all()
     assert len(incidents) == 1
     assert incidents[0][0] == "protection"
     assert [row[0] for row in links] == ["correlated"]
@@ -944,9 +926,7 @@ async def test_the_database_refuses_a_regex_matcher_even_if_code_tried(
                 project_id=context["project_id"],
                 alert_instance_id=None,
                 incident_id=None,
-                matchers=[
-                    {"name": "service", "value": ".*", "isRegex": True, "isEqual": True}
-                ],
+                matchers=[{"name": "service", "value": ".*", "isRegex": True, "isEqual": True}],
                 seconds=900,
                 reason_code="known_issue",
                 reason_note=None,
@@ -964,9 +944,7 @@ async def test_a_provider_failure_never_shows_as_an_active_silence(
     context = await make_alertmanager(engine, world)
     settings = require_it_settings()
     configured = integration(tmp_path)
-    settings = settings.model_copy(
-        update={"alertmanager_integrations": {"am-test": configured}}
-    )
+    settings = settings.model_copy(update={"alertmanager_integrations": {"am-test": configured}})
     async with engine.begin() as connection:
         identity = (
             await connection.execute(
@@ -983,9 +961,7 @@ async def test_a_provider_failure_never_shows_as_an_active_silence(
             project_id=context["project_id"],
             alert_instance_id=None,
             incident_id=None,
-            matchers=[
-                {"name": "project", "value": context["project_key"], "isRegex": False}
-            ],
+            matchers=[{"name": "project", "value": context["project_key"], "isRegex": False}],
             seconds=900,
             reason_code="known_issue",
             reason_note=None,
@@ -1258,9 +1234,7 @@ async def test_a_caller_outside_scope_sees_no_alert_no_count_and_no_slo(
         summary = await alert_repo.alert_summary(connection, principal)
         slos = await alert_repo.list_slos(connection, principal)
         silence_page = await alert_repo.list_silences(connection, principal)
-        alert_id = (
-            await connection.execute(text("SELECT id FROM alert_instances"))
-        ).scalar_one()
+        alert_id = (await connection.execute(text("SELECT id FROM alert_instances"))).scalar_one()
         detail = await alert_repo.get_alert(connection, principal, alert_id)
 
     # Not merely an empty list: the totals are zero too, so nothing leaks
@@ -1351,9 +1325,7 @@ def test_the_route_fixture_keeps_an_independent_base_receiver() -> None:
 
     document = ROUTE_FIXTURE_PATH.read_text()
 
-    drake_route = re.search(
-        r"- receiver: drake-webhook\n(?P<body>(?:\s{6}.*\n)+)", document
-    )
+    drake_route = re.search(r"- receiver: drake-webhook\n(?P<body>(?:\s{6}.*\n)+)", document)
     assert drake_route is not None
     assert "continue: true" in drake_route.group("body")
 

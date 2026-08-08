@@ -119,8 +119,7 @@ def test_scaled_to_zero_is_not_a_failed_rollout() -> None:
 def test_missing_observations_are_unknown_rather_than_guessed() -> None:
     assert evaluate_rollout(observation(generation=None), now=NOW).state is RolloutState.UNKNOWN
     assert (
-        evaluate_rollout(observation(updated_replicas=None), now=NOW).state
-        is RolloutState.UNKNOWN
+        evaluate_rollout(observation(updated_replicas=None), now=NOW).state is RolloutState.UNKNOWN
     )
 
 
@@ -140,9 +139,7 @@ def test_partial_evidence_is_never_promoted_to_verified() -> None:
         Provenance(declared_digest=DIGEST),
         Provenance(commit_sha=COMMIT),
         Provenance(commit_sha=COMMIT, declared_digest=DIGEST),
-        Provenance(
-            commit_sha=COMMIT, workflow_repository="acme/api", workflow_run_id="42"
-        ),
+        Provenance(commit_sha=COMMIT, workflow_repository="acme/api", workflow_run_id="42"),
     ):
         assert evaluate_evidence(provenance).state is EvidenceState.PARTIAL
 
@@ -202,12 +199,8 @@ def test_a_run_url_is_composed_only_from_validated_parts() -> None:
     # not shaped like one produces no link at all.
     assert workflow_run_url("", "github", "acme/api", "42") is None
     assert workflow_run_url("https://github.com", "gitlab", "acme/api", "42") is None
-    assert (
-        workflow_run_url("https://github.com", "github", "acme/api/../..", "42") is None
-    )
-    assert (
-        workflow_run_url("https://github.com", "github", "acme/api", "42; rm -rf /") is None
-    )
+    assert workflow_run_url("https://github.com", "github", "acme/api/../..", "42") is None
+    assert workflow_run_url("https://github.com", "github", "acme/api", "42; rm -rf /") is None
 
 
 # ===========================================================================
@@ -337,7 +330,11 @@ async def test_a_new_generation_is_a_new_revision_linked_to_the_previous(
     await ingest_deployments(engine)
 
     await seed_workload(
-        engine, world, generation=2, observed_generation=2, uid=uid,
+        engine,
+        world,
+        generation=2,
+        observed_generation=2,
+        uid=uid,
         image=f"ghcr.io/acme/api@{OTHER_DIGEST}",
     )
     await ingest_deployments(engine)
@@ -407,11 +404,7 @@ def test_images_and_running_digests_are_read_from_bounded_summaries() -> None:
         {"spec_summary": {"containers": [{"name": "api", "image": f"x@{DIGEST}"}]}}
     )
     assert images[0].digest == DIGEST
-    pod = {
-        "status_summary": {
-            "container_images": [{"name": "api", "image_id": f"y@{DIGEST}"}]
-        }
-    }
+    pod = {"status_summary": {"container_images": [{"name": "api", "image_id": f"y@{DIGEST}"}]}}
     assert running_digest([pod], "api") == DIGEST
 
 

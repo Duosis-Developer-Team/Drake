@@ -243,9 +243,7 @@ async def summary(connection: AsyncConnection, principal: Principal) -> dict[str
     total = 0
     for backup_state, recoverability_state, overall_state, count in rows:
         backup[backup_state] = backup.get(backup_state, 0) + count
-        recoverability[recoverability_state] = (
-            recoverability.get(recoverability_state, 0) + count
-        )
+        recoverability[recoverability_state] = recoverability.get(recoverability_state, 0) + count
         overall[overall_state] = overall.get(overall_state, 0) + count
         total += count
     return {

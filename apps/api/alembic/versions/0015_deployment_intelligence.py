@@ -39,9 +39,7 @@ down_revision: str | None = "0014"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_ROLLOUT_STATES = (
-    "'pending', 'progressing', 'healthy', 'degraded', 'failed', 'stalled', 'unknown'"
-)
+_ROLLOUT_STATES = "'pending', 'progressing', 'healthy', 'degraded', 'failed', 'stalled', 'unknown'"
 _EVIDENCE_STATES = "'verified', 'partial', 'unverified', 'conflict'"
 _COMPARISON_VERDICTS = "'improved', 'stable', 'regressed', 'insufficient_data'"
 
@@ -135,9 +133,7 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::jsonb"),
         ),
         # --- rollout --------------------------------------------------------
-        sa.Column(
-            "rollout_state", sa.Text(), nullable=False, server_default=sa.text("'unknown'")
-        ),
+        sa.Column("rollout_state", sa.Text(), nullable=False, server_default=sa.text("'unknown'")),
         sa.Column("rollout_reason", sa.Text(), nullable=True),
         sa.Column("desired_replicas", sa.Integer(), nullable=True),
         sa.Column("ready_replicas", sa.Integer(), nullable=True),
@@ -186,9 +182,7 @@ def upgrade() -> None:
         sa.CheckConstraint("revision >= 0", name="ck_dr_revision"),
         sa.CheckConstraint("jsonb_typeof(images) = 'array'", name="ck_dr_images_array"),
         sa.CheckConstraint("pg_column_size(images) <= 8192", name="ck_dr_images_size"),
-        sa.CheckConstraint(
-            "pg_column_size(metadata_snapshot) <= 4096", name="ck_dr_metadata_size"
-        ),
+        sa.CheckConstraint("pg_column_size(metadata_snapshot) <= 4096", name="ck_dr_metadata_size"),
         # A digest is a digest. Anything else in this column would defeat
         # the point of having it.
         sa.CheckConstraint(
