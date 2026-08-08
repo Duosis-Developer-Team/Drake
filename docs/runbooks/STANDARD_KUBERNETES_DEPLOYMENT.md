@@ -43,13 +43,68 @@ and must not be committed.
 | 2 | PostgreSQL DSN for a **dedicated** database + role | `DRAKE_DATABASE_URL` key in `drake-api-config` |
 | 3 | Redis URL | `DRAKE_REDIS_URL` key in `drake-api-config` |
 | 4 | Entra issuer / client id / client secret | `DRAKE_OIDC_ISSUER`, `DRAKE_OIDC_CLIENT_ID`, `DRAKE_OIDC_CLIENT_SECRET` |
-| 5 | PostgreSQL and Redis addresses as /32 CIDRs | `networkPolicy.databaseCIDR`, `redisCIDR` |
-| 6 | GHCR pull credentials | `drake-ghcr` Secret |
-| 7 | Image digests from a publication run | `api/web/migration.image.digest` |
+| 5 | GHCR pull credentials | `drake-ghcr` Secret |
+| 6 | Datastore pods labelled as below | see "Datastore label contract" |
 
 There is deliberately **no session-signing secret**: sessions are opaque
 random identifiers held server-side in Redis, so there is no key to
 manage or rotate.
+
+Image digests are already pinned in the committed values, and the
+datastores are reached by label rather than by address, so nothing else is
+left blank.
+
+## Datastore label contract
+
+The chart selects PostgreSQL and Redis by label. The pods you deploy must
+carry these, and they must come from the controller's pod template so a
+rescheduled pod keeps them:
+
+| Datastore | Required pod label |
+| --- | --- |
+| PostgreSQL | `app.kubernetes.io/name: drake-postgres` |
+| Redis | `app.kubernetes.io/name: drake-redis` |
+
+Both live in Drake's own namespace. The chart emits no `namespaceSelector`
+for them, which is what confines the peer to this namespace; set
+`networkPolicy.database.namespaceSelector` only if a datastore genuinely
+runs elsewhere.
+
+Addresses are deliberately not used. A pod connecting to a Service is
+redirected to a backing pod address, and where that rewrite sits relative
+to policy evaluation is up to the CNI — so an `ipBlock` holding a ClusterIP
+is not portable across clusters, and a pod address does not survive a
+reschedule. `podSelector` is what Kubernetes defines for in-cluster peers
+and survives both.
+
+## What each component may reach
+
+Default-deny covers the whole namespace in both directions. On top of it:
+
+| Component | DNS | PostgreSQL 5432 | Redis 6379 | Outbound HTTPS |
+| --- | --- | --- | --- | --- |
+| `api` | yes | yes | yes | only entries in `networkPolicy.apiExternalEgress` (empty by default) |
+| `migration` | yes | yes | **no** — `alembic/env.py` opens the database and nothing else | no |
+| `web` | no | no | no | no — it makes no server-side call; the browser talks to `/v1` directly |
+
+The chart also grants ingress *to* the datastores from exactly those
+components. That is not optional hardening: default-deny applies to the
+datastore pods too, so without it a permitted connection would leave the
+API and be dropped on arrival.
+
+## A note on enforcement
+
+The production cluster runs Flannel with no policy controller, and no
+NetworkPolicy exists anywhere in it. **Nothing enforces these policies
+there today**, so they are declarative intent and must not be counted as a
+security control until an enforcing CNI is present. They are written
+correctly so that the day one is installed, Drake keeps working instead of
+losing its database.
+
+Where policy *is* enforced, expect a brief window at pod start before the
+rules are programmed — measured at roughly five seconds on k3s/kube-router.
+The API's readiness probe covers this; it is only worth knowing when
+reading the first seconds of a new pod's logs.
 
 ## Steps
 
@@ -82,11 +137,10 @@ kubectl -n drake-prod create secret generic drake-api-config \
 
 Do not `get -o yaml` or `describe` this Secret afterwards.
 
-**4. Fill in the values.** Copy `deploy/drake/values-drake-prod.yaml` to a
-private working copy and set `publicOrigin`, the three digests, and the
-two CIDRs. The committed file deliberately leaves them blank and **fails
-to render** until they are supplied — a values file that renders with
-placeholders is how a placeholder reaches a cluster.
+**4. Check the values.** `deploy/drake/values-drake-prod.yaml` is complete
+as committed: images are pinned to published digests, and the datastores
+are selected by label rather than by address. Deploy it as-is unless the
+datastore labels in your namespace differ from the contract above.
 
 **5. Render and read the output before installing.**
 

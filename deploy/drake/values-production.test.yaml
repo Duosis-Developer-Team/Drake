@@ -41,8 +41,16 @@ networkPolicy:
     kubernetes.io/metadata.name: ingress-nginx
   ingressControllerPodSelector:
     app.kubernetes.io/name: ingress-nginx
-  databaseCIDR: 10.0.10.5/32
-  redisCIDR: 10.0.10.6/32
+  database:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: drake-postgres
+    port: 5432
+  redis:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: drake-redis
+    port: 6379
 
 github:
   enabled: false

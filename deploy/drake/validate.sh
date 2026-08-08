@@ -46,9 +46,10 @@ refuses "with a mutable api tag alongside a digest" --set api.image.tag="latest"
 refuses "without an application secret reference"   --set api.existingSecret=""
 refuses "with the network policy disabled"          --set networkPolicy.enabled=false
 refuses "without an ingress-controller selector"    --set networkPolicy.ingressControllerNamespaceSelector=null
-refuses "without a database CIDR"                   --set networkPolicy.databaseCIDR=""
-refuses "without a redis CIDR"                      --set networkPolicy.redisCIDR=""
-refuses "with an all-addresses egress CIDR"         --set networkPolicy.databaseCIDR="0.0.0.0/0"
+refuses "without a database selector"               --set networkPolicy.database.podSelector.matchLabels=null
+refuses "without a redis selector"                  --set networkPolicy.redis.podSelector.matchLabels=null
+refuses "without a database port"                   --set networkPolicy.database.port=""
+refuses "with an all-addresses external egress"     --set networkPolicy.apiExternalEgress[0].cidr="0.0.0.0/0" --set networkPolicy.apiExternalEgress[0].port=443
 refuses "with a rewrite-target annotation" \
   --set 'ingress.annotations.nginx\.ingress\.kubernetes\.io/rewrite-target=/'
 refuses "with a configuration-snippet annotation" \
@@ -201,35 +202,37 @@ PY
 # identity provider are attached to it.
 echo "[policy] drake-prod production values"
 
-# The committed values deliberately leave image digests and datastore CIDRs
-# blank. Rendering them as-is must FAIL rather than produce a release that
-# would install with placeholders.
-if helm template drake . -f values-drake-prod.yaml --namespace drake-prod >/dev/null 2>&1; then
-  fail "values-drake-prod.yaml rendered with unfilled operator inputs"
-fi
-
-FILL=(--set "publicOrigin=https://drake.example.test"
-      --set "api.image.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      --set "web.image.digest=sha256:2222222222222222222222222222222222222222222222222222222222222222"
-      --set "migration.image.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      --set "networkPolicy.databaseCIDR=10.0.10.5/32"
-      --set "networkPolicy.redisCIDR=10.0.10.6/32")
+# The production values are complete as committed: images are pinned to
+# published digests and the datastores are selected by label, so there is
+# nothing left for an operator to fill in.
+FILL=()
 
 for override in \
   "edge.mode=bogus" \
   "ingress.enabled=true" \
   "publicOrigin=" \
   "api.image.digest=" \
-  "api.existingSecret="
+  "api.existingSecret=" \
+  "networkPolicy.database.podSelector.matchLabels=null" \
+  "networkPolicy.redis.port=" \
+  "networkPolicy.apiExternalEgress[0].cidr=0.0.0.0/0"
 do
   if helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
-      "${FILL[@]}" --set "$override" >/dev/null 2>&1; then
+      --set "$override" >/dev/null 2>&1; then
     fail "drake-prod rendered with '$override' but should have refused"
   fi
 done
 
+# Identical datastore selectors would silently grant each peer the other's
+# access, so the chart refuses them.
+if helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
+    --set "networkPolicy.redis.podSelector.matchLabels.app\.kubernetes\.io/name=drake-postgres" \
+    >/dev/null 2>&1; then
+  fail "drake-prod rendered with identical database and redis selectors"
+fi
+
 PROD_RENDERED="$(mktemp)"
-helm template drake . -f values-drake-prod.yaml --namespace drake-prod "${FILL[@]}" > "$PROD_RENDERED"
+helm template drake . -f values-drake-prod.yaml --namespace drake-prod > "$PROD_RENDERED"
 
 python3 - "$PROD_RENDERED" <<'PY'
 import sys, yaml
@@ -270,6 +273,56 @@ for doc in kinds.get("Deployment", []) + kinds.get("Job", []):
         image = container["image"]
         if ":latest" in image or "@sha256:" not in image:
             die(f"{doc['metadata']['name']} image must be digest-pinned and never :latest")
+
+# --- NetworkPolicy: selectors, not addresses -----------------------------
+policies = {p["metadata"]["name"]: p for p in kinds.get("NetworkPolicy", [])}
+if "drake-default-deny" not in policies:
+    die("default-deny must remain")
+if set(policies["drake-default-deny"]["spec"]["policyTypes"]) != {"Ingress", "Egress"}:
+    die("default-deny must cover both directions")
+
+for name in ("drake-api-egress", "drake-migration-egress"):
+    if name not in policies:
+        die(f"{name} is missing")
+    for rule in policies[name]["spec"].get("egress", []):
+        for peer in rule.get("to", []):
+            if "ipBlock" in peer:
+                die(f"{name} must not reach a datastore by address; use podSelector")
+        if not rule.get("ports"):
+            die(f"{name} has an unrestricted egress rule")
+
+def peers(policy):
+    out = set()
+    for rule in policy["spec"].get("egress", []):
+        ports = {p["port"] for p in rule.get("ports", [])}
+        for peer in rule.get("to", []):
+            for label in peer.get("podSelector", {}).get("matchLabels", {}).values():
+                out |= {(label, port) for port in ports}
+    return out
+
+api_peers = peers(policies["drake-api-egress"])
+if ("drake-postgres", 5432) not in api_peers or ("drake-redis", 6379) not in api_peers:
+    die("the API must reach PostgreSQL and Redis by label")
+
+mig_peers = peers(policies["drake-migration-egress"])
+if ("drake-postgres", 5432) not in mig_peers:
+    die("the migration must reach PostgreSQL by label")
+if any(target == "drake-redis" for target, _ in mig_peers):
+    die("the migration reads no Redis key and must not be granted access")
+
+hooks = policies["drake-migration-egress"]["metadata"]["annotations"]
+if "pre-install" not in hooks.get("helm.sh/hook", ""):
+    die("the migration policy must exist before the migration hook Pod runs")
+if int(hooks.get("helm.sh/hook-weight", "0")) >= -5:
+    die("the migration policy must be weighted before the migration Job")
+
+if any(p["metadata"]["name"].endswith("web-egress") for p in kinds.get("NetworkPolicy", [])):
+    die("the web app makes no server-side call and must be granted no egress")
+
+migration_job = [j for j in kinds.get("Job", [])][0]
+res = migration_job["spec"]["template"]["spec"]["containers"][0].get("resources", {})
+if not res.get("requests") or not res.get("limits"):
+    die("the migration Job needs resource requests and limits")
 
 text = yaml.safe_dump_all(docs).lower()
 for marker in ("cloudflare", "cloudflared", "tunnel"):

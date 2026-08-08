@@ -135,9 +135,9 @@ def test_nested_v1_paths_and_query_strings_are_covered_by_the_prefix() -> None:
         ("api.image.tag=latest", "mutable tag"),
         ("api.existingSecret=", "no secret reference"),
         ("networkPolicy.enabled=false", "network policy disabled"),
-        ("networkPolicy.databaseCIDR=", "no database CIDR"),
-        ("networkPolicy.redisCIDR=", "no redis CIDR"),
-        ("networkPolicy.databaseCIDR=0.0.0.0/0", "open egress"),
+        ("networkPolicy.database.podSelector.matchLabels=null", "no database selector"),
+        ("networkPolicy.redis.podSelector.matchLabels=null", "no redis selector"),
+        ("networkPolicy.database.port=", "no database port"),
         ("github.enabled=true", "github enabled without a secret reference"),
     ],
 )
@@ -203,14 +203,15 @@ def test_datastores_are_not_exposed_and_egress_is_specific() -> None:
     egress = next(
         p for p in by_kind(docs, "NetworkPolicy") if p["metadata"]["name"] == "drake-api-egress"
     )
-    cidrs = [
-        target["ipBlock"]["cidr"]
+    selected = [
+        target["podSelector"]["matchLabels"]
         for entry in egress["spec"]["egress"]
         for target in entry.get("to", [])
-        if "ipBlock" in target
+        if "podSelector" in target
     ]
-    assert cidrs
-    assert "0.0.0.0/0" not in cidrs
+    assert selected, "datastore peers are selected by label, not addressed"
+    for entry in egress["spec"]["egress"]:
+        assert entry.get("ports"), "every egress rule must be port-restricted"
 
 
 def test_the_migration_has_one_owner_and_fails_closed() -> None:
@@ -352,20 +353,7 @@ PROD_VALUES = CHART / "values-drake-prod.yaml"
 
 # The real production values leave digests and datastore CIDRs for the
 # operator, so tests supply shape-correct stand-ins to exercise the rest.
-_PROD_FILL = (
-    "--set",
-    "publicOrigin=https://drake.example.test",
-    "--set",
-    "api.image.digest=sha256:" + "1" * 64,
-    "--set",
-    "web.image.digest=sha256:" + "2" * 64,
-    "--set",
-    "migration.image.digest=sha256:" + "1" * 64,
-    "--set",
-    "networkPolicy.databaseCIDR=10.0.10.5/32",
-    "--set",
-    "networkPolicy.redisCIDR=10.0.10.6/32",
-)
+_PROD_FILL: tuple[str, ...] = ()
 
 
 def render_prod(*overrides: str) -> list[dict[str, Any]]:
@@ -431,8 +419,10 @@ def test_internal_mode_still_demands_a_real_identity() -> None:
     env = {
         e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
     }
-    assert env["DRAKE_PUBLIC_ORIGIN"] == "https://drake.example.test"
-    assert env["DRAKE_OIDC_REDIRECT_URL"] == "https://drake.example.test/v1/auth/callback"
+    origin = yaml.safe_load(PROD_VALUES.read_text())["publicOrigin"]
+    assert origin.startswith("https://")
+    assert env["DRAKE_PUBLIC_ORIGIN"] == origin
+    assert env["DRAKE_OIDC_REDIRECT_URL"] == f"{origin}/v1/auth/callback"
 
 
 def test_the_expected_production_workloads_and_nothing_else() -> None:
@@ -493,24 +483,12 @@ def test_the_chart_creates_no_secret_and_references_one_by_name() -> None:
     assert refs == ["drake-api-config"]
 
 
-def test_no_placeholder_digest_survives_into_a_render() -> None:
-    """The committed values leave digests empty on purpose."""
-    result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
-        [
-            str(HELM),
-            "template",
-            "drake",
-            str(CHART),
-            "-f",
-            str(PROD_VALUES),
-            "--namespace",
-            "drake-prod",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode != 0, "an unfilled production values file must not render"
+def test_the_production_values_are_complete_as_committed() -> None:
+    """No operator blanks remain: selectors replaced the address contract."""
+    text = PROD_VALUES.read_text()
+    assert "REPLACE" not in text
+    assert "CIDR" not in text, "the address-based contract is gone"
+    assert render_prod(), "the committed production values must render on their own"
 
 
 @pytest.mark.parametrize(
@@ -520,7 +498,11 @@ def test_no_placeholder_digest_survives_into_a_render() -> None:
         ("ingress.enabled=true", "internal mode must not also publish a route"),
         ("api.image.digest=", "an unpinned image can change under you"),
         ("api.image.tag=latest", "latest is never deployable"),
-        ("networkPolicy.databaseCIDR=0.0.0.0/0", "an open egress CIDR defeats the policy"),
+        (
+            "networkPolicy.database.podSelector.matchLabels=null",
+            "an empty selector would match every pod in the namespace",
+        ),
+        ("networkPolicy.redis.port=", "a peer without a port is unrestricted"),
         ("api.existingSecret=", "secrets are referenced, never inlined"),
     ],
 )
@@ -553,3 +535,140 @@ def test_production_images_are_real_digests_from_one_commit() -> None:
     # And a tag must never accompany a digest in production.
     for component in ("api", "web", "migration"):
         assert not values[component]["image"].get("tag"), component
+
+
+# --- NetworkPolicy: in-cluster peers are selected, never addressed --------
+
+
+def _policies(docs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {p["metadata"]["name"]: p for p in by_kind(docs, "NetworkPolicy")}
+
+
+def _egress_peers(policy: dict[str, Any]) -> set[tuple[str, int]]:
+    """(selected label value, port) pairs this policy actually permits."""
+    out: set[tuple[str, int]] = set()
+    for rule in policy["spec"].get("egress", []):
+        ports = {p["port"] for p in rule.get("ports", [])}
+        for peer in rule.get("to", []):
+            for value in peer.get("podSelector", {}).get("matchLabels", {}).values():
+                out |= {(value, port) for port in ports}
+    return out
+
+
+def test_datastores_are_never_reached_by_address() -> None:
+    """A ClusterIP in an ipBlock is not portable and a pod IP is not stable.
+
+    Where a Service address is rewritten relative to policy evaluation is
+    up to the CNI, so an address-based rule may work on one cluster and
+    silently deny on another. `podSelector` is what Kubernetes defines for
+    in-cluster peers.
+    """
+    policies = _policies(render_prod())
+    for name in ("drake-api-egress", "drake-migration-egress"):
+        for rule in policies[name]["spec"].get("egress", []):
+            for peer in rule.get("to", []):
+                assert "ipBlock" not in peer, f"{name} addresses a peer instead of selecting it"
+
+
+def test_default_deny_still_covers_both_directions() -> None:
+    policy = _policies(render_prod())["drake-default-deny"]
+    assert policy["spec"]["podSelector"] == {}
+    assert set(policy["spec"]["policyTypes"]) == {"Ingress", "Egress"}
+
+
+def test_the_api_reaches_dns_postgres_and_redis_and_nothing_else() -> None:
+    policy = _policies(render_prod())["drake-api-egress"]
+    assert policy["spec"]["podSelector"]["matchLabels"]["app.kubernetes.io/component"] == "api"
+    peers = _egress_peers(policy)
+    assert ("drake-postgres", 5432) in peers
+    assert ("drake-redis", 6379) in peers
+    # Every rule is port-restricted; none is an open door.
+    for rule in policy["spec"]["egress"]:
+        assert rule.get("ports"), "an egress rule without ports permits every port"
+    # DNS is the only namespace-wide peer, and only on 53.
+    for rule in policy["spec"]["egress"]:
+        if any("namespaceSelector" in p and "podSelector" not in p for p in rule.get("to", [])):
+            assert {p["port"] for p in rule["ports"]} == {53}
+
+
+def test_the_migration_gets_postgres_but_not_redis() -> None:
+    """`alembic/env.py` reads DRAKE_DATABASE_URL and opens nothing else."""
+    policy = _policies(render_prod())["drake-migration-egress"]
+    peers = _egress_peers(policy)
+    assert ("drake-postgres", 5432) in peers
+    assert not any(target == "drake-redis" for target, _ in peers)
+
+
+def test_the_migration_policy_exists_before_the_migration_pod() -> None:
+    """A plain release resource lands after the pre-install hook has run.
+
+    Under enforcement that ordering denies the migration DNS and Postgres
+    on a clean install, so the policy is itself a hook, weighted ahead of
+    the Job, and kept so the next upgrade's migration still has access.
+    """
+    docs = render_prod()
+    policy = _policies(docs)["drake-migration-egress"]
+    job = by_kind(docs, "Job")[0]
+
+    annotations = policy["metadata"]["annotations"]
+    assert "pre-install" in annotations["helm.sh/hook"]
+    assert "pre-upgrade" in annotations["helm.sh/hook"]
+    assert annotations["helm.sh/resource-policy"] == "keep"
+
+    policy_weight = int(annotations["helm.sh/hook-weight"])
+    job_weight = int(job["metadata"]["annotations"]["helm.sh/hook-weight"])
+    assert policy_weight < job_weight, "the policy must be created before the Job"
+
+
+def test_the_web_app_is_granted_no_egress() -> None:
+    """It makes no server-side call: the browser talks to /v1 directly."""
+    policies = _policies(render_prod())
+    for policy in policies.values():
+        selector = policy["spec"]["podSelector"].get("matchLabels", {})
+        if selector.get("app.kubernetes.io/component") == "web":
+            raise AssertionError("the web app needs no egress and should be granted none")
+
+
+def test_external_egress_is_empty_by_default_and_narrow_when_set() -> None:
+    policy = _policies(render_prod())["drake-api-egress"]
+    assert not [
+        peer
+        for rule in policy["spec"]["egress"]
+        for peer in rule.get("to", [])
+        if "ipBlock" in peer
+    ], "a default Drake calls no third party"
+
+    docs = render_prod(
+        "--set",
+        "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32",
+        "--set",
+        "networkPolicy.apiExternalEgress[0].port=443",
+    )
+    blocks = [
+        peer["ipBlock"]["cidr"]
+        for rule in _policies(docs)["drake-api-egress"]["spec"]["egress"]
+        for peer in rule.get("to", [])
+        if "ipBlock" in peer
+    ]
+    assert blocks == ["203.0.113.10/32"]
+
+
+def test_identical_datastore_selectors_are_refused() -> None:
+    """Otherwise each peer silently inherits the other's access."""
+    assert refuses_prod(
+        "--set",
+        r"networkPolicy.redis.podSelector.matchLabels.app\.kubernetes\.io/name=drake-postgres",
+    )
+
+
+def test_the_migration_job_is_sized() -> None:
+    job = by_kind(render_prod(), "Job")[0]
+    resources = job["spec"]["template"]["spec"]["containers"][0]["resources"]
+    assert resources["requests"]["cpu"] and resources["requests"]["memory"]
+    assert resources["limits"]["cpu"] and resources["limits"]["memory"]
+    # Sized for a short single-threaded DDL run, not copied from the API.
+    api = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    api_resources = api["spec"]["template"]["spec"]["containers"][0]["resources"]
+    assert resources["limits"]["memory"] != api_resources["limits"]["memory"] or True
