@@ -222,6 +222,15 @@ class Settings(BaseSettings):
     # emitted as relative paths only.
     public_app_base_url: str = ""
 
+    # --- Deployment intelligence (Sprint 8) -------------------------
+    # Base for composing a workflow-run link from typed provenance parts.
+    # Empty means no link is produced — Drake never stores or accepts a URL,
+    # so without a configured base there is simply nothing to link to.
+    workflow_run_base_url: str = "https://github.com"
+    deployment_ingest_enabled: bool = False
+    deployment_ingest_interval_seconds: float = 120.0
+    deployment_ingest_batch_size: int = 200
+
     @property
     def effective_session_cookie_name(self) -> str:
         """`__Host-` wherever the cookie is actually Secure.

@@ -70,7 +70,13 @@ export const NAVIGATION: NavItem[] = [
     anyPermission: ["notification.view", "notification.manage"],
   },
   { label: "Protection", href: "/protection", icon: ShieldCheck, enabled: false },
-  { label: "Deployments", href: "/deployments", icon: Rocket, enabled: false },
+  {
+    label: "Deployments",
+    href: "/deployments",
+    icon: Rocket,
+    enabled: true,
+    anyPermission: ["environment.view", "cluster.view"],
+  },
   {
     label: "Integrations",
     href: "/integrations",

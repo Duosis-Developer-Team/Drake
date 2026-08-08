@@ -145,6 +145,7 @@ async def make_world(engine: AsyncEngine) -> dict[str, uuid.UUID]:
         ).scalar_one()
     return {
         "binding_id": binding,
+        "cluster_id": cluster,
         "environment_service_id": environment_service,
         "project_id": project,
         "environment_id": environment,

@@ -28,6 +28,7 @@ import json
 import logging
 import random
 import socket
+import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -275,8 +276,19 @@ async def send_webhook(
     idempotency_key: str,
     transport: httpx.AsyncBaseTransport | None = None,
     resolver: Resolver | None = None,
+    ssl_context: ssl.SSLContext | None = None,
 ) -> AttemptResult:
-    """One attempt. Never raises for a delivery failure; classifies it."""
+    """One attempt. Never raises for a delivery failure; classifies it.
+
+    `ssl_context` exists so a test can trust a private CA. It is not a way
+    to weaken TLS: a context that does not verify certificates or does not
+    check hostnames is refused below, so the only thing this seam can do is
+    ADD a trust anchor.
+    """
+    if ssl_context is not None and (
+        not ssl_context.check_hostname or ssl_context.verify_mode != ssl.CERT_REQUIRED
+    ):
+        raise ValueError("a webhook TLS context must verify certificates and hostnames")
     started = datetime.now(UTC)
 
     def elapsed() -> int:
@@ -315,8 +327,10 @@ async def send_webhook(
             follow_redirects=False,
             transport=transport,
             # TLS verification stays ON and is performed against the
-            # original hostname via the SNI extension below.
-            verify=True,
+            # original hostname via the SNI extension below. A caller may
+            # supply a context to add a trust anchor; it can never turn
+            # verification off (checked above).
+            verify=ssl_context if ssl_context is not None else True,
         ) as client:
             response = await client.post(
                 target.url,

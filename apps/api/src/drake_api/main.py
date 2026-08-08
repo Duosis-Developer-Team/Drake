@@ -19,6 +19,8 @@ from drake_api.auth.sessions import SessionStore
 from drake_api.catalog.router import router as catalog_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines, get_engine
+from drake_api.deployments.router import router as deployments_router
+from drake_api.deployments.worker import DeploymentIngestWorker
 from drake_api.errors import register_error_handlers
 from drake_api.github_app.auth import GitHubAppAuth
 from drake_api.github_app.auth import validate_credentials as validate_github_credentials
@@ -66,9 +68,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     notifier = getattr(app.state, "notification_worker", None)
     if notifier is not None:
         await notifier.start()
+    ingestor = getattr(app.state, "deployment_ingest_worker", None)
+    if ingestor is not None:
+        await ingestor.start()
     try:
         yield
     finally:
+        if ingestor is not None:
+            await ingestor.stop()
         if notifier is not None:
             await notifier.stop()
         if evaluator is not None:
@@ -191,6 +198,11 @@ def create_app(
         if (settings.notification_planner_enabled or settings.webhook_worker_enabled)
         else None
     )
+    app.state.deployment_ingest_worker = (
+        DeploymentIngestWorker(get_engine(settings), settings, app.state.telemetry_redis)
+        if settings.deployment_ingest_enabled
+        else None
+    )
 
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -204,6 +216,7 @@ def create_app(
     app.include_router(github_router)
     app.include_router(github_onboarding_router)
     app.include_router(github_webhook_router)
+    app.include_router(deployments_router)
     app.include_router(service_health_router)
     app.include_router(incidents_router)
     app.include_router(notifications_router)
