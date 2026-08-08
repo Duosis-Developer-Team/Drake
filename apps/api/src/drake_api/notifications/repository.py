@@ -6,10 +6,13 @@ router is not the only caller a repository ever ends up with:
 - **The inbox belongs to its recipient.** Every inbox query filters on the
   authenticated principal's identity id. There is no parameter for a
   recipient, so there is nothing to tamper with.
-- **A revoked scope revokes the content.** A notification whose incident
-  the reader may no longer see keeps its row — they did receive it — but
-  its text and link are withheld. Deleting the row would rewrite history;
-  showing the text would leak what a grant change just took away.
+- **A revoked scope hides the row entirely.** A notification whose incident
+  the reader may no longer see is not listed, not counted, and cannot be
+  marked read. Returning it as a redacted placeholder would still answer
+  "an incident exists here that you may not see", which is exactly the
+  enumeration the scope filter exists to prevent. The row stays in the
+  database — history is not rewritten — and reappears if the grant is
+  restored.
 - **A webhook target never leaves the server.** Destination reads return a
   key and a display name. There is no column, and no code path, that could
   return a URL or a secret.
@@ -46,12 +49,6 @@ MAX_MARK_READ = 100
 # Fixed windows, so "recent" is a choice from a list rather than a range
 # someone can widen.
 INBOX_WINDOWS: dict[str, int] = {"24h": 86_400, "7d": 604_800, "30d": 2_592_000}
-
-WITHHELD_TITLE = "Notification unavailable"
-WITHHELD_BODY = (
-    "This notification refers to a service you no longer have access to, so its "
-    "details are not shown."
-)
 
 
 class NotificationError(ValueError):
@@ -99,11 +96,12 @@ async def list_inbox(
         raise NotificationError("unsupported_window", "unsupported time window")
     limit = max(1, min(limit, MAX_PAGE_SIZE))
 
-    # What the reader may still see. Computed once and applied per row, so
-    # a grant revoked yesterday takes effect on today's read.
+    # What the reader may still see. Applied as a FILTER, so an
+    # inaccessible row affects neither the page contents nor the cursor
+    # positions around it.
     visible = await visible_scope_ids(connection, principal, INCIDENT_READ_PERMISSION)
 
-    filters = ["n.recipient_identity_id = :me"]
+    filters = ["n.recipient_identity_id = :me", "es.scope_id = ANY(:visible)"]
     params: dict[str, Any] = {
         "me": principal.identity_id,
         "limit": limit + 1,
@@ -125,8 +123,7 @@ async def list_inbox(
             text(
                 f"""
                 SELECT n.id, n.event_type, n.title, n.body, n.target_path,
-                       n.metadata_snapshot, n.created_at, n.read_at, n.incident_id,
-                       (es.scope_id = ANY(:visible)) AS accessible
+                       n.metadata_snapshot, n.created_at, n.read_at, n.incident_id
                 FROM in_app_notifications n
                 JOIN incidents i ON i.id = n.incident_id
                 JOIN environment_services es ON es.id = i.environment_service_id
@@ -149,37 +146,44 @@ async def list_inbox(
 
 
 def _inbox_row(row: Any) -> dict[str, Any]:
-    accessible = bool(row[9])
+    """Only rows the reader may still see reach here — see `list_inbox`."""
     return {
         "id": str(row[0]),
-        "event_type": row[1] if accessible else None,
-        "title": row[2] if accessible else WITHHELD_TITLE,
-        "body": row[3] if accessible else WITHHELD_BODY,
-        # No link either: a path to an incident they cannot open would only
-        # produce a 404 and confirm it exists.
-        "target_path": row[4] if accessible else None,
-        "metadata": (row[5] or {}) if accessible else {},
+        "event_type": row[1],
+        "title": row[2],
+        "body": row[3],
+        "target_path": row[4],
+        "metadata": row[5] or {},
         "created_at": row[6].isoformat(),
         "read_at": row[7].isoformat() if row[7] else None,
-        "incident_id": str(row[8]) if accessible else None,
-        "accessible": accessible,
+        "incident_id": str(row[8]),
     }
 
 
 async def unread_count(connection: AsyncConnection, principal: Principal) -> int:
-    """Counts the caller's own unread rows, accessible or not.
+    """Unread rows the caller can actually open.
 
-    Counting only accessible ones would make the badge disagree with the
-    list for no useful reason — the row is theirs either way.
+    Scope-filtered exactly like the list. A badge that counted rows the
+    list will not show is both confusing and a disclosure: "you have 3
+    unread" for an empty inbox says an incident exists somewhere you may
+    not look.
     """
+    visible = await visible_scope_ids(connection, principal, INCIDENT_READ_PERMISSION)
     return int(
         (
             await connection.execute(
                 text(
-                    "SELECT count(*) FROM in_app_notifications "
-                    "WHERE recipient_identity_id = :me AND read_at IS NULL"
+                    """
+                    SELECT count(*)
+                    FROM in_app_notifications n
+                    JOIN incidents i ON i.id = n.incident_id
+                    JOIN environment_services es ON es.id = i.environment_service_id
+                    WHERE n.recipient_identity_id = :me
+                      AND n.read_at IS NULL
+                      AND es.scope_id = ANY(:visible)
+                    """
                 ),
-                {"me": principal.identity_id},
+                {"me": principal.identity_id, "visible": _sentinel(visible)},
             )
         ).scalar_one()
     )
@@ -188,14 +192,43 @@ async def unread_count(connection: AsyncConnection, principal: Principal) -> int
 async def mark_read(
     connection: AsyncConnection, principal: Principal, notification_ids: list[uuid.UUID]
 ) -> int:
-    """Mark the caller's own notifications read. Idempotent by construction.
+    """Mark the caller's own, still-visible notifications read.
 
-    The recipient filter is in the UPDATE itself, so an id belonging to
-    someone else matches nothing — it cannot be used to probe for one
-    either, since the count is the same as for an unknown id.
+    Fail-closed: if any requested id is not both the caller's AND inside a
+    scope they can still see, the whole request is refused with
+    `not_found`. Silently skipping it would let the response's count act as
+    an oracle — "I asked for 3 and 2 were marked" says the third exists.
+
+    Idempotent on the rows themselves: an already-read id is addressable
+    and simply updates nothing, so a retry returns 0 rather than an error.
     """
     if not notification_ids:
         return 0
+    requested = notification_ids[:MAX_MARK_READ]
+    visible = await visible_scope_ids(connection, principal, INCIDENT_READ_PERMISSION)
+
+    addressable = {
+        row[0]
+        for row in (
+            await connection.execute(
+                text(
+                    """
+                    SELECT n.id
+                    FROM in_app_notifications n
+                    JOIN incidents i ON i.id = n.incident_id
+                    JOIN environment_services es ON es.id = i.environment_service_id
+                    WHERE n.recipient_identity_id = :me
+                      AND n.id = ANY(:ids)
+                      AND es.scope_id = ANY(:visible)
+                    """
+                ),
+                {"me": principal.identity_id, "ids": requested, "visible": _sentinel(visible)},
+            )
+        ).all()
+    }
+    if len(addressable) != len(set(requested)):
+        raise NotificationError("not_found", "not found")
+
     result = await connection.execute(
         text(
             """
@@ -206,7 +239,7 @@ async def mark_read(
               AND read_at IS NULL
             """
         ),
-        {"me": principal.identity_id, "ids": notification_ids[:MAX_MARK_READ]},
+        {"me": principal.identity_id, "ids": requested},
     )
     return int(result.rowcount or 0)
 
@@ -463,10 +496,11 @@ async def create_policy(
                 """
                 INSERT INTO notification_policies
                     (display_name, project_id, environment_id, service_id,
-                     event_types, severities, created_by, updated_by)
+                     event_types, severities, created_by, updated_by, effective_from)
                 VALUES (:name, :project, :environment, :service,
-                        CAST(:events AS jsonb), CAST(:severities AS jsonb), :actor, :actor)
-                RETURNING id, version
+                        CAST(:events AS jsonb), CAST(:severities AS jsonb), :actor, :actor,
+                        now())
+                RETURNING id, version, effective_from
                 """
             ),
             {
@@ -481,7 +515,9 @@ async def create_policy(
         )
     ).first()
     assert row is not None
-    return {"id": str(row[0]), "version": row[1]}
+    # Effective from now, never from the beginning of time: a policy
+    # created today does not route yesterday's incidents.
+    return {"id": str(row[0]), "version": row[1], "effective_from": row[2].isoformat()}
 
 
 async def update_policy(
@@ -509,7 +545,9 @@ async def update_policy(
         await connection.execute(
             text(
                 """
-                SELECT pol.version, pol.project_id, p.scope_id
+                SELECT pol.version, pol.project_id, p.scope_id,
+                       pol.environment_id, pol.service_id, pol.event_types,
+                       pol.severities, pol.enabled
                 FROM notification_policies pol
                 JOIN projects p ON p.id = pol.project_id
                 WHERE pol.id = :id
@@ -524,6 +562,22 @@ async def update_policy(
         raise NotificationError("version_conflict", "the policy changed since it was read")
     await _validate_catalog_narrowing(connection, row[1], environment_id, service_id)
 
+    # Which edits move the effective time? Anything that changes WHAT the
+    # policy matches, plus re-enabling it. Renaming does not: the rule is
+    # unchanged, so its backlog stays deliverable.
+    #
+    # Re-enabling deliberately moves it forward. Events that happened while
+    # a policy was off were, at that moment, not routed by it — turning it
+    # back on must not retroactively deliver them.
+    scope_changed = (
+        row[3] != environment_id
+        or row[4] != service_id
+        or set(row[5] or ()) != set(event_types)
+        or set(row[6] or ()) != set(severities)
+    )
+    re_enabled = enabled and not row[7]
+    reset_effective_from = scope_changed or re_enabled
+
     updated = (
         await connection.execute(
             text(
@@ -535,11 +589,13 @@ async def update_policy(
                     event_types = CAST(:events AS jsonb),
                     severities = CAST(:severities AS jsonb),
                     enabled = :enabled,
+                    effective_from = CASE WHEN :reset_effective THEN now()
+                                          ELSE effective_from END,
                     version = version + 1,
                     updated_at = now(),
                     updated_by = :actor
                 WHERE id = :id AND version = :expected
-                RETURNING version
+                RETURNING version, effective_from
                 """
             ),
             {
@@ -550,6 +606,7 @@ async def update_policy(
                 "events": json.dumps(sorted(set(event_types))),
                 "severities": json.dumps(sorted(set(severities))),
                 "enabled": enabled,
+                "reset_effective": reset_effective_from,
                 "expected": expected_version,
                 "actor": actor_identity_id,
             },
@@ -557,7 +614,11 @@ async def update_policy(
     ).first()
     if updated is None:
         raise NotificationError("version_conflict", "the policy changed since it was read")
-    return {"id": str(policy_id), "version": updated[0]}
+    return {
+        "id": str(policy_id),
+        "version": updated[0],
+        "effective_from": updated[1].isoformat(),
+    }
 
 
 async def attach_destination(
@@ -592,16 +653,23 @@ async def attach_destination(
         await connection.execute(
             text(
                 """
-                INSERT INTO notification_policy_destinations (policy_id, destination_id)
-                VALUES (:policy, :destination)
-                ON CONFLICT (policy_id, destination_id) DO NOTHING
-                RETURNING id
+                INSERT INTO notification_policy_destinations
+                    (policy_id, destination_id, effective_from)
+                VALUES (:policy, :destination, now())
+                ON CONFLICT (policy_id, destination_id) DO UPDATE
+                SET enabled = true,
+                    -- Re-arming a previously disabled binding starts from
+                    -- now, for the same reason re-enabling a policy does.
+                    effective_from = CASE WHEN notification_policy_destinations.enabled
+                                          THEN notification_policy_destinations.effective_from
+                                          ELSE now() END
+                RETURNING id, (xmax = 0) AS inserted
                 """
             ),
             {"policy": policy_id, "destination": destination_id},
         )
     ).first()
-    return {"attached": inserted is not None}
+    return {"attached": bool(inserted and inserted[1])}
 
 
 async def list_policies(
@@ -623,6 +691,7 @@ async def list_policies(
                        pol.environment_id, e.environment_key,
                        pol.service_id, sd.service_key,
                        pol.event_types, pol.severities, pol.enabled, pol.version,
+                       pol.effective_from,
                        COALESCE(
                          (SELECT count(*) FROM notification_policy_destinations pd
                           WHERE pd.policy_id = pol.id AND pd.enabled), 0)
@@ -652,7 +721,8 @@ async def list_policies(
             "severities": list(row[9] or ()),
             "enabled": row[10],
             "version": row[11],
-            "destination_count": row[12],
+            "effective_from": row[12].isoformat(),
+            "destination_count": row[13],
         }
         for row in rows
     ]

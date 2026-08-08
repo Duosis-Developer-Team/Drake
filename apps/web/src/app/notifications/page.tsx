@@ -3,11 +3,11 @@
 /**
  * The in-app inbox.
  *
- * Every row is text the server composed. A notification whose incident the
- * reader may no longer open is shown as withheld rather than removed —
- * they did receive it, and pretending otherwise would rewrite what
- * happened; showing its contents would hand back exactly what a grant
- * change took away.
+ * Every row is text the server composed, and every row is one the reader
+ * may still open: the API omits notifications whose incident has left
+ * their scope entirely. Rendering them as redacted placeholders would
+ * still answer "something exists here you may not see", which is the
+ * enumeration the scope filter exists to prevent.
  */
 
 import Link from "next/link";
@@ -56,29 +56,21 @@ function NotificationRow({
         <p className="text-sm font-medium text-ink">{item.title}</p>
         <p className="mt-0.5 text-xs text-ink-secondary">{item.body}</p>
         <p className="mt-1 text-[11px] text-ink-muted">
-          {item.event_type ? (
-            <span className="mr-2">{EVENT_TYPE_LABELS[item.event_type]}</span>
-          ) : null}
+          <span className="mr-2">{EVENT_TYPE_LABELS[item.event_type]}</span>
           <time className="font-mono">{item.created_at}</time>
           {item.read_at ? <span className="ml-2">read</span> : null}
         </p>
       </div>
       <div className="flex items-center gap-2">
-        {item.accessible && item.target_path ? (
-          <Link
-            href={item.target_path}
-            className="text-xs font-medium text-ink-secondary underline hover:text-ink"
-          >
-            Open incident
-          </Link>
-        ) : (
-          <span
-            className="text-[11px] italic text-ink-muted"
-            data-testid="notification-withheld"
-          >
-            no longer accessible
-          </span>
-        )}
+        {/* Every listed row is one the reader may still open: the API
+            filters out notifications whose incident has left their scope
+            rather than returning a redacted placeholder. */}
+        <Link
+          href={item.target_path}
+          className="text-xs font-medium text-ink-secondary underline hover:text-ink"
+        >
+          Open incident
+        </Link>
         {item.read_at ? null : (
           <button
             type="button"

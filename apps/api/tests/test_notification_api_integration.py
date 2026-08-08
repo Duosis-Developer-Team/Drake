@@ -172,8 +172,8 @@ async def test_mark_read_is_idempotent_and_scoped_to_the_caller(
     assert repeat.json()["marked_read"] == 0
 
     async with signed_in(harness, engine, "user-plain") as other:
-        # Someone else's id matches nothing — the same answer an unknown id
-        # gives, so it cannot be used to probe.
+        # Someone else's id is refused exactly like an unknown one, so the
+        # response cannot be used to probe for either.
         stolen = await other.post(
             "/v1/notifications/read",
             json={"notification_ids": [item["id"]]},
@@ -184,7 +184,8 @@ async def test_mark_read_is_idempotent_and_scoped_to_the_caller(
             json={"notification_ids": [str(uuidlib.uuid4())]},
             headers=await csrf(other),
         )
-    assert stolen.json() == unknown.json() == {"marked_read": 0}
+    assert stolen.status_code == unknown.status_code == 404
+    assert stolen.json()["error"]["message"] == unknown.json()["error"]["message"]
 
 
 async def test_mark_read_requires_csrf(engine: AsyncEngine) -> None:
@@ -198,19 +199,21 @@ async def test_mark_read_requires_csrf(engine: AsyncEngine) -> None:
     assert response.status_code in (401, 403)
 
 
-async def test_a_revoked_scope_withholds_the_notification_content(
+async def test_a_revoked_scope_removes_the_notification_from_the_api(
     engine: AsyncEngine,
 ) -> None:
-    """The row stays — they did receive it — but the details do not.
+    """Gone from the list, the count and mark-read — not redacted.
 
-    Deleting it would rewrite history; showing the text would hand back
-    exactly what the grant change just took away.
+    A redacted placeholder still answers "an incident exists here you may
+    not see", which is the enumeration the scope filter exists to prevent.
+    The row survives in the database; only its visibility ends.
     """
     harness = notification_harness()
     async with signed_in(harness, engine) as client:
         world = await inbox_world(engine, harness, "user-owner")
         visible = (await client.get("/v1/notifications")).json()["items"][0]
-        assert visible["accessible"] is True
+        assert visible["title"].startswith("Incident opened")
+        assert (await client.get("/v1/notifications/unread-count")).json()["unread"] == 1
 
         # Revoke every grant the reader holds.
         async with engine.begin() as connection:
@@ -218,16 +221,20 @@ async def test_a_revoked_scope_withholds_the_notification_content(
                 text("UPDATE grants SET revoked_at = now() WHERE identity_id = :id"),
                 {"id": world["recipient"]},
             )
-        withheld = (await client.get("/v1/notifications")).json()["items"][0]
 
-    assert withheld["accessible"] is False
-    assert withheld["title"] == "Notification unavailable"
-    assert withheld["incident_id"] is None
-    assert withheld["target_path"] is None
-    assert withheld["metadata"] == {}
-    # And nothing about the service leaked into what remains.
-    assert world["service_scope"] is not None
-    assert "pilot-api" not in str(withheld)
+        listed = (await client.get("/v1/notifications")).json()
+        count = (await client.get("/v1/notifications/unread-count")).json()
+        refused = await client.post(
+            "/v1/notifications/read",
+            json={"notification_ids": [visible["id"]]},
+            headers=await csrf(client),
+        )
+
+    assert listed["items"] == []
+    assert count["unread"] == 0
+    assert refused.status_code == 404
+    # Nothing about the service survived anywhere in the responses.
+    assert "pilot-api" not in (str(listed) + str(count) + refused.text)
 
 
 # --- policies -------------------------------------------------------------

@@ -35,10 +35,39 @@ Without it, an event with no matching policy would be rescanned on every
 cycle forever, and the planner's cost would grow with history rather than
 with traffic.
 
-Duplicate suppression is structural: unique constraints on
-(event, destination) for both notifications and deliveries. Two policies
-naming the same person produce one notification; two planners racing
-produce one row. Neither depends on timing.
+Duplicate suppression is structural — see the canonical-recipient section
+below for where the constraints actually sit. Two planners racing produce
+one row, and that does not depend on timing.
+
+### A policy applies from when it was configured
+
+Freezing a planned delivery's payload was not enough: an event that had not
+been planned yet would still be matched by a policy created — or re-scoped
+— afterwards. Policies and their destination bindings therefore carry an
+`effective_from`, compared against the event's immutable `created_at`.
+
+The distinction that matters: **retroactivity is prevented, backlog is
+not**. A scan window would have dropped both, and losing the backlog is
+exactly the failure an outbox exists to avoid.
+
+### Deduplication is on the canonical recipient, not the row
+
+Uniqueness on `(event, destination_row)` prevents duplicates per row, which
+is not what a person on the receiving end experiences. Two rows naming one
+user, or two rows pointing at one webhook key, would each produce their own
+notification. The constraints now sit on the canonical target — recipient
+identity for in-app, runtime destination key for webhooks — and the
+idempotency key is derived from the same triple.
+
+### The validated address is the one that is dialled
+
+Validating DNS and then handing the hostname to an HTTP client that
+resolves it again is a check that proves nothing: a hostile answer can flip
+public→private in between. Requests are sent to the validated IP literal
+with the hostname preserved in the `Host` header and the TLS SNI extension,
+so certificate verification is unchanged and only the socket target is
+pinned. Every answer is checked, not just the chosen one, and the whole
+check runs again on every attempt.
 
 ### A destination is a key, never an address
 
@@ -61,7 +90,7 @@ endpoint.
 Exactly-once delivery to a third-party HTTP endpoint does not exist without
 a distributed transaction with the receiver. Rather than implying
 otherwise, Drake sends a stable `Idempotency-Key` derived from the incident
-event and destination, documents at-least-once, and tells receivers to
+event, the channel and the canonical target, documents at-least-once, and tells receivers to
 deduplicate on it. Retries send byte-identical payloads, so the key is
 meaningful.
 
@@ -80,15 +109,22 @@ outage into a permanent backlog that nobody looks at.
 No endpoint takes a recipient parameter — the identity comes from the
 session, so there is nothing to tamper with.
 
-A notification whose incident the reader may no longer see keeps its row
-but withholds its content. Deleting it would rewrite history; showing it
-would hand back exactly what a grant change took away. The middle answer is
-the only honest one.
+A notification whose incident the reader may no longer see disappears from
+their inbox: not listed, not counted, and not addressable by mark-read
+(404, the same answer an unknown id gives). The row stays in the database,
+so history is not rewritten and restoring the grant restores the
+notification, unread, exactly as it was.
+
+Returning it as a redacted placeholder was the first implementation and was
+rejected on review: a placeholder still answers "an incident exists here
+that you may not see", which is precisely the enumeration a scope filter
+exists to prevent.
 
 ## Consequences
 
-- Enabling notifications does not replay history: events that predate the
-  first planner cycle are baselined as planned with no destinations.
+- Enabling notifications does not replay history, and that guarantee is
+  structural: a policy only routes events recorded at or after its
+  `effective_from`. No baseline command has to be remembered.
 - Routing is uniform and unconfigurable beyond project/environment/service
   and event type. That is a real limitation, and deliberate: a rule builder
   is a language, and a language needs a semantics nobody has agreed yet.
@@ -112,5 +148,10 @@ idempotency key and documenting at-least-once lets receivers do the one
 thing that actually works.
 
 **Delete notifications when access is revoked.** Rejected: it rewrites
-what happened. Withholding the content achieves the security goal without
-the dishonesty.
+what happened. The row is kept and simply stops being visible — not
+listed, not counted, not addressable — so restoring the grant restores the
+notification exactly as it was.
+
+**Return revoked notifications as redacted placeholders.** Rejected after
+review: a placeholder still answers "an incident exists here that you may
+not see", which is the enumeration the scope filter exists to prevent.

@@ -153,7 +153,13 @@ async def mark_read(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.begin() as connection:
-        updated = await repo.mark_read(connection, auth.principal, payload.notification_ids)
+        try:
+            updated = await repo.mark_read(connection, auth.principal, payload.notification_ids)
+        except repo.NotificationError as error:
+            # An id that is not the caller's, or whose incident has left
+            # their scope, is a 404 — the same answer an unknown id gives,
+            # so the response cannot confirm that either exists.
+            raise _fail(error) from error
     return {"marked_read": updated}
 
 

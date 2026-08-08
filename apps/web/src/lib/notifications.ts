@@ -54,18 +54,19 @@ export const DELIVERY_ERROR_LABELS: Record<string, string> = {
   destination_unresolvable: "Target could not be resolved",
 };
 
+/** A row the reader may still open. Notifications whose incident has left
+ * the reader's scope are not returned at all — not listed, not counted, and
+ * not markable — so there is no "withheld" variant to render. */
 export interface InboxItem {
   id: string;
-  event_type: NotificationEventType | null;
+  event_type: NotificationEventType;
   title: string;
   body: string;
-  target_path: string | null;
+  target_path: string;
   metadata: Record<string, string>;
   created_at: string;
   read_at: string | null;
-  incident_id: string | null;
-  /** False when the reader's access to the incident has since been removed. */
-  accessible: boolean;
+  incident_id: string;
 }
 
 export interface InboxPage {
@@ -87,6 +88,9 @@ export interface NotificationPolicy {
   severities: string[];
   enabled: boolean;
   version: number;
+  /** When this policy revision started applying. Incidents recorded before
+   * it are never routed by it. */
+  effective_from: string;
   destination_count: number;
 }
 

@@ -11,9 +11,17 @@ Three properties make it safe to run repeatedly:
 records the decision, including "nothing matched". Without that, an event
 with no policy would be rescanned on every cycle forever.
 
-**Duplicates are impossible, not merely unlikely.** Unique constraints on
-(event, destination) mean two policies naming the same person produce one
-notification, and two planners racing produce one row.
+**Duplicates are impossible, not merely unlikely.** Unique constraints sit
+on the CANONICAL target — (event, recipient identity) for in-app and
+(event, destination key) for webhooks — so two policies, or two
+destination rows naming the same person or the same operator endpoint,
+produce one notification. Two planners racing produce one row.
+
+**A policy applies from when it was configured, not backwards.** Matching
+compares the event's immutable `created_at` against the policy's and the
+binding's `effective_from`, so a policy created — or re-scoped — after an
+event never routes it. A backlog that built up while the worker was off is
+still delivered, because those events are newer than the policy.
 
 **A broken policy is one broken policy.** Each destination is planned in
 its own savepoint, so one failure does not cost the others their delivery.
@@ -51,21 +59,21 @@ class PlanReport:
     events_failed: int = 0
 
 
-async def unplanned_events(
-    connection: AsyncConnection, limit: int, *, since: datetime | None = None
-) -> list[NotifiableEvent]:
+async def unplanned_events(connection: AsyncConnection, limit: int) -> list[NotifiableEvent]:
     """Committed, notifiable events that have not been planned yet.
 
-    `since` is how a newly created policy is kept from paging people about
-    last month: the planner only ever looks forward from the moment it
-    starts caring, and an event older than that is marked planned without
-    matching anything.
+    Deliberately unbounded in time: a backlog that built up while the
+    worker was off must still be delivered. What keeps an old event from
+    being routed by a new policy is the effective-time comparison in
+    `matching_destinations`, not a scan window here — a window would drop
+    the backlog and the retroactivity together.
     """
     rows = (
         await connection.execute(
             text(
                 """
                 SELECT ev.id, ev.incident_id, ev.event_type, ev.occurred_at,
+                       ev.created_at,
                        i.state, i.severity, i.title, i.primary_reason,
                        i.opened_at, i.acknowledged_at, i.resolved_at,
                        i.project_id, i.environment_id, i.service_id,
@@ -88,30 +96,34 @@ async def unplanned_events(
             {"types": list(NOTIFIABLE_EVENTS), "limit": limit},
         )
     ).all()
-    del since
     return [
         NotifiableEvent(
             incident_event_id=row[0],
             incident_id=row[1],
             event_type=row[2],
             occurred_at=row[3],
-            incident_state=row[4],
-            severity=row[5],
-            title=row[6],
-            primary_reason=row[7],
-            opened_at=row[8],
-            acknowledged_at=row[9],
-            resolved_at=row[10],
-            project_id=row[11],
-            environment_id=row[12],
-            service_id=row[13],
-            project_key=row[14],
-            environment_key=row[15],
-            service_key=row[16],
-            binding_id=row[17],
-            namespace=row[18],
-            workload_name=row[19],
-            cluster_ref=row[20],
+            # The immutable moment Drake recorded the event. `occurred_at`
+            # is the evaluation's timestamp and can be backdated by a
+            # replayed reading, so it is not a safe basis for deciding
+            # which policy revision applies.
+            recorded_at=row[4],
+            incident_state=row[5],
+            severity=row[6],
+            title=row[7],
+            primary_reason=row[8],
+            opened_at=row[9],
+            acknowledged_at=row[10],
+            resolved_at=row[11],
+            project_id=row[12],
+            environment_id=row[13],
+            service_id=row[14],
+            project_key=row[15],
+            environment_key=row[16],
+            service_key=row[17],
+            binding_id=row[18],
+            namespace=row[19],
+            workload_name=row[20],
+            cluster_ref=row[21],
         )
         for row in rows
     ]
@@ -120,20 +132,28 @@ async def unplanned_events(
 async def matching_destinations(
     connection: AsyncConnection, event: NotifiableEvent
 ) -> list[dict[str, Any]]:
-    """Distinct destinations for an event, with the policies that matched.
+    """Canonical destinations for an event, with the policies that matched.
 
-    Every filter is `AND`, and every one of them is an id or an allowlist
-    membership — there is no expression to evaluate. `DISTINCT` on the
-    destination is what stops three overlapping policies from sending the
-    same person three copies.
+    Every filter is `AND`, and every one of them is an id, a timestamp
+    comparison or an allowlist membership — there is no expression to
+    evaluate. Grouping is on the canonical target rather than the
+    destination row, which is what stops three overlapping policies (or
+    three rows naming one person) from sending the same person three
+    copies.
     """
     rows = (
         await connection.execute(
             text(
                 """
-                SELECT d.id, d.destination_type, d.identity_id, d.destination_key,
-                       d.payload_schema_version, d.display_name,
-                       array_agg(pol.id ORDER BY pol.id) AS policy_ids
+                SELECT d.destination_type,
+                       -- Canonical target: WHO ultimately receives this.
+                       -- Grouping on the destination ROW would let two rows
+                       -- naming one person produce two notifications.
+                       d.identity_id, d.destination_key,
+                       min(d.id::text) AS destination_id,
+                       max(d.payload_schema_version) AS payload_schema_version,
+                       min(d.display_name) AS display_name,
+                       array_agg(DISTINCT pol.id) AS policy_ids
                 FROM notification_policies pol
                 JOIN notification_policy_destinations pd ON pd.policy_id = pol.id
                 JOIN notification_destinations d ON d.id = pd.destination_id
@@ -145,13 +165,18 @@ async def matching_destinations(
                   AND (pol.service_id IS NULL OR pol.service_id = :service)
                   AND pol.event_types ? :event_type
                   AND pol.severities ? :severity
+                  -- A policy applies from the moment it was created or
+                  -- last re-scoped, and a destination from the moment it
+                  -- was attached or re-enabled. An event that predates
+                  -- either is not retroactively routed.
+                  AND :recorded_at >= pol.effective_from
+                  AND :recorded_at >= pd.effective_from
                   -- A destination belongs to the same project as the policy
                   -- that points at it; this re-checks at send time so a
                   -- later catalog change cannot widen an old policy.
                   AND d.project_id = pol.project_id
-                GROUP BY d.id, d.destination_type, d.identity_id, d.destination_key,
-                         d.payload_schema_version, d.display_name
-                ORDER BY d.id
+                GROUP BY d.destination_type, d.identity_id, d.destination_key
+                ORDER BY d.destination_type, d.identity_id, d.destination_key
                 """
             ),
             {
@@ -160,18 +185,19 @@ async def matching_destinations(
                 "service": event.service_id,
                 "event_type": event.event_type,
                 "severity": event.severity,
+                "recorded_at": event.recorded_at,
             },
         )
     ).all()
     return [
         {
-            "id": row[0],
-            "type": row[1],
-            "identity_id": row[2],
-            "destination_key": row[3],
+            "type": row[0],
+            "identity_id": row[1],
+            "destination_key": row[2],
+            "id": uuid.UUID(row[3]),
             "payload_schema_version": row[4],
             "display_name": row[5],
-            "policy_ids": [str(policy_id) for policy_id in row[6]],
+            "policy_ids": sorted(str(policy_id) for policy_id in row[6]),
         }
         for row in rows
     ]
@@ -217,7 +243,9 @@ async def _plan_destination(
         return "in_app"
 
     delivery_id = uuid.uuid4()
-    key = idempotency_key(event.incident_event_id, destination["id"])
+    key = idempotency_key(
+        event.incident_event_id, "webhook", str(destination["destination_key"])
+    )
     await connection.execute(
         text(
             """
@@ -335,12 +363,14 @@ async def plan_pending(
 
 
 async def mark_existing_events_planned(engine: AsyncEngine) -> int:
-    """Baseline every event that already exists, without notifying anyone.
+    """Optional housekeeping: mark the existing backlog as already planned.
 
-    Run when notifications are first enabled. Without it, turning the
-    feature on would deliver the entire incident history to whoever is
-    listening — which is the classic way a notification system loses the
-    trust of everyone it pages on day one.
+    Correctness does NOT depend on this. Effective-time matching already
+    guarantees that a policy never routes an event older than itself, so
+    turning notifications on cannot deliver the incident history. This
+    exists only to stop the planner from re-reading a large historical
+    backlog on every cycle, and skipping it changes nothing an operator
+    would notice.
     """
     async with engine.begin() as connection:
         result = await connection.execute(

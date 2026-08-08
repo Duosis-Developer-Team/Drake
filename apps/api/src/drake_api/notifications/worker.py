@@ -9,6 +9,20 @@ transaction with the receiver, which does not exist.
 Claiming uses `FOR UPDATE SKIP LOCKED` plus a time-bounded lease. The lock
 keeps two workers out of the same row within a transaction; the lease is
 what recovers a row whose worker died holding it.
+
+Three terminal states, and they mean different things:
+
+- `delivered` — the receiver accepted it.
+- `dead_letter` — Drake tried and stopped. Either the receiver refused in
+  a way retrying cannot fix (a terminal 4xx, a redirect, an SSRF refusal)
+  or the bounded retry budget ran out.
+- `suppressed` — Drake never tried, and never will: the destination key is
+  no longer in the operator's registry, so there is nowhere to send it.
+
+All three are final. A terminal delivery is never claimed again, and never
+transitions to another terminal state — a row that went `suppressed` and
+later showed up as `dead_letter` would describe two different stories about
+the same delivery.
 """
 
 import asyncio
@@ -188,6 +202,10 @@ async def _record_attempt(
                     locked_until = NULL,
                     updated_at = now()
                 WHERE id = :id
+                  -- A terminal delivery stays terminal. Without this a
+                  -- late attempt could move `suppressed` to `dead_letter`
+                  -- and rewrite what happened.
+                  AND state NOT IN ('delivered', 'dead_letter', 'suppressed')
                 """
             ),
             {
@@ -206,8 +224,10 @@ async def _record_attempt(
 async def _suppress(engine: AsyncEngine, delivery_id: uuid.UUID, code: str) -> None:
     """A destination the operator has removed from the registry.
 
-    Not a failure to retry and not a dead letter: there is simply nowhere
-    to send it any more, and saying so is more useful than either.
+    Terminal, and deliberately NOT `dead_letter`: nothing was attempted and
+    nothing failed. `dead_letter` says "Drake tried and gave up", which
+    would send someone looking for a receiver problem that does not exist.
+    No attempt row is written either, because there was no attempt.
     """
     async with engine.begin() as connection:
         await connection.execute(
@@ -217,6 +237,7 @@ async def _suppress(engine: AsyncEngine, delivery_id: uuid.UUID, code: str) -> N
                 SET state = 'suppressed', last_error_code = :code,
                     locked_by = NULL, locked_until = NULL, updated_at = now()
                 WHERE id = :id
+                  AND state NOT IN ('delivered', 'dead_letter', 'suppressed')
                 """
             ),
             {"id": delivery_id, "code": code},

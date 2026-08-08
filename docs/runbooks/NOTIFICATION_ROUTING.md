@@ -51,23 +51,57 @@ there is no expression to evaluate:
 - severity — `critical` in this sprint
 - policy, destination and the link between them must all be enabled
 
-**Overlapping policies do not multiply.** Matching is `DISTINCT` on the
-destination, so three policies naming the same person produce one
-notification. Which policies matched is recorded on the row.
-
-**A new policy never replays history.** Baseline existing events once when
-enabling the feature:
+**Overlapping policies do not multiply.** Matching groups on the CANONICAL
+target — the recipient identity for in-app, the runtime destination key for
+webhooks — so three policies, or three destination rows naming one person
+or one endpoint, produce one notification. The database enforces the same
+thing under concurrency:
 
 ```
-uv run python -c "import asyncio; from drake_api.notifications.planner import ..."
+UNIQUE (incident_event_id, recipient_identity_id)   -- in_app_notifications
+UNIQUE (incident_event_id, destination_key)         -- webhook_deliveries
 ```
-— or simply enable the planner before creating policies: events that
-predate the first cycle are marked planned with no destinations. Delivering
-the entire incident history on day one is how a notification system loses
-everyone's trust immediately.
+
+The channel is part of the identity (separate tables), and the
+`Idempotency-Key` is derived from the same canonical triple, so a receiver
+sees one key per event per endpoint. Which policies matched is recorded on
+the row.
+
+### When a policy starts applying
+
+Every policy and every policy→destination binding carries a server-owned
+`effective_from`. The planner compares it against the event's immutable
+`created_at` — the moment Drake wrote the event down — and routes an event
+only when it is at least as new as both.
+
+| Action | `effective_from` |
+| --- | --- |
+| policy created | now |
+| filters changed (environment, service, event types, severity) | reset to now |
+| renamed only | unchanged |
+| disabled → enabled | reset to now |
+| destination attached | now |
+| disabled binding re-attached | reset to now |
+
+Consequences worth stating plainly:
+
+- **A new policy never replays history.** No baseline command is required
+  for this; correctness does not depend on remembering to run anything.
+- **Re-scoping a policy does not capture older unplanned events.** The
+  clock restarts with the new rule.
+- **Re-enabling does not backfill.** Events that happened while a policy
+  was off were, at that moment, not routed by it.
+- **A backlog is still delivered.** If the policy did not change and the
+  planner was simply behind — or switched off for a day — those events are
+  newer than the policy and are routed when it catches up. Retroactivity
+  and backlog are different things, and only the first is prevented.
+
+`mark_existing_events_planned` remains available as optional housekeeping
+to stop the planner re-reading a large historical backlog, but skipping it
+changes nothing an operator would notice.
 
 **Editing a policy affects only future events.** A delivery already
-planned keeps its frozen payload, destination and idempotency key.
+planned also keeps its frozen payload, destination and idempotency key.
 
 ## Destinations
 
@@ -112,6 +146,21 @@ about today:
 - redirects are **never followed**; a `3xx` is a terminal failure
 - no caller-supplied headers, and a bounded timeout
 - the response body is never read into anything Drake keeps
+
+**The validated address is the one that is dialled.** Checking DNS and then
+letting the HTTP client resolve the hostname again leaves a window in which
+a hostile answer flips public→private between the two — the check would
+have proved nothing. So the request goes to the validated IP literal, with:
+
+- the original hostname in the `Host` header, so the receiver routes it
+- the original hostname in the TLS SNI extension, so certificate
+  verification still happens against the real name (verification is never
+  disabled)
+- IPv6 answers bracketed correctly, and checked by the same rules
+- **every** answer checked, not just the one used: a name that can answer
+  with a forbidden address is not a safe name
+- the whole check repeated on **every attempt**, so a retry after a DNS
+  change is validated again rather than trusting the first result
 
 ## The payload
 
@@ -169,6 +218,21 @@ Receivers must deduplicate on it.
 | other `4xx` | terminal |
 | SSRF refusal | terminal |
 | destination key no longer registered | `suppressed` |
+
+### Terminal states
+
+Three, and they are final — a terminal delivery is never claimed again and
+never moves to another terminal state:
+
+| State | Means |
+| --- | --- |
+| `delivered` | the receiver accepted it |
+| `dead_letter` | Drake tried and stopped: a terminal `4xx`, a redirect, an SSRF refusal, or the retry budget ran out. There is always an attempt row saying which |
+| `suppressed` | Drake never tried and never will: the destination key is no longer in the registry. No attempt row, because there was no attempt |
+
+`suppressed` deliberately does **not** become `dead_letter` if the key
+returns — "Drake tried and gave up" would send someone looking for a
+receiver problem that does not exist.
 
 Retry is exponential with bounded jitter, up to `webhook_max_attempts` (6)
 and `webhook_max_elapsed_seconds` (24h), then `dead_letter`. `Retry-After`
@@ -251,8 +315,8 @@ not allowed to reach.
 Its destination key is no longer in the runtime registry. Re-add the key,
 or leave it: there is nowhere to send it.
 
-**A recipient sees "Notification unavailable".**
-Their access to that service was revoked after the notification was
-delivered. The row stays — they did receive it — but its contents are
-withheld, because showing them would hand back exactly what the grant
-change took away.
+**A notification vanished from someone's inbox.**
+Their access to that service was revoked. The row is not listed, not
+counted, and cannot be marked read (404) — a redacted placeholder would
+still answer "an incident exists here you may not see". The row stays in
+the database, so restoring the grant makes it visible again, unread.

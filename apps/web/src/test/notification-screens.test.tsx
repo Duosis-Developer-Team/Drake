@@ -26,7 +26,6 @@ function inboxItem(overrides: Record<string, unknown> = {}) {
     created_at: "2026-08-08T12:00:00Z",
     read_at: null,
     incident_id: "inc-1",
-    accessible: true,
     ...overrides,
   };
 }
@@ -124,23 +123,13 @@ describe("notification inbox", () => {
     );
   });
 
-  it("withholds an incident the reader can no longer access", async () => {
-    renderInbox([
-      inboxItem({
-        accessible: false,
-        title: "Notification unavailable",
-        body: "This notification refers to a service you no longer have access to.",
-        target_path: null,
-        incident_id: null,
-        metadata: {},
-        event_type: null,
-      }),
-    ]);
-    const row = await screen.findByTestId("notification-n1");
-    expect(within(row).getByTestId("notification-withheld")).toBeInTheDocument();
-    expect(within(row).queryByRole("link")).not.toBeInTheDocument();
-    // Nothing about the service survives the revocation.
-    expect(row.textContent).not.toContain("pilot/dev/api");
+  it("shows nothing at all once the API stops returning a notification", async () => {
+    // The server omits rows whose incident has left the reader's scope, so
+    // there is no redacted variant for this screen to render — and nothing
+    // that would say "an incident exists here you may not see".
+    renderInbox([]);
+    expect(await screen.findByText("No notifications")).toBeInTheDocument();
+    expect(screen.queryByTestId("inbox-list")).not.toBeInTheDocument();
   });
 
   it("marks a notification read and reloads", async () => {

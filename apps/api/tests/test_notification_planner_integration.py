@@ -10,6 +10,7 @@ ever recorded that it had been considered.
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -105,6 +106,13 @@ async def make_recipient(
     return identity
 
 
+#: Helper policies are "already in force" by default: they were configured
+#: before the events these suites create. A policy effective from `now()`
+#: would match nothing, because effective-time matching (correctly) refuses
+#: to route events that predate the rule.
+ALREADY_IN_FORCE = timedelta(hours=1)
+
+
 async def make_policy(
     engine: AsyncEngine,
     world: dict[str, Any],
@@ -113,6 +121,7 @@ async def make_policy(
     environment_id: uuid.UUID | None = None,
     service_id: uuid.UUID | None = None,
     enabled: bool = True,
+    effective_from: datetime | None = None,
 ) -> uuid.UUID:
     async with engine.begin() as connection:
         return (
@@ -121,9 +130,10 @@ async def make_policy(
                     """
                     INSERT INTO notification_policies
                         (display_name, project_id, environment_id, service_id,
-                         event_types, severities, enabled)
+                         event_types, severities, enabled, effective_from)
                     VALUES (:name, :project, :environment, :service,
-                            CAST(:events AS jsonb), '["critical"]'::jsonb, :enabled)
+                            CAST(:events AS jsonb), '["critical"]'::jsonb, :enabled,
+                            :effective_from)
                     RETURNING id
                     """
                 ),
@@ -134,6 +144,8 @@ async def make_policy(
                     "service": service_id,
                     "events": json.dumps(list(event_types)),
                     "enabled": enabled,
+                    "effective_from": effective_from
+                    or datetime.now(UTC) - ALREADY_IN_FORCE,
                 },
             )
         ).scalar_one()
@@ -172,14 +184,26 @@ async def make_destination(
         ).scalar_one()
 
 
-async def attach(engine: AsyncEngine, policy_id: uuid.UUID, destination_id: uuid.UUID) -> None:
+async def attach(
+    engine: AsyncEngine,
+    policy_id: uuid.UUID,
+    destination_id: uuid.UUID,
+    *,
+    effective_from: datetime | None = None,
+) -> None:
+    """Attach a destination, in force since before the suite's events."""
     async with engine.begin() as connection:
         await connection.execute(
             text(
-                "INSERT INTO notification_policy_destinations (policy_id, destination_id) "
-                "VALUES (:p, :d) ON CONFLICT DO NOTHING"
+                "INSERT INTO notification_policy_destinations "
+                "(policy_id, destination_id, effective_from) "
+                "VALUES (:p, :d, :t) ON CONFLICT DO NOTHING"
             ),
-            {"p": policy_id, "d": destination_id},
+            {
+                "p": policy_id,
+                "d": destination_id,
+                "t": effective_from or datetime.now(UTC) - ALREADY_IN_FORCE,
+            },
         )
 
 

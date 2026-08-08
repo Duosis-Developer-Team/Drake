@@ -10,6 +10,14 @@ What a receiver gets: a small, server-composed JSON body, a stable
 HMAC over `timestamp.body`. What Drake keeps afterwards: an outcome code,
 an HTTP status and a duration. Never the response body, never the URL,
 never the secret.
+
+**The validated address is the one that is dialled.** Checking DNS and then
+letting the HTTP client resolve the hostname again leaves a window in
+which a hostile answer can flip public→private between the two — classic
+rebinding, and the check would have proved nothing. So the request is sent
+to the validated IP literal, with the original hostname carried in the
+`Host` header and in the TLS SNI extension. Certificate verification still
+happens against the real hostname; only the socket target is pinned.
 """
 
 import asyncio
@@ -59,6 +67,21 @@ class DestinationRefusedError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PinnedTarget:
+    """A request aimed at one verified address, for one hostname.
+
+    `url` points at the IP literal, so no second resolution happens between
+    the check and the connection. `host` and `sni` keep the original name,
+    so virtual hosting and certificate verification both still work.
+    """
+
+    url: str
+    host: str
+    sni: str
+    address: str
+
+
+@dataclass(frozen=True)
 class AttemptResult:
     """One attempt, reduced to what is safe to store."""
 
@@ -104,14 +127,35 @@ def _check_address(
     return False
 
 
+def _pin(parts: Any, address: str, port: int, hostname: str) -> PinnedTarget:
+    """Rewrite the URL to the verified address, keeping the hostname."""
+    literal = ipaddress.ip_address(address)
+    # IPv6 literals need brackets in a URL authority.
+    authority = f"[{address}]" if literal.version == 6 else address
+    explicit_port = parts.port is not None
+    default_port = 443 if parts.scheme == "https" else 80
+    netloc = f"{authority}:{port}" if explicit_port or port != default_port else authority
+    path = parts.path or "/"
+    query = f"?{parts.query}" if parts.query else ""
+    host_header = hostname if not explicit_port else f"{hostname}:{port}"
+    return PinnedTarget(
+        url=f"{parts.scheme}://{netloc}{path}{query}",
+        host=host_header,
+        sni=hostname,
+        address=address,
+    )
+
+
 async def validate_destination(
     destination: WebhookDestination, settings: Settings, resolver: Resolver | None = None
-) -> str:
-    """The SSRF boundary, re-checked on every send.
+) -> PinnedTarget:
+    """The SSRF boundary, re-checked on every send, and pinned.
 
     Validating once at configuration time would not help: DNS answers
     change, and the address a hostname resolved to last week is not a
-    promise about today.
+    promise about today. Returning a pinned target rather than the original
+    URL is what makes the check binding — the caller cannot accidentally
+    resolve the name a second time.
     """
     parts = urlsplit(destination.url)
     local_like = settings.env in ("local", "test")
@@ -136,13 +180,17 @@ async def validate_destination(
 
     if literal is not None:
         _check_address(literal, settings, destination)
-        return destination.url
+        # Already an address: nothing to resolve, nothing to rebind.
+        return _pin(parts, hostname, port, hostname)
 
     try:
         addresses = await (resolver or _default_resolver)(hostname, port)
     except socket.gaierror as error:
         raise DestinationRefusedError("destination_unresolvable") from error
     _refuse(not addresses, "destination_unresolvable")
+    # EVERY answer is checked, not just the one we intend to use: a name
+    # that can answer with a forbidden address is not a safe name, whichever
+    # address happens to come first today.
     verdicts = [
         _check_address(ipaddress.ip_address(address), settings, destination)
         for address in addresses
@@ -150,7 +198,7 @@ async def validate_destination(
     # A name answering with both public and private addresses is the shape
     # of a rebinding attack, not of a healthy endpoint.
     _refuse(any(verdicts) and not all(verdicts), "destination_mixed_answers_refused")
-    return destination.url
+    return _pin(parts, addresses[0], port, hostname)
 
 
 def load_signing_secret(destination: WebhookDestination) -> bytes | None:
@@ -235,7 +283,9 @@ async def send_webhook(
         return int((datetime.now(UTC) - started).total_seconds() * 1000)
 
     try:
-        url = await validate_destination(destination, settings, resolver)
+        # Re-resolved and re-checked on EVERY attempt, so a retry after a
+        # DNS change is validated again rather than trusting the first one.
+        target = await validate_destination(destination, settings, resolver)
     except DestinationRefusedError as error:
         # A misconfigured or hostile target is not something retrying fixes.
         return AttemptResult("refused", None, error.code, elapsed())
@@ -247,6 +297,9 @@ async def send_webhook(
         IDEMPOTENCY_HEADER: idempotency_key,
         TIMESTAMP_HEADER: timestamp,
         "User-Agent": "Drake/1.0",
+        # The URL points at the pinned IP, so the receiver needs the real
+        # name to route the request and to make sense of it.
+        "Host": target.host,
     }
     secret = load_signing_secret(destination)
     if secret is not None:
@@ -261,8 +314,19 @@ async def send_webhook(
             # Redirects are refused, not followed — see classify_status.
             follow_redirects=False,
             transport=transport,
+            # TLS verification stays ON and is performed against the
+            # original hostname via the SNI extension below.
+            verify=True,
         ) as client:
-            response = await client.post(url, content=body, headers=headers)
+            response = await client.post(
+                target.url,
+                content=body,
+                headers=headers,
+                # httpcore uses this for the TLS handshake and certificate
+                # hostname check, so pinning the socket does not weaken
+                # verification.
+                extensions={"sni_hostname": target.sni},
+            )
     except httpx.TimeoutException:
         return AttemptResult("retryable", None, "timeout", elapsed())
     except httpx.ConnectError:

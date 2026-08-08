@@ -63,6 +63,10 @@ class NotifiableEvent:
     incident_id: uuid.UUID
     event_type: str
     occurred_at: datetime
+    #: When Drake WROTE the event down — immutable, and the basis for
+    #: deciding which policy revision applies. `occurred_at` carries the
+    #: evaluation's own timestamp, which a replayed reading can backdate.
+    recorded_at: datetime
     incident_state: str
     severity: str
     title: str
@@ -166,11 +170,14 @@ def webhook_payload(
     }
 
 
-def idempotency_key(event_id: uuid.UUID, destination_id: uuid.UUID) -> str:
-    """Stable across retries and across planner runs.
+def idempotency_key(event_id: uuid.UUID, channel: str, canonical_target: str) -> str:
+    """Stable across retries, planner runs, and duplicate destination rows.
 
-    Derived from the event and destination, so the same logical delivery
-    always carries the same key — that is what lets a receiver collapse the
-    duplicates that at-least-once delivery makes inevitable.
+    Derived from the event, the channel and the CANONICAL target — the
+    runtime destination key, not the database row that referenced it. Two
+    destination rows pointing at one operator endpoint therefore produce
+    one key, which is what makes the guarantee the receiver experiences
+    ("one call per event") true rather than approximately true.
     """
-    return hashlib.sha256(f"{event_id}:{destination_id}".encode()).hexdigest()[:48]
+    material = f"{event_id}:{channel}:{canonical_target}"
+    return hashlib.sha256(material.encode()).hexdigest()[:48]
