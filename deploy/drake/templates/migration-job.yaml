@@ -35,6 +35,9 @@ spec:
         app.kubernetes.io/component: migration
     spec:
       {{- include "drake.imagePullSecrets" . | nindent 6 }}
+      # Same reason as the Deployments: the injected DRAKE_API_PORT would
+      # be read as a Drake setting and stop alembic before it connects.
+      enableServiceLinks: false
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
