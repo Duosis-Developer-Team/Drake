@@ -109,10 +109,18 @@ metadata:
   labels:
     {{- include "drake.labels" . | nindent 4 }}
   annotations:
+    # A hook, so it exists before the migration Pod. `before-hook-creation`
+    # replaces the previous copy at the start of the next install/upgrade,
+    # which is what keeps it current.
+    #
+    # Helm does NOT track hook resources as part of the release, so this
+    # policy is not removed by `helm uninstall`. That is documented in the
+    # runbook with an explicit cleanup command rather than papered over
+    # with `resource-policy: keep`, which would only have restated the
+    # behaviour Helm already has for hooks.
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation
-    "helm.sh/resource-policy": keep
 spec:
   podSelector:
     matchLabels:
@@ -164,8 +172,10 @@ This policy is annotated as a pre-install/pre-upgrade hook with a weight
 lower than the Job's, so it EXISTS BEFORE the migration Pod starts. A plain
 release resource would be created only after the pre-install hook has
 already run, and under enforcement the migration would be denied DNS and
-PostgreSQL on a clean install. `resource-policy: keep` leaves it in place
-afterwards, so the next upgrade's migration has the same access.
+PostgreSQL on a clean install.
+
+Helm does not track hook resources as release resources, so this survives
+`helm uninstall`. The runbook names it and gives the cleanup command.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -178,7 +188,6 @@ metadata:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation
-    "helm.sh/resource-policy": keep
 spec:
   podSelector:
     matchLabels:

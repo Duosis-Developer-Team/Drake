@@ -223,6 +223,32 @@ do
   fi
 done
 
+# A narrow, declared HTTPS egress must RENDER — the validator must not
+# confuse it with datastore addressing.
+if ! helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
+    --set "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32" \
+    --set "networkPolicy.apiExternalEgress[0].port=443" >/dev/null 2>&1; then
+  fail "a narrow /32 HTTPS egress entry was refused but should be allowed"
+fi
+
+# ...while these stay fail-closed.
+for override in \
+  "networkPolicy.apiExternalEgress[0].cidr=0.0.0.0/0 --set networkPolicy.apiExternalEgress[0].port=443" \
+  "networkPolicy.apiExternalEgress[0].cidr=::/0 --set networkPolicy.apiExternalEgress[0].port=443" \
+  "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32" \
+  "networkPolicy.apiExternalEgress[0].port=443" \
+  "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32 --set networkPolicy.apiExternalEgress[0].port=5432" \
+  "networkPolicy.database.namespaceSelector.matchLabels.name=elsewhere" \
+  "networkPolicy.redis.namespaceSelector.matchLabels.name=elsewhere" \
+  "networkPolicy.dns.podSelector.matchLabels=null" \
+  "networkPolicy.dns.namespaceSelector.matchLabels=null"
+do
+  if helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
+      --set $override >/dev/null 2>&1; then
+    fail "drake-prod rendered with '$override' but should have refused"
+  fi
+done
+
 # Identical datastore selectors would silently grant each peer the other's
 # access, so the chart refuses them.
 if helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
@@ -236,7 +262,9 @@ helm template drake . -f values-drake-prod.yaml --namespace drake-prod > "$PROD_
 
 python3 - "$PROD_RENDERED" <<'PY'
 import sys, yaml
+from pathlib import Path
 
+CHART_DIR = Path.cwd()
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 kinds: dict[str, list] = {}
 for d in docs:
@@ -281,15 +309,30 @@ if "drake-default-deny" not in policies:
 if set(policies["drake-default-deny"]["spec"]["policyTypes"]) != {"Ingress", "Egress"}:
     die("default-deny must cover both directions")
 
+DATASTORE_PORTS = {5432, 6379}
+
 for name in ("drake-api-egress", "drake-migration-egress"):
     if name not in policies:
         die(f"{name} is missing")
     for rule in policies[name]["spec"].get("egress", []):
-        for peer in rule.get("to", []):
-            if "ipBlock" in peer:
-                die(f"{name} must not reach a datastore by address; use podSelector")
-        if not rule.get("ports"):
+        ports = {p["port"] for p in rule.get("ports", [])}
+        if not ports:
             die(f"{name} has an unrestricted egress rule")
+        for peer in rule.get("to", []):
+            if "ipBlock" not in peer:
+                continue
+            # An ipBlock is legitimate for declared outbound HTTPS, and
+            # only for that. A datastore port behind an address is the
+            # non-portable pattern this policy exists to prevent.
+            if ports & DATASTORE_PORTS:
+                die(f"{name} reaches a datastore port by address; use podSelector")
+            if ports != {443}:
+                die(f"{name} has an ipBlock rule on {sorted(ports)}; only 443 is allowed")
+        # DNS must be narrowed to the resolver, not a whole namespace.
+        if ports == {53}:
+            for peer in rule.get("to", []):
+                if "namespaceSelector" in peer and "podSelector" not in peer:
+                    die(f"{name} permits port 53 to every pod in a namespace")
 
 def peers(policy):
     out = set()
@@ -299,6 +342,15 @@ def peers(policy):
             for label in peer.get("podSelector", {}).get("matchLabels", {}).values():
                 out |= {(label, port) for port in ports}
     return out
+
+for name in ("drake-api-egress", "drake-migration-egress"):
+    for rule in policies[name]["spec"].get("egress", []):
+        ports = {p["port"] for p in rule.get("ports", [])}
+        if not (ports & DATASTORE_PORTS):
+            continue
+        for peer in rule.get("to", []):
+            if "namespaceSelector" in peer:
+                die(f"{name} datastore peer must be same-namespace (no namespaceSelector)")
 
 api_peers = peers(policies["drake-api-egress"])
 if ("drake-postgres", 5432) not in api_peers or ("drake-redis", 6379) not in api_peers:
@@ -315,6 +367,18 @@ if "pre-install" not in hooks.get("helm.sh/hook", ""):
     die("the migration policy must exist before the migration hook Pod runs")
 if int(hooks.get("helm.sh/hook-weight", "0")) >= -5:
     die("the migration policy must be weighted before the migration Job")
+
+# The hook policies survive `helm uninstall`, so the runbook must name
+# them and say how to clean them up.
+runbook = (CHART_DIR / ".." / ".." / "docs" / "runbooks" /
+           "STANDARD_KUBERNETES_DEPLOYMENT.md")
+if runbook.exists():
+    text_rb = runbook.read_text()
+    for policy_name in ("drake-migration-egress", "drake-database-ingress"):
+        if policy_name not in text_rb:
+            die(f"the runbook must name the surviving hook policy {policy_name}")
+    if "delete networkpolicy" not in text_rb:
+        die("the runbook must give the post-uninstall cleanup command")
 
 if any(p["metadata"]["name"].endswith("web-egress") for p in kinds.get("NetworkPolicy", [])):
     die("the web app makes no server-side call and must be granted no egress")

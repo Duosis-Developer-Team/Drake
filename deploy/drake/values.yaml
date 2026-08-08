@@ -108,22 +108,36 @@ networkPolicy:
   # is therefore not portable, and a pod address is not stable across a
   # reschedule. `podSelector` is the construct Kubernetes defines for
   # in-cluster peers, and it survives both.
+  # Both datastores must live in Drake's own namespace. There is no
+  # cross-namespace option, and setting one is refused rather than ignored:
+  # a NetworkPolicy only governs pods in its own namespace, so allowing the
+  # egress side to point elsewhere would produce a rule that looks complete
+  # while the matching ingress policy could never be created. Reaching a
+  # datastore in another namespace needs a design that manages the policy
+  # on that side too; that is deliberately not in this chart.
   database:
-    # Empty selector = required. A `{}` selector would match every pod in
-    # the namespace, so the chart refuses to render on one.
+    # Required. A `{}` selector would match every pod in the namespace, so
+    # the chart refuses to render on one.
     podSelector:
       matchLabels: {}
-    # Omit namespaceSelector to keep the peer in Drake's own namespace,
-    # which is where the deployment puts it. Set it only to reach a
-    # datastore that genuinely lives elsewhere; `{}` (all namespaces) is
-    # refused.
-    namespaceSelector: {}
     port: 5432
   redis:
     podSelector:
       matchLabels: {}
-    namespaceSelector: {}
     port: 6379
+
+  # DNS, narrowed to the resolver itself.
+  #
+  # `namespaceSelector: {}` on port 53 would permit every pod in every
+  # namespace on that port, which is not "DNS only". Both selectors are
+  # required and are combined in ONE peer, so they intersect: the named
+  # pods in the named namespace, and nothing else.
+  dns:
+    namespaceSelector:
+      matchLabels: {}
+    podSelector:
+      matchLabels: {}
+    port: 53
 
   # Narrow, explicit outbound HTTPS for the API — a telemetry provider, or
   # GitHub when that integration is enabled. Empty by default because a

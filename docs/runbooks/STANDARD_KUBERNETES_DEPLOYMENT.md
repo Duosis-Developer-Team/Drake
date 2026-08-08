@@ -124,18 +124,47 @@ kubectl -n drake-prod create secret docker-registry drake-ghcr \
   --docker-password='<TOKEN-WITH-read:packages>'
 ```
 
-**3. Create the application Secret.** Exactly these five keys:
+**3. Create the application Secret.** The internal deployment needs
+**exactly two keys**:
 
 ```
 kubectl -n drake-prod create secret generic drake-api-config \
   --from-literal=DRAKE_DATABASE_URL='postgresql+psycopg://<user>:<pass>@<host>:5432/<db>' \
-  --from-literal=DRAKE_REDIS_URL='redis://<host>:6379/0' \
-  --from-literal=DRAKE_OIDC_ISSUER='https://login.microsoftonline.com/<TENANT>/v2.0' \
-  --from-literal=DRAKE_OIDC_CLIENT_ID='<CLIENT-ID>' \
-  --from-literal=DRAKE_OIDC_CLIENT_SECRET='<CLIENT-SECRET>'
+  --from-literal=DRAKE_REDIS_URL='redis://<host>:6379/0'
 ```
 
 Do not `get -o yaml` or `describe` this Secret afterwards.
+
+**Entra keys are added later, not now.** The API resolves OIDC discovery
+lazily — only on the login path — so it starts, passes `/health/live` and
+reports `/health/ready` from PostgreSQL and Redis alone. Health and
+readiness verification of this deployment is fully supported without
+Entra.
+
+**Never invent placeholder OIDC values.** A fake issuer or client id does
+not make login work; it makes the failure appear later and somewhere else.
+Leave the keys absent until a real Drake app registration exists.
+
+When it does, add the three keys **without recreating the Secret and
+without printing it**:
+
+```
+kubectl -n drake-prod patch secret drake-api-config --type merge -p "$(
+  python3 - <<'PY'
+import base64, json
+def b(v): return base64.b64encode(v.encode()).decode()
+print(json.dumps({"data": {
+    "DRAKE_OIDC_ISSUER":        b("https://login.microsoftonline.com/<TENANT>/v2.0"),
+    "DRAKE_OIDC_CLIENT_ID":     b("<CLIENT-ID>"),
+    "DRAKE_OIDC_CLIENT_SECRET": b("<CLIENT-SECRET>"),
+}}))
+PY
+)"
+kubectl -n drake-prod rollout restart deployment/drake-api
+```
+
+A patch leaves the existing database and Redis values untouched, so there
+is no window in which the Secret is incomplete.
 
 **4. Check the values.** `deploy/drake/values-drake-prod.yaml` is complete
 as committed: images are pinned to published digests, and the datastores
@@ -247,3 +276,29 @@ helm uninstall drake --namespace drake-prod
 Either affects only the `drake-prod` namespace; the chart creates nothing
 outside it and touches no shared object. Rollback does **not** reverse a
 migration — Drake has no production downgrade path by design.
+
+### Two policies survive an uninstall
+
+The migration needs its network access to exist *before* the pre-install
+hook Pod runs, so two NetworkPolicies are themselves Helm hooks:
+
+- `drake-migration-egress`
+- `drake-database-ingress`
+
+Helm does not track hook resources as part of the release, so
+**`helm uninstall` leaves both behind**. Each install or upgrade replaces
+them (`hook-delete-policy: before-hook-creation`), so they stay current on
+their own; nothing needs to be done during a normal deploy or upgrade.
+
+Only after a genuine uninstall, remove exactly those two:
+
+```
+kubectl -n drake-prod delete networkpolicy \
+  drake-migration-egress \
+  drake-database-ingress \
+  --ignore-not-found
+```
+
+That command names both policies explicitly and touches nothing else — the
+PostgreSQL and Redis workloads, their Services, Secrets and PVCs are not
+Helm resources and are unaffected. Do not run it as part of an upgrade.
