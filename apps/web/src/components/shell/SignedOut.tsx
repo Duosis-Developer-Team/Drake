@@ -2,7 +2,9 @@
 
 import { LogIn, ShieldCheck } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
+import { LocalSignIn } from "@/components/auth/LocalSignIn";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 /**
@@ -16,6 +18,26 @@ export function SignedOut({
 }) {
   const pathname = usePathname();
   const loginHref = `/v1/auth/login?redirect=${encodeURIComponent(pathname || "/")}`;
+
+  // Which sign-in this deployment offers. Until the answer arrives the
+  // provider button is shown, which is the long-standing behaviour; a
+  // deployment configured for local sign-in swaps it for the form.
+  const [mode, setMode] = useState<"oidc" | "local">("oidc");
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/v1/auth/mode", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (!cancelled && body?.mode === "local") setMode("local");
+      })
+      .catch(() => {
+        // Leave the provider button in place: guessing "local" here would
+        // show a form no deployment answers.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col" data-testid={`screen-${variant}`}>
@@ -60,13 +82,17 @@ export function SignedOut({
               </p>
             </>
           )}
-          <a
-            href={loginHref}
-            className="mt-6 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-accent px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <LogIn className="h-4 w-4" aria-hidden />
-            Sign in
-          </a>
+          {variant !== "unavailable" && mode === "local" ? (
+            <LocalSignIn />
+          ) : (
+            <a
+              href={loginHref}
+              className="mt-6 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-accent px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <LogIn className="h-4 w-4" aria-hidden />
+              Sign in
+            </a>
+          )}
         </div>
       </main>
     </div>

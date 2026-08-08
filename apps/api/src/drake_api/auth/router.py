@@ -51,6 +51,19 @@ def _set_session_cookie(response: Response, settings: Settings, session_id: str)
     )
 
 
+@router.get("/auth/mode")
+async def auth_mode(request: Request) -> dict[str, str]:
+    """Which way in this deployment offers.
+
+    Unauthenticated on purpose: the browser has to know which sign-in to
+    render before it has a session. It reveals no more than trying to sign
+    in would, and it is the only thing that keeps the web app from showing
+    an identity-provider button that would fail.
+    """
+    settings: Settings = request.app.state.settings
+    return {"mode": settings.auth_mode}
+
+
 class LocalLoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=1, max_length=1024)
