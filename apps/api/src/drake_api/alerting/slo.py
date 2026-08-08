@@ -228,18 +228,14 @@ def evaluate_slo(
         return _empty(
             SloStatus.QUERY_FAILED, DataQuality.FAILED, levels, freshness, "sli_query_failed"
         )
-    if served_stale or (
-        freshness is not None and freshness > int(freshness_limit.total_seconds())
-    ):
+    if served_stale or (freshness is not None and freshness > int(freshness_limit.total_seconds())):
         # Last-good past its lifetime. It described a window that has moved.
         return _empty(SloStatus.STALE, DataQuality.STALE, levels, freshness, None)
 
     # --- was there anything to measure? ----------------------------------
     if window is None or window.total <= 0 or window.samples <= 0:
         # 0/0 is not 100%. A service with no traffic has proved nothing.
-        return _empty(
-            SloStatus.INSUFFICIENT_DATA, DataQuality.EMPTY, levels, freshness, None
-        )
+        return _empty(SloStatus.INSUFFICIENT_DATA, DataQuality.EMPTY, levels, freshness, None)
 
     # --- the actual arithmetic -------------------------------------------
     observed_bad_ratio = window.bad / window.total

@@ -46,10 +46,7 @@ _EVENT_HEADLINE: dict[str, str] = {
 }
 
 _EVENT_SENTENCE: dict[str, str] = {
-    "opened": (
-        "Drake opened an incident after two consecutive trustworthy critical "
-        "evaluations."
-    ),
+    "opened": ("Drake opened an incident after two consecutive trustworthy critical evaluations."),
     "acknowledged": "A responder acknowledged this incident. Monitoring continues.",
     "auto_resolved": (
         "The service reported healthy twice in a row, so Drake resolved this "

@@ -138,9 +138,7 @@ async def incident_events(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
-        events = await incident_repo.list_incident_events(
-            connection, auth.principal, incident_id
-        )
+        events = await incident_repo.list_incident_events(connection, auth.principal, incident_id)
     if events is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"events": events}
@@ -182,9 +180,7 @@ async def acknowledge(
     if result["outcome"] == "not_found":
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     if result["outcome"] == "conflict":
-        raise HTTPException(
-            status_code=409, detail="the incident changed since it was read"
-        )
+        raise HTTPException(status_code=409, detail="the incident changed since it was read")
 
     # Audited only when something actually changed. A safe retry is not a
     # second acknowledgement and does not deserve a second audit row.
@@ -289,8 +285,9 @@ async def assign(
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
         if not await incident_repo.can_assign(connection, auth.principal, incident_id):
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
-        if payload.assignee_identity_id is not None and not await (
-            incident_repo.assignee_is_eligible(
+        if (
+            payload.assignee_identity_id is not None
+            and not await incident_repo.assignee_is_eligible(
                 connection, incident_id, payload.assignee_identity_id
             )
         ):
@@ -327,9 +324,7 @@ async def assign(
                 correlation_id=correlation_id_var.get(),
                 metadata={
                     "assignee_identity_id": (
-                        str(payload.assignee_identity_id)
-                        if payload.assignee_identity_id
-                        else None
+                        str(payload.assignee_identity_id) if payload.assignee_identity_id else None
                     )
                 },
             ),

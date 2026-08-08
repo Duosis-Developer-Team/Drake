@@ -94,9 +94,7 @@ def _incident_extensions() -> None:
     """Teach the Sprint 6 incident table about sources other than health."""
     op.add_column(
         "incidents",
-        sa.Column(
-            "source", sa.Text(), nullable=False, server_default=sa.text("'service_health'")
-        ),
+        sa.Column("source", sa.Text(), nullable=False, server_default=sa.text("'service_health'")),
     )
     # The canonical dedup identity for an incident that has no binding.
     # Server-composed from resolved identifiers — there is no endpoint
@@ -113,9 +111,7 @@ def _incident_extensions() -> None:
             nullable=True,
         ),
     )
-    op.add_column(
-        "incidents", sa.Column("assigned_at", sa.TIMESTAMP(timezone=True), nullable=True)
-    )
+    op.add_column("incidents", sa.Column("assigned_at", sa.TIMESTAMP(timezone=True), nullable=True))
     op.add_column(
         "incidents",
         sa.Column(
@@ -228,7 +224,7 @@ def _incident_extensions() -> None:
     op.create_check_constraint(
         "ck_np_severities_allowed",
         "notification_policies",
-        "severities <@ '[\"critical\", \"high\"]'::jsonb",
+        'severities <@ \'["critical", "high"]\'::jsonb',
     )
 
 
@@ -288,9 +284,7 @@ def _alert_tables() -> None:
         # attacker-influenceable and are not stored anywhere in this schema.
         sa.Column("slo_key", sa.Text(), nullable=True),
         sa.Column("runbook_key", sa.Text(), nullable=True),
-        sa.Column(
-            "mapping_state", sa.Text(), nullable=False, server_default=sa.text("'unmapped'")
-        ),
+        sa.Column("mapping_state", sa.Text(), nullable=False, server_default=sa.text("'unmapped'")),
         sa.Column("mapping_error_code", sa.Text(), nullable=True),
         sa.Column("starts_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.Column("ends_at", sa.TIMESTAMP(timezone=True), nullable=True),
@@ -354,9 +348,7 @@ def _alert_tables() -> None:
         ),
         # Small on purpose. A label set that does not fit is not a label set.
         sa.CheckConstraint("pg_column_size(labels) <= 4096", name="ck_alert_labels_size"),
-        sa.CheckConstraint(
-            "pg_column_size(annotations) <= 4096", name="ck_alert_annotations_size"
-        ),
+        sa.CheckConstraint("pg_column_size(annotations) <= 4096", name="ck_alert_annotations_size"),
         sa.CheckConstraint("occurrence >= 1", name="ck_alert_occurrence"),
         sa.CheckConstraint("version >= 1", name="ck_alert_version"),
         # An unmapped alert has no project, and a mapped one has a project.
@@ -481,9 +473,7 @@ def _delivery_table() -> None:
         # identity for anything: group membership changes between sends.
         sa.Column("group_key_digest", sa.Text(), nullable=True),
         sa.Column("status", sa.Text(), nullable=True),
-        sa.Column(
-            "truncated_alerts", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("truncated_alerts", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("alert_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("accepted_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("rejected_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
@@ -555,7 +545,9 @@ def _slo_tables() -> None:
         # Which CURATED query template measures this. Not PromQL: there is
         # no column here an expression could be stored in.
         sa.Column("sli_template_key", sa.Text(), nullable=False),
-        sa.Column("sli_template_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.Column(
+            "sli_template_version", sa.Integer(), nullable=False, server_default=sa.text("1")
+        ),
         # Latency thresholds come from a reviewed profile, so a frontend
         # cannot decide what "fast enough" means.
         sa.Column("threshold_profile_key", sa.Text(), nullable=True),
@@ -571,26 +563,20 @@ def _slo_tables() -> None:
         sa.Column("version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         *_timestamps(),
         sa.UniqueConstraint("project_id", "slo_key", name="uq_slo_definition_identity"),
-        sa.CheckConstraint(
-            "indicator IN ('availability', 'latency')", name="ck_slo_indicator"
-        ),
+        sa.CheckConstraint("indicator IN ('availability', 'latency')", name="ck_slo_indicator"),
         # A 0% objective is meaningless and a >100% one is impossible. 100%
         # itself is allowed and handled explicitly as a zero-error policy.
         sa.CheckConstraint(
             "objective_ratio > 0 AND objective_ratio <= 1", name="ck_slo_objective_range"
         ),
-        sa.CheckConstraint(
-            "window_seconds BETWEEN 3600 AND 7776000", name="ck_slo_window_range"
-        ),
+        sa.CheckConstraint("window_seconds BETWEEN 3600 AND 7776000", name="ck_slo_window_range"),
         sa.CheckConstraint(f"slo_key {_KEY_SHAPE}", name="ck_slo_key_shape"),
         sa.CheckConstraint(f"sli_template_key {_KEY_SHAPE}", name="ck_slo_template_shape"),
         sa.CheckConstraint(f"burn_profile_key {_KEY_SHAPE}", name="ck_slo_burn_profile_shape"),
         sa.CheckConstraint("version >= 1", name="ck_slo_version"),
     )
     op.create_index("ix_slo_definitions_project", "slo_definitions", ["project_id", "enabled"])
-    op.create_index(
-        "ix_slo_definitions_service", "slo_definitions", ["environment_service_id"]
-    )
+    op.create_index("ix_slo_definitions_service", "slo_definitions", ["environment_service_id"])
 
     op.create_table(
         "slo_evaluations",

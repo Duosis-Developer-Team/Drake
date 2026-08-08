@@ -324,9 +324,7 @@ class HealthOrchestrator:
         }
         tasks = {
             name: asyncio.create_task(
-                self._read_signal(
-                    principal, binding_id, key, from_dt, now, step_seconds, semaphore
-                )
+                self._read_signal(principal, binding_id, key, from_dt, now, step_seconds, semaphore)
             )
             for name, key in fields.items()
         }
@@ -536,9 +534,7 @@ class HealthOrchestrator:
         # A verdict already built on stale telemetry is cached, but not
         # promoted to the fallback: otherwise each outage would inherit the
         # previous one's staleness while looking freshly computed.
-        await self._cache.put(
-            keys, payload, last_good="telemetry_stale" not in payload["reasons"]
-        )
+        await self._cache.put(keys, payload, last_good="telemetry_stale" not in payload["reasons"])
         return payload
 
     async def invalidate(self, context: dict[str, Any]) -> None:

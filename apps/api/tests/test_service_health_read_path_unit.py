@@ -250,9 +250,7 @@ async def test_one_failed_optional_query_is_partial_not_critical() -> None:
 @pytest.mark.asyncio
 async def test_every_query_failing_is_unknown_not_critical() -> None:
     """A datasource outage is Drake's problem, and says so."""
-    broker = FakeBroker(
-        {key: HTTPException(503, "provider down") for key in HEALTHY_BASELINE}
-    )
+    broker = FakeBroker({key: HTTPException(503, "provider down") for key in HEALTHY_BASELINE})
     result, _ = await orchestrator(broker).compute(None, context(), now=NOW)
 
     assert result.status is HealthStatus.UNKNOWN
@@ -324,8 +322,7 @@ async def test_a_last_good_broker_response_produces_a_stale_verdict() -> None:
 async def test_telemetry_older_than_the_policy_allows_is_stale() -> None:
     old = NOW_TS - 4000  # the default policy tolerates 300s
     answers = {
-        key: envelope(key, float(value), sample_at=old)
-        for key, value in HEALTHY_BASELINE.items()
+        key: envelope(key, float(value), sample_at=old) for key, value in HEALTHY_BASELINE.items()
     }
     result, _ = await orchestrator(FakeBroker(answers)).compute(None, context(), now=NOW)
     assert result.status is HealthStatus.STALE

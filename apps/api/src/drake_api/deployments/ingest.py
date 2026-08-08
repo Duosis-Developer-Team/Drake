@@ -192,9 +192,7 @@ async def _pods_for(
     return [row[0] or {} for row in rows]
 
 
-async def ingest_workload(
-    connection: AsyncConnection, row: Any, *, now: datetime
-) -> str:
+async def ingest_workload(connection: AsyncConnection, row: Any, *, now: datetime) -> str:
     """Record (or refresh) one workload's current revision."""
     payload: dict[str, Any] = row[6] or {}
     spec = payload.get("spec_summary") or {}
@@ -218,9 +216,7 @@ async def ingest_workload(
         desired_replicas=desired,
         ready_replicas=_as_int(status.get("ready_replicas") or status.get("ready")),
         updated_replicas=_as_int(status.get("updated_replicas") or status.get("updated")),
-        available_replicas=_as_int(
-            status.get("available_replicas") or status.get("available")
-        ),
+        available_replicas=_as_int(status.get("available_replicas") or status.get("available")),
         conditions=tuple(payload.get("conditions") or ()),
         observed_at=row[9],
         first_seen_at=row[7],

@@ -48,17 +48,13 @@ async def run_ingest_cycle(
     if not acquired:
         return report
     try:
-        return await ingest_deployments(
-            engine, limit=settings.deployment_ingest_batch_size
-        )
+        return await ingest_deployments(engine, limit=settings.deployment_ingest_batch_size)
     finally:
         with contextlib.suppress(Exception):
             await redis.eval(_RELEASE, 1, INGEST_LEASE_KEY, token)
 
 
-async def compare_pending(
-    engine: AsyncEngine, broker: Any, principal: Any, limit: int = 20
-) -> int:
+async def compare_pending(engine: AsyncEngine, broker: Any, principal: Any, limit: int = 20) -> int:
     """Compute health comparisons for completed rollouts that lack one.
 
     Only for finished rollouts: comparing "after" while the rollout is
@@ -112,9 +108,7 @@ async def compare_pending(
 class DeploymentIngestWorker:
     """Lifespan-owned loop. Absent unless the flag is on."""
 
-    def __init__(
-        self, engine: AsyncEngine, settings: Settings, redis: aioredis.Redis
-    ) -> None:
+    def __init__(self, engine: AsyncEngine, settings: Settings, redis: aioredis.Redis) -> None:
         self._engine = engine
         self._settings = settings
         self._redis = redis

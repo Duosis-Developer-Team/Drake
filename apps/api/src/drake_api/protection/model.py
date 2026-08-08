@@ -193,9 +193,10 @@ def evaluate_protection(
     reasons: list[str] = []
 
     # --- can we trust anything at all? -----------------------------------
-    if evidence.reporter_seen_at is None or (
-        now - evidence.reporter_seen_at
-    ) > reporter_stale_after:
+    if (
+        evidence.reporter_seen_at is None
+        or (now - evidence.reporter_seen_at) > reporter_stale_after
+    ):
         # Without a live reporter, every other signal is a memory. Saying
         # "protected" here would mean "protected as far as we knew then".
         reasons.append(str(ReasonCode.REPORTER_STALE))
@@ -289,8 +290,7 @@ def _evaluate_recoverability(
 
     if promise.rto_seconds is not None:
         exceeded = drill.rto_met is False or (
-            drill.duration_seconds is not None
-            and drill.duration_seconds > promise.rto_seconds
+            drill.duration_seconds is not None and drill.duration_seconds > promise.rto_seconds
         )
         if exceeded:
             # It restored, but not inside the time the business was

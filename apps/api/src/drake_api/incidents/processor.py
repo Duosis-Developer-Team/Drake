@@ -372,9 +372,7 @@ async def process_evaluation(engine: AsyncEngine, evaluation: Evaluation) -> Pro
         )
 
 
-async def _open_incident(
-    connection: AsyncConnection, evaluation: Evaluation
-) -> uuid.UUID | None:
+async def _open_incident(connection: AsyncConnection, evaluation: Evaluation) -> uuid.UUID | None:
     """Open one, or discover that a concurrent worker already did.
 
     The `IntegrityError` path is not a failure: it is the partial unique

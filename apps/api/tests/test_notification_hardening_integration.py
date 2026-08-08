@@ -163,9 +163,7 @@ async def test_the_rest_of_the_inbox_pages_normally_around_a_hidden_row(
         others.append(world)
     for world in [first, *others]:
         policy = await make_policy(engine, world)
-        await attach(
-            engine, policy, await make_destination(engine, world, identity_id=recipient)
-        )
+        await attach(engine, policy, await make_destination(engine, world, identity_id=recipient))
     await plan_pending(engine)
 
     principal = principal_for(recipient)
@@ -182,9 +180,7 @@ async def test_the_rest_of_the_inbox_pages_normally_around_a_hidden_row(
 
     async with engine.connect() as connection:
         after = await list_inbox(connection, principal, limit=2)
-        second = await list_inbox(
-            connection, principal, limit=2, cursor=after["next_cursor"]
-        )
+        second = await list_inbox(connection, principal, limit=2, cursor=after["next_cursor"])
     seen = [item["id"] for item in after["items"] + second["items"]]
     # Three visible rows, paged cleanly: no gap where the hidden one was.
     assert len(seen) == len(set(seen)) == 3
@@ -290,9 +286,7 @@ async def test_a_backlog_is_still_delivered_when_the_policy_did_not_change(
         )
         # The event sat unplanned for a day because the worker was off.
         await connection.execute(
-            text(
-                "UPDATE incident_events SET created_at = :t WHERE incident_id = :i"
-            ),
+            text("UPDATE incident_events SET created_at = :t WHERE incident_id = :i"),
             {"t": datetime.now(UTC) - timedelta(days=1), "i": recipient_world["incident_id"]},
         )
 
@@ -597,9 +591,7 @@ async def test_different_recipients_are_not_deduped_together(
     second = await make_recipient(engine, world["service_scope"])
     policy = await make_policy(engine, world)
     for identity in (first, second):
-        await attach(
-            engine, policy, await make_destination(engine, world, identity_id=identity)
-        )
+        await attach(engine, policy, await make_destination(engine, world, identity_id=identity))
 
     await plan_pending(engine)
     assert len(await notifications_for(engine, first)) == 1
@@ -763,9 +755,7 @@ class LocalReceiver:
             self._server.close()
             await self._server.wait_closed()
 
-    async def _handle(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         head = await reader.readuntil(b"\r\n\r\n")
         lines = head.decode().split("\r\n")
         headers = {}
@@ -870,9 +860,7 @@ async def test_a_real_receiver_failure_is_recorded_without_its_body(
         settings = require_it_settings().model_copy(
             update={
                 "notification_webhooks": {
-                    WEBHOOK_KEY: destination(
-                        url=f"http://pinned.test:{receiver.port}/hooks/drake"
-                    )
+                    WEBHOOK_KEY: destination(url=f"http://pinned.test:{receiver.port}/hooks/drake")
                 }
             }
         )
@@ -1032,9 +1020,7 @@ async def test_terminal_failures_dead_letter_and_are_not_reclaimed(
     assert len(receiver.requests) == 1
 
 
-async def test_a_delivered_row_is_never_claimed_again(
-    engine: AsyncEngine, redis: Any
-) -> None:
+async def test_a_delivered_row_is_never_claimed_again(engine: AsyncEngine, redis: Any) -> None:
     from test_notification_webhook_integration import FakeReceiver, planned_delivery
 
     world = await planned_delivery(engine)

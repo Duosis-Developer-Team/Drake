@@ -70,9 +70,7 @@ def upgrade() -> None:
     # --- canonical destination identity -----------------------------------
     # In-app: the recipient identity IS the canonical target. Two policies,
     # or two destination rows, naming the same person now collide here.
-    op.drop_constraint(
-        "uq_in_app_event_destination", "in_app_notifications", type_="unique"
-    )
+    op.drop_constraint("uq_in_app_event_destination", "in_app_notifications", type_="unique")
     op.create_unique_constraint(
         "uq_in_app_event_recipient",
         "in_app_notifications",
@@ -82,9 +80,7 @@ def upgrade() -> None:
     # Webhook: the runtime destination key is the canonical target. Two
     # destination rows pointing at the same operator endpoint are one
     # endpoint, and it should be called once.
-    op.drop_constraint(
-        "uq_webhook_event_destination", "webhook_deliveries", type_="unique"
-    )
+    op.drop_constraint("uq_webhook_event_destination", "webhook_deliveries", type_="unique")
     op.create_unique_constraint(
         "uq_webhook_event_destination_key",
         "webhook_deliveries",
@@ -93,9 +89,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "uq_webhook_event_destination_key", "webhook_deliveries", type_="unique"
-    )
+    op.drop_constraint("uq_webhook_event_destination_key", "webhook_deliveries", type_="unique")
     op.create_unique_constraint(
         "uq_webhook_event_destination",
         "webhook_deliveries",

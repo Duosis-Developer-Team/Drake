@@ -149,9 +149,7 @@ async def test_pagination_is_bounded_and_keyset_based(engine: AsyncEngine) -> No
         first = (await client.get("/v1/incidents?limit=2")).json()
         assert len(first["items"]) == 2
         assert first["next_cursor"]
-        second = (
-            await client.get(f"/v1/incidents?limit=2&cursor={first['next_cursor']}")
-        ).json()
+        second = (await client.get(f"/v1/incidents?limit=2&cursor={first['next_cursor']}")).json()
 
     seen = [item["id"] for item in first["items"]] + [item["id"] for item in second["items"]]
     assert len(seen) == len(set(seen)) == 3

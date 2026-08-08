@@ -48,8 +48,7 @@ _KEY_SHAPE = "~ '^[a-z0-9][a-z0-9_.:-]{0,127}$'"
 _BACKUP_STATES = "'protected', 'at_risk', 'overdue', 'failed', 'unknown'"
 _RECOVERABILITY_STATES = "'verified', 'unverified', 'failed', 'unknown'"
 _OVERALL_STATES = (
-    "'recoverable_verified', 'protected_unverified', 'at_risk', 'overdue', "
-    "'failed', 'unknown'"
+    "'recoverable_verified', 'protected_unverified', 'at_risk', 'overdue', 'failed', 'unknown'"
 )
 _RUN_STATUSES = "'started', 'succeeded', 'failed', 'cancelled', 'unknown'"
 _DRILL_RESULTS = "'passed', 'failed', 'partial', 'unknown'"
@@ -248,9 +247,7 @@ def upgrade() -> None:
         ),
         *_timestamps(),
         sa.UniqueConstraint("run_id", "artifact_external_key", name="uq_backup_artifact_identity"),
-        sa.CheckConstraint(
-            "presence IN ('present', 'missing', 'expired')", name="ck_ba_presence"
-        ),
+        sa.CheckConstraint("presence IN ('present', 'missing', 'expired')", name="ck_ba_presence"),
         sa.CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_ba_size"),
         sa.CheckConstraint(
             "checksum_algorithm IS NULL OR checksum_algorithm IN ('sha256', 'sha512', 'md5')",
@@ -384,14 +381,10 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         *_timestamps(),
-        sa.UniqueConstraint(
-            "connector_key", "drill_external_id", name="uq_restore_drill_identity"
-        ),
+        sa.UniqueConstraint("connector_key", "drill_external_id", name="uq_restore_drill_identity"),
         sa.CheckConstraint(f"result IN ({_DRILL_RESULTS})", name="ck_rd_result"),
         sa.CheckConstraint(f"target_profile {_KEY_SHAPE}", name="ck_rd_target_shape"),
-        sa.CheckConstraint(
-            "jsonb_typeof(validations) = 'object'", name="ck_rd_validations_object"
-        ),
+        sa.CheckConstraint("jsonb_typeof(validations) = 'object'", name="ck_rd_validations_object"),
         sa.CheckConstraint("pg_column_size(validations) <= 2048", name="ck_rd_validations_size"),
         sa.CheckConstraint(
             "error_code IS NULL OR error_code ~ '^[a-z0-9_]{1,64}$'", name="ck_rd_error_code"
@@ -430,7 +423,9 @@ def upgrade() -> None:
         sa.Column("last_attempt_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("last_restore_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("reporter_seen_at", sa.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column("consecutive_failures", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "consecutive_failures", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
         sa.Column(
             "computed_at",
             sa.TIMESTAMP(timezone=True),
@@ -502,9 +497,7 @@ def upgrade() -> None:
         sa.Column("pages", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("records", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("error_code", sa.Text(), nullable=True),
-        sa.CheckConstraint(
-            "state IN ('open', 'completed', 'discarded')", name="ck_ps_state"
-        ),
+        sa.CheckConstraint("state IN ('open', 'completed', 'discarded')", name="ck_ps_state"),
     )
     op.create_index(
         "ix_protection_snapshots_connector",

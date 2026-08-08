@@ -421,9 +421,7 @@ async def load_definitions(
             id=uuid.UUID(str(row[0])),
             version=int(row[1]),
             project_id=uuid.UUID(str(row[2])),
-            environment_service_id=(
-                uuid.UUID(str(row[3])) if row[3] is not None else None
-            ),
+            environment_service_id=(uuid.UUID(str(row[3])) if row[3] is not None else None),
             slo_key=str(row[4]),
             indicator=str(row[5]),
             objective_ratio=float(row[6]),
