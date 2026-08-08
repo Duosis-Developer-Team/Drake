@@ -1037,3 +1037,155 @@ def test_the_runbook_states_the_same_namespace_requirement() -> None:
     assert "separate architectural change" in text, (
         "the runbook must say cross-namespace needs a design change, not a value"
     )
+
+
+# --- the chart uses the pre-provisioned datastores, it never claims them --
+
+
+def test_the_render_claims_no_out_of_band_resource() -> None:
+    """Adoption is the danger, not absence.
+
+    PostgreSQL, Redis, the PVC and the application Secret exist before the
+    release and outlive it. If the chart rendered any of them, Helm would
+    adopt them and `helm uninstall` would delete the database.
+    """
+    docs = render_prod()
+    kinds = {d["kind"] for d in docs}
+    for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet"):
+        assert forbidden not in kinds, f"the chart must not own a {forbidden}"
+
+    # A NetworkPolicy *about* a datastore pod is the chart's own resource and
+    # is expected; a workload or Service carrying the datastore's name would
+    # be Helm claiming the datastore itself.
+    owning_kinds = ("Deployment", "StatefulSet", "DaemonSet", "Service", "Job")
+    for doc in docs:
+        if doc["kind"] not in owning_kinds:
+            continue
+        name = doc["metadata"]["name"]
+        assert not name.startswith(("drake-postgres", "drake-redis")), (
+            f"{doc['kind']}/{name} would make Helm adopt an out-of-band datastore"
+        )
+
+
+def test_the_render_owns_exactly_the_application_resources() -> None:
+    docs = render_prod()
+    assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Deployment")) == [
+        "drake-api",
+        "drake-web",
+    ]
+    assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
+    assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
+        "drake-api",
+        "drake-web",
+    ]
+    assert {s["spec"]["type"] for s in by_kind(docs, "Service")} == {"ClusterIP"}
+
+
+def test_the_datastores_are_referenced_only_by_label_and_secret_name() -> None:
+    """The chart's whole relationship to the datastores is a reference."""
+    docs = render_prod()
+    api = next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-api")
+    container = api["spec"]["template"]["spec"]["containers"][0]
+
+    # Connection details arrive by Secret reference, never as a value.
+    assert [s["secretRef"]["name"] for s in container["envFrom"]] == ["drake-api-config"]
+    for entry in container.get("env", []):
+        name = entry["name"]
+        if "DATABASE" in name or "REDIS" in name:
+            raise AssertionError(f"{name} is rendered inline instead of referenced")
+
+    # And the network peers are labels, resolved at runtime.
+    selectors = [
+        # The DNS peer selects on k8s-app, so read the key tolerantly.
+        peer["podSelector"]["matchLabels"].get("app.kubernetes.io/name")
+        for policy in by_kind(docs, "NetworkPolicy")
+        for rule in policy["spec"].get("egress", [])
+        for peer in rule.get("to", [])
+        if "podSelector" in peer
+    ]
+    assert "drake-postgres" in selectors and "drake-redis" in selectors
+
+
+# --- the runbook matches a namespace that is already populated ------------
+
+
+def test_the_runbook_does_not_require_an_empty_namespace() -> None:
+    """The datastores must exist first, so an empty namespace is impossible."""
+    text = RUNBOOK.read_text()
+    assert "holds no prior resources" not in text
+    flat = " ".join(text.split()).lower()
+    for claim in ("namespace must be empty", "no prior resources", "must contain no"):
+        if claim in flat:
+            window = flat[flat.index(claim) - 200 : flat.index(claim) + 200]
+            assert "impossible" in window or "would be" in window, (
+                f"the runbook still demands an empty namespace: ...{claim}..."
+            )
+
+
+def test_the_runbook_lists_the_datastores_as_expected_preflight_state() -> None:
+    text = RUNBOOK.read_text()
+    section = text[text.index("Preflight the cluster") : text.index("Data-protection gate")]
+    lowered = section.lower()
+    assert "expected to be present" in lowered
+    for prerequisite in ("postgresql", "redis", "pvc", "bound"):
+        assert prerequisite in lowered, f"preflight must expect {prerequisite}"
+    # ...and it must stop on the collisions that actually matter.
+    for stop in ("helm release already exists", "not ready", "not `bound`", "already exists that"):
+        assert stop in lowered, f"preflight must stop on: {stop}"
+
+
+def test_the_runbook_never_recreates_an_existing_secret() -> None:
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+    marker = "If `drake-api-config` exists with both keys"
+    assert marker in flat
+    guidance = flat[flat.index(marker) : flat.index(marker) + 400].lower()
+    for prohibition in ("do not recreate", "do not patch", "do not print"):
+        assert prohibition in guidance, f"missing: {prohibition}"
+
+
+def test_the_runbook_never_dumps_a_secret() -> None:
+    """`-o yaml`/`-o json`/`describe` on a Secret prints the whole data map."""
+    for line in RUNBOOK.read_text().splitlines():
+        stripped = line.strip()
+        if "secret" not in stripped.lower() or not stripped.startswith("kubectl"):
+            continue
+        if "describe" in stripped:
+            raise AssertionError(f"describe prints Secret data: {stripped}")
+        if "-o yaml" in stripped or "-o json" in stripped:
+            raise AssertionError(f"this prints the full data map: {stripped}")
+
+
+def test_the_runbook_gates_the_migration_on_a_recovery_point() -> None:
+    text = RUNBOOK.read_text()
+    gate = text[text.index("Data-protection gate") : text.index("**8. Install.**")]
+    lowered = gate.lower()
+    assert "recovery point" in lowered
+    assert "stop" in lowered, "the gate must stop when no recovery point is confirmed"
+    # It must not promise something --atomic cannot do.
+    assert "does not undo a migration" in lowered
+    assert "no automatic downgrade" in lowered or "has no automatic downgrade" in lowered
+    # Baselines are identities, not pod UIDs.
+    for baseline in ("uid", "volumename", "generation", "resourceversion"):
+        assert baseline in lowered, f"the gate must baseline {baseline}"
+
+
+def test_the_runbook_does_not_claim_pod_uids_stay_constant() -> None:
+    """A rescheduled datastore pod is legitimate; demanding a fixed pod UID
+    would raise false alarms while missing real adoption."""
+    text = " ".join(RUNBOOK.read_text().split()).lower()
+    assert "pod uids are deliberately not on that list" in text
+
+
+def test_the_runbook_carries_no_point_in_time_status_claim() -> None:
+    """A procedure that records cluster state is wrong the day after."""
+    text = " ".join(RUNBOOK.read_text().split()).lower()
+    for stale in (
+        "no image published",
+        "no namespace created",
+        "no secret created",
+        "nothing here has been executed",
+        "has never been deployed",
+    ):
+        assert stale not in text, f"stale status claim in a permanent procedure: {stale}"
+    assert "this is a procedure, not a status report" in text
