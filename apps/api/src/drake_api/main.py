@@ -29,10 +29,14 @@ from drake_api.github_app.router_onboarding import router as github_onboarding_r
 from drake_api.github_app.router_webhook import router as github_webhook_router
 from drake_api.github_app.service import DeliveryRecoveryWorker, GitHubReconciler
 from drake_api.health import router as health_router
+from drake_api.incidents.router import router as incidents_router
+from drake_api.incidents.runner import EvaluationRunner
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
+from drake_api.service_health.cache import HealthCache
+from drake_api.service_health.orchestrator import HealthOrchestrator
 from drake_api.service_health.router import router as service_health_router
 from drake_api.settings import Settings, get_settings
 from drake_api.telemetry.broker import TelemetryBroker
@@ -50,9 +54,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     worker = getattr(app.state, "github_recovery_worker", None)
     if worker is not None:
         await worker.start()
+    # Same contract for the incident evaluator: absent unless enabled, so a
+    # disabled feature issues no query and holds no lease.
+    evaluator = getattr(app.state, "incident_runner", None)
+    if evaluator is not None:
+        await evaluator.start()
     try:
         yield
     finally:
+        if evaluator is not None:
+            await evaluator.stop()
         if worker is not None:
             # Deterministic cancellation, so no task outlives the process.
             await worker.stop()
@@ -138,6 +149,28 @@ def create_app(
         adapter=PrometheusAdapter(settings, transport=telemetry_transport),
         metrics=app.state.telemetry_metrics,
     )
+    # The evaluator reuses the Sprint 5 read path exactly as the API does —
+    # same orchestrator, same broker, same budgets — so a scheduled
+    # evaluation and a screen refresh can never disagree about a service.
+    app.state.health_orchestrator = HealthOrchestrator(
+        get_engine(settings),
+        app.state.telemetry_broker,
+        app.state.telemetry_registry,
+        HealthCache(app.state.telemetry_redis),
+    )
+    app.state.incident_runner = (
+        EvaluationRunner(
+            get_engine(settings),
+            app.state.health_orchestrator,
+            app.state.telemetry_redis,
+            interval_seconds=settings.incident_runner_interval_seconds,
+            batch_size=settings.incident_runner_batch_size,
+            concurrency=settings.incident_runner_concurrency,
+            lease_seconds=settings.incident_runner_lease_seconds,
+        )
+        if settings.incident_runner_enabled
+        else None
+    )
 
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -152,6 +185,7 @@ def create_app(
     app.include_router(github_onboarding_router)
     app.include_router(github_webhook_router)
     app.include_router(service_health_router)
+    app.include_router(incidents_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):
         # Explicit local/test opt-in only; validate_runtime_security refuses

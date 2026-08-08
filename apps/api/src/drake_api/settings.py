@@ -156,6 +156,21 @@ class Settings(BaseSettings):
     github_recovery_poll_seconds: float = 30.0
     github_recovery_batch_size: int = 50
 
+    # --- Incident evaluation runner (Sprint 6) ----------------------
+    # OFF by default, like every other background actor here: a feature
+    # that queries a datasource on a timer must be turned on deliberately,
+    # not inherited from a default. Nothing below runs until it is.
+    incident_runner_enabled: bool = False
+    # Server-controlled and bounded. There is no per-service schedule and
+    # no user-supplied interval: the clamp below is the whole contract.
+    incident_runner_interval_seconds: float = 60.0
+    incident_runner_batch_size: int = 25
+    incident_runner_concurrency: int = 4
+    # How long one cycle may hold the distributed lease. Long enough for a
+    # full batch, short enough that a crashed replica's lease expires
+    # rather than blocking evaluation until someone notices.
+    incident_runner_lease_seconds: int = 120
+
     @property
     def effective_session_cookie_name(self) -> str:
         """`__Host-` wherever the cookie is actually Secure.
@@ -254,6 +269,10 @@ class Settings(BaseSettings):
                 raise RuntimeError("GitHub API base URL must be https outside local/test")
         if self.github_jwt_ttl_seconds > 600:
             raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
+        if self.incident_runner_enabled and self.incident_runner_interval_seconds < 30:
+            # A tighter loop than this is a load generator pointed at
+            # someone's Prometheus, not monitoring.
+            raise RuntimeError("incident runner interval below 30s is local/test only")
 
 
 @lru_cache

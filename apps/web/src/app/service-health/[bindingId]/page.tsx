@@ -13,6 +13,10 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
+import {
+  HealthTransitions,
+  ServiceIncidents,
+} from "@/components/incidents/ServiceIncidents";
 import { RangeSelector, SignalChart } from "@/components/service-health/SignalChart";
 import {
   BindingStateBadge,
@@ -243,6 +247,11 @@ export default function ServiceHealthDetailPage() {
                     />
                   )}
                 </SectionCard>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <ServiceIncidents bindingId={binding.id} />
+                <HealthTransitions bindingId={binding.id} />
               </div>
 
               <Card title="Binding">

@@ -54,7 +54,13 @@ export const NAVIGATION: NavItem[] = [
     anyPermission: ["environment.view"],
   },
   { label: "Tenants", href: "/tenants", icon: Users, enabled: false },
-  { label: "Alerts & Incidents", href: "/incidents", icon: Bell, enabled: false },
+  {
+    label: "Alerts & Incidents",
+    href: "/incidents",
+    icon: Bell,
+    enabled: true,
+    anyPermission: ["environment.view"],
+  },
   { label: "Protection", href: "/protection", icon: ShieldCheck, enabled: false },
   { label: "Deployments", href: "/deployments", icon: Rocket, enabled: false },
   {

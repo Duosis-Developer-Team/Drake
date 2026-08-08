@@ -146,6 +146,14 @@ last-good available the answer is `unknown` — never an invented one.
 The frontend computes no health. It renders the typed response, maps reason
 codes to wording, and shows `—` wherever a value is absent — never `0`.
 
+## From health to incidents
+
+A `critical` verdict does not stay a verdict. Drake's evaluation runner
+turns repeated, trustworthy ones into an incident with its own lifecycle —
+see [INCIDENT_LIFECYCLE.md](INCIDENT_LIFECYCLE.md). The rule that matters
+here: a verdict that is partial, stale, served from last-good, or produced
+while the datasource was unreachable never opens an incident.
+
 ## Metric presets
 
 A preset names a set of curated queries. It never contains an expression,
