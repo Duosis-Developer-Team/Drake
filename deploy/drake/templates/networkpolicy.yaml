@@ -101,26 +101,25 @@ already knows which pods these are, so it grants exactly the access it just
 asked for rather than leaving a policy the deployment silently depends on
 to be remembered by hand.
 */}}
+{{/*
+The API's route to PostgreSQL is a NORMAL release resource, not a hook.
+
+That split matters. `before-hook-creation` deletes and recreates a hook
+policy at the start of every upgrade. If one policy carried both the API's
+and the migration's access, that window would revoke the API's database
+access on a running system while default-deny stayed in force — and the
+k3s test showed policy programming is asynchronous, so the gap is real
+rather than theoretical. As a release resource this is left in place
+through the pre-upgrade hook phase and is removed by `helm uninstall` like
+anything else.
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "drake.name" . }}-database-ingress
+  name: {{ include "drake.name" . }}-database-api-ingress
   namespace: {{ include "drake.namespace" . }}
   labels:
     {{- include "drake.labels" . | nindent 4 }}
-  annotations:
-    # A hook, so it exists before the migration Pod. `before-hook-creation`
-    # replaces the previous copy at the start of the next install/upgrade,
-    # which is what keeps it current.
-    #
-    # Helm does NOT track hook resources as part of the release, so this
-    # policy is not removed by `helm uninstall`. That is documented in the
-    # runbook with an explicit cleanup command rather than papered over
-    # with `resource-policy: keep`, which would only have restated the
-    # behaviour Helm already has for hooks.
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-10"
-    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   podSelector:
     matchLabels:
@@ -132,6 +131,37 @@ spec:
             matchLabels:
               app.kubernetes.io/name: {{ include "drake.name" . }}
               app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: {{ $np.database.port }}
+---
+{{/*
+The migration's route to PostgreSQL is a hook, because it must exist
+before the pre-install hook Pod runs. It admits ONLY the migration: a hook
+that also admitted the API is what would make an upgrade interrupt live
+traffic.
+
+Helm does not track hook resources as release resources, so this survives
+`helm uninstall`. The runbook names it and gives the cleanup command.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-database-migration-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $np.database.podSelector.matchLabels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "drake.name" . }}

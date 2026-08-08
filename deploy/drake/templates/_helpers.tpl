@@ -241,8 +241,10 @@ imagePullSecrets:
   {{- end -}}
   {{- range $name := list "database" "redis" -}}
     {{- $peer := index $.Values.networkPolicy $name -}}
-    {{- if $peer.namespaceSelector -}}
-      {{- fail (printf "networkPolicy.%s.namespaceSelector is not supported: a NetworkPolicy governs only its own namespace, so the datastore must live in Drake's namespace" $name) -}}
+    {{/* hasKey, not truthiness: an empty `namespaceSelector: {}` left in a
+         stale overlay is exactly the case that must not pass silently. */}}
+    {{- if hasKey $peer "namespaceSelector" -}}
+      {{- fail (printf "networkPolicy.%s.namespaceSelector is not supported and must be removed: a NetworkPolicy governs only its own namespace, so the datastore must live in Drake's namespace" $name) -}}
     {{- end -}}
   {{- end -}}
   {{- $dns := .Values.networkPolicy.dns -}}
@@ -254,6 +256,9 @@ imagePullSecrets:
   {{- end -}}
   {{- if not $dns.port -}}
     {{- fail "networkPolicy.dns.port is required in production" -}}
+  {{- end -}}
+  {{- if ne (int $dns.port) 53 -}}
+    {{- fail (printf "networkPolicy.dns.port must be 53; %v would open a different port under the name \"DNS\"" $dns.port) -}}
   {{- end -}}
   {{- if eq (toYaml .Values.networkPolicy.database.podSelector.matchLabels) (toYaml .Values.networkPolicy.redis.podSelector.matchLabels) -}}
     {{- fail "networkPolicy.database and networkPolicy.redis must select different pods; identical selectors grant each the other's access" -}}

@@ -241,13 +241,30 @@ for override in \
   "networkPolicy.database.namespaceSelector.matchLabels.name=elsewhere" \
   "networkPolicy.redis.namespaceSelector.matchLabels.name=elsewhere" \
   "networkPolicy.dns.podSelector.matchLabels=null" \
-  "networkPolicy.dns.namespaceSelector.matchLabels=null"
+  "networkPolicy.dns.namespaceSelector.matchLabels=null" \
+  "networkPolicy.dns.port=5353" \
+  "networkPolicy.dns.port=0"
 do
   if helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
       --set $override >/dev/null 2>&1; then
     fail "drake-prod rendered with '$override' but should have refused"
   fi
 done
+
+# An empty `namespaceSelector: {}` left behind in a stale overlay must fail
+# exactly like a populated one — the key itself is unsupported.
+EMPTY_NS="$(mktemp)"
+printf 'networkPolicy:\n  database:\n    namespaceSelector: {}\n' > "$EMPTY_NS"
+if helm template drake . -f values-drake-prod.yaml -f "$EMPTY_NS" \
+    --namespace drake-prod >/dev/null 2>&1; then
+  rm -f "$EMPTY_NS"; fail "an empty database.namespaceSelector was accepted"
+fi
+printf 'networkPolicy:\n  redis:\n    namespaceSelector: {}\n' > "$EMPTY_NS"
+if helm template drake . -f values-drake-prod.yaml -f "$EMPTY_NS" \
+    --namespace drake-prod >/dev/null 2>&1; then
+  rm -f "$EMPTY_NS"; fail "an empty redis.namespaceSelector was accepted"
+fi
+rm -f "$EMPTY_NS"
 
 # Identical datastore selectors would silently grant each peer the other's
 # access, so the chart refuses them.
@@ -352,6 +369,38 @@ for name in ("drake-api-egress", "drake-migration-egress"):
             if "namespaceSelector" in peer:
                 die(f"{name} datastore peer must be same-namespace (no namespaceSelector)")
 
+# DNS opens 53 and only 53, on both protocols.
+for name in ("drake-api-egress", "drake-migration-egress"):
+    for rule in policies[name]["spec"].get("egress", []):
+        protos = {p["protocol"] for p in rule.get("ports", [])}
+        ports = {p["port"] for p in rule.get("ports", [])}
+        if protos == {"TCP", "UDP"}:
+            if ports != {53}:
+                die(f"{name} DNS rule opens {sorted(ports)}, expected only 53")
+
+# The API's database route is a release resource; the migration's is a hook.
+api_ingress = policies["drake-database-api-ingress"]
+mig_ingress = policies["drake-database-migration-ingress"]
+if "helm.sh/hook" in api_ingress["metadata"].get("annotations", {}):
+    die("the API database ingress must not be a hook; an upgrade would revoke live access")
+if "pre-install" not in mig_ingress["metadata"]["annotations"].get("helm.sh/hook", ""):
+    die("the migration database ingress must be a pre-install hook")
+
+def admitted(policy):
+    return {
+        peer["podSelector"]["matchLabels"].get("app.kubernetes.io/component")
+        for rule in policy["spec"].get("ingress", [])
+        for peer in rule.get("from", [])
+        if "podSelector" in peer
+    }
+
+if admitted(api_ingress) != {"api"}:
+    die(f"the API database ingress admits {admitted(api_ingress)}, expected only api")
+if admitted(mig_ingress) != {"migration"}:
+    die(f"the migration database ingress admits {admitted(mig_ingress)}, expected only migration")
+if admitted(policies["drake-redis-ingress"]) != {"api"}:
+    die("redis must admit only the API")
+
 api_peers = peers(policies["drake-api-egress"])
 if ("drake-postgres", 5432) not in api_peers or ("drake-redis", 6379) not in api_peers:
     die("the API must reach PostgreSQL and Redis by label")
@@ -374,11 +423,22 @@ runbook = (CHART_DIR / ".." / ".." / "docs" / "runbooks" /
            "STANDARD_KUBERNETES_DEPLOYMENT.md")
 if runbook.exists():
     text_rb = runbook.read_text()
-    for policy_name in ("drake-migration-egress", "drake-database-ingress"):
+    for policy_name in ("drake-migration-egress", "drake-database-migration-ingress"):
         if policy_name not in text_rb:
             die(f"the runbook must name the surviving hook policy {policy_name}")
     if "delete networkpolicy" not in text_rb:
         die("the runbook must give the post-uninstall cleanup command")
+    cleanup_at = text_rb.index("kubectl -n drake-prod delete networkpolicy")
+    cleanup_cmd = text_rb[cleanup_at : text_rb.index("```", cleanup_at)]
+    if "drake-database-api-ingress" in cleanup_cmd:
+        die("the API ingress policy is Helm-managed and must not be in the cleanup command")
+    # A secret value must never reach kubectl's argv.
+    for line in text_rb.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("kubectl") and "patch" in stripped and (
+            " -p " in stripped or " --patch " in stripped
+        ):
+            die("the runbook must not pass a patch body on the command line")
 
 if any(p["metadata"]["name"].endswith("web-egress") for p in kinds.get("NetworkPolicy", [])):
     die("the web app makes no server-side call and must be granted no egress")

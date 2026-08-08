@@ -850,7 +850,7 @@ def test_the_runbook_names_the_policies_that_outlive_an_uninstall() -> None:
         for name, policy in _policies(render_prod()).items()
         if "helm.sh/hook" in policy["metadata"].get("annotations", {})
     ]
-    assert sorted(surviving) == ["drake-database-ingress", "drake-migration-egress"]
+    assert sorted(surviving) == ["drake-database-migration-ingress", "drake-migration-egress"]
 
     text = RUNBOOK.read_text()
     for name in surviving:
@@ -859,6 +859,138 @@ def test_the_runbook_names_the_policies_that_outlive_an_uninstall() -> None:
     # The cleanup must not reach the datastores themselves.
     start = text.index("kubectl -n drake-prod delete networkpolicy")
     command = text[start : text.index("```", start)]
-    assert "drake-migration-egress" in command and "drake-database-ingress" in command
+    assert "drake-migration-egress" in command
+    assert "drake-database-migration-ingress" in command
     for forbidden in ("pvc", "persistentvolumeclaim", "statefulset", "secret", "deployment", "ns "):
         assert forbidden not in command.lower(), f"cleanup must not touch {forbidden}"
+
+
+# --- the API's database route must survive an upgrade --------------------
+
+
+def test_api_database_ingress_is_a_release_resource_not_a_hook() -> None:
+    """`before-hook-creation` deletes and recreates hooks on every upgrade.
+
+    If one policy carried both the API's and the migration's access, that
+    window would revoke a running API's database access while default-deny
+    stayed in force. Policy programming is asynchronous — the k3s run
+    showed a new pod denied for several seconds — so the gap is real.
+    """
+    policy = _policies(render_prod())["drake-database-api-ingress"]
+    annotations = policy["metadata"].get("annotations", {})
+    assert "helm.sh/hook" not in annotations
+    assert "helm.sh/hook-delete-policy" not in annotations
+
+
+def test_migration_database_ingress_is_a_hook_created_before_the_job() -> None:
+    docs = render_prod()
+    policy = _policies(docs)["drake-database-migration-ingress"]
+    annotations = policy["metadata"]["annotations"]
+    assert "pre-install" in annotations["helm.sh/hook"]
+    assert "pre-upgrade" in annotations["helm.sh/hook"]
+    assert annotations["helm.sh/hook-delete-policy"] == "before-hook-creation"
+
+    job = by_kind(docs, "Job")[0]
+    assert int(annotations["helm.sh/hook-weight"]) < int(
+        job["metadata"]["annotations"]["helm.sh/hook-weight"]
+    )
+
+
+def _admitted(policy: dict[str, Any]) -> set[str | None]:
+    return {
+        peer["podSelector"]["matchLabels"].get("app.kubernetes.io/component")
+        for rule in policy["spec"].get("ingress", [])
+        for peer in rule.get("from", [])
+        if "podSelector" in peer
+    }
+
+
+def test_the_two_database_ingress_policies_do_not_overlap() -> None:
+    """Each admits exactly one component, which is what makes the split work."""
+    policies = _policies(render_prod())
+    assert _admitted(policies["drake-database-api-ingress"]) == {"api"}
+    assert _admitted(policies["drake-database-migration-ingress"]) == {"migration"}
+    assert _admitted(policies["drake-redis-ingress"]) == {"api"}
+
+
+def test_recreating_the_migration_hook_cannot_remove_the_apis_access() -> None:
+    """The only policy Helm deletes mid-upgrade admits nothing but the migration."""
+    policies = _policies(render_prod())
+    recreated = [
+        name
+        for name, policy in policies.items()
+        if policy["metadata"].get("annotations", {}).get("helm.sh/hook-delete-policy")
+        == "before-hook-creation"
+    ]
+    for name in recreated:
+        assert "api" not in _admitted(policies[name]), (
+            f"{name} is deleted and recreated on every upgrade; admitting the API "
+            "there would interrupt live database access"
+        )
+    # ...and the API's own route is not in that set.
+    assert "drake-database-api-ingress" not in recreated
+
+
+def test_the_dns_port_is_pinned_to_53() -> None:
+    for name in ("drake-api-egress", "drake-migration-egress"):
+        policy = _policies(render_prod())[name]
+        dns = [
+            r
+            for r in policy["spec"]["egress"]
+            if {p["protocol"] for p in r["ports"]} == {"TCP", "UDP"}
+        ]
+        assert len(dns) == 1
+        assert {p["port"] for p in dns[0]["ports"]} == {53}
+
+
+@pytest.mark.parametrize("port", ["5353", "0", "80"])
+def test_a_dns_port_other_than_53_is_refused(port: str) -> None:
+    assert refuses_prod("--set", f"networkPolicy.dns.port={port}")
+
+
+def test_an_empty_namespace_selector_key_is_refused_like_a_populated_one() -> None:
+    """A stale overlay carrying `namespaceSelector: {}` must not pass."""
+    import tempfile
+
+    for datastore in ("database", "redis"):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write(f"networkPolicy:\n  {datastore}:\n    namespaceSelector: {{}}\n")
+            overlay = handle.name
+        result = subprocess.run(  # noqa: S603 - resolved binary, fixed argv, no shell
+            [
+                str(HELM),
+                "template",
+                "drake",
+                str(CHART),
+                "-f",
+                str(PROD_VALUES),
+                "-f",
+                overlay,
+                "--namespace",
+                "drake-prod",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        Path(overlay).unlink()
+        assert result.returncode != 0, f"empty {datastore}.namespaceSelector was accepted"
+
+
+def test_the_runbook_never_puts_a_patch_body_on_the_command_line() -> None:
+    """A secret in argv is visible to `ps` and lands in shell history."""
+    for line in RUNBOOK.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("kubectl") and "patch" in stripped:
+            assert " -p " not in stripped and " --patch " not in stripped
+    assert "--patch-file" in RUNBOOK.read_text()
+
+
+def test_the_cleanup_command_leaves_helm_managed_policies_alone() -> None:
+    text = RUNBOOK.read_text()
+    start = text.index("kubectl -n drake-prod delete networkpolicy")
+    command = text[start : text.index("```", start)]
+    assert "drake-migration-egress" in command
+    assert "drake-database-migration-ingress" in command
+    assert "drake-database-api-ingress" not in command, "Helm manages that one"
+    assert "drake-redis-ingress" not in command, "Helm manages that one"

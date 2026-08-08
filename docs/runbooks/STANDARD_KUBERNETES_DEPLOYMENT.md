@@ -145,23 +145,39 @@ Entra.
 not make login work; it makes the failure appear later and somewhere else.
 Leave the keys absent until a real Drake app registration exists.
 
-When it does, add the three keys **without recreating the Secret and
-without printing it**:
+When it does, add the three keys **without recreating the Secret, without
+printing them, and without putting them on a command line**.
+
+`kubectl patch -p '<json>'` would place the client secret in the `kubectl`
+process's argv, where it is visible to `ps` and lands in shell history.
+Instead the patch is built in memory and piped straight to
+`--patch-file=/dev/stdin` (kubectl v1.22+; the target cluster runs
+v1.34.3):
 
 ```
-kubectl -n drake-prod patch secret drake-api-config --type merge -p "$(
-  python3 - <<'PY'
-import base64, json
+read -rsp 'Entra tenant id: '      TENANT;  echo
+read -rsp 'Entra client id: '      CLIENT;  echo
+read -rsp 'Entra client secret: '  SECRET;  echo
+
+TENANT="$TENANT" CLIENT="$CLIENT" SECRET="$SECRET" python3 - <<'PY' |
+import base64, json, os
 def b(v): return base64.b64encode(v.encode()).decode()
 print(json.dumps({"data": {
-    "DRAKE_OIDC_ISSUER":        b("https://login.microsoftonline.com/<TENANT>/v2.0"),
-    "DRAKE_OIDC_CLIENT_ID":     b("<CLIENT-ID>"),
-    "DRAKE_OIDC_CLIENT_SECRET": b("<CLIENT-SECRET>"),
+    "DRAKE_OIDC_ISSUER":        b(f"https://login.microsoftonline.com/{os.environ['TENANT']}/v2.0"),
+    "DRAKE_OIDC_CLIENT_ID":     b(os.environ["CLIENT"]),
+    "DRAKE_OIDC_CLIENT_SECRET": b(os.environ["SECRET"]),
 }}))
 PY
-)"
+kubectl -n drake-prod patch secret drake-api-config \
+  --type merge --patch-file=/dev/stdin
+
+unset TENANT CLIENT SECRET
 kubectl -n drake-prod rollout restart deployment/drake-api
 ```
+
+`read -rs` keeps the values off the screen and out of history; the
+environment carries them only to the child process that encodes them; the
+patch never touches disk; and `unset` clears them from the shell.
 
 A patch leaves the existing database and Redis values untouched, so there
 is no window in which the Secret is incomplete.
@@ -283,7 +299,13 @@ The migration needs its network access to exist *before* the pre-install
 hook Pod runs, so two NetworkPolicies are themselves Helm hooks:
 
 - `drake-migration-egress`
-- `drake-database-ingress`
+- `drake-database-migration-ingress`
+
+The API's own route to PostgreSQL is **not** among them.
+`drake-database-api-ingress` is an ordinary release resource, precisely so
+that recreating the migration hook at the start of an upgrade cannot
+interrupt a running API's database access. Helm removes it on uninstall
+like anything else.
 
 Helm does not track hook resources as part of the release, so
 **`helm uninstall` leaves both behind**. Each install or upgrade replaces
@@ -295,7 +317,7 @@ Only after a genuine uninstall, remove exactly those two:
 ```
 kubectl -n drake-prod delete networkpolicy \
   drake-migration-egress \
-  drake-database-ingress \
+  drake-database-migration-ingress \
   --ignore-not-found
 ```
 
