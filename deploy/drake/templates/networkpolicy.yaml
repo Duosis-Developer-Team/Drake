@@ -22,7 +22,76 @@ metadata:
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
-{{- if eq (include "drake.ingressMode" .) "true" }}
+{{- if and (eq (include "drake.ingressMode" .) "true") .Values.edge.dedicatedController.enabled }}
+---
+{{/*
+Drake's own controller reaches the two application ports, and nothing else
+reaches them. It also needs DNS and the Kubernetes API to watch Ingresses.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-edge-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+              app.kubernetes.io/component: edge
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+        - protocol: TCP
+          port: {{ .Values.web.port }}
+---
+{{/* The controller itself: reached from outside the cluster on its
+     NodePort, so ingress is not restricted by pod selector here. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-edge-egress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: edge
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 10254
+  egress:
+    {{- include "drake.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+        - protocol: TCP
+          port: {{ .Values.web.port }}
+    # The Kubernetes API, so the controller can watch Ingresses.
+    - ports:
+        - protocol: TCP
+          port: 6443
+{{- end }}
+{{- if and (eq (include "drake.ingressMode" .) "true") (not .Values.edge.dedicatedController.enabled) }}
 ---
 {{/*
 The ingress controller is admitted to exactly the two application ports —

@@ -63,6 +63,26 @@ imagePullSecrets:
     {{- fail "edge.mode=internal publishes no public route; set edge.mode=ingress to enable one" -}}
   {{- end -}}
 {{- end -}}
+{{- if and (eq $mode "ingress") (.Values.edge.dedicatedController).enabled -}}
+  {{- $c := .Values.edge.dedicatedController -}}
+  {{- if eq (include "drake.production" .) "true" -}}
+    {{- if not $c.image.digest -}}
+      {{- fail "edge.dedicatedController.image.digest is required in production" -}}
+    {{- end -}}
+    {{- if not (hasPrefix "sha256:" $c.image.digest) -}}
+      {{- fail "edge.dedicatedController.image.digest must be a sha256 digest" -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $c.controllerClass -}}
+    {{- fail "edge.dedicatedController.controllerClass is required: two controllers sharing a class would each serve the other's Ingresses" -}}
+  {{- end -}}
+  {{- if not $c.ingressClassName -}}
+    {{- fail "edge.dedicatedController.ingressClassName is required" -}}
+  {{- end -}}
+  {{- if or (lt (int $c.httpsNodePort) 30000) (gt (int $c.httpsNodePort) 32767) -}}
+    {{- fail (printf "edge.dedicatedController.httpsNodePort must be inside the NodePort range, got %v" $c.httpsNodePort) -}}
+  {{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/* The public host, taken from the ingress and cross-checked against the
@@ -83,16 +103,25 @@ imagePullSecrets:
     {{- if not $host -}}
       {{- fail "ingress.host is required in production" -}}
     {{- end -}}
-    {{- if ne $originHost $host -}}
-      {{- fail (printf "publicOrigin host (%s) and ingress.host (%s) must be the same origin" $originHost $host) -}}
+    {{- if ne ((splitList ":" $originHost) | first) $host -}}
+      {{- fail (printf "publicOrigin host (%s) and ingress.host (%s) must be the same hostname" ((splitList ":" $originHost) | first) $host) -}}
     {{- end -}}
   {{- end -}}
-  {{- $host = $originHost -}}
-  {{- if contains ":" $host -}}
-    {{- fail (printf "publicOrigin %q carries a port; a Kubernetes Ingress host is port-less, so the port would be silently dropped. Publish Drake on 443." $origin) -}}
+  {{/* A public origin may carry a port — the edge is a NodePort, not 443.
+       The Ingress `host:` field cannot, so the port is split off here and
+       the hostname alone is what the Ingress matches on. */}}
+  {{- $host = (splitList ":" $originHost) | first -}}
+  {{- if not $host -}}
+    {{- fail (printf "publicOrigin %q has no hostname" $origin) -}}
   {{- end -}}
   {{- if contains "*" $host -}}
     {{- fail "ingress.host must be an exact host, not a wildcard" -}}
+  {{- end -}}
+  {{/* A bare IP is refused here as well as in the API. Cookies are not
+       scoped by port, so an origin identified only by address shares its
+       cookie jar with every other service on that address. */}}
+  {{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" $host -}}
+    {{- fail (printf "publicOrigin host %q is a bare IP address; use a hostname" $host) -}}
   {{- end -}}
   {{- if or (contains "REPLACE_ME" $host) (contains "<" $host) -}}
     {{- fail "ingress.host is still a placeholder" -}}
@@ -103,13 +132,22 @@ imagePullSecrets:
 {{/* The host itself, for templates that need to print it. Validation is a
      separate define so including it cannot emit a stray line into a
      manifest. */}}
+{{/* The hostname the Ingress matches on: no scheme, and no port. */}}
 {{- define "drake.publicHost" -}}
 {{- include "drake.validateHost" . -}}
 {{- if eq (include "drake.production" .) "true" -}}
-{{- trimPrefix "https://" (.Values.publicOrigin | default "") | trimSuffix "/" -}}
+{{- $origin := trimPrefix "https://" (.Values.publicOrigin | default "") | trimSuffix "/" -}}
+{{- (splitList ":" $origin) | first -}}
 {{- else -}}
 {{- .Values.ingress.host | default "" -}}
 {{- end -}}
+{{- end -}}
+
+{{/* The full origin, port included: what the application must believe it
+     is reachable at, and what every redirect and cookie derives from. */}}
+{{- define "drake.publicOrigin" -}}
+{{- include "drake.validateHost" . -}}
+{{- .Values.publicOrigin | trimSuffix "/" -}}
 {{- end -}}
 
 {{/* Production requires an Ingress with a class and TLS. */}}
@@ -124,8 +162,11 @@ imagePullSecrets:
   {{- if not .Values.ingress.tls.enabled -}}
     {{- fail "ingress.tls.enabled must be true in production: public traffic requires HTTPS" -}}
   {{- end -}}
-  {{- if not .Values.ingress.tls.secretName -}}
-    {{- fail "ingress.tls.secretName is required in production" -}}
+  {{- if not (has .Values.ingress.tls.mode (list "secret" "controller-default")) -}}
+    {{- fail "ingress.tls.mode must be \"secret\" or \"controller-default\"" -}}
+  {{- end -}}
+  {{- if and (eq .Values.ingress.tls.mode "secret") (not .Values.ingress.tls.secretName) -}}
+    {{- fail "ingress.tls.secretName is required when tls.mode=secret" -}}
   {{- end -}}
   {{- range $key, $value := .Values.ingress.annotations -}}
     {{- if or (contains "rewrite-target" $key) (contains "configuration-snippet" $key) (contains "server-snippet" $key) -}}
@@ -224,7 +265,13 @@ imagePullSecrets:
   {{- if not .Values.networkPolicy.enabled -}}
     {{- fail "networkPolicy.enabled must be true in production" -}}
   {{- end -}}
-  {{- if and (eq (include "drake.ingressMode" .) "true") (not .Values.networkPolicy.ingressControllerNamespaceSelector) -}}
+  {{/* Only a controller in ANOTHER namespace needs a namespaceSelector.
+       Drake's own controller is a pod in this namespace and is admitted by
+       label, which is both narrower and impossible to point at the wrong
+       place. */}}
+  {{- if and (eq (include "drake.ingressMode" .) "true")
+             (not .Values.edge.dedicatedController.enabled)
+             (not .Values.networkPolicy.ingressControllerNamespaceSelector) -}}
     {{- fail "networkPolicy.ingressControllerNamespaceSelector is required: default-deny would otherwise block the route just configured" -}}
   {{- end -}}
   {{- range $name := list "database" "redis" -}}

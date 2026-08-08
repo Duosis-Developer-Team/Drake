@@ -399,9 +399,9 @@ def refuses_prod(*overrides: str) -> bool:
     return result.returncode != 0
 
 
-def test_the_first_deployment_publishes_no_public_route() -> None:
-    """Prove the application runs before attaching a name and a certificate."""
-    docs = render_prod()
+def test_internal_mode_publishes_no_public_route() -> None:
+    """The mode that proves the app runs before a name is attached to it."""
+    docs = render_prod("--set", "edge.mode=internal", "--set", "ingress.enabled=false")
     kinds = {d["kind"] for d in docs}
     assert "Ingress" not in kinds
     for service in by_kind(docs, "Service"):
@@ -430,11 +430,13 @@ def test_the_expected_production_workloads_and_nothing_else() -> None:
     docs = render_prod()
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Deployment")) == [
         "drake-api",
+        "drake-edge",
         "drake-web",
     ]
     assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
         "drake-api",
+        "drake-edge",
         "drake-web",
     ]
 
@@ -442,7 +444,7 @@ def test_the_expected_production_workloads_and_nothing_else() -> None:
 def test_every_workload_can_pull_private_images() -> None:
     docs = render_prod()
     workloads = by_kind(docs, "Deployment") + by_kind(docs, "Job")
-    assert len(workloads) == 3, "api, web, migration"
+    assert len(workloads) == 4, "api, web, edge, migration"
     for doc in workloads:
         pod = doc["spec"]["template"]["spec"]
         assert pod["imagePullSecrets"] == [{"name": "drake-ghcr"}], doc["metadata"]["name"]
@@ -460,7 +462,11 @@ def test_an_unset_pull_secret_emits_no_key_at_all() -> None:
 
 def test_every_resource_names_its_namespace() -> None:
     """Under review, which namespace this lands in must be in the file."""
+    cluster_scoped = {"ClusterRole", "ClusterRoleBinding", "IngressClass"}
     for doc in render_prod():
+        if doc["kind"] in cluster_scoped:
+            assert "namespace" not in doc["metadata"], doc["metadata"]["name"]
+            continue
         assert doc["metadata"]["namespace"] == "drake-prod", doc["metadata"]["name"]
 
 
@@ -496,7 +502,7 @@ def test_the_production_values_are_complete_as_committed() -> None:
     ("override", "because"),
     [
         ("edge.mode=bogus", "an unknown edge mode must not silently pick one"),
-        ("ingress.enabled=true", "internal mode must not also publish a route"),
+        ("edge.mode=internal", "internal mode must not also publish a route"),
         ("api.image.digest=", "an unpinned image can change under you"),
         ("api.image.tag=latest", "latest is never deployable"),
         (
@@ -1071,14 +1077,18 @@ def test_the_render_owns_exactly_the_application_resources() -> None:
     docs = render_prod()
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Deployment")) == [
         "drake-api",
+        "drake-edge",
         "drake-web",
     ]
     assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
         "drake-api",
+        "drake-edge",
         "drake-web",
     ]
-    assert {s["spec"]["type"] for s in by_kind(docs, "Service")} == {"ClusterIP"}
+    assert {
+        s["spec"]["type"] for s in by_kind(docs, "Service") if s["metadata"]["name"] != "drake-edge"
+    } == {"ClusterIP"}
 
 
 def test_the_datastores_are_referenced_only_by_label_and_secret_name() -> None:
@@ -1214,7 +1224,7 @@ def test_no_pod_receives_kubernetes_service_link_variables() -> None:
     none of these variables.
     """
     specs = _pod_specs(render_prod())
-    assert set(specs) == {"drake-api", "drake-web", "drake-migrate"}
+    assert set(specs) == {"drake-api", "drake-web", "drake-migrate", "drake-edge"}
     for name, spec in specs.items():
         assert spec.get("enableServiceLinks") is False, (
             f"{name} would receive DRAKE_API_PORT and fail to parse it as a setting"
@@ -1237,19 +1247,22 @@ def test_the_setting_that_collided_is_still_named_api_port() -> None:
 
     assert "api_port" in Settings.model_fields
     services = {s["metadata"]["name"] for s in by_kind(render_prod(), "Service")}
-    assert services == {"drake-api", "drake-web"}
+    assert services == {"drake-api", "drake-web", "drake-edge"}
 
 
 def test_the_fix_did_not_disturb_ownership_or_images() -> None:
     """A one-field change must not move anything else."""
     docs = render_prod()
     kinds = {d["kind"] for d in docs}
-    for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet", "Ingress"):
+    # An Ingress is expected now; a Secret, PVC or StatefulSet never is.
+    for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet"):
         assert forbidden not in kinds
     for doc in docs:
         if doc["kind"] in ("Deployment", "Service", "Job"):
             assert not doc["metadata"]["name"].startswith(("drake-postgres", "drake-redis"))
-    assert {s["spec"]["type"] for s in by_kind(docs, "Service")} == {"ClusterIP"}
+    assert {
+        s["spec"]["type"] for s in by_kind(docs, "Service") if s["metadata"]["name"] != "drake-edge"
+    } == {"ClusterIP"}
 
     values = yaml.safe_load(PROD_VALUES.read_text())
     images = {
@@ -1260,3 +1273,146 @@ def test_the_fix_did_not_disturb_ownership_or_images() -> None:
     assert images["drake-api"].endswith(values["api"]["image"]["digest"])
     assert images["drake-web"].endswith(values["web"]["image"]["digest"])
     assert images["drake-migrate"] == images["drake-api"]
+
+
+# --- the public edge: one entrance, Drake's own controller ---------------
+
+
+def test_exactly_one_public_entrance() -> None:
+    """Only the edge is published; the application Services stay internal."""
+    docs = render_prod()
+    published = {
+        (s["metadata"]["name"], port["nodePort"])
+        for s in by_kind(docs, "Service")
+        for port in s["spec"]["ports"]
+        if port.get("nodePort")
+    }
+    assert published == {("drake-edge", 30773)}
+    for service in by_kind(docs, "Service"):
+        if service["metadata"]["name"] in ("drake-api", "drake-web"):
+            assert service["spec"]["type"] == "ClusterIP"
+    assert not [s for s in by_kind(docs, "Service") if s["spec"]["type"] == "LoadBalancer"]
+
+
+def test_the_edge_publishes_no_plaintext_port() -> None:
+    """An http listener on a public node port is a way in nobody asked for."""
+    edge = next(
+        s for s in by_kind(render_prod(), "Service") if s["metadata"]["name"] == "drake-edge"
+    )
+    assert [p["name"] for p in edge["spec"]["ports"]] == ["https"]
+
+
+def test_the_ingress_host_carries_no_port() -> None:
+    """A Kubernetes Ingress host is a hostname; the port lives in the origin."""
+    ingress = by_kind(render_prod(), "Ingress")[0]
+    host = ingress["spec"]["rules"][0]["host"]
+    assert ":" not in host
+    assert host == "drake-84-247-180-172.sslip.io"
+
+
+def test_the_public_origin_keeps_its_port() -> None:
+    """Everything the browser is told derives from the full origin."""
+    api = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    env = {
+        e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    origin = "https://drake-84-247-180-172.sslip.io:30773"
+    assert env["DRAKE_PUBLIC_ORIGIN"] == origin
+    assert env["DRAKE_ALLOWED_WEB_ORIGINS"] == f'["{origin}"]'
+    assert env["DRAKE_OIDC_REDIRECT_URL"] == f"{origin}/v1/auth/callback"
+    assert env["DRAKE_AUTH_MODE"] == "local"
+
+
+def test_one_origin_routes_v1_to_the_api_and_everything_else_to_the_web() -> None:
+    ingress = by_kind(render_prod(), "Ingress")[0]
+    paths = {
+        p["path"]: (p["pathType"], p["backend"]["service"]["name"])
+        for p in ingress["spec"]["rules"][0]["http"]["paths"]
+    }
+    assert paths["/v1"] == ("Prefix", "drake-api")
+    assert paths["/"] == ("Prefix", "drake-web")
+
+
+def test_drake_runs_its_own_controller_and_claims_nothing_shared() -> None:
+    """The shared controllers serve other applications; Drake touches none."""
+    docs = render_prod()
+    classes = by_kind(docs, "IngressClass")
+    assert [c["metadata"]["name"] for c in classes] == ["drake-nginx"]
+    assert classes[0]["spec"]["controller"] == "k8s.io/drake-nginx"
+    assert (
+        classes[0]["metadata"]
+        .get("annotations", {})
+        .get("ingressclass.kubernetes.io/is-default-class")
+        != "true"
+    ), "claiming the default class would serve other teams' Ingresses"
+
+    ingress = by_kind(docs, "Ingress")[0]
+    assert ingress["spec"]["ingressClassName"] == "drake-nginx"
+
+    controller = next(
+        d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-edge"
+    )
+    args = controller["spec"]["template"]["spec"]["containers"][0]["args"]
+    assert "--controller-class=k8s.io/drake-nginx" in args
+    assert "--ingress-class=drake-nginx" in args
+    assert "--election-id=drake-edge-leader" in args, (
+        "a shared lease would fight another controller"
+    )
+    assert any(a.startswith("--watch-namespace=") for a in args)
+
+
+def test_the_edge_image_is_digest_pinned() -> None:
+    controller = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-edge"
+    )
+    image = controller["spec"]["template"]["spec"]["containers"][0]["image"]
+    assert "@sha256:" in image
+    assert ":latest" not in image
+
+
+def test_the_render_still_owns_no_datastore_or_shared_controller() -> None:
+    docs = render_prod()
+    kinds = {d["kind"] for d in docs}
+    for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet"):
+        assert forbidden not in kinds
+    for doc in docs:
+        name = doc["metadata"]["name"]
+        # Nothing belonging to the cluster's existing controllers.
+        assert not name.startswith("ingress-nginx"), f"{doc['kind']}/{name} is not Drake's"
+        if doc["kind"] in ("Deployment", "StatefulSet", "Service", "Job"):
+            assert not name.startswith(("drake-postgres", "drake-redis"))
+
+
+def test_every_drake_pod_still_disables_service_links() -> None:
+    for name, spec in _pod_specs(render_prod()).items():
+        assert spec.get("enableServiceLinks") is False, name
+
+
+@pytest.mark.parametrize(
+    ("override", "because"),
+    [
+        ("publicOrigin=https://84.247.180.172:30773", "a bare IP shares its cookie jar"),
+        ("edge.dedicatedController.image.digest=", "an unpinned controller can change"),
+        ("edge.dedicatedController.httpsNodePort=443", "outside the NodePort range"),
+        ("edge.dedicatedController.controllerClass=", "two controllers would share a class"),
+        ("ingress.tls.mode=bogus", "an unknown TLS mode"),
+        ("edge.mode=internal", "internal mode publishes no route, so ingress must be off"),
+    ],
+)
+def test_the_public_edge_fails_closed(override: str, because: str) -> None:
+    assert refuses_prod("--set", override), because
+
+
+def test_a_hostname_origin_with_a_port_is_accepted_but_a_bare_ip_is_not() -> None:
+    """The port is legitimate here — the edge is a NodePort, not 443."""
+    from drake_api.origin import InvalidOriginError, parse_public_origin
+
+    accepted = parse_public_origin("https://drake-84-247-180-172.sslip.io:30773")
+    assert accepted.port == 30773
+    assert accepted.host == "drake-84-247-180-172.sslip.io"
+
+    for refused in ("https://84.247.180.172:30773", "http://drake-x.sslip.io:30773"):
+        with pytest.raises(InvalidOriginError):
+            parse_public_origin(refused)

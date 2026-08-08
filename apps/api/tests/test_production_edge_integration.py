@@ -107,18 +107,22 @@ async def test_the_session_cookie_is_secure_in_production(engine: AsyncEngine) -
     harness = _production_harness()
     await login_all(harness, ["user-owner"])
 
+    expected_name = harness.settings.effective_session_cookie_name
+    # Over HTTPS the name carries the `__Host-` prefix, which browsers only
+    # honour for a Secure, host-only, path-`/` cookie.
+    assert expected_name == "__Host-drake_session"
+
     async with harness.api_client() as client:
         await harness.login(client, "user-owner")
-        cookie = next(
-            value
-            for name, value in client.cookies.items()
-            if name == harness.settings.session_cookie_name
-        )
+        cookie = next(value for name, value in client.cookies.items() if name == expected_name)
     assert cookie
     # httpx does not expose attributes directly; assert through the jar.
     jar = client.cookies.jar
-    entry = next(c for c in jar if c.name == harness.settings.session_cookie_name)
+    entry = next(c for c in jar if c.name == expected_name)
     assert entry.secure is True
+    # host-only: a Domain attribute would widen it to every sibling host.
+    assert entry.domain_specified is False
+    assert entry.path == "/"
 
 
 async def test_health_responses_carry_no_configuration_detail(engine: AsyncEngine) -> None:

@@ -6,12 +6,21 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field
 
 from drake_api.audit.service import AuditEventData, record_audit_event
 from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.auth.flows import AuthFlows, sanitize_post_login_redirect
+from drake_api.auth.local import (
+    LocalAuthenticator,
+    LocalAuthUnavailableError,
+    RateLimitedError,
+    audit_metadata,
+    client_key,
+    normalize_email,
+)
 from drake_api.auth.oidc import OidcError, ValidatedIdentity
-from drake_api.auth.sessions import SessionBackendUnavailableError
+from drake_api.auth.sessions import Session, SessionBackendUnavailableError, new_csrf_token
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
 from drake_api.rbac.service import RbacService
@@ -32,7 +41,7 @@ def _client_ip_hash(request: Request) -> str:
 
 def _set_session_cookie(response: Response, settings: Settings, session_id: str) -> None:
     response.set_cookie(
-        key=settings.session_cookie_name,
+        key=settings.effective_session_cookie_name,
         value=session_id,
         max_age=settings.session_ttl_seconds,
         httponly=True,
@@ -40,6 +49,101 @@ def _set_session_cookie(response: Response, settings: Settings, session_id: str)
         secure=settings.env not in ("local", "test"),
         path="/",
     )
+
+
+@router.get("/auth/mode")
+async def auth_mode(request: Request) -> dict[str, str]:
+    """Which way in this deployment offers.
+
+    Unauthenticated on purpose: the browser has to know which sign-in to
+    render before it has a session. It reveals no more than trying to sign
+    in would, and it is the only thing that keeps the web app from showing
+    an identity-provider button that would fail.
+    """
+    settings: Settings = request.app.state.settings
+    return {"mode": settings.auth_mode}
+
+
+class LocalLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+@router.post("/auth/login")
+async def local_login(
+    request: Request, response: Response, payload: LocalLoginRequest
+) -> JSONResponse:
+    """Email and password sign-in.
+
+    Every failure returns the same body and status. Distinguishing "no such
+    account" from "wrong password" would turn this endpoint into a way to
+    enumerate who has access.
+    """
+    settings: Settings = request.app.state.settings
+    if not settings.local_auth_enabled:
+        # Not 401: the endpoint genuinely is not part of this deployment.
+        raise HTTPException(status_code=404, detail="not found")
+
+    engine = get_engine(settings)
+    store = request.app.state.session_store
+    authenticator = LocalAuthenticator(settings, request.app.state.telemetry_redis)
+    correlation_id = correlation_id_var.get()
+    ip_hash = _client_ip_hash(request)
+    caller = client_key(request.client.host if request.client else None)
+    normalized = normalize_email(payload.email)
+
+    async def _audit(result: str, actor_id: str, outcome: str) -> None:
+        try:
+            await record_audit_event(
+                engine,
+                AuditEventData(
+                    actor_type="user",
+                    actor_id=actor_id,
+                    action="auth.login",
+                    result=result,
+                    correlation_id=correlation_id,
+                    metadata={"ip_hash": ip_hash, **audit_metadata(normalized, outcome)},
+                ),
+            )
+        except Exception:
+            logger.warning("login audit did not persist")
+
+    try:
+        await authenticator.check_rate_limit(caller, normalized)
+    except RateLimitedError:
+        await _audit("failure", "unknown", "rate_limited")
+        raise HTTPException(status_code=429, detail="too many attempts") from None
+    except LocalAuthUnavailableError as error:
+        raise HTTPException(status_code=503, detail="authentication backend unavailable") from error
+
+    identity = await authenticator.authenticate(engine, payload.email, payload.password)
+    if identity is None:
+        await _audit("failure", "unknown", "invalid_credentials")
+        raise HTTPException(status_code=401, detail="invalid email or password")
+
+    # A brand new session id for every successful login: the caller can
+    # never keep a session identifier it chose or previously held.
+    session = Session(
+        identity_id=identity.identity_id,
+        issuer=identity.issuer,
+        subject=identity.subject,
+        display_name=identity.display_name,
+        email=identity.email,
+        groups=[],
+        csrf_token=new_csrf_token(),
+    )
+    try:
+        session_id = await store.create(session)
+    except SessionBackendUnavailableError as error:
+        raise HTTPException(status_code=503, detail="authentication backend unavailable") from error
+
+    await authenticator.clear_rate_limit(caller, normalized)
+    await authenticator.record_login(engine, identity.identity_id)
+    await _audit("success", identity.identity_id, "authenticated")
+
+    body = JSONResponse({"status": "signed_in", "csrf_token": session.csrf_token})
+    _set_session_cookie(body, settings, session_id)
+    return body
 
 
 @router.get("/auth/login")
@@ -147,7 +251,7 @@ async def logout(request: Request, auth: AuthContext = Depends(require_csrf)) ->
         logger.warning("logout audit write did not persist")
 
     response = JSONResponse({"status": "signed_out"})
-    response.delete_cookie(settings.session_cookie_name, path="/")
+    response.delete_cookie(settings.effective_session_cookie_name, path="/")
     return response
 
 

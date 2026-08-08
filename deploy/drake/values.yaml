@@ -18,6 +18,11 @@ publicOrigin: ""
 
 namespaceOverride: ""
 
+# Which way in Drake offers. `oidc` delegates to an identity provider;
+# `local` verifies an email and password itself. Exactly one is active.
+auth:
+  mode: oidc
+
 # How Drake is reached.
 #
 #   internal — no public route at all. Drake runs and is reachable inside
@@ -32,6 +37,28 @@ namespaceOverride: ""
 edge:
   mode: internal
 
+  # Drake's own ingress-nginx, used in `ingress` mode.
+  #
+  # The cluster's shared controllers already serve other applications, and
+  # one of them publishes a hostless catch-all Ingress — so Drake cannot
+  # add rules there without competing for `/`. Its own controller watches
+  # only its own IngressClass and its own namespace.
+  dedicatedController:
+    enabled: false
+    ingressClassName: drake-nginx
+    # Must be unique in the cluster: two controllers sharing a class would
+    # each serve the other's Ingresses.
+    controllerClass: k8s.io/drake-nginx
+    replicas: 1
+    # HTTPS only. No plaintext node port is published.
+    httpsNodePort: 0
+    image:
+      repository: registry.k8s.io/ingress-nginx/controller
+      digest: ""
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: "1", memory: 512Mi}
+
 ingress:
   enabled: false
   # No default class: the right one is cluster-specific, and guessing it
@@ -41,6 +68,13 @@ ingress:
   annotations: {}
   tls:
     enabled: false
+    # `secret`             — terminate with a certificate this cluster holds.
+    # `controller-default` — terminate with the ingress controller's own
+    #                        default certificate. That certificate is
+    #                        self-signed, so browsers warn. Chosen only
+    #                        where an accepted-risk edge already works that
+    #                        way; it is never a substitute for a real one.
+    mode: secret
     # Name of a Secret holding the certificate. Never the certificate.
     secretName: ""
 
