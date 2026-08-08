@@ -369,9 +369,7 @@ async def session_gitops(
     ]
 
 
-async def integration_evidence(
-    connection: AsyncConnection, principal: Principal
-) -> dict[str, Any]:
+async def integration_evidence(connection: AsyncConnection, principal: Principal) -> dict[str, Any]:
     """Onboarding-side Integration Health.
 
     Counts, states and timestamps only. There is no branch here that can

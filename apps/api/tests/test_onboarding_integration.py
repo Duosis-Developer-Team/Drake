@@ -161,9 +161,7 @@ def snapshot(**overrides: Any) -> CatalogSnapshot:
 
 
 def actions_for(plan: Any, kind: str) -> dict[str, str]:
-    return {
-        item.item_key: item.action for item in plan.items if item.entity_kind == kind
-    }
+    return {item.item_key: item.action for item in plan.items if item.entity_kind == kind}
 
 
 def test_a_clean_manifest_plans_creates_and_blocks_nothing() -> None:
@@ -181,9 +179,7 @@ def test_a_clean_manifest_plans_creates_and_blocks_nothing() -> None:
 
 def test_an_unknown_cluster_is_unmapped_and_never_created() -> None:
     """Clusters are operator-registered infrastructure."""
-    plan = build_plan(
-        manifest_document(), snapshot(clusters={}), repository_row_id="repo-1"
-    )
+    plan = build_plan(manifest_document(), snapshot(clusters={}), repository_row_id="repo-1")
     bindings = actions_for(plan, str(EntityKind.CLUSTER_BINDING))
     assert bindings == {"cluster_binding:dev": str(Action.UNMAPPED)}
     assert plan.blocking_items >= 1
@@ -258,9 +254,7 @@ def test_a_namespace_another_environment_already_occupies_is_a_conflict() -> Non
 
 def test_a_truncated_analysis_blocks_the_plan() -> None:
     """An incomplete picture is never a green light."""
-    plan = build_plan(
-        manifest_document(), snapshot(), repository_row_id="repo-1", truncated=True
-    )
+    plan = build_plan(manifest_document(), snapshot(), repository_row_id="repo-1", truncated=True)
     assert plan.state == "needs_review"
     assert any(item.item_key == "analysis:truncated" for item in plan.items)
 
@@ -271,9 +265,7 @@ def test_the_plan_digest_ignores_item_order_but_not_content() -> None:
     second.items.reverse()
     assert first.digest() == second.digest()
 
-    different = build_plan(
-        manifest_document(), snapshot(clusters={}), repository_row_id="repo-1"
-    )
+    different = build_plan(manifest_document(), snapshot(clusters={}), repository_row_id="repo-1")
     assert different.digest() != first.digest()
 
 
@@ -460,9 +452,7 @@ async def _bootstrap(
         await deliver(client, "installation", installation_payload(), str(uuidlib.uuid4()))
     row_id = await _row_id(engine, HERMES_ID)
     reconciler = github_service.GitHubReconciler(engine, harness.app.state.github_client)
-    await reconciler.reconcile_repository(
-        row_id, INSTALLATION_ID, f"{OWNER}/Hermes", HERMES_ID
-    )
+    await reconciler.reconcile_repository(row_id, INSTALLATION_ID, f"{OWNER}/Hermes", HERMES_ID)
     return row_id
 
 
@@ -586,14 +576,10 @@ async def test_nothing_in_the_repository_is_executed_and_secrets_are_never_read(
         engine, settings, repository_row_id=row_id, actor_identity_id=actor
     )
     session_id = uuidlib.UUID(created["session_id"])
-    await service.analyze(
-        engine, settings, harness.app.state.github_client, session_id=session_id
-    )
+    await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
 
     # Not one provider request names a refused path.
-    refused = [
-        entry["path"] for entry in golden()["tree"] if entry["kind"] == "refused"
-    ]
+    refused = [entry["path"] for entry in golden()["tree"] if entry["kind"] == "refused"]
     for path in refused:
         assert not any(path in call for call in fake.calls), path
 
@@ -716,9 +702,7 @@ async def test_a_moved_commit_makes_the_plan_stale_and_unappliable(
 
 
 @pytest.mark.anyio
-async def test_a_push_marks_a_reviewed_plan_stale(
-    engine: AsyncEngine, tmp_path: Path
-) -> None:
+async def test_a_push_marks_a_reviewed_plan_stale(engine: AsyncEngine, tmp_path: Path) -> None:
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     settings = harness.app.state.settings
@@ -727,9 +711,7 @@ async def test_a_push_marks_a_reviewed_plan_stale(
         engine, settings, repository_row_id=row_id, actor_identity_id=actor
     )
     session_id = uuidlib.UUID(created["session_id"])
-    await service.analyze(
-        engine, settings, harness.app.state.github_client, session_id=session_id
-    )
+    await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
 
     marked = await service.mark_stale_for_commit(
         engine, repository_row_id=row_id, new_commit_sha=NEXT_SHA
@@ -950,9 +932,7 @@ async def test_gitops_disabled_makes_no_request_and_no_provider_call(
         engine, settings, repository_row_id=row_id, actor_identity_id=actor
     )
     session_id = uuidlib.UUID(created["session_id"])
-    await service.analyze(
-        engine, settings, harness.app.state.github_client, session_id=session_id
-    )
+    await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
 
     assert settings.github_gitops_pr_enabled is False
     with pytest.raises(OnboardingError) as refusal:
@@ -967,9 +947,7 @@ async def test_gitops_disabled_makes_no_request_and_no_provider_call(
 
     async with engine.connect() as connection:
         requests = int(
-            (
-                await connection.execute(text("SELECT count(*) FROM gitops_requests"))
-            ).scalar_one()
+            (await connection.execute(text("SELECT count(*) FROM gitops_requests"))).scalar_one()
         )
     assert requests == 0
 
@@ -980,16 +958,16 @@ async def test_a_gitops_request_targets_only_the_allowlisted_path_and_branch(
 ) -> None:
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
-    settings = harness.app.state.settings.model_copy(
-        update={"github_gitops_pr_enabled": True}
-    )
+    settings = harness.app.state.settings.model_copy(update={"github_gitops_pr_enabled": True})
     actor = await _identity(engine)
     created = await service.create_session(
         engine, harness.app.state.settings, repository_row_id=row_id, actor_identity_id=actor
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(
-        engine, harness.app.state.settings, harness.app.state.github_client,
+        engine,
+        harness.app.state.settings,
+        harness.app.state.github_client,
         session_id=session_id,
     )
 
@@ -1015,9 +993,7 @@ async def test_a_gitops_request_targets_only_the_allowlisted_path_and_branch(
 
     async with engine.connect() as connection:
         state, number = (
-            await connection.execute(
-                text("SELECT state, provider_pr_number FROM gitops_requests")
-            )
+            await connection.execute(text("SELECT state, provider_pr_number FROM gitops_requests"))
         ).one()
     assert state == "active"
     assert number == 7
@@ -1106,9 +1082,7 @@ async def test_a_caller_outside_scope_sees_no_session_and_no_count(
 
 
 @pytest.mark.anyio
-async def test_the_permissions_are_separate_rights(
-    engine: AsyncEngine, tmp_path: Path
-) -> None:
+async def test_the_permissions_are_separate_rights(engine: AsyncEngine, tmp_path: Path) -> None:
     """Viewing is not managing; approving is not applying; applying is not
     proposing a change to somebody's repository."""
     from drake_api.rbac.catalog import PERMISSIONS
@@ -1152,9 +1126,7 @@ async def test_no_read_response_carries_repository_content_or_a_url(
         engine, settings, repository_row_id=row_id, actor_identity_id=actor
     )
     session_id = uuidlib.UUID(created["session_id"])
-    await service.analyze(
-        engine, settings, harness.app.state.github_client, session_id=session_id
-    )
+    await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
 
     from harness_s1 import grant_platform_owner
 

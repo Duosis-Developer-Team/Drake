@@ -86,9 +86,7 @@ class EntityKind(StrEnum):
 # Actions that stop an apply. `unmapped` is included on purpose: a manifest
 # naming a cluster or a metric profile Drake does not have is a decision
 # someone has to make, not a gap to paper over.
-BLOCKING_ACTIONS: frozenset[str] = frozenset(
-    {Action.CONFLICT, Action.UNMAPPED, Action.UNSUPPORTED}
-)
+BLOCKING_ACTIONS: frozenset[str] = frozenset({Action.CONFLICT, Action.UNMAPPED, Action.UNSUPPORTED})
 
 # Bumped whenever discovery or planning rules change. Part of an analysis's
 # identity, so a smarter analyzer produces a NEW analysis of the same commit
@@ -108,9 +106,7 @@ REASON_TEXT: dict[str, str] = {
         "take it over, which is not something Drake does silently."
     ),
     "project_already_linked": "This repository is already linked to this project.",
-    "environment_ambiguous": (
-        "More than one catalog environment matches this manifest entry."
-    ),
+    "environment_ambiguous": ("More than one catalog environment matches this manifest entry."),
     "service_ambiguous": "More than one catalog service matches this manifest entry.",
     "cluster_unknown": (
         "The manifest references a cluster Drake does not have. Clusters are "

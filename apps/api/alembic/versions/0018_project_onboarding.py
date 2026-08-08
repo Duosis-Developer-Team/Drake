@@ -69,8 +69,7 @@ _SESSION_STATES = (
 # What a plan proposes to do. Deliberately no `delete`: a catalog row is
 # never removed because a repository stopped mentioning it.
 _ITEM_ACTIONS = (
-    "'create', 'link', 'update_metadata', 'no_change', 'conflict', "
-    "'unmapped', 'unsupported'"
+    "'create', 'link', 'update_metadata', 'no_change', 'conflict', 'unmapped', 'unsupported'"
 )
 
 _ENTITY_KINDS = (
@@ -181,9 +180,7 @@ def _sessions() -> None:
         "onboarding_sessions",
         ["repository_id"],
         unique=True,
-        postgresql_where=sa.text(
-            "state NOT IN ('imported', 'cancelled', 'failed')"
-        ),
+        postgresql_where=sa.text("state NOT IN ('imported', 'cancelled', 'failed')"),
     )
     op.create_index("ix_onboarding_sessions_scope", "onboarding_sessions", ["scope_id", "state"])
 
@@ -241,9 +238,7 @@ def _analyses() -> None:
         sa.CheckConstraint(
             "status IN ('complete', 'partial', 'failed')", name="ck_onboarding_analysis_status"
         ),
-        sa.CheckConstraint(
-            "commit_sha ~ '^[0-9a-f]{7,64}$'", name="ck_onboarding_analysis_commit"
-        ),
+        sa.CheckConstraint("commit_sha ~ '^[0-9a-f]{7,64}$'", name="ck_onboarding_analysis_commit"),
         sa.CheckConstraint("analyzer_version >= 1", name="ck_onboarding_analysis_version"),
         # `partial` and `truncated` are the same fact stated twice; letting
         # them disagree would make one of them meaningless.
@@ -340,7 +335,9 @@ def _plans() -> None:
             name="ck_onboarding_plan_state",
         ),
         sa.CheckConstraint("plan_version >= 1", name="ck_onboarding_plan_version_positive"),
-        sa.CheckConstraint("length(plan_digest) BETWEEN 16 AND 128", name="ck_onboarding_plan_digest"),
+        sa.CheckConstraint(
+            "length(plan_digest) BETWEEN 16 AND 128", name="ck_onboarding_plan_digest"
+        ),
         # A plan with blocking items is not ready, whatever else is true.
         sa.CheckConstraint(
             "blocking_items = 0 OR state <> 'ready'", name="ck_onboarding_plan_blocking"
@@ -391,9 +388,7 @@ def _plans() -> None:
         sa.CheckConstraint(f"action IN ({_ITEM_ACTIONS})", name="ck_onboarding_item_action"),
         sa.CheckConstraint(f"item_key {_KEY_SHAPE}", name="ck_onboarding_item_key_shape"),
         sa.CheckConstraint("jsonb_typeof(detail) = 'object'", name="ck_onboarding_item_detail"),
-        sa.CheckConstraint(
-            "pg_column_size(detail) <= 2048", name="ck_onboarding_item_detail_size"
-        ),
+        sa.CheckConstraint("pg_column_size(detail) <= 2048", name="ck_onboarding_item_detail_size"),
     )
     op.create_index("ix_onboarding_plan_items_plan", "onboarding_plan_items", ["plan_id"])
 
@@ -502,15 +497,11 @@ def _gitops() -> None:
             name="ck_gitops_state",
         ),
         # Allowlisted path, enforced in the database as well as in code.
-        sa.CheckConstraint(
-            "file_path = '.drake/project.yaml'", name="ck_gitops_allowlisted_path"
-        ),
+        sa.CheckConstraint("file_path = '.drake/project.yaml'", name="ck_gitops_allowlisted_path"),
         sa.CheckConstraint(
             "branch_name ~ '^drake/[a-z0-9][a-z0-9/-]{0,80}$'", name="ck_gitops_branch_shape"
         ),
-        sa.CheckConstraint(
-            "base_commit_sha ~ '^[0-9a-f]{7,64}$'", name="ck_gitops_base_commit"
-        ),
+        sa.CheckConstraint("base_commit_sha ~ '^[0-9a-f]{7,64}$'", name="ck_gitops_base_commit"),
         # Open means the provider said so and gave us a number to prove it.
         sa.CheckConstraint(
             "state <> 'active' OR provider_pr_number IS NOT NULL",

@@ -33,9 +33,7 @@ EXPECTED_ORGANIZATION = ORGANIZATION
 # `pull_request` is deliberately absent. Drake has no consumer for it this
 # sprint, and accepting an event nothing acts on is a webhook surface with
 # no purpose and a parser to keep safe.
-SUPPORTED_EVENTS = frozenset(
-    {"installation", "installation_repositories", "repository", "push"}
-)
+SUPPORTED_EVENTS = frozenset({"installation", "installation_repositories", "repository", "push"})
 # `ping` is answered but carries no domain work.
 ACKNOWLEDGED_EVENTS = frozenset({"ping"})
 

@@ -203,9 +203,7 @@ async def request_pull_request(
         if created is None:
             existing = (
                 await connection.execute(
-                    text(
-                        "SELECT id, state FROM gitops_requests WHERE idempotency_key = :key"
-                    ),
+                    text("SELECT id, state FROM gitops_requests WHERE idempotency_key = :key"),
                     {"key": key},
                 )
             ).one()
@@ -287,9 +285,7 @@ async def process_pending(
             # Left pending; the claim already scheduled the next attempt.
             continue
         else:
-            await _finish(
-                engine, item["id"], state="failed", number=None, error=result.error_code
-            )
+            await _finish(engine, item["id"], state="failed", number=None, error=result.error_code)
         processed += 1
     return processed
 

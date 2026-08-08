@@ -126,9 +126,7 @@ class SessionRow:
     approved_plan_version: int | None
 
 
-async def _session_row(
-    connection: AsyncConnection, session_id: uuid.UUID
-) -> SessionRow | None:
+async def _session_row(connection: AsyncConnection, session_id: uuid.UUID) -> SessionRow | None:
     row = (
         await connection.execute(
             text(
@@ -228,8 +226,12 @@ async def _set_state(
     reason_code: str | None = None,
     **columns: Any,
 ) -> None:
-    assignments = ["state = :state", "reason_code = :reason", "version = version + 1",
-                   "updated_at = now()"]
+    assignments = [
+        "state = :state",
+        "reason_code = :reason",
+        "version = version + 1",
+        "updated_at = now()",
+    ]
     params: dict[str, Any] = {"id": session_id, "state": state, "reason": reason_code}
     for name, value in columns.items():
         assignments.append(f"{name} = :{name}")
@@ -371,9 +373,7 @@ async def _record_analysis(
                 reason = "manifest_invalid"
             else:
                 document = validation.document
-                manifest_digest = hashlib.sha256(
-                    result.manifest_text.encode("utf-8")
-                ).hexdigest()
+                manifest_digest = hashlib.sha256(result.manifest_text.encode("utf-8")).hexdigest()
         else:
             # The invalid body is NOT stored: it came from a repository and
             # may contain the very credential the policy refused it for.
@@ -450,14 +450,17 @@ async def _record_analysis(
                         VALUES (:analysis, :type, :path, :confidence, :evidence, :target, :reason)
                         """
                     ),
-                    {"analysis": analysis_id, **{
-                        "type": finding["finding_type"],
-                        "path": finding["safe_path"],
-                        "confidence": finding["confidence"],
-                        "evidence": finding["evidence_kind"],
-                        "target": finding["proposed_target"],
-                        "reason": finding["review_reason"],
-                    }},
+                    {
+                        "analysis": analysis_id,
+                        **{
+                            "type": finding["finding_type"],
+                            "path": finding["safe_path"],
+                            "confidence": finding["confidence"],
+                            "evidence": finding["evidence_kind"],
+                            "target": finding["proposed_target"],
+                            "reason": finding["review_reason"],
+                        },
+                    },
                 )
 
         if document is None:
@@ -503,11 +506,7 @@ async def _record_analysis(
             commit_sha=result.commit_sha,
             manifest_digest=manifest_digest,
         )
-        state = (
-            str(SessionState.NEEDS_REVIEW)
-            if plan.blocking_items
-            else str(SessionState.READY)
-        )
+        state = str(SessionState.NEEDS_REVIEW) if plan.blocking_items else str(SessionState.READY)
         await _set_state(
             connection,
             session.id,
@@ -579,9 +578,7 @@ async def load_snapshot(
 
     clusters = {
         str(entry[0]): str(entry[1])
-        for entry in (
-            await connection.execute(text("SELECT cluster_ref, id FROM clusters"))
-        ).all()
+        for entry in (await connection.execute(text("SELECT cluster_ref, id FROM clusters"))).all()
     }
     namespace_bindings = {
         (str(entry[0]), str(entry[1])): str(entry[2])
@@ -760,9 +757,7 @@ async def approve(
                 "A newer analysis replaced this plan. Review the current one.",
             )
         if str(plan[1]) == "stale":
-            raise OnboardingError(
-                "plan_stale", "The repository moved after this plan was built."
-            )
+            raise OnboardingError("plan_stale", "The repository moved after this plan was built.")
         if int(plan[2]) > 0:
             # Conflicts and unmapped items are decisions, not warnings.
             raise OnboardingError(
