@@ -102,8 +102,8 @@ refuses to start with them on unless a real GitHub App is configured.
 
 | Permission | Level | Used for |
 |---|---|---|
-| Contents | write | create a `drake/onboarding/…` branch from the analysed commit, and write one file: `.drake/project.yaml` |
-| Pull requests | write | open ONE draft pull request from that branch |
+| Contents | write | create a `drake/onboarding/…` branch from the analysed commit, write one file (`.drake/project.yaml`), and READ back the branch, that file, and a bounded commit comparison to prove the branch carries only that change |
+| Pull requests | write | open ONE draft pull request from that branch, and read the open pull request for its exact head/base pair |
 
 What the write path can do, exhaustively: create a branch that does not
 exist, write one allowlisted path on it, and open a draft pull request.

@@ -854,30 +854,27 @@ async def test_an_exhausted_request_is_retired_without_another_provider_call(
 # ===========================================================================
 
 
-@pytest.mark.anyio
-async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
-    engine: AsyncEngine, tmp_path: Path
-) -> None:
-    """Request → lease → real provider → one draft pull request.
+class _CountingProvider:
+    """Counts what actually reached the provider, whatever it then did."""
 
-    The provider is the Sprint 12B implementation, over a stateful fake of
-    the GitHub write API. No network, no credential, no real repository —
-    and the assertion is on what the fake says was APPLIED, not on what the
-    provider claims it did.
-    """
-    import httpx
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.calls = 0
+
+    async def create_pull_request(self, **kwargs: Any) -> Any:
+        self.calls += 1
+        return await self._inner.create_pull_request(**kwargs)
+
+
+async def _write_fake_for(
+    engine: AsyncEngine, tmp_path: Path, row_id: uuidlib.UUID, session_id: uuidlib.UUID
+) -> tuple[Any, Any, dict[str, Any]]:
+    """A stateful GitHub-write fake wired to the real provider, for this row."""
     from drake_api.github_app.auth import GitHubAppAuth
     from drake_api.github_app.client import GitHubClient
     from drake_api.onboarding.github_provider import GitHubPullRequestProvider
     from drake_api.settings import Settings
     from fake_github_write import WriteFakeGitHub
-
-    harness, fake = github_harness(tmp_path)
-    row_id = await _bootstrap(harness, engine, fake, golden_tree())
-    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
-    await gitops.request_pull_request(
-        engine, enabled, session_id=session_id, actor_identity_id=actor
-    )
 
     async with engine.connect() as connection:
         base_sha, branch = (
@@ -888,10 +885,10 @@ async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
                 {"s": session_id},
             )
         ).one()
-        external_id, installation_external_id, owner, name = (
+        external_id, installation_external_id, owner, name, default_branch = (
             await connection.execute(
                 text(
-                    "SELECT r.external_id, i.external_id, r.owner_login, r.name "
+                    "SELECT r.external_id, i.external_id, r.owner_login, r.name, r.default_branch "
                     "FROM github_repositories r "
                     "JOIN github_installations i ON i.id = r.installation_id "
                     "WHERE r.id = :r"
@@ -905,20 +902,22 @@ async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
         name=str(name),
         repository_id=int(external_id),
         installation_id=int(installation_external_id),
+        default_branch=str(default_branch),
         base_sha=str(base_sha),
     )
 
     key = tmp_path / "provider-key.pem"
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
+    if not key.exists():
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
 
-    key.write_bytes(
-        rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
+        key.write_bytes(
+            rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
         )
-    )
     provider_settings = Settings(
         env="local",
         github_app_enabled=True,
@@ -928,16 +927,37 @@ async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
     )
     provider = GitHubPullRequestProvider(
         GitHubClient(
-            provider_settings,
-            GitHubAppAuth(provider_settings),
-            transport=httpx.MockTransport(writes.handler),
+            provider_settings, GitHubAppAuth(provider_settings), transport=writes.transport()
         )
     )
+    return writes, provider, {"branch": str(branch), "owner": str(owner), "name": str(name)}
+
+
+@pytest.mark.anyio
+async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Request → lease → real provider → one draft pull request.
+
+    The provider is the Sprint 12B implementation, over a stateful fake of
+    the GitHub write API. No network, no credential, no real repository —
+    and the assertion is on what the fake says was APPLIED, not on what the
+    provider claims it did.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+    writes, provider, target = await _write_fake_for(engine, tmp_path, row_id, session_id)
+    branch, owner, name = target["branch"], target["owner"], target["name"]
 
     assert await gitops.process_pending(engine, enabled, provider) == 1
     assert writes.counts() == {"branches": 1, "commits": 1, "pulls": 1}
-    assert str(branch).startswith("drake/onboarding/")
-    assert list(writes.files) == [(str(branch), ".drake/project.yaml")]
+    assert branch.startswith("drake/onboarding/")
+    assert writes.file_on(branch) is not None
+    assert writes.file_on(branch, ".github/workflows/ci.yaml") is None
     assert writes.pulls[0]["draft"] is True
 
     settled = await _request_row(engine, session_id)
@@ -956,3 +976,70 @@ async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
         entries = (await api.get(f"/v1/onboarding/sessions/{session_id}")).json()["gitops_requests"]
     assert len(entries) == 1
     assert entries[0]["pull_request_url"] == (f"https://github.com/{owner}/{name}/pull/101")
+
+
+@pytest.mark.anyio
+async def test_a_draft_that_no_longer_matches_its_digest_is_never_sent(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The content proposed must be the content the request was audited for.
+
+    The draft is REGENERATED at claim time rather than stored — that is what
+    keeps Drake from holding a copy of a repository file. The cost is that
+    the generator, the projection, or the analysis can move underneath a
+    pending request, and then the persisted `content_digest` describes one
+    document while a different one would be pushed under its audited intent.
+
+    Here the projection moves after the request is made. The digest is
+    re-checked against the exact bytes about to leave, so nothing does: no
+    installation token, no provider call, no HTTP request, no branch.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+    writes, real, _ = await _write_fake_for(engine, tmp_path, row_id, session_id)
+    provider = _CountingProvider(real)
+
+    async with engine.connect() as connection:
+        stored = (
+            await connection.execute(
+                text("SELECT content_digest FROM gitops_requests WHERE session_id = :s"),
+                {"s": session_id},
+            )
+        ).scalar_one()
+
+    # The draft is generated from the repository projection, so moving the
+    # projection moves the draft.
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE github_repositories SET default_branch = 'release' WHERE id = :r"),
+            {"r": row_id},
+        )
+
+    assert await gitops.process_pending(engine, enabled, provider) == 1
+
+    assert provider.calls == 0, "the provider was never called"
+    assert writes.calls == [], "nothing left the process — not even a token mint"
+    assert writes.counts() == {"branches": 0, "commits": 0, "pulls": 0}
+
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "failed"
+    assert settled["error_code"] == "content_digest_mismatch"
+    assert settled["number"] is None
+
+    async with engine.connect() as connection:
+        after = (
+            await connection.execute(
+                text("SELECT content_digest FROM gitops_requests WHERE session_id = :s"),
+                {"s": session_id},
+            )
+        ).scalar_one()
+    assert after == stored, "the audited digest is evidence; it is never rewritten"
+
+    # Terminal, not retried: a re-analysis produces a request for what the
+    # repository actually looks like now.
+    assert await gitops.process_pending(engine, enabled, provider) == 0
+    assert provider.calls == 0

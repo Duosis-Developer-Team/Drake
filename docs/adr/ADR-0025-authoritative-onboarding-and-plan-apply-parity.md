@@ -471,11 +471,26 @@ fill in and says plainly that merging it imports nothing — it puts the
 manifest in the repository, and the import still happens through analyse →
 review → approve → apply in Drake.
 
-The draft is re-checked immediately before it leaves: shape, size,
-credential-shaped content, and an ALLOWLIST of the placeholders it may
-contain. An unexpected placeholder means the generator changed and this
-provider was not re-reviewed, which is exactly the kind of thing noticed
-only afterwards.
+The draft is re-checked immediately before it leaves, and the check
+**parses**. A line-by-line scan accepted a document with duplicate keys — a
+reviewer sees one value and the parser uses another — and a document that is
+not a mapping at all. Parsing reuses `manifest.parse_strict`: the same
+SafeLoader subclass, duplicate-key refusal and shape bounds the import
+boundary already applies, extracted rather than copied, because a second
+implementation of "safe to parse" is a second place for it to be relaxed by
+accident.
+
+On top of the parse: exact `apiVersion` and `kind`, a github repository
+provider, owner / name / defaultBranch exactly matching the repository being
+written to, the base commit the draft states matching the commit being
+proposed onto, exactly the expected `REPLACE_ME` paths — neither missing nor
+extra — and the manifest content policy. A missing placeholder means a
+decision a person was supposed to make arrived already answered; an extra one
+means the generator changed and this provider was not re-reviewed.
+
+It deliberately does not apply the completed-manifest JSON Schema. A draft is
+incomplete by design, so forcing it through that schema would mean either
+failing every draft or weakening the schema that guards imports.
 
 **The pull-request link is composed, not followed.** GitHub returns an
 `html_url`; using it would mean the browser navigates wherever a provider
@@ -493,3 +508,47 @@ write credential is an exfiltration primitive.
 Nothing in this slice contacted GitHub. Every provider behaviour above is
 proved against a stateful fake that records which mutations were applied,
 including the ones where the response is dropped after the write landed.
+
+### Sprint 12B — final corrections
+
+**The content proposed is the content that was audited.** The draft is
+regenerated at claim time rather than stored, which is what keeps Drake from
+holding a copy of a repository file — but it also means the generator, the
+projection or the analysis can move underneath a pending request, and then
+`content_digest` describes one document while a different one would go to
+GitHub under its audited intent. The persisted digest is now carried into the
+claim and compared, byte for byte, immediately before the provider is called.
+A mismatch is terminal (`content_digest_mismatch`) with no token minted and
+no HTTP request made: a re-analysis produces a request describing what the
+repository actually looks like now, and silently proposing new content under
+an old request's audited intent does not.
+
+**Matching content is not provenance.** Reuse used to mean "a `drake/` branch
+whose `.drake/project.yaml` matches", which a branch can satisfy while also
+carrying somebody else's commit — or a second file in the same commit — and
+an open pull request over it does not make that Drake's work. The invariant is
+now stated on the diff: the pull request Drake creates or reuses carries
+exactly one change on top of the reviewed base, `.drake/project.yaml`, with
+exactly the proposed content. Establishing it needs a bounded `compare` read,
+pinned to commit shas, and it happens BEFORE the pull-request search is
+allowed to answer. Anything else is `branch_conflict` with zero mutations — a
+comparison larger than the inspection budget included, because a partial
+answer would read as "nothing else changed", which is the one conclusion this
+check exists to earn.
+
+**A refused write is reconciled in the context of the endpoint that refused
+it.** 409 and 422 on a mutation are now `GitHubWriteConflictError` rather than
+a generic contract failure: a branch create re-reads the ref, a file write
+re-reads the file, a pull-request create searches again for the exact
+head/base pair, and each continues only if what is there is this proposal.
+Nothing is ever re-sent. Two providers racing the same proposal — genuinely
+interleaved, held at a rendezvous until both have done their reads — still
+produce one branch, one commit and one pull request.
+
+**A 429 is rate limiting.** Classification required `x-ratelimit-remaining: 0`
+to say so, which made a bare 429 — what a proxy or a secondary limit answers
+with — terminal, so Drake abandoned work that would have succeeded a minute
+later. Every 429 is now retryable; a 403 becomes retryable only on explicit
+rate-limit evidence in the HEADERS, never from the body, which is provider
+prose and must not steer Drake's behaviour. `Retry-After` is read only in its
+integer-seconds form and clamped before it can become a wait.

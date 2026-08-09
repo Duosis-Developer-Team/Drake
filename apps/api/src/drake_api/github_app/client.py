@@ -56,6 +56,14 @@ _MAX_REQUEST_BYTES = 128 * 1024
 #: manifest, and its installation token, to whoever is listening.
 _PRODUCTION_API_ORIGINS = ("https://api.github.com",)
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+#: A `Retry-After` is a hint from a peer, so it is clamped before it can
+#: become a wait.
+_MAX_RETRY_AFTER_SECONDS = 300
+#: How much of a branch comparison Drake will look at. A Drake proposal is
+#: one commit touching one file; anything larger is not something to inspect
+#: more thoroughly, it is something to refuse.
+_MAX_COMPARE_COMMITS = 16
+_MAX_COMPARE_FILES = 32
 _MAX_ATTEMPTS = 3
 _MAX_PAGES = 20
 _PER_PAGE = 100
@@ -95,6 +103,18 @@ class GitHubContractError(GitHubError):
     """The response was not what the documented contract promises."""
 
     code = "github_contract"
+
+
+class GitHubWriteConflictError(GitHubError):
+    """A write GitHub refused because the world already says otherwise.
+
+    409 or 422 on a mutation: the ref exists, the blob sha is stale, the
+    pull request is already open. Unlike an ambiguous write, the outcome is
+    known — nothing was applied by THIS request — but what is already there
+    has to be read before deciding whether it is ours.
+    """
+
+    code = "github_write_conflict"
 
 
 class GitHubAmbiguousWriteError(GitHubError):
@@ -155,16 +175,42 @@ class GitHubClient:
         }
 
     @staticmethod
-    def _classify(response: httpx.Response) -> None:
+    def _retry_after(response: httpx.Response) -> int | None:
+        """`Retry-After`, in seconds, bounded — or nothing.
+
+        Only the integer-seconds form is read. The HTTP-date form would need
+        the client to trust the peer's clock, and a hint is not worth that.
+        Bounded because the value is a caller-controlled number that ends up
+        in a wait.
+        """
+        raw = (response.headers.get("retry-after") or "").strip()
+        if not raw.isdigit():
+            return None
+        return min(int(raw), _MAX_RETRY_AFTER_SECONDS)
+
+    @classmethod
+    def _classify(cls, response: httpx.Response) -> None:
         status = response.status_code
         if status < 400:
             return
         remaining = response.headers.get("x-ratelimit-remaining")
-        if status in (403, 429) and remaining == "0":
-            retry_after = response.headers.get("retry-after")
+        has_retry_after = cls._retry_after(response) is not None
+        if status == 429:
+            # ALWAYS rate limiting. It used to require `x-ratelimit-remaining:
+            # 0`, so a 429 carrying only `Retry-After` — or no headers at all,
+            # which is what a proxy or a secondary limit answers with — fell
+            # through to the contract branch and became terminal. Drake then
+            # gave up on work that would have succeeded a minute later.
             raise GitHubRateLimitedError(
-                "github rate limit exhausted",
-                retry_after_seconds=int(retry_after) if (retry_after or "").isdigit() else None,
+                "github rate limit exhausted", retry_after_seconds=cls._retry_after(response)
+            )
+        if status == 403 and (remaining == "0" or has_retry_after):
+            # 403 is ambiguous: GitHub uses it both for "you may not" and for
+            # some rate limiting. Only explicit evidence in the HEADERS moves
+            # it to retryable — the body is deliberately not consulted, since
+            # it is provider prose and must not steer Drake's behaviour.
+            raise GitHubRateLimitedError(
+                "github rate limit exhausted", retry_after_seconds=cls._retry_after(response)
             )
         if status == 401:
             raise GitHubForbiddenError("github refused the credential")
@@ -506,7 +552,17 @@ class GitHubClient:
 
         if oversized:
             raise GitHubContractError("github response exceeded the size budget")
-        self._classify(response)
+        try:
+            self._classify(response)
+        except GitHubContractError as error:
+            if response.status_code in (409, 422):
+                # A refused write, not a broken contract: the ref already
+                # exists, the blob sha is stale, the pull request is already
+                # open. The caller has to READ what is there before deciding
+                # whether it is its own work — which is different from both
+                # "it failed" and "it might have applied".
+                raise GitHubWriteConflictError("github refused the write as conflicting") from error
+            raise
         payload: Any = None
         if body:
             try:
@@ -540,6 +596,42 @@ class GitHubClient:
         if not isinstance(sha, str) or not _COMMIT_SHA.fullmatch(sha):
             raise GitHubContractError("ref response carried no commit sha")
         return sha
+
+    async def compare_commits(
+        self, token: InstallationToken, owner: str, repo: str, *, base: str, head: str
+    ) -> dict[str, Any]:
+        """What does `head` add on top of `base` — commits and changed files?
+
+        A READ, and the one that makes "this branch is Drake's proposal and
+        nothing else" checkable rather than assumed. Both ends are pinned to
+        commit shas: comparing branch names would compare whatever they point
+        at by the time the request lands.
+
+        Bounded on both axes. A Drake proposal is one commit touching one
+        file, so a comparison larger than the budget is refused rather than
+        summarised — a partial answer here would read as "nothing else
+        changed", which is exactly the conclusion that must be earned.
+        """
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        if not _COMMIT_SHA.fullmatch(base) or not _COMMIT_SHA.fullmatch(head):
+            raise GitHubContractError("commit comparisons must be pinned to commit shas")
+        response = await self._request(
+            "GET",
+            f"/repos/{owner}/{repo}/compare/{base}...{head}",
+            token.token,
+            params={"per_page": _PER_PAGE},
+        )
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise GitHubContractError("comparison response was not an object")
+        commits = payload.get("commits")
+        files = payload.get("files")
+        if not isinstance(commits, list) or not isinstance(files, list):
+            raise GitHubContractError("comparison response was incomplete")
+        if len(commits) > _MAX_COMPARE_COMMITS or len(files) > _MAX_COMPARE_FILES:
+            raise GitHubContractError("comparison exceeded the inspection budget")
+        return payload
 
     async def create_branch(
         self, token: InstallationToken, owner: str, repo: str, branch: str, sha: str
