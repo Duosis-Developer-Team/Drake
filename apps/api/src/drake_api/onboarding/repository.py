@@ -248,6 +248,18 @@ STARTABLE_BLOCKERS = (
     "session_in_progress",
 )
 
+#: What counts as a session already occupying a repository.
+#:
+#: EXACTLY the partial unique index's predicate
+#: (`uq_onboarding_session_active`), and that is not a coincidence: the
+#: index is what actually stops a second session, so anything else here
+#: would make the picker and the database disagree. It said
+#: `NOT IN ('imported', 'cancelled')`, which counts a FAILED session as
+#: occupying the repository — so the picker reported `session_in_progress`
+#: and offered to open the existing one, while a direct POST cheerfully
+#: created a new draft beside it.
+_OCCUPYING_SESSION_STATES = "'imported', 'cancelled', 'failed'"
+
 #: Everything the eligibility decision reads. Selected once, by both the
 #: picker and the create endpoint, so the two cannot drift.
 _ELIGIBILITY_COLUMNS = """
@@ -255,7 +267,7 @@ _ELIGIBILITY_COLUMNS = """
     r.archived, r.disabled, r.access_state, r.reconciliation_state,
     (SELECT s.id FROM onboarding_sessions s
       WHERE s.repository_id = r.id
-        AND s.state NOT IN ('imported', 'cancelled')
+        AND s.state NOT IN ('imported', 'cancelled', 'failed')
       ORDER BY s.created_at DESC LIMIT 1) AS active_session
 """
 

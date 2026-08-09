@@ -26,7 +26,7 @@ from drake_api.onboarding import gitops, service
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import github_harness
-from test_onboarding_integration import _bootstrap, _identity, golden_tree
+from test_onboarding_integration import _bootstrap, _identity, _principal, golden_tree
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +37,11 @@ async def _analysed_session(
     """A session with an analysis, and the settings that allow a proposal."""
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, harness.app.state.settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        harness.app.state.settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(
@@ -109,60 +113,205 @@ async def test_cancelling_a_session_closes_its_pending_request(
 
 
 @pytest.mark.anyio
-async def test_a_request_racing_a_cancel_never_leaves_a_deliverable_row(
+async def test_cancel_first_refuses_the_request_and_sends_nothing(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
-    """Two independent connections, released together, in both orders.
+    """Cancel takes the session's row lock first, deterministically.
 
-    Whichever wins, the invariant is the same: a cancelled session has no
-    pending request, and the provider is never called on its behalf. The
-    single transaction is what makes that true — the loser waits on the
-    session's row lock instead of interleaving with the winner.
+    A shared `asyncio.Barrier` releases two coroutines at the same moment
+    and then lets the scheduler pick an order — so it tests whichever order
+    that run happened to produce, not both. Here the ordering is forced: the
+    cancel's transaction holds the session row and does not commit until the
+    proposal is provably waiting on it.
     """
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
     version = await _session_version(engine, session_id)
 
-    barrier = asyncio.Barrier(2)
+    holding = asyncio.Event()
+    release = asyncio.Event()
+
+    async def cancel_holding_the_lock() -> None:
+        async with engine.begin() as connection:
+            # The same row lock `service.cancel` takes, held open.
+            await connection.execute(
+                text("SELECT id FROM onboarding_sessions WHERE id = :s FOR UPDATE"),
+                {"s": session_id},
+            )
+            await connection.execute(
+                text(
+                    "UPDATE onboarding_sessions SET state = 'cancelled', "
+                    "version = version + 1, updated_at = now() WHERE id = :s"
+                ),
+                {"s": session_id},
+            )
+            holding.set()
+            await release.wait()
+        # Commit happens on exit; the proposal is unblocked from here.
 
     async def propose() -> Any:
-        await barrier.wait()
-        return await gitops.request_pull_request(
-            engine, enabled, session_id=session_id, actor_identity_id=actor
-        )
-
-    async def close() -> Any:
-        await barrier.wait()
-        return await service.cancel(engine, session_id=session_id, expected_version=version)
-
-    results = await asyncio.gather(propose(), close(), return_exceptions=True)
-    failures = [item for item in results if isinstance(item, BaseException)]
-
-    # Cancel first: the proposal is refused by the state machine, with a
-    # bounded code rather than a database error.
-    # Request first: the proposal succeeds and the cancel closes it.
-    for failure in failures:
-        assert isinstance(failure, service.OnboardingError), failure
-        assert failure.code in ("invalid_session_state", "version_conflict")
-        assert failure.status == 409
-
-    async with engine.connect() as connection:
-        state = (
-            await connection.execute(
-                text("SELECT state FROM onboarding_sessions WHERE id = :s"), {"s": session_id}
+        await holding.wait()
+        # The proposal now blocks on the row lock. Give it a moment to
+        # actually reach that block, then let the cancel commit.
+        task = asyncio.create_task(
+            gitops.request_pull_request(
+                engine, enabled, session_id=session_id, actor_identity_id=actor
             )
-        ).scalar_one()
-    assert state == "cancelled", "the cancel must win or the race is not the one being tested"
+        )
+        await asyncio.sleep(0.2)
+        assert not task.done(), "the proposal must be waiting on the session's row lock"
+        release.set()
+        return await task
 
-    rows = await _requests(engine, session_id)
-    assert len(rows) <= 1, rows
-    assert all(row[0] != "pending" for row in rows), rows
+    canceller = asyncio.create_task(cancel_holding_the_lock())
+    with pytest.raises(service.OnboardingError) as refused:
+        await propose()
+    await canceller
 
-    # Whatever the ordering, the worker sends nothing.
-    provider = gitops.RecordingProvider(number=12)
+    # Refused on the state it found after waiting — not on a stale read.
+    assert refused.value.code == "invalid_session_state"
+    assert refused.value.status == 409
+    assert await _requests(engine, session_id) == []
+
+    provider = gitops.RecordingProvider(number=21)
     assert await gitops.process_pending(engine, enabled, provider) == 0
     assert provider.calls == []
+    assert version >= 1
+
+
+@pytest.mark.anyio
+async def test_request_first_is_closed_by_the_cancel_that_follows(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The other ordering, forced the same way.
+
+    The proposal commits first, so the request exists. The cancel then has
+    to close it — atomically, in the transaction that cancels the session —
+    or the worker would deliver a proposal for a withdrawn decision.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+
+    created = await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+    assert created["created"] is True
+    assert await _requests(engine, session_id) == [("pending", "")]
+
+    result = await service.cancel(
+        engine,
+        session_id=session_id,
+        expected_version=await _session_version(engine, session_id),
+    )
+    assert result["gitops_requests_cancelled"] == 1
+    assert await _requests(engine, session_id) == [("cancelled", "session_cancelled")]
+
+    provider = gitops.RecordingProvider(number=22)
+    assert await gitops.process_pending(engine, enabled, provider) == 0
+    assert provider.calls == []
+
+
+@pytest.mark.anyio
+async def test_a_cancel_between_the_claim_and_the_provider_call_wins(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The last gap, and the reason a claim is a lease rather than a hand-off.
+
+    `_claim` validated the session and committed; the provider call happened
+    afterwards. A cancel landing in that window still reached GitHub, and
+    `_finish` then overwrote the cancelled row by id.
+
+    This stops the worker between the two — exactly where the race lived —
+    commits a real cancel, and lets it continue.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    original = gitops._begin_dispatch
+    cancelled_between: list[int] = []
+
+    async def cancel_then_dispatch(*args: Any, **kwargs: Any) -> bool:
+        # The claim has committed and the item is in memory. This is the
+        # instant the old code called the provider.
+        if not cancelled_between:
+            cancelled_between.append(1)
+            await service.cancel(
+                engine,
+                session_id=session_id,
+                expected_version=await _session_version(engine, session_id),
+            )
+        return await original(*args, **kwargs)
+
+    gitops._begin_dispatch = cancel_then_dispatch  # type: ignore[assignment]
+    try:
+        provider = gitops.RecordingProvider(number=23)
+        processed = await gitops.process_pending(engine, enabled, provider)
+    finally:
+        gitops._begin_dispatch = original  # type: ignore[assignment]
+
+    assert cancelled_between == [1], "the cancel has to land between claim and dispatch"
+    assert processed == 0
+    # The whole point: nothing was sent.
+    assert provider.calls == []
+    # And the cancelled row was not resurrected by `_finish`.
+    assert await _requests(engine, session_id) == [("cancelled", "session_cancelled")]
+
+
+@pytest.mark.anyio
+async def test_finish_cannot_overwrite_a_row_that_moved_underneath_it(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """`_finish` used to write by id alone.
+
+    That is enough to resurrect a cancelled request as `active` — reporting
+    an open pull request for a session somebody closed — or to let a slow
+    worker's answer overwrite a newer one.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    async with engine.connect() as connection:
+        request_id, version = (
+            await connection.execute(
+                text("SELECT id, version FROM gitops_requests WHERE session_id = :s"),
+                {"s": session_id},
+            )
+        ).one()
+
+    # Cancel, then let a worker that still holds the pre-cancel version try
+    # to record a successful delivery.
+    await service.cancel(
+        engine,
+        session_id=session_id,
+        expected_version=await _session_version(engine, session_id),
+    )
+    await gitops._finish(
+        engine,
+        {"id": uuidlib.UUID(str(request_id)), "version": int(version)},
+        state="active",
+        number=99,
+        error=None,
+    )
+
+    async with engine.connect() as connection:
+        state, number = (
+            await connection.execute(
+                text("SELECT state, provider_pr_number FROM gitops_requests WHERE id = :id"),
+                {"id": request_id},
+            )
+        ).one()
+    assert state == "cancelled"
+    assert number is None, "a cancelled request must not acquire a pull request number"
 
 
 @pytest.mark.anyio

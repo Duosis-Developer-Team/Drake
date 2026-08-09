@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_catalog_api_integration import grant, login_all, make_role
 from test_github_integration import github_harness
-from test_onboarding_integration import _bootstrap, _identity, golden_tree
+from test_onboarding_integration import _bootstrap, _identity, _principal, golden_tree
 
 pytestmark = pytest.mark.integration
 
@@ -720,7 +720,11 @@ async def test_two_simultaneous_creates_produce_one_session(
     async def worker() -> Any:
         await barrier.wait()
         return await onboarding_service.create_session(
-            engine, settings, repository_row_id=row_id, actor_identity_id=actor
+            engine,
+            settings,
+            repository_row_id=row_id,
+            actor_identity_id=actor,
+            principal=await _principal(harness, engine),
         )
 
     results = await asyncio.gather(worker(), worker(), return_exceptions=True)
@@ -743,19 +747,12 @@ async def test_two_simultaneous_creates_produce_one_session(
                 )
             ).scalar_one()
         )
-        audits = int(
-            (
-                await connection.execute(
-                    text(
-                        "SELECT count(*) FROM audit_events "
-                        "WHERE action = 'onboarding.session.created' AND target_id = :t"
-                    ),
-                    {"t": results[0]["session_id"]},
-                )
-            ).scalar_one()
-        )
     assert live == 1
-    assert audits <= 1, "one create, at most one create audit"
+    # No audit assertion here: this calls the SERVICE, and the audit is
+    # written by the router. Asserting on it from this test is what made the
+    # earlier version worthless — it searched for an action name that does
+    # not exist (`onboarding.session.created`) and accepted zero rows, so it
+    # passed while proving nothing. The HTTP test below counts it for real.
 
 
 @pytest.mark.anyio
@@ -828,3 +825,297 @@ async def test_a_cursor_this_endpoint_did_not_issue_is_refused(
         for bogus in ("not-base64!!", "Zm9v", "%%%"):
             response = await client.get(f"/v1/onboarding/repositories?cursor={bogus}")
             assert response.status_code == 422, (bogus, response.text)
+
+
+@pytest.mark.anyio
+async def test_two_simultaneous_http_creates_produce_one_session_and_one_audit(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The same race through the real endpoint, with the audit counted.
+
+    The service-level test above proves the database arbitrates. This one
+    proves the ENDPOINT does the right thing with that answer: both callers
+    get the same session, exactly one is told it created it, and exactly one
+    success audit exists — under the action name the router actually writes.
+    """
+    harness, _fake, _session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
+    await login_all(harness, ["user-http"])
+    await grant(engine, harness, "user-http", OPERATOR_ROLE, "organization", "root")
+
+    async with engine.connect() as connection:
+        row_id = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT id FROM github_repositories "
+                            "WHERE full_name = 'Duosis-Developer-Team/Hermes'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE onboarding_sessions SET state = 'cancelled' WHERE repository_id = :r"),
+            {"r": row_id},
+        )
+    await _reconciled(engine, row_id)
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-http")
+        me = (await client.get("/v1/me")).json()
+        headers = {"X-CSRF-Token": me["csrf_token"], "Origin": harness.client_base_url}
+
+        barrier = asyncio.Barrier(2)
+
+        async def worker() -> Any:
+            await barrier.wait()
+            return await client.post(
+                "/v1/onboarding/sessions",
+                json={"repository_id": str(row_id)},
+                headers=headers,
+            )
+
+        first, second = await asyncio.gather(worker(), worker())
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    bodies = [first.json(), second.json()]
+    assert bodies[0]["session_id"] == bodies[1]["session_id"]
+    # Exactly one caller created it. Not "at most one" — zero would mean the
+    # endpoint invented a session nobody is recorded as having opened.
+    assert sorted(body["created"] for body in bodies) == [False, True]
+
+    session_id = bodies[0]["session_id"]
+    async with engine.connect() as connection:
+        live = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM onboarding_sessions WHERE repository_id = :r "
+                        "AND state NOT IN ('imported', 'cancelled', 'failed')"
+                    ),
+                    {"r": row_id},
+                )
+            ).scalar_one()
+        )
+        audits = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM audit_events "
+                        "WHERE action = 'onboarding.session.create' "
+                        "AND result = 'success' AND target_id = :t"
+                    ),
+                    {"t": session_id},
+                )
+            ).scalar_one()
+        )
+    assert live == 1
+    assert audits == 1, "exactly one create audit, against the session that was created"
+
+
+@pytest.mark.anyio
+async def test_a_failed_session_does_not_block_a_new_one_in_either_place(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The picker and the endpoint have to agree about what `failed` means.
+
+    The picker treated any session outside `imported`/`cancelled` as
+    occupying the repository, so it reported `session_in_progress` and
+    offered to open the failed one. The partial unique index — which is what
+    actually stops a second session — excludes `failed`, so a direct POST
+    created a new draft beside it. The UI sent operators one way and the API
+    did the other.
+    """
+    harness, _fake, _session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
+    await login_all(harness, ["user-failed"])
+    await grant(engine, harness, "user-failed", OPERATOR_ROLE, "organization", "root")
+
+    async with engine.connect() as connection:
+        row_id = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT id FROM github_repositories "
+                            "WHERE full_name = 'Duosis-Developer-Team/Hermes'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+    # Exactly one session on this repository, and it failed.
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE onboarding_sessions SET state = 'failed' WHERE repository_id = :r"),
+            {"r": row_id},
+        )
+    await _reconciled(engine, row_id)
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-failed")
+        me = (await client.get("/v1/me")).json()
+
+        listed = (await client.get("/v1/onboarding/repositories?limit=50")).json()
+        entry = next(
+            item for item in listed["items"] if item["full_name"] == "Duosis-Developer-Team/Hermes"
+        )
+        # A failed session does not occupy the repository: the picker offers
+        # to start, and does not point at a session nobody can continue.
+        assert entry["startable"] is True
+        assert entry["reason_code"] is None
+        assert entry["active_session_id"] is None
+
+        created = await client.post(
+            "/v1/onboarding/sessions",
+            json={"repository_id": str(row_id)},
+            headers={"X-CSRF-Token": me["csrf_token"], "Origin": harness.client_base_url},
+        )
+
+    # And the endpoint agrees — a new session, not a redirect to the failed
+    # one and not a refusal.
+    assert created.status_code == 201, created.text
+    assert created.json()["created"] is True
+
+    async with engine.connect() as connection:
+        states = sorted(
+            str(row[0])
+            for row in (
+                await connection.execute(
+                    text("SELECT state FROM onboarding_sessions WHERE repository_id = :r"),
+                    {"r": row_id},
+                )
+            ).all()
+        )
+    assert states == ["draft", "failed"]
+
+
+@pytest.mark.anyio
+async def test_a_repository_that_leaves_the_callers_scope_cannot_be_onboarded(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The scope decision is made against the row that gets written.
+
+    Eligibility used to be read in one connection and the insert done in
+    another. Between them a repository could be gated, archived, disabled,
+    lose access — or move to a scope the caller has no rights in — and the
+    session was still opened on the strength of the earlier read.
+
+    Both now happen in one transaction, against a locked row, with the scope
+    predicate part of the locked read.
+    """
+    harness, fake, _session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
+    await login_all(harness, ["user-moved"])
+    await grant(engine, harness, "user-moved", OPERATOR_ROLE, "organization", "root")
+
+    async with engine.connect() as connection:
+        row_id = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT id FROM github_repositories "
+                            "WHERE full_name = 'Duosis-Developer-Team/Hermes'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE onboarding_sessions SET state = 'cancelled' WHERE repository_id = :r"),
+            {"r": row_id},
+        )
+    await _reconciled(engine, row_id)
+
+    # Move the repository into a scope this caller has no grant in.
+    #
+    # A composite foreign key pins `(installation_id, scope_id)`, so the
+    # installation moves with it — and the constraint is not deferrable, so
+    # the two updates are ordered rather than done together: point the
+    # repository at a new installation row in the target scope.
+    # A scope OUTSIDE the caller's tree. `_scope` parents under the
+    # organisation root, which a root-level grant would still cover — and
+    # covering it would be correct, so the test has to move the repository
+    # somewhere the caller genuinely has nothing.
+    async with engine.begin() as connection:
+        other = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO scopes (scope_type, external_ref, display_name, "
+                            " parent_id) VALUES ('organization', 'other-tenant', "
+                            " 'Other Tenant', NULL) "
+                            "ON CONFLICT (scope_type, external_ref) DO UPDATE "
+                            " SET display_name = EXCLUDED.display_name RETURNING id"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+    async with engine.begin() as connection:
+        moved_installation = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO github_installations (external_id, scope_id, "
+                            " account_login, account_type, state) "
+                            "VALUES (912555, :scope, 'elsewhere', 'Organization', 'active') "
+                            "RETURNING id"
+                        ),
+                        {"scope": other},
+                    )
+                ).scalar_one()
+            )
+        )
+        await connection.execute(
+            text(
+                "UPDATE github_repositories SET scope_id = :scope, installation_id = :inst "
+                "WHERE id = :id"
+            ),
+            {"scope": other, "inst": moved_installation, "id": row_id},
+        )
+
+    before = await _counts(engine, _session_a)
+    fake.calls.clear()
+    async with harness.api_client() as client:
+        await harness.login(client, "user-moved")
+        me = (await client.get("/v1/me")).json()
+        # It is gone from the picker...
+        listed = (await client.get("/v1/onboarding/repositories?limit=50")).json()
+        assert all(item["full_name"] != "Duosis-Developer-Team/Hermes" for item in listed["items"])
+        # ...and the endpoint refuses it, with the same answer an unknown
+        # repository gets.
+        created = await client.post(
+            "/v1/onboarding/sessions",
+            json={"repository_id": str(row_id)},
+            headers={"X-CSRF-Token": me["csrf_token"], "Origin": harness.client_base_url},
+        )
+        unknown = await client.post(
+            "/v1/onboarding/sessions",
+            json={"repository_id": str(uuidlib.uuid4())},
+            headers={"X-CSRF-Token": me["csrf_token"], "Origin": harness.client_base_url},
+        )
+
+    assert created.status_code == 404, created.text
+    assert unknown.status_code == 404
+    assert created.json()["error"]["message"] == unknown.json()["error"]["message"]
+    assert fake.calls == []
+    assert await _counts(engine, _session_a) == before
+    async with engine.connect() as connection:
+        opened = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM onboarding_sessions WHERE repository_id = :r "
+                        "AND state = 'draft'"
+                    ),
+                    {"r": row_id},
+                )
+            ).scalar_one()
+        )
+    assert opened == 0

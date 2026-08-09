@@ -79,6 +79,7 @@ from drake_api.onboarding.model import (
     build_plan,
     deployment_source_item,
 )
+from drake_api.rbac.service import Principal
 from drake_api.service_health.policy import DEFAULT_POLICY_KEY
 from drake_api.service_health.presets import DEFAULT_PRESET_KEY
 from drake_api.settings import Settings
@@ -191,6 +192,7 @@ async def create_session(
     *,
     repository_row_id: uuid.UUID,
     actor_identity_id: uuid.UUID,
+    principal: Principal,
 ) -> dict[str, Any]:
     """Open a session for one repository, or return the live one.
 
@@ -205,7 +207,17 @@ async def create_session(
     """
     require_configured(settings)
 
-    async with engine.connect() as connection:
+    # ONE transaction: the repository row lock, the scope check, the
+    # eligibility decision and the insert.
+    #
+    # They used to be two. The eligibility read committed and released, and
+    # the insert followed — so between them a repository could be gated,
+    # archived, disabled, lose access, or MOVE TO ANOTHER SCOPE, and a
+    # session would still be opened on the strength of a decision taken
+    # against the old row. Holding the lock makes the row that was judged
+    # the row that is written against.
+    async with engine.begin() as connection:
+        scopes = await repo.scopes_for(connection, principal, repo.MANAGE_PERMISSION)
         row = (
             await connection.execute(
                 text(
@@ -213,29 +225,34 @@ async def create_session(
                     "r.security_gate, r.archived, r.disabled, r.access_state, "
                     "r.reconciliation_state, (SELECT s.id FROM onboarding_sessions s "
                     " WHERE s.repository_id = r.id "
-                    "   AND s.state NOT IN ('imported', 'cancelled') "
+                    "   AND s.state NOT IN ('imported', 'cancelled', 'failed') "
                     " ORDER BY s.created_at DESC LIMIT 1), r.scope_id "
-                    "FROM github_repositories r WHERE r.id = :id"
+                    "FROM github_repositories r "
+                    # The scope predicate is part of the LOCKED read, so a
+                    # repository that moves out of the caller's scopes
+                    # cannot be onboarded on the strength of the authority
+                    # they had a moment ago.
+                    "WHERE r.id = :id AND r.scope_id = ANY(:scopes) FOR UPDATE OF r"
                 ),
-                {"id": repository_row_id},
+                {"id": repository_row_id, "scopes": scopes},
             )
         ).first()
-    if row is None:
-        raise OnboardingError("repository_not_found", "No such repository.", status=404)
+        if row is None:
+            # Unknown, or outside the caller's manage scopes. The same
+            # answer for both: distinguishing them would say which
+            # repositories exist.
+            raise OnboardingError("repository_not_found", "No such repository.", status=404)
 
-    eligibility = repo.repository_eligibility(row)
-    scope_id = uuid.UUID(str(row[10]))
-    if not eligibility["startable"] and eligibility["reason_code"] != "session_in_progress":
-        raise NotStartableError(str(eligibility["reason_code"]))
+        eligibility = repo.repository_eligibility(row)
+        scope_id = uuid.UUID(str(row[10]))
+        if not eligibility["startable"] and eligibility["reason_code"] != "session_in_progress":
+            raise NotStartableError(str(eligibility["reason_code"]))
 
-    async with engine.begin() as connection:
-        # Database-authoritative, not select-then-insert.
-        #
-        # Two concurrent creates both read "no active session" and both
-        # insert; the partial unique index stops the second, but as an
-        # IntegrityError surfacing to the caller as a 500. `ON CONFLICT DO
-        # NOTHING` against that index makes the loser's answer a normal
-        # result: it reads the winner's row and reports `created: false`.
+        # Database-authoritative, not select-then-insert. Two concurrent
+        # creates both read "no active session" and both insert; the partial
+        # unique index stops the second, but as an IntegrityError surfacing
+        # to the caller as a 500. `ON CONFLICT DO NOTHING` against that same
+        # index makes the loser's answer a normal result.
         inserted = (
             await connection.execute(
                 text(

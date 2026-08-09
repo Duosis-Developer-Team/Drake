@@ -385,25 +385,17 @@ async def manifest_draft(
 async def create_session(
     request: Request, payload: CreateSessionBody, auth: AuthContext = Depends(require_csrf)
 ) -> dict[str, Any]:
-    """Open a session for a repository Drake already projects."""
+    """Open a session for a repository Drake already projects.
+
+    The page-level gate here is the cheap "is this feature yours at all"
+    check. The scope decision that matters happens inside `create_session`,
+    against a LOCKED repository row, so a repository that moves scope
+    between the two cannot be onboarded on the strength of authority the
+    caller had a moment ago.
+    """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     await _require(request, auth, repo.MANAGE_PERMISSION)
-
-    from sqlalchemy import text
-
-    async with engine.connect() as connection:
-        scopes = await repo.scopes_for(connection, auth.principal, repo.MANAGE_PERMISSION)
-        visible = (
-            await connection.execute(
-                text(
-                    "SELECT id FROM github_repositories WHERE id = :id AND scope_id = ANY(:scopes)"
-                ),
-                {"id": payload.repository_id, "scopes": scopes},
-            )
-        ).first()
-    if visible is None:
-        raise HTTPException(status_code=404, detail=_NOT_FOUND)
 
     try:
         result = await service.create_session(
@@ -411,8 +403,12 @@ async def create_session(
             settings,
             repository_row_id=payload.repository_id,
             actor_identity_id=uuid.UUID(auth.session.identity_id),
+            principal=auth.principal,
         )
     except OnboardingError as error:
+        if error.code == "repository_not_found":
+            # Unknown and out-of-scope answer alike.
+            raise HTTPException(status_code=404, detail=_NOT_FOUND) from error
         raise _failure(error) from error
 
     if result["created"]:

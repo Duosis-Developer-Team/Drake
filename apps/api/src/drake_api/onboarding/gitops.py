@@ -226,16 +226,24 @@ async def cancel_pending_for_session(connection: AsyncConnection, session_id: uu
     row lock. A request that survives its session is one the worker will
     happily push on behalf of a decision somebody withdrew.
 
-    Only `pending` rows move: a request already in flight or already
-    delivered is a fact, and rewriting it would be a lie about what
-    happened. `next_attempt_at` is cleared so nothing re-claims it.
+    Only `pending` rows that are NOT in flight move. A request already
+    delivered, or one a worker is calling the provider for at this moment,
+    is a fact — and rewriting it would be a claim about somebody's
+    repository that Drake is in no position to make. `next_attempt_at` is
+    cleared so nothing re-claims what this closes.
     """
     result = await connection.execute(
         text(
             "UPDATE gitops_requests SET state = 'cancelled', "
             "error_code = 'session_cancelled', next_attempt_at = NULL, "
             "version = version + 1, updated_at = now() "
-            "WHERE session_id = :session AND state = 'pending'"
+            "WHERE session_id = :session AND state = 'pending' "
+            # Not one a worker has already taken in flight. `next_attempt_at
+            # IS NULL` on a pending row means a provider call is happening
+            # right now, and a branch may exist by the time this commits —
+            # marking it cancelled would be a claim about the repository
+            # that Drake cannot make.
+            "AND next_attempt_at IS NOT NULL"
         ),
         {"session": session_id},
     )
@@ -292,6 +300,29 @@ async def process_pending(
     The provider call happens outside any request transaction: a slow GitHub
     must not hold a database lock, and a failing one must not roll back the
     audited request that caused it.
+
+    That is also where the last race lived. `_claim` validated the session
+    and committed, and the provider was called afterwards — so a cancel
+    landing in between still reached GitHub:
+
+        claim:  session proposable, request pending, COMMIT
+        cancel: session cancelled, request cancelled
+        worker: provider.create_pull_request(...) anyway
+
+    So a claim is now a LEASE, not a hand-off. The row stays `pending`,
+    which is what cancel is allowed to close, and `_begin_dispatch` re-reads
+    it — against the version the claim saw, on the session's CURRENT state —
+    immediately before the call.
+
+    In-flight is `state = 'pending' AND next_attempt_at IS NULL`: a request
+    with no future attempt scheduled because one is happening right now.
+    `active` could not carry that meaning — the schema requires a provider
+    PR number for it, which is the point, since `active` asserts a pull
+    request exists.
+
+    That transition is the exact instant a request becomes in-flight.
+    Before it, cancel wins and nothing is sent. After it, a branch may
+    really exist, so cancel leaves it alone rather than claiming otherwise.
     """
     if not settings.github_gitops_pr_enabled:
         # Disabled means no work is claimed at all — not "claimed and then
@@ -300,6 +331,10 @@ async def process_pending(
 
     processed = 0
     for item in await _claim(engine, limit):
+        if not await _begin_dispatch(engine, item):
+            # Cancelled, superseded, or the session moved while this request
+            # waited its turn. Nothing is sent and nothing is rewritten.
+            continue
         try:
             context_row = item["context"]
             result = await provider.create_pull_request(
@@ -321,14 +356,58 @@ async def process_pending(
             result = PullRequestResult("retryable", None, "transport_error")
 
         if result.outcome in ("created", "exists"):
-            await _finish(engine, item["id"], state="active", number=result.number, error=None)
+            await _finish(engine, item, state="active", number=result.number, error=None)
         elif result.outcome == "retryable" and int(item["attempts"]) < MAX_ATTEMPTS:
-            # Left pending; the claim already scheduled the next attempt.
+            # Back to `pending` for the next attempt — and back to being
+            # something a cancel may close, which is correct: nothing was
+            # created, so there is nothing in flight to protect.
+            await _finish(engine, item, state="pending", number=None, error=result.error_code)
             continue
         else:
-            await _finish(engine, item["id"], state="failed", number=None, error=result.error_code)
+            await _finish(engine, item, state="failed", number=None, error=result.error_code)
         processed += 1
     return processed
+
+
+async def _begin_dispatch(engine: AsyncEngine, item: dict[str, Any]) -> bool:
+    """Take the request in-flight, or decline to send it.
+
+    One statement decides both: the row must still be the `pending` row this
+    worker leased (same version), and its session must still be one a
+    proposal may be sent for. `RETURNING` makes the answer the database's
+    rather than a read this worker did earlier and hoped was still true.
+    """
+    async with engine.begin() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    """
+                    UPDATE gitops_requests AS g
+                    SET next_attempt_at = NULL, version = g.version + 1, updated_at = now()
+                    FROM onboarding_sessions AS s
+                    WHERE g.id = :id
+                      AND g.version = :version
+                      AND g.state = 'pending'
+                      AND g.next_attempt_at IS NOT NULL
+                      AND s.id = g.session_id
+                      AND s.state = ANY(:states)
+                    RETURNING g.version
+                    """
+                ),
+                {
+                    "id": item["id"],
+                    "version": item["version"],
+                    "states": sorted(CLAIMABLE_SESSION_STATES),
+                },
+            )
+        ).first()
+    if row is None:
+        return False
+    # The version the provider call is answering for. `_finish` writes only
+    # against this, so a cancel or another worker that moved the row in the
+    # meantime is never overwritten.
+    item["version"] = int(row[0])
+    return True
 
 
 #: The session states a pending request may still be delivered for. The
@@ -346,7 +425,7 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                     """
                     SELECT g.id, g.session_id, g.branch_name, g.base_commit_sha, g.attempts,
                            r.owner_login, r.name, r.default_branch, r.external_id,
-                           i.external_id, r.security_gate, s.state, r.full_name
+                           i.external_id, r.security_gate, s.state, r.full_name, g.version
                     FROM gitops_requests g
                     JOIN github_repositories r ON r.id = g.repository_id
                     JOIN github_installations i ON i.id = r.installation_id
@@ -402,6 +481,7 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                     "branch_name": str(row[2]),
                     "base_commit_sha": str(row[3]),
                     "attempts": int(row[4]) + 1,
+                    "version": int(row[13]),
                     "context": {
                         "owner": str(row[5]),
                         "name": str(row[6]),
@@ -426,23 +506,45 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
 
 async def _finish(
     engine: AsyncEngine,
-    request_id: uuid.UUID,
+    item: dict[str, Any],
     *,
     state: str,
     number: int | None,
     error: str | None,
 ) -> None:
+    """Record the outcome — only over the row this worker took in flight.
+
+    Guarded on the exact row this worker took in flight: same id, same
+    version, still `pending`, still marked in-flight. Without that it wrote
+    by id alone and would happily resurrect a request somebody had
+    cancelled, or overwrite a terminal row with an older worker's answer.
+
+    A `retryable` outcome re-arms `next_attempt_at`, which also returns the
+    row to being something cancel may close — correct, because nothing was
+    created and there is nothing in flight to protect.
+    """
     async with engine.begin() as connection:
         await connection.execute(
             text(
                 """
                 UPDATE gitops_requests
                 SET state = :state, provider_pr_number = :number, error_code = :error,
-                    next_attempt_at = NULL, version = version + 1, updated_at = now()
-                WHERE id = :id
+                    next_attempt_at = CASE
+                        WHEN :state = 'pending' THEN now() + interval '60 seconds'
+                        ELSE NULL
+                    END,
+                    version = version + 1, updated_at = now()
+                WHERE id = :id AND version = :version AND state = 'pending'
+                  AND next_attempt_at IS NULL
                 """
             ),
-            {"id": request_id, "state": state, "number": number, "error": error},
+            {
+                "id": item["id"],
+                "version": item["version"],
+                "state": state,
+                "number": number,
+                "error": error,
+            },
         )
 
 

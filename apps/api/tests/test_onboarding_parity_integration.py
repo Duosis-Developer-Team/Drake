@@ -43,6 +43,7 @@ from test_github_integration import github_harness
 from test_onboarding_integration import (
     _bootstrap,
     _identity,
+    _principal,
     actions_for,
     bindings_for,
     datalake_manifest,
@@ -577,7 +578,11 @@ async def _plan_and_apply(
     settings = harness.app.state.settings
     client = harness.app.state.github_client
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)
@@ -855,7 +860,11 @@ async def test_a_failure_mid_apply_leaves_no_catalog_rows_behind(
     client = harness.app.state.github_client
 
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)

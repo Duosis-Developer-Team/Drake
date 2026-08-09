@@ -43,6 +43,7 @@ from test_github_integration import github_harness
 from test_onboarding_integration import (
     _bootstrap,
     _identity,
+    _principal,
     golden_tree,
     manifest_document,
     snapshot,
@@ -204,7 +205,11 @@ async def _approved_session(
     settings = harness.app.state.settings
     client = harness.app.state.github_client
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)
@@ -999,7 +1004,11 @@ async def _two_plans(
     settings = harness.app.state.settings
     client = harness.app.state.github_client
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     first = await service.analyze(engine, settings, client, session_id=session_id)

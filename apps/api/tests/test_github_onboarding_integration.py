@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from drake_api.github_app import onboarding_service, scanner
+from drake_api.rbac.service import Principal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
@@ -767,7 +768,11 @@ async def test_the_manifest_draft_moved_to_the_session_path(
             )
         )
     created = await onboarding_service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=Principal(identity_id=actor, issuer=harness.provider.issuer),
     )
     session_id = created["session_id"]
 
