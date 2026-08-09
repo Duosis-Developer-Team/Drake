@@ -68,6 +68,20 @@ DISPATCH_LEASE_SECONDS = 600
 #: nothing is in flight while it waits.
 RETRY_BACKOFF_SECONDS = 60
 
+#: The hard ceiling on one provider call, enforced HERE rather than trusted
+#: to whatever client a provider happens to use.
+#:
+#: The lease is only an exclusion guarantee if a call cannot outlive it. A
+#: provider that blocks for longer would let the lease expire underneath
+#: itself, a second worker would claim the row, and both would be sending
+#: the same pull request — the exact duplicate the lease exists to prevent.
+#:
+#: `PullRequestProvider` is a protocol: any implementation may be slow, may
+#: have no timeout of its own, or may have one larger than the lease. So the
+#: orchestration layer sets the bound, with a wide margin under the lease so
+#: the timeout always fires first.
+PROVIDER_CALL_TIMEOUT_SECONDS = 120
+
 #: The marker that says a provider call is happening RIGHT NOW.
 #:
 #: `next_attempt_at` alone cannot carry this. A leased row and a row waiting
@@ -348,15 +362,27 @@ async def process_pending(
     it — against the version the claim saw, on the session's CURRENT state —
     immediately before the call.
 
-    In-flight is `state = 'pending' AND next_attempt_at IS NULL`: a request
-    with no future attempt scheduled because one is happening right now.
-    `active` could not carry that meaning — the schema requires a provider
-    PR number for it, which is the point, since `active` asserts a pull
-    request exists.
+    The lease contract, in full:
 
-    That transition is the exact instant a request becomes in-flight.
-    Before it, cancel wins and nothing is sent. After it, a branch may
-    really exist, so cancel leaves it alone rather than claiming otherwise.
+        state           = 'pending'          — claimable at all
+        next_attempt_at = lease expiry       — not due until it passes
+        error_code      = 'dispatch_in_flight' — a call is happening NOW
+        version         = fencing token      — whose answer may be written
+
+    `next_attempt_at` alone cannot say "in flight": a leased row and a row
+    waiting out a retry backoff are both "not due", and cancel must close
+    the second while leaving the first alone. `active` cannot say it either
+    — the schema requires a provider PR number for that state, which is the
+    point, since `active` asserts a pull request exists.
+
+    `_begin_dispatch` setting the marker is the exact instant a request
+    becomes in-flight. Before it, cancel wins and nothing is sent. After it,
+    a branch may really exist, so cancel leaves it alone rather than
+    claiming otherwise.
+
+    The provider call is bounded by `PROVIDER_CALL_TIMEOUT_SECONDS`, well
+    under the lease, so a call can never outlive the exclusion that protects
+    it.
     """
     if not settings.github_gitops_pr_enabled:
         # Disabled means no work is claimed at all — not "claimed and then
@@ -371,19 +397,30 @@ async def process_pending(
             continue
         try:
             context_row = item["context"]
-            result = await provider.create_pull_request(
-                installation_id=int(context_row["installation_external_id"]),
-                repository_id=int(context_row["external_id"]),
-                owner=str(context_row["owner"]),
-                name=str(context_row["name"]),
-                base_branch=str(context_row["default_branch"]),
-                base_commit_sha=str(item["base_commit_sha"]),
-                head_branch=str(item["branch_name"]),
-                file_path=ALLOWED_PATH,
-                content=item["content"],
-                title="Add Drake project manifest",
-                body=pull_request_body(item["session_id"], str(item["base_commit_sha"])),
-            )
+            # The bound the lease depends on. Without it a slow provider
+            # outlives its own exclusion and a second worker sends the same
+            # pull request.
+            async with asyncio.timeout(PROVIDER_CALL_TIMEOUT_SECONDS):
+                result = await provider.create_pull_request(
+                    installation_id=int(context_row["installation_external_id"]),
+                    repository_id=int(context_row["external_id"]),
+                    owner=str(context_row["owner"]),
+                    name=str(context_row["name"]),
+                    base_branch=str(context_row["default_branch"]),
+                    base_commit_sha=str(item["base_commit_sha"]),
+                    head_branch=str(item["branch_name"]),
+                    file_path=ALLOWED_PATH,
+                    content=item["content"],
+                    title="Add Drake project manifest",
+                    body=pull_request_body(item["session_id"], str(item["base_commit_sha"])),
+                )
+        except TimeoutError:
+            # Bounded and retryable: the call may or may not have reached
+            # GitHub, and the next attempt's create-or-reuse settles that.
+            # What matters here is that this worker stops waiting while it
+            # still owns the lease.
+            logger.warning("gitops: provider call exceeded the dispatch timeout")
+            result = PullRequestResult("retryable", None, "transport_timeout")
         except Exception:
             # A provider that raised is not a provider that succeeded.
             logger.warning("gitops: provider call failed for one request")
@@ -546,6 +583,30 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                         "version = version + 1, updated_at = now() WHERE id = :id"
                     ),
                     {"id": row[0]},
+                )
+                continue
+            if int(row[4]) >= MAX_ATTEMPTS:
+                # The ceiling has to be enforced HERE, at the claim.
+                #
+                # It used to be checked only after a provider result came
+                # back — so a worker that died between the call and
+                # `_finish` never reached it. The lease expired, the row was
+                # due again, and the next worker incremented `attempts` and
+                # called the provider again. Repeat that and neither the
+                # attempt count nor the number of provider calls is bounded
+                # by anything.
+                #
+                # Terminal, not left pending: a request nobody may retry and
+                # nobody will finish is a row that sits in the queue for
+                # ever, being skipped.
+                await connection.execute(
+                    text(
+                        "UPDATE gitops_requests SET state = 'failed', "
+                        "error_code = 'dispatch_attempts_exhausted', "
+                        "next_attempt_at = NULL, version = version + 1, "
+                        "updated_at = now() WHERE id = :id AND version = :version"
+                    ),
+                    {"id": row[0], "version": int(row[13])},
                 )
                 continue
             if str(row[11]) not in CLAIMABLE_SESSION_STATES:

@@ -17,6 +17,7 @@ this slice and none is added by testing it.
 """
 
 import asyncio
+import contextlib
 import uuid as uuidlib
 from pathlib import Path
 from typing import Any
@@ -679,3 +680,170 @@ async def test_a_static_catalogue_gate_stops_the_dispatch_too(
     settled = await _request_row(engine, session_id)
     assert settled["state"] == "failed"
     assert settled["error_code"] == "security_gate_open"
+
+
+# ===========================================================================
+# the two ends of the lease
+# ===========================================================================
+
+
+@pytest.mark.anyio
+async def test_a_slow_provider_is_cut_off_before_its_lease_expires(
+    engine: AsyncEngine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lease only excludes if a call cannot outlive it.
+
+    A provider that blocks longer than the lease lets it expire underneath
+    itself: a second worker claims the row and both send the same pull
+    request. `PullRequestProvider` is a protocol — any implementation may be
+    slow or have no timeout of its own — so the bound belongs here.
+
+    The real values are 120s under a 600s lease. This shrinks both, keeping
+    the same ordering, so the boundary can actually be crossed in a test.
+    """
+    monkeypatch.setattr(gitops, "PROVIDER_CALL_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(gitops, "DISPATCH_LEASE_SECONDS", 3)
+    monkeypatch.setattr(gitops, "RETRY_BACKOFF_SECONDS", 60)
+
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    class NeverReturningProvider(gitops.RecordingProvider):
+        async def create_pull_request(self, **kwargs: Any) -> gitops.PullRequestResult:
+            self.calls.append(dict(kwargs))
+            # Longer than the lease, never mind the timeout.
+            await asyncio.sleep(30)
+            raise AssertionError("the call must be cut off long before this")
+
+    provider = NeverReturningProvider(number=71)
+    started = asyncio.get_running_loop().time()
+    assert await gitops.process_pending(engine, enabled, provider) == 0
+    elapsed = asyncio.get_running_loop().time() - started
+
+    # Cut off by the timeout, and comfortably before the lease would have
+    # expired — which is the whole ordering guarantee.
+    assert elapsed < gitops.DISPATCH_LEASE_SECONDS
+    assert len(provider.calls) == 1
+
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "pending"
+    assert settled["error_code"] == "transport_timeout"
+    assert settled["error_code"] != gitops.DISPATCH_MARKER, "the in-flight marker is cleared"
+    assert settled["next_attempt_at"] is not None, "a retry is scheduled"
+    assert settled["attempts"] == 1, "one attempt, not one per timeout"
+
+    # And it is not due yet, so an immediate second worker sends nothing —
+    # the timeout did not open a window the lease was holding shut.
+    immediate = gitops.RecordingProvider(number=72)
+    assert await gitops.process_pending(engine, enabled, immediate) == 0
+    assert immediate.calls == []
+
+
+@pytest.mark.anyio
+async def test_repeated_crashes_stop_at_exactly_max_attempts(
+    engine: AsyncEngine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash loop must not be an unbounded provider loop.
+
+    `MAX_ATTEMPTS` was only consulted after a provider result came back, so
+    a worker dying between the call and `_finish` never reached it. The
+    lease expired, the row was due, the next worker incremented `attempts`
+    and called the provider again — for ever.
+    """
+    monkeypatch.setattr(gitops, "DISPATCH_LEASE_SECONDS", 1)
+
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    original = gitops._finish
+
+    async def die_before_finishing(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("worker died before recording the result")
+
+    provider = gitops.RecordingProvider(number=81)
+    gitops._finish = die_before_finishing  # type: ignore[assignment]
+    try:
+        for _ in range(gitops.MAX_ATTEMPTS + 3):
+            with contextlib.suppress(RuntimeError):
+                await gitops.process_pending(engine, enabled, provider)
+            # Expire the lease, the way time would.
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE gitops_requests SET next_attempt_at = now() - "
+                        "interval '1 second' WHERE session_id = :s AND state = 'pending'"
+                    ),
+                    {"s": session_id},
+                )
+    finally:
+        gitops._finish = original  # type: ignore[assignment]
+
+    # Exactly the ceiling, however many times the loop ran.
+    assert len(provider.calls) == gitops.MAX_ATTEMPTS
+    settled = await _request_row(engine, session_id)
+    assert settled["attempts"] == gitops.MAX_ATTEMPTS
+    assert settled["state"] == "failed"
+    assert settled["error_code"] == "dispatch_attempts_exhausted"
+    assert settled["next_attempt_at"] is None
+
+    # Terminal: no later pass picks it up again.
+    after = gitops.RecordingProvider(number=82)
+    assert await gitops.process_pending(engine, enabled, after) == 0
+    assert after.calls == []
+    assert (await _request_row(engine, session_id))["attempts"] == gitops.MAX_ATTEMPTS
+
+
+@pytest.mark.anyio
+async def test_an_exhausted_request_is_retired_without_another_provider_call(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The same rule, reached directly rather than through a crash loop.
+
+    A due row already at the ceiling must not buy one more provider call on
+    its way to being retired — and must not be left `pending` either, where
+    it would be skipped by every pass for ever.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE gitops_requests SET attempts = :max, "
+                "next_attempt_at = now() - interval '1 second' WHERE session_id = :s"
+            ),
+            {"max": gitops.MAX_ATTEMPTS, "s": session_id},
+        )
+
+    provider = gitops.RecordingProvider(number=91)
+    assert await gitops.process_pending(engine, enabled, provider) == 0
+    assert provider.calls == []
+
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "failed"
+    assert settled["error_code"] == "dispatch_attempts_exhausted"
+    assert settled["attempts"] == gitops.MAX_ATTEMPTS, "retiring it is not another attempt"
+    assert settled["next_attempt_at"] is None
+
+    async with engine.connect() as connection:
+        rows = int(
+            (
+                await connection.execute(
+                    text("SELECT count(*) FROM gitops_requests WHERE session_id = :s"),
+                    {"s": session_id},
+                )
+            ).scalar_one()
+        )
+    assert rows == 1
