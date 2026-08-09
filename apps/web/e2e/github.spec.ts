@@ -461,9 +461,26 @@ test("the Sprint 5B import path is retired and writes nothing", async ({ page })
   // opening a second way in.
   await page.goto("/integrations/github");
   await expect(page.getByTestId("onboarding-toggle")).toHaveCount(0);
-  const link = page.getByTestId("onboarding-link").first();
-  await expect(link).toBeVisible();
-  await expect(link).toHaveAttribute("href", /\/onboarding\?repository_id=/);
+
+  // The card asks the SERVER about this repository rather than deciding
+  // from "the operator holds onboarding.manage somewhere". So it shows one
+  // of three honest answers — a link, the open session, or why not — and
+  // never the retired panel.
+  const card = page.getByTestId("repository-list").locator("section").first();
+  await expect(
+    card
+      .getByTestId("onboarding-link")
+      .or(card.getByTestId("onboarding-link-existing"))
+      .or(card.getByTestId("onboarding-link-blocked"))
+      .or(card.getByTestId("onboarding-link-denied"))
+      .first(),
+  ).toBeVisible();
+
+  // Where it does offer to start, it points at the canonical screen.
+  const startable = page.getByTestId("onboarding-link").first();
+  if (await startable.count()) {
+    await expect(startable).toHaveAttribute("href", /\/onboarding\?repository_id=/);
+  }
 });
 
 test("onboarding refuses the gated repository and leaks nothing", async ({ page }) => {

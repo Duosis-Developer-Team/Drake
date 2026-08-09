@@ -14,9 +14,11 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
  *
  *   choose a repository → session → analyse → review → approve → apply
  *
- * The fixture repository is Drake's own `Hermes`. The real Datalake
- * repository is deliberately NOT used: it is closed by a manual security
- * gate, and a golden path that depends on opening one is not a golden path.
+ * The fixture repository is Drake's own `Hermes`. No real customer
+ * repository appears here — not as a target and not as a name in a
+ * fixture. A repository closed by a manual security gate is somebody's
+ * production access decision, and a test suite is not the place to depend
+ * on which way it went.
  */
 
 test.describe.configure({ mode: "serial" });
@@ -27,8 +29,13 @@ const INSTALLATION_ID = 55501;
 const REPOSITORIES = [
   { id: 900001, name: "Hermes", private: true },
   { id: 900002, name: "logislot", private: true },
-  { id: 900003, name: "Datalake-Platform-GUI", private: true },
+  { id: 900003, name: "Blocked-Sample", private: true },
   { id: 900004, name: "Fikir-Sepeti", private: true },
+  // This spec's own repository. The shared fixtures are deliberately put
+  // through access loss by the GitHub-boundary spec, and a repository that
+  // lost access is `disabled` — recoverable only through rediscovery, by
+  // design. Borrowing one made this spec pass or fail on which ran first.
+  { id: 900005, name: "Widget-Service", private: true },
 ].map((repo) => ({
   ...repo,
   node_id: `R_${repo.name}`,
@@ -42,22 +49,44 @@ function sign(body: string): string {
   );
 }
 
-async function announceInstallation(request: APIRequestContext) {
+async function deliverInstallation(request: APIRequestContext, action: string) {
   const body = JSON.stringify({
-    action: "created",
+    action,
     installation: {
       id: INSTALLATION_ID,
-      account: { login: "Duosis-Developer-Team", id: 1 },
+      account: { login: "Duosis-Developer-Team", id: 1, type: "Organization" },
       repository_selection: "selected",
       permissions: { contents: "read", metadata: "read", pull_requests: "read" },
       events: ["installation", "installation_repositories", "repository", "push"],
     },
-    repositories: REPOSITORIES,
+    // Only a `created` delivery carries the repository set; an
+    // `unsuspend` says the App is usable again and nothing else.
+    ...(action === "created" ? { repositories: REPOSITORIES } : {}),
   });
   return request.post("/v1/integrations/github/webhook", {
     headers: {
       "content-type": "application/json",
       "x-github-event": "installation",
+      "x-github-delivery": crypto.randomUUID(),
+      "x-hub-signature-256": sign(body),
+    },
+    data: body,
+  });
+}
+
+async function deliverRepositoriesAdded(request: APIRequestContext) {
+  const body = JSON.stringify({
+    action: "added",
+    installation: {
+      id: INSTALLATION_ID,
+      account: { login: "Duosis-Developer-Team", id: 1, type: "Organization" },
+    },
+    repositories_added: REPOSITORIES,
+  });
+  return request.post("/v1/integrations/github/webhook", {
+    headers: {
+      "content-type": "application/json",
+      "x-github-event": "installation_repositories",
       "x-github-delivery": crypto.randomUUID(),
       "x-hub-signature-256": sign(body),
     },
@@ -82,23 +111,57 @@ async function reconcile(page: Page, repositoryId: string) {
   });
 }
 
-test("an operator onboards a repository through the reviewed path", async ({ page }) => {
-  await signInAs(page, "user-owner");
+/**
+ * Put the fixture repository in a state an onboarding may start from.
+ *
+ * Built here rather than assumed, because earlier specs in this suite
+ * legitimately suspend the installation and remove repositories — and a
+ * repository Drake has lost sight of is correctly not startable. Depending
+ * on what ran before would make this spec pass or fail on alphabetical
+ * ordering.
+ */
+async function makeStartable(page: Page): Promise<{ id: string; full_name: string }> {
   const request = page.request;
 
-  expect((await announceInstallation(request)).status()).toBe(202);
+  await deliverInstallation(request, "unsuspend");
+  expect((await deliverInstallation(request, "created")).status()).toBe(202);
+  expect((await deliverRepositoriesAdded(request)).status()).toBe(202);
+
   const listed = (await (
     await request.get("/v1/integrations/github/repositories?limit=50")
   ).json()) as { repositories: { id: string; full_name: string }[] };
-  const hermes = listed.repositories.find((repo) => repo.full_name.endsWith("/Hermes"))!;
-  expect((await reconcile(page, hermes.id)).status()).toBe(202);
+  const widget = listed.repositories.find((repo) => repo.full_name.endsWith("/Widget-Service"))!;
+
+  // Announce FIRST, reconcile LAST, and never the other way round. An
+  // announcement re-derives the projection state from standing evidence
+  // and marks a completed reconciliation stale — so announcing after a
+  // reconcile throws away the evidence that reconcile just supplied, and
+  // the repository falls back to "awaiting reconciliation".
+  const startable = async () => {
+    const candidates = (await (
+      await request.get("/v1/onboarding/repositories?limit=50")
+    ).json()) as { items: { id: string; startable: boolean; reason_code: string | null }[] };
+    const entry = candidates.items.find((item) => item.id === widget.id);
+    return entry?.startable === true || entry?.reason_code === "session_in_progress";
+  };
+
+  for (let attempt = 0; attempt < 3 && !(await startable()); attempt += 1) {
+    expect((await reconcile(page, widget.id)).status()).toBe(202);
+  }
+  expect(await startable(), "the fixture repository never became startable").toBe(true);
+
+  return widget;
+}
+
+test("an operator onboards a repository through the reviewed path", async ({ page }) => {
+  await signInAs(page, "user-owner");
+  const request = page.request;
+  const widget = await makeStartable(page);
 
   // --- 1. choose a repository and start ------------------------------------
   await page.goto("/onboarding");
-  const picker = page.getByTestId("repository-select");
-  await expect(picker).toBeVisible();
-  // Selected by the repository's own id, which is what the option carries.
-  await picker.selectOption(hermes.id);
+  await expect(page.getByTestId("repository-list")).toBeVisible();
+  await page.getByTestId(`repository-option-${widget.id}`).click();
   await page.getByTestId("start-onboarding-button").click();
   await page.waitForURL(/\/onboarding\/[0-9a-f-]{36}$/);
   const sessionId = page.url().split("/").pop()!;
@@ -166,12 +229,12 @@ test("an operator onboards a repository through the reviewed path", async ({ pag
     imported_project_key: string | null;
   };
   expect(session.state).toBe("imported");
-  expect(session.imported_project_key).toBe("hermes");
+  expect(session.imported_project_key).toBe("widget");
 
   const project = (await (
     await request.get(`/v1/projects/${session.imported_project_id}`)
   ).json()) as { project_key: string };
-  expect(project.project_key).toBe("hermes");
+  expect(project.project_key).toBe("widget");
 
   // --- 6. imported survives a reload ---------------------------------------
   await page.reload();
@@ -191,7 +254,7 @@ test("an operator onboards a repository through the reviewed path", async ({ pag
   const replaySession = (await (
     await request.post("/v1/onboarding/sessions", {
       headers: { "x-csrf-token": csrf },
-      data: { repository_id: hermes.id },
+      data: { repository_id: widget.id },
     })
   ).json()) as { session_id: string };
   const replayId = replaySession.session_id;
@@ -231,7 +294,7 @@ test("an operator onboards a repository through the reviewed path", async ({ pag
     await request.get("/v1/projects?limit=100")
   ).json()) as { total: number };
   const retired = await request.post(
-    `/v1/integrations/github/repositories/${hermes.id}/onboarding/import`,
+    `/v1/integrations/github/repositories/${widget.id}/onboarding/import`,
     {
       headers: { "x-csrf-token": csrf, "idempotency-key": crypto.randomUUID() },
       failOnStatusCode: false,
@@ -360,7 +423,7 @@ test("the operator can drive onboarding from the keyboard", async ({ page }) => 
   await signInAs(page, "user-owner");
   await page.goto("/onboarding");
 
-  const picker = page.getByTestId("repository-select");
+  const picker = page.getByTestId("repository-search");
   await expect(picker).toBeVisible();
   // Focusable, labelled and operable without a pointer.
   await picker.focus();
@@ -372,19 +435,28 @@ test("the operator can drive onboarding from the keyboard", async ({ page }) => 
   expect(labelled).toBe(true);
 
   // A disabled button is correctly skipped by Tab, so choose a repository
-  // that can actually be started — the first option is the gated Datalake
-  // repository, which is meant to stay unselectable.
+  // the server says can actually be started rather than whichever sorts
+  // first — some of the fixture repositories are deliberately not startable.
   const candidates = (await (
     await page.request.get("/v1/onboarding/repositories?limit=50")
-  ).json()) as { items: { id: string; startable: boolean; active_session_id: string | null }[] };
+  ).json()) as {
+    items: {
+      id: string;
+      full_name: string;
+      startable: boolean;
+      active_session_id: string | null;
+    }[];
+  };
   const usable = candidates.items.find((item) => item.startable || item.active_session_id);
   expect(usable, "no repository this operator can act on").toBeTruthy();
-  await picker.selectOption(usable!.id);
-  // `selectOption` does not guarantee where focus lands, so put it back on
-  // the control an operator would be on before testing what Tab reaches.
-  await picker.focus();
-  await page.keyboard.press("Tab");
-  await expect(page.getByTestId("start-onboarding-button")).toBeFocused();
+
+  // Choose with the keyboard: focus the option and press Enter.
+  const option = page.getByTestId(`repository-option-${usable!.id}`);
+  await option.focus();
+  await expect(option).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("repository-selected")).toContainText(usable!.full_name);
+  await expect(page.getByTestId("start-onboarding-button")).toBeEnabled();
 });
 
 /**
@@ -398,7 +470,14 @@ async function openSession(page: Page): Promise<string> {
   const csrf = await csrfToken(page);
   const candidates = (await (
     await page.request.get("/v1/onboarding/repositories?limit=50")
-  ).json()) as { items: { id: string; startable: boolean; active_session_id: string | null }[] };
+  ).json()) as {
+    items: {
+      id: string;
+      full_name: string;
+      startable: boolean;
+      active_session_id: string | null;
+    }[];
+  };
   const usable = candidates.items.find((item) => item.startable || item.active_session_id)!;
   if (usable.active_session_id) return usable.active_session_id;
   const created = (await (

