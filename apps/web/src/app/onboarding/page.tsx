@@ -17,6 +17,7 @@ import { Suspense } from "react";
 
 import { useApi } from "@/components/catalog/primitives";
 import { SessionBadge } from "@/components/onboarding/primitives";
+import { StartOnboarding } from "@/components/onboarding/StartOnboarding";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
@@ -28,6 +29,7 @@ import {
   type OnboardingSession,
   type SessionPage,
 } from "@/lib/onboarding";
+import { useSession } from "@/lib/session";
 
 function NotConfigured({ status }: { status: GitHubStatus }) {
   return (
@@ -113,6 +115,8 @@ function SessionRow({ session }: { session: OnboardingSession }) {
 }
 
 function OnboardingInner() {
+  const { state: auth } = useSession();
+  const csrfToken = auth.status === "authenticated" ? auth.me.csrf_token : "";
   const [status, retryStatus] = useApi<GitHubStatus>("/v1/onboarding/github/status");
   const [page, retryPage] = useApi<SessionPage>("/v1/onboarding/sessions");
 
@@ -181,6 +185,10 @@ function OnboardingInner() {
           )}
         </Card>
       )}
+
+      {status.state === "ready" && status.data.configuration_state === "configured" ? (
+        <StartOnboarding csrfToken={csrfToken} canManage={status.data.can_manage} />
+      ) : null}
 
       <Card title="Sessions">
         {page.state === "loading" ? (
