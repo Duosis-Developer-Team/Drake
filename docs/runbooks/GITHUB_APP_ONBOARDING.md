@@ -163,22 +163,43 @@ Nothing is cloned, downloaded as an archive, or executed. A budget being
 exhausted is reported as an incomplete scan, and an incomplete scan is
 never importable.
 
+### Where onboarding happens now (Sprint 12A.2a)
+
+**Use `/onboarding`.** The panel that used to open inside the repository
+card on `/integrations/github` is gone, and the five endpoints behind it
+answer `410 Gone` with `legacy_onboarding_retired`.
+
+It was retired because it wrote catalog rows with no plan, no approval, no
+plan digest and no apply receipt — every guarantee Sprints 11 and 12A.1
+were built to provide, optional. The repository card now links to the
+reviewed flow instead, and the link appears only for an operator who holds
+`onboarding.manage`; managing the integration is a different permission
+from onboarding a project.
+
+The full operator walkthrough is in
+[PROJECT_ONBOARDING.md](PROJECT_ONBOARDING.md).
+
 ### The GitOps workflow
 
-If the repository already contains a valid `.drake/project.yaml`, review
-it in Drake and import it. The imported project appears in the catalog;
-nothing is deployed.
+If the repository already contains a valid `.drake/project.yaml`, analyse
+it in a session, review the plan, approve it and apply it. The imported
+project appears in the catalog; nothing is deployed.
 
-If it does not, Drake generates a starting point from what it observed and
-offers it for download. Drake fills in only the repository block, because
-that is all it can see. Ownership, cluster, namespace, criticality, tenant
-model and metrics profile are left as `REPLACE_ME` — a plausible guess
-would invite being committed unread.
+If it does not, download a starting point from
+`GET /v1/onboarding/sessions/{id}/manifest-draft` — the "Download manifest
+draft" action on the session screen. It is generated from that session's
+stored analysis, so Drake fills in only the repository block, because that
+is all it can see. Ownership, cluster, namespace, criticality, tenant model
+and metrics profile are left as `REPLACE_ME` — a plausible guess would
+invite being committed unread.
 
-**Commit the file to the repository, then scan again.** A draft edited in
-the browser can be validated and downloaded but never imported: ADR-0007
-makes the repository the source of intent, and an import that accepted a
-browser copy would record intent the repository never expressed.
+**Commit the file to the repository yourself, then analyse again.** Drake
+cannot commit it for you: `Contents: write` is not requested, and the
+GitOps pull-request provider is Sprint 12B with `github_gitops_pr_enabled`
+off. And a draft edited in the browser is never importable regardless:
+ADR-0007 makes the repository the source of intent, and an import that
+accepted a browser copy would record intent the repository never
+expressed.
 
 ### First target
 

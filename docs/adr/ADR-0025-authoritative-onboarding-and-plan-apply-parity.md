@@ -291,3 +291,87 @@ breaks the integrity check for the rest. The downgrade now fails closed
 with a bounded error naming the count; an operator decides what happens to
 those sessions. `0020`'s downgrade refuses on the same grounds when any
 receipt carries counters the older schema cannot hold.
+
+## Sprint 12A.2a — the operator UI, and closing the old door
+
+The authoritative path existed and nobody could use it from a browser. The
+screen that shipped in Sprint 11 could read a session and its plan but not
+create, analyse, approve, apply or cancel one, so every real onboarding
+still went through the Sprint 5B panel — the path with no plan, no approval
+and no receipt. A rule that is harder to follow than the thing it replaces
+is a suggestion.
+
+**Mutation authorization is scoped to the session's own scope.** Every
+mutation used to ask two questions and never notice they were about two
+different things: "does this principal hold `onboarding.apply` anywhere?"
+and "can this principal see session X?". A user with `onboarding.view` on
+project A and `onboarding.apply` on project B passed both and could apply
+A's plan. Each check was correct on its own, which is why it survived
+review.
+
+`repository.authorize_session` now answers one question — may this
+principal use this permission on THIS session — and every session endpoint
+goes through it. Unknown, invisible and visible-but-forbidden all return
+the same 404; a 403 would confirm the session exists. Downward inheritance
+is unchanged, because a grant on an organisation covering its projects is
+the direction delegation actually runs. The `can_manage` / `can_apply` /
+`can_gitops` flags on a session are computed the same way, so an enabled
+button and a permitted request are the same claim.
+
+**The state machine is enforced in the database, not in the UI.** Hiding a
+button prevents nothing. `lock_session_for` takes the session's row lock
+inside the mutating transaction and then checks the action is legal from
+that state, so a double-click, a retry and two operators all serialise.
+`imported` and `cancelled` are terminal: a repository is revisited with a
+new session, which keeps the record of what the old one decided.
+
+An apply's REPLAY is answered before the state check, and the order is
+deliberate. After a successful apply the session is `imported`, which is
+not a state an apply may start from — but a replay is not starting one, it
+is returning the answer to work that already committed.
+
+**The repository picker has its own endpoint.** `GET
+/v1/onboarding/repositories` is scoped to `onboarding.manage` and filters
+in SQL before paginating, so the list is what the caller can act on rather
+than what they can read. Pointing the screen at the integration list would
+have been less code and would have shown repositories whose Start button
+404s. The cursor orders by `full_name COLLATE "C"`: a locale collation
+sorts differently on different databases, and a cursor that means something
+else on the next instance is worse than no cursor.
+
+**The manifest draft moved to the session.** Retiring the old panel would
+otherwise have removed the only way to obtain a manifest for a repository
+that has none — and Drake still cannot write one, because `Contents: write`
+is not requested and the GitOps provider is Sprint 12B with its flag off.
+`GET /v1/onboarding/sessions/{id}/manifest-draft` builds it from that
+session's stored analysis, with no provider call, and serves it as an
+attachment with `no-store`. The UI links to it and never renders it: a
+manifest is a file to commit, not markup to put in a document.
+
+**The Sprint 5B path is a tombstone.** Five routes answer `410 Gone` with
+`legacy_onboarding_retired` — a tombstone rather than a 404, because the
+difference tells an operator or an old client that this moved instead of
+that they mistyped it. Identical for every repository id, so it cannot be
+used to ask which repositories exist. No provider call, no token, no draft
+write, no catalog mutation, no success audit.
+
+What was NOT done: the `OnboardingScanner` and `CatalogImporter` classes
+still exist and the `github_onboarding_drafts` table still holds its rows.
+Retiring an entry point is not the same as deleting the code behind it, and
+a migration that dropped historical drafts would destroy a record this
+change has no business touching.
+
+**Bounded error codes reach the client.** The error envelope stringified a
+dict detail into its message, so a browser wanting to tell `plan_stale`
+from `version_conflict` had to parse a Python repr — which meant it did
+not, and every 409 looked alike. The handler now promotes a `{"code",
+"message"}` detail into `error.code`, and only those two keys, so a detail
+object can never invent an envelope field.
+
+**Two counters that must not be confused.** A plan item with
+`update_metadata` had been grouped under "No change" in the UI, which hid
+the only part of an apply that edits an existing row; it has its own group
+now, with `before` / `after` per field and `—` for an absent value. And an
+apply counter that a pre-0020 receipt never recorded renders as "Not
+recorded" rather than `0`, all the way out to the TypeScript type, which is
+`number | null`.
