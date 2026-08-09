@@ -375,9 +375,11 @@ export function SessionActions({
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex justify-between gap-3 text-xs">
-      <dt className="text-ink-muted">{label}</dt>
-      <dd className="font-mono text-ink">{children}</dd>
+    <div className="flex min-w-0 justify-between gap-3 text-xs">
+      <dt className="shrink-0 text-ink-muted">{label}</dt>
+      {/* A digest or a UUID is one unbreakable word; let it break rather
+          than push the page sideways. */}
+      <dd className="font-mono break-all text-ink">{children}</dd>
     </div>
   );
 }

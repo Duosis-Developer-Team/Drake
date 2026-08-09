@@ -305,6 +305,29 @@ async function horizontalOverflow(page: Page): Promise<number> {
   );
 }
 
+/**
+ * Which element is wider than the viewport.
+ *
+ * A bare "the page overflows by 19px" is not actionable from a CI log, and
+ * the element responsible is usually one unbreakable token deep inside a
+ * layout that is otherwise fine.
+ */
+async function widestOffender(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const limit = document.documentElement.clientWidth;
+    let worst = "";
+    let width = limit;
+    for (const element of Array.from(document.querySelectorAll("*"))) {
+      const box = element.getBoundingClientRect();
+      if (box.right > width) {
+        width = box.right;
+        worst = `${element.tagName}.${(element.className || "").toString().slice(0, 80)} → ${Math.round(box.right)}px (limit ${limit})`;
+      }
+    }
+    return worst;
+  });
+}
+
 test("the onboarding screens fit every viewport, in both themes", async ({ page }) => {
   await signInAs(page, "user-owner");
   const sessions = (await (await page.request.get("/v1/onboarding/sessions?limit=1")).json()) as {
@@ -323,9 +346,10 @@ test("the onboarding screens fit every viewport, in both themes", async ({ page 
         await expect(page.getByRole("heading").first()).toBeVisible();
         // A page that scrolls sideways hides the right-hand end of every
         // row on it, which on this screen is where the actions live.
+        const overflow = await horizontalOverflow(page);
         expect(
-          await horizontalOverflow(page),
-          `${target} @ ${viewport.name} ${theme}`,
+          overflow,
+          `${target} @ ${viewport.name} ${theme}: ${await widestOffender(page)}`,
         ).toBeLessThanOrEqual(1);
       }
     }

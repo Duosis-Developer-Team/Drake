@@ -148,7 +148,7 @@ export default function OnboardingSessionPage() {
                 <h1 className="text-xl font-semibold text-ink">
                   {data.repository.full_name}
                 </h1>
-                <p className="mt-1 font-mono text-xs text-ink-muted">
+                <p className="mt-1 font-mono text-xs break-all text-ink-muted">
                   {data.repository.default_branch} ·{" "}
                   {shortSha(data.analyzed_commit_sha)}
                 </p>
@@ -275,7 +275,14 @@ export default function OnboardingSessionPage() {
                 />
               ) : (
                 <div className="space-y-4" data-testid="plan">
-                  <div className="flex flex-wrap gap-4 text-xs text-ink-secondary">
+                  {/*
+                    `min-w-0` and `break-all` on the digest: a 64-character
+                    monospace token is one unbreakable word, so flex-wrap
+                    cannot help it — it pushed the page 19px wider than the
+                    viewport at 768px, which scrolls every row's right-hand
+                    end (where the actions are) off screen.
+                  */}
+                  <div className="flex min-w-0 flex-wrap gap-4 text-xs text-ink-secondary">
                     <span>
                       Plan <span className="font-mono">v{plan.data.plan.plan_version}</span>
                     </span>
@@ -287,7 +294,9 @@ export default function OnboardingSessionPage() {
                     </span>
                     <span>
                       Digest{" "}
-                      <span className="font-mono">{plan.data.plan.plan_digest}</span>
+                      <span className="font-mono break-all">
+                        {plan.data.plan.plan_digest}
+                      </span>
                     </span>
                     <span>{plan.data.plan.total_items} items</span>
                   </div>
@@ -302,7 +311,10 @@ export default function OnboardingSessionPage() {
                         <p className="mb-1.5 text-xs font-medium text-ink">{group.title}</p>
                         <ul className="space-y-1.5">
                           {items.map((item) => (
-                            <li key={item.item_key} className="flex flex-wrap items-baseline gap-2">
+                            <li
+                              key={item.item_key}
+                              className="flex min-w-0 flex-wrap items-baseline gap-2 break-words"
+                            >
                               <ActionBadge action={item.action} />
                               <span className="font-mono text-xs text-ink">
                                 {item.entity_kind}
