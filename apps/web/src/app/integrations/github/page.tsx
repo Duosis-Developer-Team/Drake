@@ -10,7 +10,6 @@ import {
   VerdictBadge,
   formatUtc,
 } from "@/components/github/primitives";
-import { OnboardingPanel } from "@/components/github/OnboardingPanel";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -34,6 +33,9 @@ const MISSING_INPUT_LABELS: Record<string, string> = {
 export default function GitHubIntegrationPage() {
   const { hasPermission } = useSession();
   const canManage = hasPermission("integration.manage");
+  // Separate on purpose: managing the GitHub integration is not permission
+  // to onboard a project into the catalog.
+  const canOnboard = hasPermission("onboarding.manage");
 
   const [status, retryStatus] = useApi<GitHubStatus>("/v1/integrations/github/status");
   const [installations, retryInstallations] = useApi<{
@@ -132,6 +134,7 @@ export default function GitHubIntegrationPage() {
                       key={repository.id}
                       repository={repository}
                       canManage={canManage}
+                      canOnboard={canOnboard}
                     />
                   ))}
                 </div>
@@ -201,13 +204,14 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
 function RepositoryCard({
   repository,
   canManage,
+  canOnboard,
 }: {
   repository: GitHubRepository;
   canManage: boolean;
+  canOnboard: boolean;
 }) {
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<PolicySnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -336,20 +340,32 @@ function RepositoryCard({
 
       {snapshot ? <PolicyResult snapshot={snapshot} /> : null}
 
+      {/*
+        Onboarding lives on its own screen now. The panel that used to open
+        here drove the Sprint 5B import — scan, validate, import — which
+        wrote catalog rows with no plan, no approval and no receipt. Those
+        endpoints answer 410, and this is a link to the reviewed flow rather
+        than a second way in.
+
+        Gated on `onboarding.manage`, not `integration.manage`: managing an
+        integration is not permission to onboard a project, and a link that
+        leads somewhere the operator is refused is worse than no link.
+      */}
       <div className="mt-3">
-        <button
-          type="button"
-          onClick={() => setOnboardingOpen((open) => !open)}
-          aria-expanded={onboardingOpen}
-          data-testid="onboarding-toggle"
-          className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
-        >
-          {onboardingOpen ? "Hide onboarding" : "Start onboarding"}
-        </button>
+        {canOnboard ? (
+          <Link
+            href={`/onboarding?repository_id=${repository.id}`}
+            data-testid="onboarding-link"
+            className="inline-block rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+          >
+            Onboard this repository →
+          </Link>
+        ) : (
+          <p className="text-xs text-ink-muted" data-testid="onboarding-link-denied">
+            Onboarding this repository needs the onboarding manage permission.
+          </p>
+        )}
       </div>
-      {onboardingOpen ? (
-        <OnboardingPanel repository={repository} csrfToken={csrf} canManage={canManage} />
-      ) : null}
     </section>
   );
 }

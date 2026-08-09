@@ -645,185 +645,177 @@ async def _login(harness: Any, client: Any, subject: str) -> dict[str, Any]:
     return await harness.login(client, subject)
 
 
-async def test_the_api_walks_scan_review_and_import(engine: AsyncEngine, tmp_path: Path) -> None:
-    harness, _fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
+_LEGACY = "/v1/integrations/github/repositories"
+
+_RETIRED_ROUTES = [
+    ("GET", "{row}/onboarding"),
+    ("POST", "{row}/onboarding/scan"),
+    ("POST", "{row}/onboarding/validate"),
+    ("GET", "{row}/onboarding/download"),
+    ("POST", "{row}/onboarding/import"),
+]
+
+
+async def _retired_counts(engine: AsyncEngine) -> tuple[int, int, int, int]:
+    """(projects, services, apply receipts, github audit rows)."""
+    async with engine.connect() as connection:
+        values = []
+        for query in (
+            "SELECT count(*) FROM projects",
+            "SELECT count(*) FROM service_definitions",
+            "SELECT count(*) FROM onboarding_applies",
+            "SELECT count(*) FROM audit_events WHERE action LIKE 'github.onboarding%'",
+        ):
+            values.append(int((await connection.execute(text(query))).scalar_one()))
+    return values[0], values[1], values[2], values[3]
+
+
+async def test_every_legacy_onboarding_route_is_a_tombstone(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The Sprint 5B bypass is closed, and says so.
+
+    These five routes wrote catalog rows with no plan, no approval, no
+    digest and no receipt. Everything Sprints 11 and 12A.1 built is only a
+    rule if the old door is shut; while it was open, the authoritative path
+    was a convention, and a convention is what somebody skips at 3am.
+
+    410 rather than 404 on purpose: it tells an operator or an old client
+    that this MOVED, instead of that they got the URL wrong.
+    """
+    harness, fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
+    await _seed_admin(harness, engine)
+    await _register_cluster(engine)
+    row_id = await _onboard_and_reconcile(harness, engine)
+    before = await _retired_counts(engine)
+
+    fake.calls.clear()
+    async with harness.api_client() as client:
+        me = await _login(harness, client, "user-owner")
+        headers = {"X-CSRF-Token": me["csrf_token"], "Idempotency-Key": str(uuidlib.uuid4())}
+        for method, suffix in _RETIRED_ROUTES:
+            url = f"{_LEGACY}/{suffix.format(row=row_id)}"
+            response = await client.request(method, url, headers=headers)
+            assert response.status_code == 410, f"{method} {url} → {response.status_code}"
+            body = response.json()["error"]
+            assert body["code"] == "legacy_onboarding_retired"
+            assert body["details"][0]["replacement"] == "/v1/onboarding/sessions"
+
+    # Nothing was called, nothing was written, nothing was audited as done.
+    assert fake.calls == [], fake.calls
+    assert await _retired_counts(engine) == before
+
+
+async def test_a_retired_route_cannot_tell_a_real_repository_from_a_made_up_one(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """A tombstone that 404s for unknown ids is a repository oracle.
+
+    The old endpoints answered 404 for "not yours" and something else for
+    "yours" — fine when they did work, useless to preserve now. Retired
+    means retired for every id, including one nobody has ever seen.
+    """
+    harness, fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
     await _seed_admin(harness, engine)
     await _register_cluster(engine)
     row_id = await _onboard_and_reconcile(harness, engine)
 
+    fake.calls.clear()
     async with harness.api_client() as client:
         me = await _login(harness, client, "user-owner")
         headers = {"X-CSRF-Token": me["csrf_token"]}
-
-        before = (
-            await client.get(f"/v1/integrations/github/repositories/{row_id}/onboarding")
-        ).json()
-        assert before["state"] == "not_started"
-        assert before["importable"] is False
-
-        scanned = await client.post(
-            f"/v1/integrations/github/repositories/{row_id}/onboarding/scan", headers=headers
+        real = await client.post(f"{_LEGACY}/{row_id}/onboarding/import", headers=headers)
+        invented = await client.post(
+            f"{_LEGACY}/{uuidlib.uuid4()}/onboarding/import", headers=headers
         )
-        assert scanned.status_code == 202, scanned.text
-        assert scanned.json()["state"] == "ready_to_import"
-        assert scanned.json()["importable"] is True
-
-        imported = await client.post(
-            f"/v1/integrations/github/repositories/{row_id}/onboarding/import",
-            headers={**headers, "Idempotency-Key": str(uuidlib.uuid4())},
-        )
-        assert imported.status_code == 201, imported.text
-        project_id = imported.json()["project_id"]
-
-        project = await client.get(f"/v1/projects/{project_id}")
-        assert project.status_code == 200
-        assert project.json()["project_key"] == "hermes"
+    assert real.status_code == invented.status_code == 410
+    # Correlation ids differ per request by design; everything that could
+    # distinguish the two repositories is identical.
+    assert real.json()["error"]["code"] == invented.json()["error"]["code"]
+    assert real.json()["error"]["message"] == invented.json()["error"]["message"]
+    assert real.json()["error"].get("details") == invented.json()["error"].get("details")
+    assert fake.calls == []
 
 
-async def test_import_requires_an_idempotency_key(engine: AsyncEngine, tmp_path: Path) -> None:
-    harness, _fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
+async def test_the_manifest_draft_moved_to_the_session_path(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Retiring the panel must not remove the capability it carried.
+
+    The old download was the only way to get a manifest for a repository
+    that has none — and Drake still cannot write one itself, because the
+    GitOps provider is Sprint 12B and its flag is off. So the draft moved to
+    the session that analysed the repository, where it is built from that
+    session's own stored evidence rather than from a live read.
+    """
+    from drake_api.onboarding import service as onboarding_service
+
+    harness, fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
     await _seed_admin(harness, engine)
     await _register_cluster(engine)
     row_id = await _onboard_and_reconcile(harness, engine)
-    await _scan(harness, engine, row_id)
+    settings = harness.app.state.settings
 
-    async with harness.api_client() as client:
-        me = await _login(harness, client, "user-owner")
-        response = await client.post(
-            f"/v1/integrations/github/repositories/{row_id}/onboarding/import",
-            headers={"X-CSRF-Token": me["csrf_token"]},
-        )
-    assert response.status_code == 400
-
-
-async def test_a_read_only_user_may_look_but_not_act(engine: AsyncEngine, tmp_path: Path) -> None:
-    from test_catalog_api_integration import build_users, grant, login_all, make_role
-
-    harness, _fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
-    users = await build_users(engine)
-    harness.provider.users.update(users.provider.users)
-    await _seed_admin(harness, engine)
-    await _register_cluster(engine)
-    row_id = await _onboard_and_reconcile(harness, engine)
-    await _scan(harness, engine, row_id)
-
-    await login_all(harness, ["user-reader"])
-    await make_role(harness, engine, "Onboarding Reader S5B", ["project.view"])
-    await grant(engine, harness, "user-reader", "Onboarding Reader S5B", "organization", "root")
-
-    async with harness.api_client() as reader:
-        me = await _login(harness, reader, "user-reader")
-        headers = {"X-CSRF-Token": me["csrf_token"]}
-
-        view = await reader.get(f"/v1/integrations/github/repositories/{row_id}/onboarding")
-        assert view.status_code == 200
-        assert view.json()["state"] == "ready_to_import"
-
-        # Manage actions are the same uniform 404 as an unknown repository.
-        assert (
-            await reader.post(
-                f"/v1/integrations/github/repositories/{row_id}/onboarding/scan", headers=headers
+    async with engine.connect() as connection:
+        actor = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text("SELECT id FROM identities WHERE subject = 'user-owner'")
+                    )
+                ).scalar_one()
             )
-        ).status_code == 404
-        assert (
-            await reader.post(
-                f"/v1/integrations/github/repositories/{row_id}/onboarding/import",
-                headers={**headers, "Idempotency-Key": str(uuidlib.uuid4())},
-            )
-        ).status_code == 404
-
-
-async def test_a_repository_outside_the_callers_scope_is_a_uniform_404(
-    engine: AsyncEngine, tmp_path: Path
-) -> None:
-    from test_catalog_api_integration import build_users
-
-    harness, _fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
-    users = await build_users(engine)
-    harness.provider.users.update(users.provider.users)
-    await _seed_admin(harness, engine)
-    row_id = await _onboard_and_reconcile(harness, engine)
-
-    async with harness.api_client() as outsider:
-        await _login(harness, outsider, "user-b-only")
-        seen = await outsider.get(f"/v1/integrations/github/repositories/{row_id}/onboarding")
-        ghost = await outsider.get(
-            f"/v1/integrations/github/repositories/{uuidlib.uuid4()}/onboarding"
         )
-    assert seen.status_code == 404
-    assert ghost.status_code == 404
-    assert seen.json()["error"]["message"] == ghost.json()["error"]["message"]
-
-
-async def test_an_edited_manifest_validates_but_never_imports(
-    engine: AsyncEngine, tmp_path: Path
-) -> None:
-    """ADR-0007 again, at the API boundary this time."""
-    harness, _fake = _setup(tmp_path, {"pyproject.toml": "[project]\n"})
-    await _seed_admin(harness, engine)
-    await _register_cluster(engine)
-    row_id = await _onboard_and_reconcile(harness, engine)
-    await _scan(harness, engine, row_id)
-
-    async with harness.api_client() as client:
-        me = await _login(harness, client, "user-owner")
-        headers = {"X-CSRF-Token": me["csrf_token"]}
-
-        checked = await client.post(
-            f"/v1/integrations/github/repositories/{row_id}/onboarding/validate",
-            headers=headers,
-            json={"content": hermes_manifest()},
-        )
-        assert checked.status_code == 200
-        body = checked.json()
-        assert body["valid"] is True
-        assert body["importable"] is False
-        assert ".drake/project.yaml" in body["next_step"]
-
-        refused = await client.post(
-            f"/v1/integrations/github/repositories/{row_id}/onboarding/import",
-            headers={**headers, "Idempotency-Key": str(uuidlib.uuid4())},
-        )
-    assert refused.status_code == 409
-
-
-async def test_the_generated_draft_downloads_as_a_manifest_file(
-    engine: AsyncEngine, tmp_path: Path
-) -> None:
-    harness, _fake = _setup(tmp_path, {"pyproject.toml": "[project]\n"})
-    await _seed_admin(harness, engine)
-    row_id = await _onboard_and_reconcile(harness, engine)
-    await _scan(harness, engine, row_id)
+    created = await onboarding_service.create_session(
+        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+    )
+    session_id = created["session_id"]
 
     async with harness.api_client() as client:
         await _login(harness, client, "user-owner")
-        response = await client.get(
-            f"/v1/integrations/github/repositories/{row_id}/onboarding/download"
-        )
-    assert response.status_code == 200
-    assert "attachment" in response.headers["content-disposition"]
-    assert "apiVersion: drake.duosis.com/v1alpha1" in response.text
+        # Before any analysis there is no evidence to build a draft from,
+        # and inventing one would be a manifest nobody's repository implied.
+        early = await client.get(f"/v1/onboarding/sessions/{session_id}/manifest-draft")
+        # 409, the service's default for a refusal that a later request can
+        # satisfy: analyse the repository and ask again.
+        assert early.status_code == 409, early.text
+        assert early.json()["error"]["code"] == "analysis_required"
+
+    await onboarding_service.analyze(
+        engine, settings, harness.app.state.github_client, session_id=uuidlib.UUID(session_id)
+    )
+
+    fake.calls.clear()
+    async with harness.api_client() as client:
+        await _login(harness, client, "user-owner")
+        draft = await client.get(f"/v1/onboarding/sessions/{session_id}/manifest-draft")
+
+    assert draft.status_code == 200, draft.text
+    assert draft.headers["content-type"].startswith("application/yaml")
+    assert "attachment" in draft.headers["content-disposition"]
+    assert draft.headers["cache-control"] == "no-store"
+    assert "apiVersion: drake.duosis.com" in draft.text
+    # Built from stored evidence: no provider call, no token, no live read.
+    assert fake.calls == [], fake.calls
+    # And it is a manifest, not a copy of anything in the repository.
+    assert "ghs_" not in draft.text
+    assert WEBHOOK_SECRET not in draft.text
 
 
-async def test_a_valid_import_is_audited_exactly_once(engine: AsyncEngine, tmp_path: Path) -> None:
+async def test_the_manifest_draft_is_scoped_to_the_session(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """An unknown session and one outside the caller's scope answer alike."""
     harness, _fake = _setup(tmp_path, {".drake/project.yaml": hermes_manifest()})
     await _seed_admin(harness, engine)
     await _register_cluster(engine)
-    row_id = await _onboard_and_reconcile(harness, engine)
-    await _scan(harness, engine, row_id)
-    before = await _audits(engine, "github.onboarding.import")
+    await _onboard_and_reconcile(harness, engine)
 
     async with harness.api_client() as client:
-        me = await _login(harness, client, "user-owner")
-        headers = {"X-CSRF-Token": me["csrf_token"]}
-        for _ in range(3):
-            response = await client.post(
-                f"/v1/integrations/github/repositories/{row_id}/onboarding/import",
-                headers={**headers, "Idempotency-Key": str(uuidlib.uuid4())},
-            )
-            assert response.status_code == 201
-
-    assert await _audits(engine, "github.onboarding.import") == before + 1
+        await _login(harness, client, "user-owner")
+        missing = await client.get(f"/v1/onboarding/sessions/{uuidlib.uuid4()}/manifest-draft")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["message"] == "not found"
 
 
 async def test_no_onboarding_response_leaks_credential_material(

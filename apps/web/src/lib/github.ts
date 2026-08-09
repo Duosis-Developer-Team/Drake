@@ -188,22 +188,14 @@ export interface ManifestValidation {
   as_of: string;
 }
 
-export interface ImportResult {
-  repository_id: string;
-  project_id: string;
-  project_key: string;
-  created: boolean;
-  as_of: string;
-}
-
-const onboardingBase = (repositoryId: string) =>
-  `/v1/integrations/github/repositories/${repositoryId}/onboarding`;
-
-export const onboardingPath = onboardingBase;
-export const onboardingScanPath = (id: string) => `${onboardingBase(id)}/scan`;
-export const onboardingValidatePath = (id: string) => `${onboardingBase(id)}/validate`;
-export const onboardingDownloadPath = (id: string) => `${onboardingBase(id)}/download`;
-export const onboardingImportPath = (id: string) => `${onboardingBase(id)}/import`;
+/*
+ * The Sprint 5B onboarding path helpers used to live here — scan, validate,
+ * download, import. Those endpoints answer 410 now, and keeping typed
+ * builders for them would be an invitation to call one: a path helper reads
+ * as a supported route.
+ *
+ * Onboarding is `@/lib/onboarding`, which drives the reviewed session flow.
+ */
 
 /** Human-readable reason a repository cannot be onboarded right now. */
 export function blockedReason(repository: GitHubRepository): string | null {
