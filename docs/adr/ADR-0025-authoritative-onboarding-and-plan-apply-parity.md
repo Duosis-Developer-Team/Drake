@@ -37,12 +37,32 @@ actually reach is the unreviewed one.
 **1. `/v1/onboarding/sessions/*` is the one authoritative onboarding path.**
 Every future onboarding capability lands there.
 
-**2. The approved plan is the instruction set.** Apply loads the approved
-plan's items and dispatches each to exactly one registered handler. It no
-longer infers work from the manifest. The manifest still supplies the
-*values*, and safely: apply has already re-read it at the approved commit
-and checked its digest against the one frozen on the plan, so the document
-it reads is byte-for-byte what was reviewed.
+**2. The approved plan is the instruction set, values included.** Apply
+loads the approved plan's items and dispatches each to exactly one
+registered handler. It no longer infers work from the manifest, and it no
+longer reads *values* from it either.
+
+Binding only field NAMES was not enough. A plan that says "display_name
+will change" leaves the new value free to change between review and apply —
+a time-of-check/time-of-use gap wearing a review process as a disguise. The
+digest check proves the manifest is unchanged; it does not prove the plan
+was built from this reading of it.
+
+So each actionable item carries a **canonical mutation payload**: exactly
+the values that handler will execute. It is allowlisted per entity kind (an
+unknown field is refused, not dropped — dropping it silently would let a
+manifest carry something nobody notices is ignored), credential-checked
+again even though the manifest policy already refused those shapes, bounded
+in size, and covered by the plan digest.
+
+An `update_metadata` item also carries `{field: {before, after}}`, canonical
+on both sides, so an approval is informed rather than a list of field names.
+Both sides are stored values and both are allowlisted and scanned.
+
+Apply handlers read that payload and nothing else — not the manifest, not
+the analysis snapshot, not the live request. A test replaces the document
+handed to apply with an empty one and the import still produces exactly the
+approved catalog.
 
 **3. Two invariants, enforced by tests rather than by convention.**
 
@@ -128,3 +148,42 @@ new UI actions, and that is the slice that closes this gap.
 - Apply counters (`metadata_updated`, `slo_definitions_created`,
   `slo_definitions_updated`, `bindings_created`, `no_change_count`) are
   additive on the API and reflect committed work only.
+
+## Later decisions (Sprint 12A.1 review)
+
+**Workload bindings are their own plan entity kind.** They briefly borrowed
+`service` with a flag in `detail`, which made two genuinely different
+decisions read as one, put the handler registry's key at odds with what it
+dispatched on, and would have pushed the discriminator into every API
+consumer including the 12A.2 UI. Migration `0019` widens exactly one CHECK
+constraint and touches nothing else.
+
+**Audit is inside the apply transaction.** `record_audit_event` opens its
+own transaction, which is right for anything audited after its work already
+committed and wrong here: an apply that changed a catalog with no record of
+who asked is worse than one that did not happen, because nobody can
+discover it afterwards. `record_audit_event_in` shares the caller's
+transaction, and a failing audit fails the apply. That is the intended
+trade — fail closed.
+
+**`onboarding_applies` is the transactional outbox row.** Drake's outbox
+contract (ADR-0024) is a durable row written in the same transaction as the
+domain change and read by a worker afterwards. For an apply that row is
+`onboarding_applies`: it commits with the catalog change and the audit, and
+it is what any later reconciliation reads. No second event table was added,
+because an event nothing consumes is a surface to keep safe for no reason —
+the same rule that kept `pull_request` out of the webhook allowlist.
+
+**Idempotency is concurrency-safe, and proved as such.** Two independent
+PostgreSQL sessions, released together by a barrier, race one plan and one
+key. The unique constraint on `(plan_id, idempotency_key)` arbitrates; one
+applies, the other returns the recorded outcome, and the catalog ends with
+exactly one of everything. Uniqueness is on the PAIR, so the same key under
+a different plan is a different request rather than a silent replay of
+somebody else's approval.
+
+**Deployment source stays informational**, and says so in the payload:
+`materialized: false` with the bounded reason
+`catalog_projection_not_supported`. A client decides on the code, never on
+the sentence beside it. Whether the catalog grows a column for it is a
+separate schema decision.

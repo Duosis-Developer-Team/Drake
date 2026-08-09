@@ -137,6 +137,15 @@ def test_every_registered_handler_is_reachable_from_some_plan() -> None:
                 services={("datalake", "datalake-api"): "s1"},
             ),
         ),
+        # an observed workload → the binding create path
+        (
+            with_slo,
+            snapshot(
+                observed_workloads={
+                    ("dev", "datalake-api"): ({"kind": "Deployment", "name": "datalake-api"},)
+                }
+            ),
+        ),
         # rows exist and differ → update paths
         (
             with_slo,
@@ -460,6 +469,11 @@ def test_a_binding_needs_an_observed_workload() -> None:
         "workload_binding:dev:datalake-api": str(Action.NO_CHANGE),
         "workload_binding:dev:datalake-gui": str(Action.NO_CHANGE),
     }
+    assert all(
+        item.entity_kind == str(EntityKind.WORKLOAD_BINDING)
+        for item in without.items
+        if item.item_key.startswith("workload_binding:")
+    )
     # Not blocking: a project being onboarded for the first time has no
     # agent report yet, and refusing the import would make onboarding
     # impossible before the agent runs.
@@ -480,7 +494,10 @@ def test_a_binding_needs_an_observed_workload() -> None:
         if entry.item_key == "workload_binding:dev:datalake-api"
     )
     assert item.action == str(Action.CREATE)
-    assert item.detail["workload_kind"] == "Deployment"
+    assert item.entity_kind == str(EntityKind.WORKLOAD_BINDING)
+    # The values apply will execute, in the plan and therefore in the digest.
+    assert item.payload["workload_kind"] == "Deployment"
+    assert item.payload["workload_name"] == "datalake-api"
 
 
 def test_two_matching_workloads_block_rather_than_choosing() -> None:

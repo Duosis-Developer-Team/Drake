@@ -39,6 +39,7 @@ catalog rows. A manifest naming a cluster Drake does not have is an
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -81,6 +82,10 @@ class EntityKind(StrEnum):
     METRIC_PROFILE = "metric_profile"
     SLO_PROFILE = "slo_profile"
     DEPLOYMENT_SOURCE = "deployment_source"
+    # Its own kind since 0019. It used to borrow `service` with a flag in
+    # `detail`, which made two different decisions read as one and put the
+    # handler registry's key at odds with what it dispatched on.
+    WORKLOAD_BINDING = "workload_binding"
 
 
 # Actions that stop an apply. `unmapped` is included on purpose: a manifest
@@ -211,6 +216,160 @@ MIN_SLO_WINDOW_DAYS = 1
 MAX_SLO_WINDOW_DAYS = 90
 
 
+# What a plan item's mutation payload may carry, per entity kind. A field
+# outside its entity's list never reaches the payload, so a manifest cannot
+# smuggle one through a plan and into apply.
+PAYLOAD_ALLOWLIST: dict[str, frozenset[str]] = {
+    str(EntityKind.PROJECT): frozenset(
+        {
+            "project_key",
+            "display_name",
+            "criticality",
+            "tenant_model",
+            "repo_provider",
+            "repo_owner",
+            "repo_name",
+            "default_branch",
+            "owners",
+        }
+    ),
+    str(EntityKind.ENVIRONMENT): frozenset(
+        {"environment_key", "runtime", "branch", "criticality", "cluster_ref", "namespace"}
+    ),
+    str(EntityKind.SERVICE): frozenset(
+        {
+            "service_key",
+            "display_name",
+            "component",
+            "runtime",
+            "metrics_profile",
+            "workload_selector",
+            "health",
+        }
+    ),
+    str(EntityKind.SLO_PROFILE): frozenset(
+        {
+            "slo_key",
+            "display_name",
+            "indicator",
+            "objective_ratio",
+            "window_seconds",
+            "service_ref",
+        }
+    ),
+    str(EntityKind.WORKLOAD_BINDING): frozenset(
+        {
+            "environment_key",
+            "service_key",
+            "workload_kind",
+            "workload_name",
+            "namespace",
+            "cluster_ref",
+        }
+    ),
+    str(EntityKind.REPOSITORY): frozenset({"provider", "owner", "name", "external_id"}),
+}
+
+# A plan item is a proposal, not a data file. The bound is small on purpose:
+# anything that does not fit is not a mutation payload.
+MAX_PAYLOAD_BYTES = 4096
+
+# Shapes that must never appear in a payload, whatever field they arrive in.
+# The manifest policy already refuses these, so this is the second wall
+# rather than the first.
+_SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(
+        r"\b(?:password|api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token)"
+        r"\b\s*[:=]\s*\S+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"://[^/\s@:]+:[^@\s]+@"),
+)
+
+
+class PayloadRejectedError(ValueError):
+    """A mutation payload that must not be stored, named by rule."""
+
+    def __init__(self, rule: str) -> None:
+        super().__init__(rule)
+        self.rule = rule
+
+
+def _assert_safe(value: Any) -> None:
+    if isinstance(value, str):
+        for pattern in _SECRET_SHAPES:
+            if pattern.search(value):
+                raise PayloadRejectedError("credential_shaped_value")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _assert_safe(str(key))
+            _assert_safe(item)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_safe(item)
+
+
+def build_payload(entity_kind: str, values: dict[str, Any]) -> dict[str, Any]:
+    """The canonical mutation payload an apply handler will execute.
+
+    Bound to the plan, and therefore to the plan digest and to the approval.
+    Three properties make it safe to store and to show:
+
+    - **Allowlisted.** Only fields this entity kind declares. An unknown one
+      is refused rather than dropped, because dropping it silently would let
+      a manifest carry a field nobody notices is being ignored.
+    - **Canonical.** The same intent produces the same payload, so an
+      unchanged manifest does not churn the digest.
+    - **Credential-free.** Checked again here even though the manifest
+      policy already refused these shapes — a payload is rendered in a
+      browser and written to audit metadata.
+    """
+    allowed = PAYLOAD_ALLOWLIST.get(entity_kind)
+    if allowed is None:
+        raise PayloadRejectedError("unknown_entity_kind")
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        raise PayloadRejectedError("field_not_allowlisted")
+
+    payload = {key: canonical(value) for key, value in sorted(values.items())}
+    _assert_safe(payload)
+    if len(json.dumps(payload, sort_keys=True, separators=(",", ":"))) > MAX_PAYLOAD_BYTES:
+        raise PayloadRejectedError("payload_too_large")
+    return payload
+
+
+def build_changes(
+    entity_kind: str,
+    existing: dict[str, Any],
+    proposed: dict[str, Any],
+    fields: list[str],
+) -> dict[str, dict[str, Any]]:
+    """`{field: {"before": ..., "after": ...}}`, canonical on both sides.
+
+    The reviewer sees the values, which is what makes an approval informed.
+    They are still allowlisted and still credential-checked: a `before` is
+    as much a stored value as an `after`.
+    """
+    allowed = PAYLOAD_ALLOWLIST.get(entity_kind)
+    if allowed is None:
+        raise PayloadRejectedError("unknown_entity_kind")
+    unknown = sorted(set(fields) - allowed)
+    if unknown:
+        raise PayloadRejectedError("field_not_allowlisted")
+
+    changes = {
+        name: {"before": canonical(existing.get(name)), "after": canonical(proposed.get(name))}
+        for name in sorted(fields)
+    }
+    _assert_safe(changes)
+    if len(json.dumps(changes, sort_keys=True, separators=(",", ":"))) > MAX_PAYLOAD_BYTES:
+        raise PayloadRejectedError("payload_too_large")
+    return changes
+
+
 def canonical(value: Any) -> Any:
     """One representation per value, so comparison cannot produce churn.
 
@@ -272,6 +431,13 @@ class PlanItem:
     existing_name: str | None = None
     reason_code: str | None = None
     detail: dict[str, Any] = field(default_factory=dict)
+    #: The canonical values apply will execute. Bound to the plan, and so to
+    #: the digest and to the approval — apply reads these and never re-reads
+    #: the manifest for a value.
+    payload: dict[str, Any] = field(default_factory=dict)
+    #: `{field: {"before", "after"}}` for an update, so an approval is
+    #: informed rather than a list of field names.
+    changes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def blocking(self) -> bool:
@@ -291,6 +457,11 @@ class PlanItem:
             "proposed_name": self.proposed_name,
             "existing_entity_id": self.existing_entity_id,
             "reason_code": self.reason_code,
+            # The VALUES are part of the identity of a plan. Without them an
+            # approval would bind a shape and leave the content free to
+            # change underneath it.
+            "payload": self.payload,
+            "changes": self.changes,
         }
 
     def to_payload(self) -> dict[str, Any]:
@@ -304,7 +475,12 @@ class PlanItem:
             "reason_code": self.reason_code,
             "reason": REASON_TEXT.get(self.reason_code or "", ""),
             "detail": dict(self.detail),
+            "payload": dict(self.payload),
+            "changes": dict(self.changes),
             "blocking": self.blocking,
+            # An item that is not actionable states so, and why, rather than
+            # leaving a reader to infer it from an absent handler.
+            "materialized": self.action in ACTIONABLE_ACTIONS,
         }
 
 
@@ -454,9 +630,11 @@ def _row_item(
             existing_entity_id=existing_id,
             existing_name=name,
             reason_code="metadata_differs",
-            # The fields, never their values: a plan is rendered in a
-            # browser and written to audit metadata.
             detail={**(detail or {}), "fields": changed},
+            # Exactly the fields that differ, and only those. Apply executes
+            # this and re-reads nothing.
+            payload=build_payload(entity_kind, {name_: proposed[name_] for name_ in changed}),
+            changes=build_changes(entity_kind, existing, proposed, changed),
         )
 
     return PlanItem(
@@ -566,6 +744,22 @@ def build_plan(
                 # Named in the plan because creating a project also registers
                 # these placeholders. Every persistent mutation is represented.
                 detail={"registers_integrations": list(PLACEHOLDER_INTEGRATIONS)},
+                payload=build_payload(
+                    str(EntityKind.PROJECT),
+                    {
+                        **_project_metadata(document),
+                        "default_branch": str(
+                            (spec.get("repository") or {}).get("defaultBranch") or ""
+                        ),
+                        "owners": [
+                            {
+                                "team": str(owner.get("team") or ""),
+                                "role": str(owner.get("role") or "primary"),
+                            }
+                            for owner in spec.get("owners") or []
+                        ],
+                    },
+                ),
             )
         )
     elif linked_repository in (repository_row_id, None):
@@ -610,6 +804,16 @@ def build_plan(
             proposed_name=str((spec.get("repository") or {}).get("name") or ""),
             reason_code=None if linked_repository != repository_row_id else "identical",
             detail={"provider": str((spec.get("repository") or {}).get("provider") or "")},
+            payload=build_payload(
+                str(EntityKind.REPOSITORY),
+                {
+                    "provider": str((spec.get("repository") or {}).get("provider") or ""),
+                    "owner": str((spec.get("repository") or {}).get("owner") or ""),
+                    "name": str((spec.get("repository") or {}).get("name") or ""),
+                },
+            )
+            if linked_repository != repository_row_id
+            else {},
         )
     )
 
@@ -653,6 +857,9 @@ def build_plan(
                     item_key=item_key,
                     proposed_name=environment_key,
                     detail={"runtime": str(environment.get("runtime") or "")},
+                    payload=build_payload(
+                        str(EntityKind.ENVIRONMENT), _environment_metadata(environment)
+                    ),
                 )
             )
         else:
@@ -732,6 +939,7 @@ def build_plan(
                     item_key=f"service:{service_key}",
                     proposed_name=service_key,
                     detail=detail,
+                    payload=build_payload(str(EntityKind.SERVICE), _service_metadata(service)),
                 )
             )
         else:
@@ -874,18 +1082,34 @@ def _slo_item(
             item_key=item_key,
             proposed_name=key,
             detail={"indicator": proposed["indicator"], "service_ref": service_ref},
+            payload=build_payload(str(EntityKind.SLO_PROFILE), proposed),
         )
     existing_id, current = existing
     changed = metadata_differences(current, proposed, MUTABLE_SLO_FIELDS)
+    if not changed:
+        return PlanItem(
+            entity_kind=str(EntityKind.SLO_PROFILE),
+            action=str(Action.NO_CHANGE),
+            item_key=item_key,
+            proposed_name=key,
+            existing_entity_id=existing_id,
+            existing_name=key,
+            reason_code="identical",
+            detail={"indicator": proposed["indicator"], "fields": []},
+        )
     return PlanItem(
         entity_kind=str(EntityKind.SLO_PROFILE),
-        action=str(Action.UPDATE_METADATA) if changed else str(Action.NO_CHANGE),
+        action=str(Action.UPDATE_METADATA),
         item_key=item_key,
         proposed_name=key,
         existing_entity_id=existing_id,
         existing_name=key,
-        reason_code="metadata_differs" if changed else "identical",
+        reason_code="metadata_differs",
         detail={"indicator": proposed["indicator"], "fields": changed},
+        # The whole definition: an SLO update rewrites the row, so the
+        # payload is the row, not the delta.
+        payload=build_payload(str(EntityKind.SLO_PROFILE), proposed),
+        changes=build_changes(str(EntityKind.SLO_PROFILE), current, proposed, changed),
     )
 
 
@@ -921,14 +1145,14 @@ def _binding_item(
 
     if existing is not None:
         return PlanItem(
-            entity_kind=str(EntityKind.SERVICE),
+            entity_kind=str(EntityKind.WORKLOAD_BINDING),
             action=str(Action.NO_CHANGE),
             item_key=item_key,
             proposed_name=str(existing.get("workload_name") or ""),
             existing_entity_id=str(existing.get("id") or ""),
             existing_name=str(existing.get("workload_name") or ""),
             reason_code="identical",
-            detail={"binding": True, "workload_kind": str(existing.get("workload_kind") or "")},
+            detail={"workload_kind": str(existing.get("workload_kind") or "")},
         )
     if not observed:
         # `no_change`, not `unmapped`. Nothing is wrong and nothing is
@@ -937,36 +1161,39 @@ def _binding_item(
         # the first time. Blocking the import on it would mean no project
         # could ever be onboarded before its agent had run.
         return PlanItem(
-            entity_kind=str(EntityKind.SERVICE),
+            entity_kind=str(EntityKind.WORKLOAD_BINDING),
             action=str(Action.NO_CHANGE),
             item_key=item_key,
             proposed_name=service_key,
             reason_code="binding_no_evidence",
-            detail={"binding": True},
         )
     if len(observed) > 1:
         return PlanItem(
-            entity_kind=str(EntityKind.SERVICE),
+            entity_kind=str(EntityKind.WORKLOAD_BINDING),
             action=str(Action.UNMAPPED),
             item_key=item_key,
             proposed_name=service_key,
             reason_code="binding_ambiguous",
-            detail={"binding": True, "candidates": len(observed)},
+            detail={"candidates": len(observed)},
         )
 
     workload = observed[0]
     return PlanItem(
-        entity_kind=str(EntityKind.SERVICE),
+        entity_kind=str(EntityKind.WORKLOAD_BINDING),
         action=str(Action.CREATE),
         item_key=item_key,
         proposed_name=str(workload.get("name") or ""),
-        detail={
-            "binding": True,
-            "workload_kind": str(workload.get("kind") or ""),
-            "workload_name": str(workload.get("name") or ""),
-            "namespace": namespace,
-            "cluster_ref": cluster_ref,
-        },
+        payload=build_payload(
+            str(EntityKind.WORKLOAD_BINDING),
+            {
+                "environment_key": environment_key,
+                "service_key": service_key,
+                "workload_kind": str(workload.get("kind") or ""),
+                "workload_name": str(workload.get("name") or ""),
+                "namespace": namespace,
+                "cluster_ref": cluster_ref,
+            },
+        ),
     )
 
 
@@ -991,6 +1218,11 @@ def deployment_source_item(detections: list[dict[str, str]]) -> PlanItem | None:
                 item_key="deployment_source:primary",
                 proposed_name=str(detection.get("value") or ""),
                 reason_code="deployment_source_informational",
-                detail={"evidence": str(detection.get("evidence") or "")},
+                detail={
+                    "evidence": str(detection.get("evidence") or ""),
+                    # A bounded code, not prose: a client decides on this,
+                    # never on the sentence beside it.
+                    "not_materialized_reason": "catalog_projection_not_supported",
+                },
             )
     return None

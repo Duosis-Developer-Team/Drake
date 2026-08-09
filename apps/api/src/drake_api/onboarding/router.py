@@ -410,35 +410,17 @@ async def apply(
             plan_version=payload.plan_version,
             idempotency_key=payload.idempotency_key,
             actor_identity_id=uuid.UUID(auth.session.identity_id),
+            correlation_id=correlation_id_var.get() or "",
         )
     except OnboardingError as error:
         raise _failure(error) from error
 
-    if outcome.outcome == "applied":
-        # Audited only when something actually changed. A safe retry is not
-        # a second import and does not deserve a second audit row.
-        await record_audit_event(
-            engine,
-            AuditEventData(
-                actor_type="user",
-                actor_id=auth.session.identity_id,
-                action="onboarding.apply",
-                result="success",
-                target_type="onboarding_session",
-                target_id=str(session_id),
-                correlation_id=correlation_id_var.get(),
-                metadata={
-                    "plan_version": payload.plan_version,
-                    "project_id": str(outcome.project_id),
-                    "created": outcome.created,
-                    "linked": outcome.linked,
-                    "metadata_updated": outcome.metadata_updated,
-                    "slo_definitions": outcome.slo_definitions_created
-                    + outcome.slo_definitions_updated,
-                    "bindings_created": outcome.bindings_created,
-                },
-            ),
-        )
+    # The audit row is written INSIDE the apply transaction (see
+    # `_materialise`), not here. Writing it afterwards would mean a failed
+    # audit leaves a committed catalog change nobody can discover — and a
+    # safe retry returns the recorded outcome without a second row, because
+    # the transaction that would have written one never runs again.
+    #
     # Normalized result only: no manifest, no provider body, no repository
     # content. Every counter is from the COMMITTED transaction — a rollback
     # raises rather than returning partial numbers.

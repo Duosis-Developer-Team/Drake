@@ -48,6 +48,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.alerting.contracts import default_burn_profile, indicator_template
+from drake_api.audit.service import AuditEventData, record_audit_event_in
 from drake_api.catalog.service import CatalogService
 from drake_api.github_app import catalog as repo_catalog
 from drake_api.github_app import manifest as manifest_module
@@ -76,11 +77,7 @@ from drake_api.onboarding.model import (
     SessionState,
     build_plan,
     deployment_source_item,
-    slo_metadata,
 )
-from drake_api.onboarding.model import _environment_metadata as model_environment_metadata
-from drake_api.onboarding.model import _project_metadata as model_project_metadata
-from drake_api.onboarding.model import _service_metadata as model_service_metadata
 from drake_api.service_health.policy import DEFAULT_POLICY_KEY
 from drake_api.service_health.presets import DEFAULT_PRESET_KEY
 from drake_api.settings import Settings
@@ -883,7 +880,17 @@ async def _store_plan(
                 "existing": item.existing_entity_id,
                 "existing_name": item.existing_name,
                 "reason": item.reason_code,
-                "detail": json.dumps(item.detail),
+                # The payload and the before/after travel WITH the item, so
+                # what apply executes is what the approval covered. They are
+                # in `detail` because a plan item's columns are a reviewed
+                # schema and this needs no new one.
+                "detail": json.dumps(
+                    {
+                        **item.detail,
+                        **({"payload": item.payload} if item.payload else {}),
+                        **({"changes": item.changes} if item.changes else {}),
+                    }
+                ),
             },
         )
     return next_version
@@ -980,6 +987,7 @@ async def apply(
     plan_version: int,
     idempotency_key: str,
     actor_identity_id: uuid.UUID,
+    correlation_id: str = "",
 ) -> ApplyOutcome:
     """Apply an approved plan, in one transaction, with no network calls.
 
@@ -1045,6 +1053,7 @@ async def apply(
 
     plan_id = uuid.UUID(str(plan_row[0]))
     planned_commit = str(plan_row[2])
+    plan_digest = str(plan_row[4])
 
     # --- freshness, outside the transaction --------------------------------
     token = await client.installation_token(
@@ -1092,8 +1101,10 @@ async def apply(
         document=validation.document,
         commit_sha=planned_commit,
         manifest_digest=str(plan_row[3] or ""),
+        plan_digest=plan_digest,
         idempotency_key=idempotency_key,
         actor_identity_id=actor_identity_id,
+        correlation_id=correlation_id,
     )
 
 
@@ -1127,6 +1138,8 @@ class _ApplyContext:
     environments: dict[str, uuid.UUID] = field(default_factory=dict)
     #: service_key -> id
     services: dict[str, uuid.UUID] = field(default_factory=dict)
+    #: environment keys the approved plan created or linked
+    planned_environments: set[str] = field(default_factory=set)
 
     def spec(self, section: str) -> list[dict[str, Any]]:
         return list((self.document.get("spec") or {}).get(section) or [])
@@ -1163,8 +1176,10 @@ async def _materialise(
     document: dict[str, Any],
     commit_sha: str,
     manifest_digest: str,
+    plan_digest: str,
     idempotency_key: str,
     actor_identity_id: uuid.UUID,
+    correlation_id: str = "",
 ) -> ApplyOutcome:
     """Apply the APPROVED PLAN, item by item, in one transaction.
 
@@ -1257,6 +1272,11 @@ async def _materialise(
         # because they need both.
         for item in sorted(items, key=lambda entry: _ORDER.get(entry["entity_kind"], 99)):
             if item["action"] == str(Action.NO_CHANGE):
+                # A re-onboarding where nothing differs still needs the
+                # project resolved: its children are addressed relative to
+                # it, and `no_change` means "already correct", not "absent".
+                if item["entity_kind"] == str(EntityKind.PROJECT) and item["proposed_name"]:
+                    await _resolve_project(apply_context, item)
                 apply_context.counters.unchanged += 1
                 continue
             if item["action"] not in ACTIONABLE_ACTIONS:
@@ -1292,7 +1312,35 @@ async def _materialise(
             imported_project_id=apply_context.project_id,
             imported_at=datetime.now(UTC),
         )
-        _ = (plan_version, manifest_digest)
+
+        # In the SAME transaction as everything above. An apply that changed
+        # a catalog with no record of who asked is worse than one that did
+        # not happen: nobody can discover it afterwards. If this insert
+        # fails, every row this function wrote goes with it.
+        await record_audit_event_in(
+            connection,
+            AuditEventData(
+                actor_type="user",
+                actor_id=str(actor_identity_id),
+                action="onboarding.apply",
+                result="success",
+                target_type="onboarding_session",
+                target_id=str(session.id),
+                correlation_id=correlation_id,
+                metadata={
+                    "plan_version": plan_version,
+                    "plan_digest": plan_digest[:16],
+                    "project_id": str(apply_context.project_id),
+                    "created": counters.created,
+                    "linked": counters.linked,
+                    "metadata_updated": counters.metadata_updated,
+                    "slo_definitions": counters.slo_definitions_created
+                    + counters.slo_definitions_updated,
+                    "bindings_created": counters.bindings_created,
+                },
+            ),
+        )
+        _ = manifest_digest
 
     return ApplyOutcome(
         outcome="applied",
@@ -1325,6 +1373,10 @@ async def _approved_items(connection: AsyncConnection, plan_id: uuid.UUID) -> li
             "proposed_name": row[3],
             "existing_entity_id": row[4],
             "detail": dict(row[5] or {}),
+            # The approved values. A handler reads these and re-reads
+            # nothing: the manifest, the analysis and the live request are
+            # all mutable between approval and apply, and this is not.
+            "payload": dict((row[5] or {}).get("payload") or {}),
         }
         for row in rows
     ]
@@ -1336,24 +1388,25 @@ async def _approved_items(connection: AsyncConnection, plan_id: uuid.UUID) -> li
 
 
 async def _apply_project_create(context: _ApplyContext, item: dict[str, Any]) -> None:
-    spec = context.document["spec"]
-    metadata = context.document["metadata"]
+    # Every value from the APPROVED payload. Reading the manifest here would
+    # mean the values applied are whatever it says NOW — the digest check
+    # proves the manifest is unchanged, not that this plan was built from
+    # this reading of it.
+    payload = item["payload"]
     project = await context.catalog.create_project(
-        str(metadata["name"]),
-        str(metadata.get("displayName") or metadata["name"]),
-        repo_provider=str(spec["repository"]["provider"]),
-        repo_owner=str(spec["repository"]["owner"]),
-        repo_name=str(spec["repository"]["name"]),
-        default_branch=str(spec["repository"].get("defaultBranch") or ""),
-        criticality=max(
-            (str(env["criticality"]) for env in spec["environments"]),
-            key=["low", "medium", "high", "critical"].index,
-        ),
-        tenant_model=str(spec["tenantModel"]["mode"]),
+        str(payload["project_key"]),
+        str(payload.get("display_name") or payload["project_key"]),
+        repo_provider=str(payload.get("repo_provider") or ""),
+        repo_owner=str(payload.get("repo_owner") or ""),
+        repo_name=str(payload.get("repo_name") or ""),
+        default_branch=str(payload.get("default_branch") or ""),
+        criticality=str(payload.get("criticality") or "low"),
+        tenant_model=str(payload.get("tenant_model") or ""),
         # Owner teams are created with the project. The plan says so on its
         # own `owner_team` items rather than leaving it implicit.
         owners=[
-            (str(owner["team"]), str(owner.get("role") or "primary")) for owner in spec["owners"]
+            (str(owner["team"]), str(owner.get("role") or "primary"))
+            for owner in payload.get("owners") or []
         ],
         source_ref=context.source_ref,
         source_revision=context.commit_sha,
@@ -1387,14 +1440,11 @@ async def _apply_project_link(context: _ApplyContext, item: dict[str, Any]) -> N
 
 async def _apply_project_update(context: _ApplyContext, item: dict[str, Any]) -> None:
     project_id = await _resolve_project(context, item)
-    fields = [str(name) for name in item["detail"].get("fields") or []]
-    proposed = model_project_metadata(context.document)
-    # Only the fields the PLAN named, and only from the mutable allowlist.
-    # A field that appeared after approval is not applied.
+    # Only the fields the APPROVED payload carries, intersected with the
+    # mutable allowlist. A field that appeared in the manifest afterwards is
+    # not in the payload and is therefore not applied.
     updates = {
-        name: proposed[name]
-        for name in fields
-        if name in MUTABLE_PROJECT_FIELDS and name in proposed
+        name: value for name, value in item["payload"].items() if name in MUTABLE_PROJECT_FIELDS
     }
     if not updates:
         context.counters.unchanged += 1
@@ -1411,35 +1461,35 @@ async def _apply_project_update(context: _ApplyContext, item: dict[str, Any]) ->
 
 
 async def _apply_environment_create(context: _ApplyContext, item: dict[str, Any]) -> None:
-    environment_key = str(item["proposed_name"])
-    spec = context.find("environments", environment_key)
-    assert spec is not None
+    payload = item["payload"]
+    environment_key = str(payload["environment_key"])
     assert context.project_id is not None
-    cluster_id = await _require_cluster(context, spec)
+    cluster_id = await _require_cluster(context, payload)
     entity = await context.catalog.create_environment(
         context.project_id,
         environment_key,
-        runtime=str(spec["runtime"]),
-        branch=str(spec.get("branch") or ""),
-        criticality=str(spec["criticality"]),
+        runtime=str(payload["runtime"]),
+        branch=str(payload.get("branch") or ""),
+        criticality=str(payload["criticality"]),
         cluster_id=cluster_id,
-        namespace=spec.get("namespace"),
+        namespace=payload.get("namespace"),
         source_ref=context.source_ref,
         source_revision=context.commit_sha,
     )
     context.environments[environment_key] = entity.id
+    context.planned_environments.add(environment_key)
     context.counters.created += 1
 
 
-async def _require_cluster(context: _ApplyContext, environment: dict[str, Any]) -> uuid.UUID | None:
+async def _require_cluster(context: _ApplyContext, payload: dict[str, Any]) -> uuid.UUID | None:
     """Re-checked here as well as in the plan: a cluster can be removed
     between review and apply, and a manifest never conjures infrastructure."""
-    if str(environment["runtime"]) != "kubernetes":
+    if str(payload.get("runtime") or "") != "kubernetes":
         return None
     row = (
         await context.connection.execute(
             text("SELECT id FROM clusters WHERE cluster_ref = :ref"),
-            {"ref": str(environment["clusterRef"])},
+            {"ref": str(payload.get("cluster_ref") or "")},
         )
     ).first()
     if row is None:
@@ -1466,20 +1516,18 @@ async def _resolve_environment(context: _ApplyContext, key: str) -> uuid.UUID:
 
 
 async def _apply_environment_link(context: _ApplyContext, item: dict[str, Any]) -> None:
-    await _resolve_environment(context, str(item["proposed_name"]))
+    key = str(item["proposed_name"])
+    await _resolve_environment(context, key)
+    context.planned_environments.add(key)
     context.counters.linked += 1
 
 
 async def _apply_environment_update(context: _ApplyContext, item: dict[str, Any]) -> None:
     key = str(item["proposed_name"])
     environment_id = await _resolve_environment(context, key)
-    spec = context.find("environments", key)
-    assert spec is not None
-    proposed = model_environment_metadata(spec)
+    context.planned_environments.add(key)
     updates = {
-        name: proposed[name]
-        for name in (str(field) for field in item["detail"].get("fields") or [])
-        if name in MUTABLE_ENVIRONMENT_FIELDS and name in proposed
+        name: value for name, value in item["payload"].items() if name in MUTABLE_ENVIRONMENT_FIELDS
     }
     if not updates:
         context.counters.unchanged += 1
@@ -1511,21 +1559,17 @@ async def _resolve_service(context: _ApplyContext, key: str) -> uuid.UUID:
 
 
 async def _apply_service_create(context: _ApplyContext, item: dict[str, Any]) -> None:
-    if item["detail"].get("binding"):
-        await _apply_binding_create(context, item)
-        return
-    key = str(item["proposed_name"])
-    spec = context.find("services", key)
-    assert spec is not None
+    payload = item["payload"]
+    key = str(payload["service_key"])
     assert context.project_id is not None
     service_id = await context.catalog.create_service_definition(
         context.project_id,
         key,
-        component=str(spec["component"]),
-        runtime=str(spec["runtime"]),
-        metrics_profile=str(spec["metricsProfile"]),
-        workload_selector=spec.get("workloadSelector") or {},
-        health=spec.get("health") or {},
+        component=str(payload["component"]),
+        runtime=str(payload["runtime"]),
+        metrics_profile=str(payload["metrics_profile"]),
+        workload_selector=payload.get("workload_selector") or {},
+        health=payload.get("health") or {},
         source_ref=context.source_ref,
         source_revision=context.commit_sha,
     )
@@ -1541,16 +1585,9 @@ async def _apply_service_link(context: _ApplyContext, item: dict[str, Any]) -> N
 
 
 async def _apply_service_update(context: _ApplyContext, item: dict[str, Any]) -> None:
-    key = str(item["proposed_name"])
-    service_id = await _resolve_service(context, key)
-    spec = context.find("services", key)
-    assert spec is not None
-    proposed = model_service_metadata(spec)
-    named = [str(field) for field in item["detail"].get("fields") or []]
+    service_id = await _resolve_service(context, str(item["proposed_name"]))
     updates = {
-        name: proposed[name]
-        for name in named
-        if name in MUTABLE_SERVICE_FIELDS and name in proposed
+        name: value for name, value in item["payload"].items() if name in MUTABLE_SERVICE_FIELDS
     }
     await _bind_to_environments(context, service_id)
     if not updates:
@@ -1583,8 +1620,12 @@ async def _bind_to_environments(context: _ApplyContext, service_id: uuid.UUID) -
     Idempotent in the catalog service, so a repeated apply attaches nothing
     twice.
     """
-    for environment in context.spec("environments"):
-        environment_id = await _resolve_environment(context, str(environment["name"]))
+    # The environments the PLAN acted on, not the manifest's list. Reading
+    # the manifest here would reintroduce exactly the coupling this slice
+    # removed: an environment added after approval would get a binding
+    # nobody reviewed.
+    for environment_key in sorted(context.planned_environments):
+        environment_id = await _resolve_environment(context, environment_key)
         # `bind_service` raises on a duplicate, which is right for the
         # catalog API and wrong for a re-apply. Checked here so a second
         # apply of the same plan is a no-op rather than an error.
@@ -1607,8 +1648,9 @@ async def _apply_binding_create(context: _ApplyContext, item: dict[str, Any]) ->
     Everything here comes from the approved plan item, which the planner
     built from `inventory_resources`. Nothing is inferred at apply time.
     """
-    detail = item["detail"]
-    environment_key, service_key = item["item_key"].split(":")[1:3]
+    payload = item["payload"]
+    environment_key = str(payload["environment_key"])
+    service_key = str(payload["service_key"])
     environment_id = await _resolve_environment(context, environment_key)
     service_id = await _resolve_service(context, service_key)
     assert context.project_id is not None
@@ -1627,7 +1669,7 @@ async def _apply_binding_create(context: _ApplyContext, item: dict[str, Any]) ->
             {
                 "environment": environment_id,
                 "service": service_id,
-                "cluster": str(detail.get("cluster_ref") or ""),
+                "cluster": str(payload.get("cluster_ref") or ""),
             },
         )
     ).first()
@@ -1659,9 +1701,9 @@ async def _apply_binding_create(context: _ApplyContext, item: dict[str, Any]) ->
                 "environment": environment_id,
                 "service": service_id,
                 "cluster": row[1],
-                "namespace": str(detail.get("namespace") or ""),
-                "kind": str(detail.get("workload_kind") or ""),
-                "name": str(detail.get("workload_name") or ""),
+                "namespace": str(payload.get("namespace") or ""),
+                "kind": str(payload.get("workload_kind") or ""),
+                "name": str(payload.get("workload_name") or ""),
                 "preset": DEFAULT_PRESET_KEY,
                 "policy": DEFAULT_POLICY_KEY,
             },
@@ -1716,12 +1758,8 @@ async def _write_slo(context: _ApplyContext, item: dict[str, Any], *, update: bo
     definition and its evaluation history. Retiring one is a separate,
     explicit decision — see the ADR.
     """
-    key = str(item["proposed_name"])
-    declared = next(
-        (entry for entry in context.spec("slos") if str(entry.get("name") or "") == key), None
-    )
-    assert declared is not None
-    values = slo_metadata(declared)
+    values = item["payload"]
+    key = str(values["slo_key"])
     assert context.project_id is not None
 
     service_ref = str(values["service_ref"])
@@ -1802,6 +1840,7 @@ _HANDLERS: dict[tuple[str, str], Any] = {
     (str(EntityKind.SERVICE), str(Action.CREATE)): _apply_service_create,
     (str(EntityKind.SERVICE), str(Action.LINK)): _apply_service_link,
     (str(EntityKind.SERVICE), str(Action.UPDATE_METADATA)): _apply_service_update,
+    (str(EntityKind.WORKLOAD_BINDING), str(Action.CREATE)): _apply_binding_create,
     (str(EntityKind.REPOSITORY), str(Action.LINK)): _apply_repository_link,
     (str(EntityKind.SLO_PROFILE), str(Action.CREATE)): _apply_slo_create,
     (str(EntityKind.SLO_PROFILE), str(Action.UPDATE_METADATA)): _apply_slo_update,
@@ -1817,6 +1856,8 @@ _ORDER: dict[str, int] = {
     str(EntityKind.NAMESPACE_BINDING): 4,
     str(EntityKind.SERVICE): 5,
     str(EntityKind.METRIC_PROFILE): 6,
+    # After the service and its environment attachment both exist.
+    str(EntityKind.WORKLOAD_BINDING): 6,
     str(EntityKind.SLO_PROFILE): 7,
     str(EntityKind.DEPLOYMENT_SOURCE): 8,
     str(EntityKind.REPOSITORY): 9,

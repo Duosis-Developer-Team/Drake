@@ -80,8 +80,31 @@ export const GITOPS_LABELS: Record<GitOpsState, string> = {
   cancelled: "Cancelled",
 };
 
+/** Plan entity kinds. `workload_binding` is its own kind since migration
+ * 0019 — it used to borrow `service` with a flag in `detail`, which made two
+ * different decisions read as one. */
+export type PlanEntityKind =
+  | "project"
+  | "environment"
+  | "service"
+  | "owner_team"
+  | "repository"
+  | "cluster_binding"
+  | "namespace_binding"
+  | "metric_profile"
+  | "slo_profile"
+  | "deployment_source"
+  | "workload_binding";
+
+/** One field's before and after, canonical on both sides. Shown so an
+ * approval is informed rather than a list of field names. */
+export interface FieldChange {
+  before: unknown;
+  after: unknown;
+}
+
 export interface PlanItem {
-  entity_kind: string;
+  entity_kind: PlanEntityKind;
   action: PlanAction;
   item_key: string;
   proposed_name: string | null;
@@ -90,7 +113,13 @@ export interface PlanItem {
   reason_code: string | null;
   reason: string;
   detail: Record<string, unknown>;
+  /** The canonical values apply will execute — bound to the plan digest. */
+  payload: Record<string, unknown>;
+  changes: Record<string, FieldChange>;
   blocking: boolean;
+  /** False for an item that is shown but changes nothing; `detail`
+   * carries a bounded reason code saying why. */
+  materialized: boolean;
 }
 
 export interface Plan {

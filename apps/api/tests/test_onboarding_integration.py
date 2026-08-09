@@ -161,24 +161,15 @@ def snapshot(**overrides: Any) -> CatalogSnapshot:
 
 
 def actions_for(plan: Any, kind: str) -> dict[str, str]:
-    """Items of one entity kind, excluding workload bindings.
-
-    Bindings share the `service` entity kind (the plan-item vocabulary is a
-    database CHECK and this slice adds no migration), so they are separated
-    by their distinguishing item key.
-    """
-    return {
-        item.item_key: item.action
-        for item in plan.items
-        if item.entity_kind == kind and not item.item_key.startswith("workload_binding:")
-    }
+    """Items of one entity kind."""
+    return {item.item_key: item.action for item in plan.items if item.entity_kind == kind}
 
 
 def bindings_for(plan: Any) -> dict[str, str]:
     return {
         item.item_key: item.action
         for item in plan.items
-        if item.item_key.startswith("workload_binding:")
+        if item.entity_kind == str(EntityKind.WORKLOAD_BINDING)
     }
 
 
