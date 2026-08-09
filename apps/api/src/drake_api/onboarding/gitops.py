@@ -36,6 +36,7 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from drake_api.github_app import catalog as repo_catalog
 from drake_api.github_app.onboarding_service import OnboardingError, load_repository_context
 from drake_api.onboarding import service
 from drake_api.settings import Settings
@@ -145,10 +146,22 @@ async def request_pull_request(
     if not settings.github_gitops_pr_enabled:
         raise GitOpsDisabledError()
 
+    # ONE transaction, holding the session's row lock from the state check
+    # to the durable request.
+    #
+    # It used to be two. The first checked the state and released the lock;
+    # the second inserted the request. A cancel committing in that gap left
+    # a pending request against a closed session, and the worker would push
+    # to a repository on behalf of a session nobody had approved:
+    #
+    #     gitops: state check passes → lock released
+    #     cancel: session becomes `cancelled`
+    #     gitops: pending request written
+    #     worker: provider call for a cancelled session
+    #
+    # Holding the lock across the insert makes the cancel wait, and then it
+    # sees the request and cancels it too.
     async with engine.begin() as connection:
-        # A proposal describes an analysed session, so the state has to be
-        # one that HAS an analysis. Locked, so a cancel committing alongside
-        # this cannot leave a pending request against a closed session.
         session = await service.lock_session_for(connection, session_id, "gitops")
         repository_id = session.repository_id
         commit_sha = str(session.analyzed_commit_sha or "")
@@ -158,16 +171,17 @@ async def request_pull_request(
                 "Analyse the repository first: a proposal needs a base commit.",
             )
         context = await load_repository_context(connection, repository_id)
-        if context.security_gate:
+        if context.security_gate or repo_catalog.security_gate_for(context.full_name):
+            # Both sources, because a gate must not depend on which
+            # mechanism set it.
             raise OnboardingError(
                 "security_gate_open", "This repository is closed by a manual security gate."
             )
         draft = await draft_manifest(connection, session_id)
 
-    digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
-    key = idempotency_key(session_id, commit_sha, digest)
+        digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
+        key = idempotency_key(session_id, commit_sha, digest)
 
-    async with engine.begin() as connection:
         created = (
             await connection.execute(
                 text(
@@ -203,6 +217,29 @@ async def request_pull_request(
             ).one()
             return {"id": str(existing[0]), "state": str(existing[1]), "created": False}
     return {"id": str(created[0]), "state": "pending", "created": True}
+
+
+async def cancel_pending_for_session(connection: AsyncConnection, session_id: uuid.UUID) -> int:
+    """Close any request that has not reached the provider yet.
+
+    Called from `cancel`, in ITS transaction, while it holds the session's
+    row lock. A request that survives its session is one the worker will
+    happily push on behalf of a decision somebody withdrew.
+
+    Only `pending` rows move: a request already in flight or already
+    delivered is a fact, and rewriting it would be a lie about what
+    happened. `next_attempt_at` is cleared so nothing re-claims it.
+    """
+    result = await connection.execute(
+        text(
+            "UPDATE gitops_requests SET state = 'cancelled', "
+            "error_code = 'session_cancelled', next_attempt_at = NULL, "
+            "version = version + 1, updated_at = now() "
+            "WHERE session_id = :session AND state = 'pending'"
+        ),
+        {"session": session_id},
+    )
+    return int(result.rowcount or 0)
 
 
 async def draft_manifest(connection: AsyncConnection, session_id: uuid.UUID) -> str:
@@ -294,6 +331,13 @@ async def process_pending(
     return processed
 
 
+#: The session states a pending request may still be delivered for. The
+#: same set `service.ALLOWED_STATES["gitops"]` allows a request FROM — a
+#: request that was legal to make stays legal to send only while the
+#: session is still in one of them.
+CLAIMABLE_SESSION_STATES = frozenset({"needs_review", "ready", "approved"})
+
+
 async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
     async with engine.begin() as connection:
         rows = (
@@ -302,10 +346,11 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                     """
                     SELECT g.id, g.session_id, g.branch_name, g.base_commit_sha, g.attempts,
                            r.owner_login, r.name, r.default_branch, r.external_id,
-                           i.external_id, r.security_gate
+                           i.external_id, r.security_gate, s.state, r.full_name
                     FROM gitops_requests g
                     JOIN github_repositories r ON r.id = g.repository_id
                     JOIN github_installations i ON i.id = r.installation_id
+                    JOIN onboarding_sessions s ON s.id = g.session_id
                     WHERE g.state = 'pending'
                       AND (g.next_attempt_at IS NULL OR g.next_attempt_at <= now())
                     ORDER BY g.created_at
@@ -319,13 +364,32 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
 
         claimed: list[dict[str, Any]] = []
         for row in rows:
-            if row[10]:
-                # A gate opened after the request was made. Refuse rather
-                # than push to a repository someone closed.
+            # Both gate sources, at claim time. A gate that opened after the
+            # request was made must stop it, and which mechanism set the
+            # gate is not something the worker should depend on.
+            if row[10] or repo_catalog.security_gate_for(str(row[12])):
                 await connection.execute(
                     text(
                         "UPDATE gitops_requests SET state = 'failed', "
                         "error_code = 'security_gate_open', next_attempt_at = NULL, "
+                        "version = version + 1, updated_at = now() WHERE id = :id"
+                    ),
+                    {"id": row[0]},
+                )
+                continue
+            if str(row[11]) not in CLAIMABLE_SESSION_STATES:
+                # The session moved on — cancelled, imported, or re-opened
+                # for another analysis. A request is an intent about ONE
+                # reviewed state, and pushing it after that state changed
+                # would act on a decision nobody currently holds.
+                #
+                # The in-request cancel cascade already closes these; this
+                # is the second half of the same rule, for a row written
+                # before that cascade existed or moved by another path.
+                await connection.execute(
+                    text(
+                        "UPDATE gitops_requests SET state = 'cancelled', "
+                        "error_code = 'session_not_proposable', next_attempt_at = NULL, "
                         "version = version + 1, updated_at = now() WHERE id = :id"
                     ),
                     {"id": row[0]},
