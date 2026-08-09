@@ -291,7 +291,10 @@ export interface RepositoryCandidatePage {
 /** Why a repository cannot be started, in words an operator can act on. */
 export const CANDIDATE_BLOCKERS: Record<string, string> = {
   security_gate_open: "Closed by a manual security review. Ask a platform owner to clear it.",
-  repository_unavailable: "Drake cannot reach this repository — it is archived, disabled, or the installation lost access.",
+  repository_unavailable:
+    "Drake cannot reach this repository — it is archived, disabled, or the installation lost access.",
+  repository_not_ready:
+    "Drake has not finished projecting this repository. Reconcile it first, then try again.",
   session_in_progress: "An onboarding is already open for this repository.",
 };
 
@@ -400,6 +403,13 @@ export async function fetchRepositoryCandidates(
   return apiGet<RepositoryCandidatePage>(
     `/v1/onboarding/repositories${suffix ? `?${suffix}` : ""}`,
   );
+}
+
+/** One repository's startability, target-specific and server-decided. */
+export async function fetchRepositoryCandidate(
+  repositoryId: string,
+): Promise<RepositoryCandidate> {
+  return apiGet<RepositoryCandidate>(`/v1/onboarding/repositories/${repositoryId}`);
 }
 
 export async function fetchSession(sessionId: string): Promise<OnboardingSession> {

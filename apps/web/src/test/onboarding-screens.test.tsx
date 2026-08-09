@@ -19,10 +19,11 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const routerState = { push: vi.fn() };
+const searchParamsState = { current: new URLSearchParams() };
 vi.mock("next/navigation", () => ({
   usePathname: () => "/onboarding",
   useRouter: () => ({ push: routerState.push, replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsState.current,
   useParams: () => ({ sessionId: "sess-1" }),
 }));
 
@@ -71,8 +72,8 @@ function session(overrides: Record<string, unknown> = {}) {
     repository: {
       id: "repo-1",
       owner: "Duosis-Developer-Team",
-      name: "Datalake-Platform-GUI",
-      full_name: "Duosis-Developer-Team/Datalake-Platform-GUI",
+      name: "Widget-Service",
+      full_name: "Duosis-Developer-Team/Widget-Service",
       default_branch: "main",
       security_gate: null,
     },
@@ -96,8 +97,8 @@ function planItem(overrides: Record<string, unknown> = {}) {
   return {
     entity_kind: "service",
     action: "create",
-    item_key: "service:datalake-api",
-    proposed_name: "datalake-api",
+    item_key: "service:widget-api",
+    proposed_name: "widget-api",
     existing_entity_id: null,
     existing_name: null,
     reason_code: null,
@@ -128,8 +129,8 @@ function plan(overrides: Record<string, unknown> = {}) {
       planItem({
         entity_kind: "project",
         action: "create",
-        item_key: "project:datalake",
-        proposed_name: "datalake",
+        item_key: "project:widget",
+        proposed_name: "widget",
       }),
     ],
     ...overrides,
@@ -168,7 +169,7 @@ function analysis(overrides: Record<string, unknown> = {}) {
 function candidate(overrides: Record<string, unknown> = {}) {
   return {
     id: "repo-1",
-    full_name: "Duosis-Developer-Team/Datalake-Platform-GUI",
+    full_name: "Duosis-Developer-Team/Widget-Service",
     default_branch: "main",
     onboarding_state: "ready",
     access_state: "accessible",
@@ -212,6 +213,7 @@ function renderDetail(overrides: Record<string, { status: number; body: unknown 
 afterEach(() => {
   vi.unstubAllGlobals();
   routerState.push.mockReset();
+  searchParamsState.current = new URLSearchParams();
   sessionState.current = makeMe({
     permissions: ["onboarding.view", "onboarding.manage", "onboarding.apply"],
   });
@@ -293,7 +295,7 @@ describe("onboarding session", () => {
   it("groups the plan by what it would actually do", async () => {
     renderDetail();
     const created = await screen.findByTestId("plan-group-create");
-    expect(created).toHaveTextContent("datalake-api");
+    expect(created).toHaveTextContent("widget-api");
     expect(created).toHaveTextContent("Create");
     expect(screen.getByTestId("apply-available")).toHaveTextContent(
       /changes nothing in the repository/i,
@@ -462,8 +464,7 @@ describe("starting an onboarding", () => {
         body: { items: [], total: 0, limit: 25, offset: 0 },
       },
     });
-    const select = await screen.findByTestId("repository-select");
-    fireEvent.change(select, { target: { value: "repo-1" } });
+    fireEvent.click(await screen.findByTestId("repository-option-repo-1"));
     fireEvent.click(screen.getByTestId("start-onboarding-button"));
 
     await waitFor(() => expect(routerState.push).toHaveBeenCalled());
@@ -488,9 +489,7 @@ describe("starting an onboarding", () => {
         },
       },
     });
-    fireEvent.change(await screen.findByTestId("repository-select"), {
-      target: { value: "repo-1" },
-    });
+    fireEvent.click(await screen.findByTestId("repository-option-repo-1"));
     fireEvent.click(screen.getByTestId("start-onboarding-button"));
     await waitFor(() => expect(routerState.push).toHaveBeenCalledWith("/onboarding/sess-9"));
     // No second session beside the first one.
@@ -507,9 +506,7 @@ describe("starting an onboarding", () => {
         },
       },
     });
-    fireEvent.change(await screen.findByTestId("repository-select"), {
-      target: { value: "repo-1" },
-    });
+    fireEvent.click(await screen.findByTestId("repository-option-repo-1"));
     // Not only grey: the reason is in words.
     expect(await screen.findByTestId("repository-blocked")).toHaveTextContent(/security review/i);
     expect(screen.getByTestId("start-onboarding-button")).toBeDisabled();
@@ -731,7 +728,7 @@ describe("session actions", () => {
         body: session({
           state: "imported",
           imported_project_id: "proj-1",
-          imported_project_key: "datalake",
+          imported_project_key: "widget",
           imported_at: "2026-08-09T11:00:00Z",
         }),
       },
@@ -740,7 +737,7 @@ describe("session actions", () => {
     for (const action of ["analyze", "approve", "apply", "cancel", "gitops"]) {
       expect(screen.queryByTestId(`action-${action}`)).not.toBeInTheDocument();
     }
-    expect(screen.getAllByText("datalake").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("widget").length).toBeGreaterThan(0);
   });
 
   it("offers nothing on a cancelled session", async () => {
@@ -797,10 +794,10 @@ describe("the plan a reviewer reads", () => {
             planItem({
               entity_kind: "project",
               action: "update_metadata",
-              item_key: "project:datalake",
-              proposed_name: "Datalake Platform",
+              item_key: "project:widget",
+              proposed_name: "Widget Service",
               changes: {
-                display_name: { before: "Datalake", after: "Datalake Platform" },
+                display_name: { before: "Widget", after: "Widget Service" },
               },
             }),
           ],
@@ -809,10 +806,10 @@ describe("the plan a reviewer reads", () => {
     });
     // Its own group, not filed under "No change".
     expect(await screen.findByTestId("plan-group-update_metadata")).toBeInTheDocument();
-    const changes = screen.getByTestId("changes-project:datalake");
+    const changes = screen.getByTestId("changes-project:widget");
     expect(changes).toHaveTextContent("display_name");
-    expect(changes).toHaveTextContent("before: Datalake");
-    expect(changes).toHaveTextContent("after: Datalake Platform");
+    expect(changes).toHaveTextContent("before: Widget");
+    expect(changes).toHaveTextContent("after: Widget Service");
   });
 
   it("shows an absent previous value as absent, not as an empty string", async () => {
@@ -825,14 +822,14 @@ describe("the plan a reviewer reads", () => {
             planItem({
               entity_kind: "service",
               action: "update_metadata",
-              item_key: "service:datalake-api",
+              item_key: "service:widget-api",
               changes: { component: { before: null, after: "api" } },
             }),
           ],
         },
       },
     });
-    const changes = await screen.findByTestId("changes-service:datalake-api");
+    const changes = await screen.findByTestId("changes-service:widget-api");
     // "there was nothing recorded" is not "it was blank".
     expect(changes).toHaveTextContent("before: —");
     expect(changes).toHaveTextContent("after: api");
@@ -848,8 +845,8 @@ describe("the plan a reviewer reads", () => {
             planItem({
               entity_kind: "workload_binding",
               action: "create",
-              item_key: "binding:datalake-api",
-              proposed_name: "datalake-api",
+              item_key: "binding:widget-api",
+              proposed_name: "widget-api",
             }),
           ],
         },
@@ -890,15 +887,221 @@ describe("the plan a reviewer reads", () => {
           items: [
             planItem({
               action: "update_metadata",
-              item_key: "service:datalake-api",
+              item_key: "service:widget-api",
               changes: { labels: { before: null, after: { team: "data" } } },
             }),
           ],
         },
       },
     });
-    const changes = await screen.findByTestId("changes-service:datalake-api");
+    const changes = await screen.findByTestId("changes-service:widget-api");
     expect(changes).toHaveTextContent("(structured value)");
     expect(changes.textContent).not.toContain("{");
+  });
+});
+
+// ===========================================================================
+// the picker has to reach past the first page
+// ===========================================================================
+
+function candidatePage(count: number, offset = 0, nextCursor: string | null = null) {
+  return {
+    items: Array.from({ length: count }, (_, index) => {
+      const number = offset + index + 1;
+      return candidate({
+        id: `repo-${number}`,
+        full_name: `Duosis-Developer-Team/repo-${String(number).padStart(3, "0")}`,
+      });
+    }),
+    next_cursor: nextCursor,
+  };
+}
+
+describe("repository picker pagination and search", () => {
+  it("reaches a repository past the first page", async () => {
+    // 51+ candidates: everything after the first page used to be
+    // unreachable, because the picker asked once and rendered what it got.
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/v1/onboarding/repositories?")) {
+          call += 1;
+          const body = url.includes("cursor=")
+            ? candidatePage(26, 25, null)
+            : candidatePage(25, 0, "Y3Vyc29y");
+          return new Response(JSON.stringify(body), { status: 200 });
+        }
+        const routes: Record<string, unknown> = {
+          "/v1/onboarding/github/status": status(),
+          "/v1/onboarding/sessions": { items: [], total: 0, limit: 25, offset: 0 },
+        };
+        const body = routes[url.split("?")[0]];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }),
+    );
+    render(<OnboardingPage />);
+
+    await screen.findByTestId("repository-option-repo-1");
+    expect(screen.queryByTestId("repository-option-repo-51")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("repository-load-more"));
+    expect(await screen.findByTestId("repository-option-repo-51")).toBeInTheDocument();
+    // The first page is still there — "load more" appends, it does not
+    // replace, so an operator does not lose what they were looking at.
+    expect(screen.getByTestId("repository-option-repo-1")).toBeInTheDocument();
+    expect(screen.getByTestId("repository-list-complete")).toBeInTheDocument();
+    expect(call).toBe(2);
+  });
+
+  it("searches on the server rather than filtering one page in the browser", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/v1/onboarding/repositories?")) {
+          urls.push(url);
+          const body = url.includes("search=")
+            ? { items: [candidate({ id: "repo-far", full_name: "Duosis-Developer-Team/zeta" })], next_cursor: null }
+            : candidatePage(25, 0, "Y3Vyc29y");
+          return new Response(JSON.stringify(body), { status: 200 });
+        }
+        const routes: Record<string, unknown> = {
+          "/v1/onboarding/github/status": status(),
+          "/v1/onboarding/sessions": { items: [], total: 0, limit: 25, offset: 0 },
+        };
+        const body = routes[url.split("?")[0]];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }),
+    );
+    render(<OnboardingPage />);
+    await screen.findByTestId("repository-option-repo-1");
+
+    fireEvent.change(screen.getByTestId("repository-search"), { target: { value: "zeta" } });
+
+    // A repository that sorts past the first page is found because the
+    // SERVER searched, not because it happened to already be loaded.
+    expect(await screen.findByTestId("repository-option-repo-far")).toBeInTheDocument();
+    expect(urls.some((url) => url.includes("search=zeta"))).toBe(true);
+  });
+
+  it("separates 'no match' from 'nothing you can onboard'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/v1/onboarding/repositories?")) {
+          const body = url.includes("search=")
+            ? { items: [], next_cursor: null }
+            : candidatePage(2, 0, null);
+          return new Response(JSON.stringify(body), { status: 200 });
+        }
+        const routes: Record<string, unknown> = {
+          "/v1/onboarding/github/status": status(),
+          "/v1/onboarding/sessions": { items: [], total: 0, limit: 25, offset: 0 },
+        };
+        const body = routes[url.split("?")[0]];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }),
+    );
+    render(<OnboardingPage />);
+    await screen.findByTestId("repository-option-repo-1");
+
+    fireEvent.change(screen.getByTestId("repository-search"), { target: { value: "nothing" } });
+    // "Your search matched nothing" and "you can onboard nothing" are
+    // different answers and only one of them means go and get access.
+    expect(await screen.findByTestId("start-no-matches")).toBeInTheDocument();
+    expect(screen.queryByTestId("start-empty")).not.toBeInTheDocument();
+  });
+
+  it("preselects a linked repository by id, wherever it sorts", async () => {
+    const fetched: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        fetched.push(url);
+        if (url === "/v1/onboarding/repositories/repo-far") {
+          return new Response(
+            JSON.stringify(candidate({ id: "repo-far", full_name: "Duosis-Developer-Team/zeta" })),
+            { status: 200 },
+          );
+        }
+        if (url.startsWith("/v1/onboarding/repositories?")) {
+          return new Response(JSON.stringify(candidatePage(25, 0, "Y3Vyc29y")), { status: 200 });
+        }
+        const routes: Record<string, unknown> = {
+          "/v1/onboarding/github/status": status(),
+          "/v1/onboarding/sessions": { items: [], total: 0, limit: 25, offset: 0 },
+        };
+        const body = routes[url.split("?")[0]];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }),
+    );
+    searchParamsState.current = new URLSearchParams("repository_id=repo-far");
+    render(<OnboardingPage />);
+
+    // Fetched by id, not hunted for in the first page — a preselection that
+    // works only near the top of the alphabet is a coincidence.
+    expect(await screen.findByTestId("repository-selected")).toHaveTextContent("zeta");
+    expect(fetched).toContain("/v1/onboarding/repositories/repo-far");
+    expect(screen.getByTestId("start-onboarding-button")).not.toBeDisabled();
+  });
+
+  it("says a linked repository is unavailable without confirming it exists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/v1/onboarding/repositories/repo-other-scope") {
+          return new Response(JSON.stringify(errorBody("not_found", "not found")), {
+            status: 404,
+          });
+        }
+        if (url.startsWith("/v1/onboarding/repositories?")) {
+          return new Response(JSON.stringify(candidatePage(2, 0, null)), { status: 200 });
+        }
+        const routes: Record<string, unknown> = {
+          "/v1/onboarding/github/status": status(),
+          "/v1/onboarding/sessions": { items: [], total: 0, limit: 25, offset: 0 },
+        };
+        const body = routes[url.split("?")[0]];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }),
+    );
+    searchParamsState.current = new URLSearchParams("repository_id=repo-other-scope");
+    render(<OnboardingPage />);
+
+    const denied = await screen.findByTestId("preselect-denied");
+    // Nothing about whether it exists, who owns it, or what it is called.
+    expect(denied).toHaveTextContent(/onboarding manage permission/i);
+    expect(denied.textContent).not.toContain("repo-other-scope");
+    expect(screen.getByTestId("start-onboarding-button")).toBeDisabled();
+  });
+
+  it("selects and starts from the keyboard alone", async () => {
+    const calls = renderList({
+      "/v1/onboarding/sessions": {
+        status: 200,
+        body: { items: [], total: 0, limit: 25, offset: 0 },
+      },
+    }).calls;
+
+    const option = await screen.findByTestId("repository-option-repo-1");
+    option.focus();
+    expect(option).toHaveFocus();
+    // Enter on a focused button is a click; no pointer is involved.
+    fireEvent.keyDown(option, { key: "Enter", code: "Enter" });
+    fireEvent.click(option);
+
+    const start = screen.getByTestId("start-onboarding-button");
+    start.focus();
+    expect(start).toHaveFocus();
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(calls.some((call) => call.init?.method === "POST")).toBe(true),
+    );
   });
 });
