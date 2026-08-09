@@ -191,7 +191,15 @@ rendering it: a manifest is a file to commit, not markup to put in a page.
 
 This is how an operator adds `.drake/project.yaml` to a repository that has
 none. Drake cannot commit it for them: `Contents: write` is not requested,
-and the GitOps pull-request provider is Sprint 12B with its flag off.
+and no pull-request provider exists yet.
+
+**Production has no GitOps provider at all.** The only implementation is a
+recording test double, and a production process is not allowed to hold one
+— it would report a pull request that does not exist. So
+`github_gitops_pr_enabled` and `gitops_worker_enabled` are refused outside
+local/test: a process configured with either does not start, and says which
+flag to turn off. Enabling repository writes is Sprint 12B's real provider
+plus a separate decision, not a flag change.
 
 ## Session states, and what may act from them
 

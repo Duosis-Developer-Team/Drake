@@ -375,3 +375,51 @@ now, with `before` / `after` per field and `—` for an absent value. And an
 apply counter that a pre-0020 receipt never recorded renders as "Not
 recorded" rather than `0`, all the way out to the TypeScript type, which is
 `number | null`.
+
+## Sprint 12A.2b — the production boundary, and what Sprint 12A ships as
+
+Sprint 12A is complete. What it delivers is a **read-only-to-GitHub**
+onboarding control plane: Drake analyses a repository, proposes a reviewed
+plan, and writes the approved result to its own catalog. It does not write
+to anybody's repository, and cannot.
+
+    12A.2a  the authoritative browser workflow, and retiring the
+            Sprint 5B import path
+    12A.2b  the production fail-closed boundary and the
+            release-candidate proof
+    12B     a real GitHub create-or-reuse provider, and a separate
+            decision about switching it on
+
+**`RecordingProvider` cannot exist in a production process.** It was the
+startup default. It is a test double, and it returns a pull-request
+NUMBER — so a production runtime holding one would report an open pull
+request that does not exist, against a branch nobody created, and every
+layer downstream would agree with it: the request row says `active`, the
+API says `active`, the screen says `active`. A fake that is wrong in a way
+nothing can detect is worse than a missing feature.
+
+Two independent guards, because either alone leaves a way in:
+
+- settings validation refuses `github_gitops_pr_enabled` and
+  `gitops_worker_enabled` outside local/test, naming both flags, so the
+  process does not start;
+- the startup wiring constructs no provider outside local/test, so a
+  caller that somehow got past the flags still holds nothing to call.
+
+Fail closed at startup rather than at the first request. A worker running
+against a fake, or requests accepted and never deliverable, are both
+half-enabled states — and a half-enabled write path is worse than a
+disabled one, because it looks like it works.
+
+**No new API field was added to say this.** `gitops_pr_enabled` on the
+status endpoint already carries it: production can no longer have that flag
+on, so the value is `false` there by construction, and the screen's
+existing sentence — *repository writes are disabled; no branch or pull
+request will be created* — is the truth rather than a placeholder.
+
+**Activation is not a flag change.** Turning GitOps on needs Sprint 12B's
+real provider AND a separate CTO decision. The flags alone now refuse.
+
+Unchanged by this slice, and deliberately: no real GitHub write exists,
+`github_gitops_pr_enabled` is off, the Datalake `manual_env_review` gate is
+open, no migration was added (head stays `0020`), and nothing was deployed.

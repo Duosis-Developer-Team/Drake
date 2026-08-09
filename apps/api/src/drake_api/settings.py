@@ -435,6 +435,22 @@ class Settings(BaseSettings):
                 "GitOps pull requests require the GitHub App: a write path cannot be "
                 "enabled while the integration that authenticates it is off"
             )
+        if self.github_gitops_pr_enabled or self.gitops_worker_enabled:
+            # There is no real pull-request provider yet — Sprint 12B builds
+            # it. The only implementation that exists is a recording fake,
+            # and a fake returns a pull-request NUMBER: with it wired in
+            # production, Drake would report an open pull request that does
+            # not exist, against a branch nobody created.
+            #
+            # So this refuses at startup rather than at the first request.
+            # A half-enabled write path — a worker running against a fake,
+            # or requests accepted and never deliverable — is worse than a
+            # disabled one, because both of those look like they are working.
+            raise RuntimeError(
+                "GitOps repository writes cannot be enabled outside local/test: no real "
+                "pull-request provider is configured. Turn off github_gitops_pr_enabled "
+                "and gitops_worker_enabled."
+            )
         if self.github_jwt_ttl_seconds > 600:
             raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
         for key, destination in self.notification_webhooks.items():

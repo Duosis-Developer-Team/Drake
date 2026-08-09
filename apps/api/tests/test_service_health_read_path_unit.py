@@ -32,10 +32,30 @@ from drake_api.service_health.policy import HealthStatus
 from drake_api.service_health.presets import HTTP_SERVICE, KUBERNETES_BASELINE, get_preset
 from fastapi import HTTPException
 
-# Relative to the real clock: `current_health` reads the wall clock itself,
-# and a fixed date would make every sample look months stale.
+# Relative to the real clock, and re-stamped for every test.
+#
+# `current_health` reads the wall clock itself, so a fixed date would make
+# every sample look months stale. A constant captured at IMPORT has the same
+# problem more slowly: the module is imported when collection starts, and in
+# a full single-process run these tests execute minutes later — by which
+# time samples stamped at import are old enough to be judged
+# `telemetry_stale`, and a stale verdict is deliberately not promoted to
+# last-good. The two tests that read the cache directly then found nothing
+# there, and only ever in a long run.
+#
+# The autouse fixture below re-stamps this before each test, so a test's
+# fixture data and its notion of "now" always come from the same instant no
+# matter how long the process has been alive.
 NOW = datetime.now(UTC).replace(microsecond=0)
 NOW_TS = int(NOW.timestamp())
+
+
+@pytest.fixture(autouse=True)
+def _stamp_now() -> None:
+    """Anchor the module's clock to the moment this test starts."""
+    global NOW, NOW_TS
+    NOW = datetime.now(UTC).replace(microsecond=0)
+    NOW_TS = int(NOW.timestamp())
 
 
 # --- doubles -------------------------------------------------------------
