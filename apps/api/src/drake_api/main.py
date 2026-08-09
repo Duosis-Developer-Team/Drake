@@ -41,6 +41,8 @@ from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
 from drake_api.notifications.worker import NotificationWorker
+from drake_api.onboarding.gitops import GitOpsWorker, RecordingProvider
+from drake_api.onboarding.router import router as onboarding_router
 from drake_api.protection.router import router as protection_router
 from drake_api.protection.router_ingest import router as protection_ingest_router
 from drake_api.rbac.options_router import router as rbac_options_router
@@ -83,9 +85,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     silence_worker = getattr(app.state, "silence_worker", None)
     if silence_worker is not None:
         await silence_worker.start()
+    gitops_worker = getattr(app.state, "gitops_worker", None)
+    if gitops_worker is not None:
+        await gitops_worker.start()
     try:
         yield
     finally:
+        if gitops_worker is not None:
+            await gitops_worker.stop()
         if silence_worker is not None:
             await silence_worker.stop()
         if slo_evaluator is not None:
@@ -233,6 +240,17 @@ def create_app(
         if settings.slo_evaluator_enabled
         else None
     )
+    # The GitOps worker is the only path through which Drake would WRITE to
+    # a repository. Off by default, and while it is off nothing is claimed,
+    # no token is minted and no provider call is made. The provider is the
+    # recording fake until a real one is wired: a half-configured write path
+    # is worse than none.
+    app.state.gitops_provider = RecordingProvider()
+    app.state.gitops_worker = (
+        GitOpsWorker(get_engine(settings), settings, app.state.gitops_provider)
+        if (settings.gitops_worker_enabled and settings.github_gitops_pr_enabled)
+        else None
+    )
     # The only outbound provider MUTATION in Drake. Off unless an operator
     # turned it on and registered an Alertmanager.
     app.state.silence_worker = (
@@ -252,6 +270,7 @@ def create_app(
     app.include_router(integrations_router)
     app.include_router(github_router)
     app.include_router(github_onboarding_router)
+    app.include_router(onboarding_router)
     app.include_router(github_webhook_router)
     app.include_router(deployments_router)
     app.include_router(protection_router)

@@ -29,13 +29,13 @@ describe("AppShell (authenticated)", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders all fourteen primary navigation sections", async () => {
+  it("renders all fifteen primary navigation sections", async () => {
     await renderAuthenticated();
     const nav = screen.getByRole("navigation", { name: "Primary" });
     for (const item of NAVIGATION) {
       expect(within(nav).getByText(item.label)).toBeInTheDocument();
     }
-    expect(NAVIGATION).toHaveLength(14);
+    expect(NAVIGATION).toHaveLength(15);
   });
 
   it("marks the active section and labels future sections honestly", async () => {
@@ -43,10 +43,10 @@ describe("AppShell (authenticated)", () => {
     const active = screen.getByRole("link", { name: /command center/i });
     expect(active).toHaveAttribute("aria-current", "page");
     const nav = screen.getByRole("navigation", { name: "Primary" });
-    // 14 items; Command Center + Access Control unlocked → 12 remain "soon"
-    // for a session with no grants. Alerts and Service Objectives are gated
-    // on `alert.view` / `slo.view`, which this session does not hold.
-    expect(within(nav).getAllByText("soon").length).toBe(12);
+    // 15 items; Command Center + Access Control unlocked → 13 remain "soon"
+    // for a session with no grants. Alerts, Service Objectives and Onboard
+    // Project are gated on permissions this session does not hold.
+    expect(within(nav).getAllByText("soon").length).toBe(13);
   });
 
   it("theme toggle switches the dark class and persists the choice", async () => {
