@@ -80,8 +80,31 @@ export const GITOPS_LABELS: Record<GitOpsState, string> = {
   cancelled: "Cancelled",
 };
 
+/** Plan entity kinds. `workload_binding` is its own kind since migration
+ * 0019 — it used to borrow `service` with a flag in `detail`, which made two
+ * different decisions read as one. */
+export type PlanEntityKind =
+  | "project"
+  | "environment"
+  | "service"
+  | "owner_team"
+  | "repository"
+  | "cluster_binding"
+  | "namespace_binding"
+  | "metric_profile"
+  | "slo_profile"
+  | "deployment_source"
+  | "workload_binding";
+
+/** One field's before and after, canonical on both sides. Shown so an
+ * approval is informed rather than a list of field names. */
+export interface FieldChange {
+  before: unknown;
+  after: unknown;
+}
+
 export interface PlanItem {
-  entity_kind: string;
+  entity_kind: PlanEntityKind;
   action: PlanAction;
   item_key: string;
   proposed_name: string | null;
@@ -90,7 +113,13 @@ export interface PlanItem {
   reason_code: string | null;
   reason: string;
   detail: Record<string, unknown>;
+  /** The canonical values apply will execute — bound to the plan digest. */
+  payload: Record<string, unknown>;
+  changes: Record<string, FieldChange>;
   blocking: boolean;
+  /** False for an item that is shown but changes nothing; `detail`
+   * carries a bounded reason code saying why. */
+  materialized: boolean;
 }
 
 export interface Plan {
@@ -202,6 +231,29 @@ export interface GitHubStatus {
   gitops_pending: number;
   gitops_active: number;
   gitops_failed: number;
+}
+
+/** What an apply actually committed. Counters are additive; older clients
+ * that read only the first three keep working.
+ *
+ * The four extended counters are `number | null`, and the `null` is load
+ * bearing. Apply receipts written before migration 0020 never recorded
+ * them, so a replay of one of those reports "not recorded" rather than a
+ * zero that would read as a measurement. Do NOT normalise it to 0 — that
+ * turns "we do not know" into "nothing happened", which is the exact
+ * confusion the backend went to the trouble of avoiding. Render it as
+ * unknown, or omit the counter. */
+export interface ApplyResult {
+  outcome: "applied" | "unchanged" | "failed";
+  project_id: string | null;
+  created_entities: number;
+  linked_entities: number;
+  unchanged_entities: number;
+  no_change_count: number;
+  metadata_updated: number | null;
+  slo_definitions_created: number | null;
+  slo_definitions_updated: number | null;
+  bindings_created: number | null;
 }
 
 export interface SessionPage {

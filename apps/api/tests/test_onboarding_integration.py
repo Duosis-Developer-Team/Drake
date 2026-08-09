@@ -161,7 +161,16 @@ def snapshot(**overrides: Any) -> CatalogSnapshot:
 
 
 def actions_for(plan: Any, kind: str) -> dict[str, str]:
+    """Items of one entity kind."""
     return {item.item_key: item.action for item in plan.items if item.entity_kind == kind}
+
+
+def bindings_for(plan: Any) -> dict[str, str]:
+    return {
+        item.item_key: item.action
+        for item in plan.items
+        if item.entity_kind == str(EntityKind.WORKLOAD_BINDING)
+    }
 
 
 def test_a_clean_manifest_plans_creates_and_blocks_nothing() -> None:
@@ -785,8 +794,9 @@ async def test_applying_twice_creates_one_project_and_one_audit(
     )
     assert first.outcome == "applied"
     # A client that lost the response repeats the call and gets the recorded
-    # answer rather than a second project.
-    assert second.outcome == "unchanged"
+    # answer rather than a second project — the WHOLE recorded answer,
+    # outcome word included. A replay is not a different operation.
+    assert second.outcome == "applied"
     assert second.project_id == first.project_id
 
     async with engine.connect() as connection:
