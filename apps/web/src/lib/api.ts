@@ -59,12 +59,26 @@ export interface MutateOptions {
   body?: unknown;
   ifMatch?: string;
   signal?: AbortSignal;
+  /**
+   * An idempotency key the CALLER owns.
+   *
+   * The default — a fresh UUID per call — is right for a request that is
+   * safe to repeat and pointless to deduplicate. It is wrong for anything
+   * the caller may need to RETRY: a new key on a retry describes a new
+   * operation, so a request that timed out after the server committed it
+   * would be applied a second time.
+   *
+   * Pass this when the caller holds one key across its own retries. Apply
+   * does, and sends the same value in the body so the server can bind the
+   * receipt to it.
+   */
+  idempotencyKey?: string;
 }
 
 export async function apiMutate<T>(path: string, options: MutateOptions): Promise<T> {
   const headers: Record<string, string> = {
     "X-CSRF-Token": options.csrfToken,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": options.idempotencyKey ?? crypto.randomUUID(),
   };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.ifMatch) headers["If-Match"] = options.ifMatch;

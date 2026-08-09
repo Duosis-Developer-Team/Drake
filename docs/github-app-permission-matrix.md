@@ -62,16 +62,39 @@ permission is absent — it never degrades to `PASS`.
 | `installation` | created / deleted / suspend / unsuspend — installation lifecycle and access loss |
 | `installation_repositories` | repositories added to or removed from the installation |
 | `repository` | renamed, transferred, privatised, archived, deleted |
+| `push` | default-branch commits, so plans built on an older commit become `stale` |
 
-No other event is subscribed. Adding one requires a matching consumer
-and an update to this matrix.
+Four events, and no others. Adding one requires a matching consumer and an
+update to this matrix.
 
-## Explicitly forbidden in Sprint 5A
+`push` was added in Sprint 11 and this matrix did not record it, which is
+the failure mode a permission matrix exists to prevent: a subscription
+nobody wrote down is a subscription nobody reviews. It is consumed by
+`apps/api/src/drake_api/github_app/webhook.py`, which calls
+`onboarding.service.mark_stale_for_commit` when the default branch moves.
+
+It carries no new permission — `push` deliveries arrive under **Contents:
+read**, which the App already holds for static discovery — and it changes
+nothing in a repository. Its only effect is to mark reviews stale: a plan
+is a review of one commit, and a review of a commit is not a review of its
+successor. Deliveries for other branches are ignored.
+
+## Explicitly forbidden
 
 Not requested, not used, and rejected in review if proposed:
 
 - **Administration: write** — would allow changing branch protection or
   rulesets. Drake evaluates; it does not remediate.
+- **Contents: write** — would allow committing to a repository. Sprint
+  12A.2a deliberately did NOT add it: the operator commits the generated
+  manifest themselves, from
+  `GET /v1/onboarding/sessions/{id}/manifest-draft`. Whether Drake ever
+  writes a branch is Sprint 12B's decision to make on its own evidence.
+- **Pull requests: write** — same reasoning. `github_gitops_pr_enabled`
+  is off, the provider behind it is a recording fake, and the flag stays
+  off in this slice.
+- **Workflows / Actions: write** — would let Drake change what a
+  repository executes. Never.
 
 ## Sprint 5B addition: Contents (read)
 

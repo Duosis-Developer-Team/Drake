@@ -43,6 +43,7 @@ from test_github_integration import github_harness
 from test_onboarding_integration import (
     _bootstrap,
     _identity,
+    _principal,
     golden_tree,
     manifest_document,
     snapshot,
@@ -204,7 +205,11 @@ async def _approved_session(
     settings = harness.app.state.settings
     client = harness.app.state.github_client
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)
@@ -984,8 +989,49 @@ async def test_two_concurrent_applies_produce_exactly_one_of_everything(
     assert audits == 1
 
 
+async def _two_plans(
+    harness: Any, engine: AsyncEngine, row_id: uuidlib.UUID, actor: uuidlib.UUID
+) -> tuple[uuidlib.UUID, int, int]:
+    """A session with two real plans, the SECOND one approved.
+
+    Both analyses happen before the approval, because the state machine
+    allows neither of the shortcuts that would be easier to write: an
+    `approved` session cannot be re-analysed (that would supersede a plan
+    somebody accepted, silently) and an `imported` one cannot be re-opened
+    at all. So the only honest way to hold two plans is to build both while
+    the session is still `ready`.
+    """
+    settings = harness.app.state.settings
+    client = harness.app.state.github_client
+    created = await service.create_session(
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
+    )
+    session_id = uuidlib.UUID(created["session_id"])
+    first = await service.analyze(engine, settings, client, session_id=session_id)
+    second = await service.analyze(engine, settings, client, session_id=session_id)
+    first_version = int(first["plan_version"])
+    second_version = int(second["plan_version"])
+    assert first_version != second_version
+    await service.approve(
+        engine,
+        session_id=session_id,
+        plan_version=second_version,
+        expected_version=await _session_version(engine, session_id),
+        actor_identity_id=actor,
+    )
+    return session_id, first_version, second_version
+
+
 async def _second_plan(harness: Any, engine: AsyncEngine, session_id: uuidlib.UUID) -> int:
-    """Re-analyse a session, producing a genuinely different plan version."""
+    """Re-analyse a session, producing a genuinely different plan version.
+
+    Only legal while the session is still `ready`: an `approved` plan is not
+    superseded silently, and `imported` is terminal.
+    """
     analysis = await service.analyze(
         engine,
         harness.app.state.settings,
@@ -1010,16 +1056,14 @@ async def test_the_same_key_under_a_different_plan_is_a_conflict(
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     actor = await _identity(engine)
-    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
-    first = await _apply(harness, engine, session_id, plan_version, actor, "shared-key")
-    assert first.outcome == "applied"
+    session_id, first_version, second_version = await _two_plans(harness, engine, row_id, actor)
 
-    # A real second plan, from a real second analysis of the same session.
-    second_version = await _second_plan(harness, engine, session_id)
-    assert second_version != plan_version
+    applied = await _apply(harness, engine, session_id, second_version, actor, "shared-key")
+    assert applied.outcome == "applied"
 
+    # The same key against the OTHER plan is a different request.
     with pytest.raises(service.OnboardingError) as raised:
-        await _apply(harness, engine, session_id, second_version, actor, "shared-key")
+        await _apply(harness, engine, session_id, first_version, actor, "shared-key")
     assert raised.value.code == "idempotency_key_reused"
     assert raised.value.status == 409
 
@@ -1099,14 +1143,14 @@ async def test_a_race_on_one_key_and_two_plans_is_settled_by_the_database(
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     actor = await _identity(engine)
-    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
-
-    # A real apply first, so the winner promotes a receipt that names a real
-    # project instead of a fabricated one.
-    applied = await _apply(harness, engine, session_id, plan_version, actor, "seed-key-0001")
+    # Two plans, both built while the session was still `ready`, then a real
+    # apply so the winner promotes a receipt naming a real project instead
+    # of a fabricated one.
+    session_id, first_version, second_version = await _two_plans(harness, engine, row_id, actor)
+    assert first_version != second_version
+    applied = await _apply(harness, engine, session_id, second_version, actor, "seed-key-0001")
     assert applied.outcome == "applied"
     assert applied.project_id is not None
-    await _second_plan(harness, engine, session_id)
 
     async with engine.connect() as connection:
         plans = [

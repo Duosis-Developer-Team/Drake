@@ -16,25 +16,46 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useRef, useState } from "react";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import { ActionBadge, GitOpsBadge, SessionBadge } from "@/components/onboarding/primitives";
+import { SessionActions } from "@/components/onboarding/SessionActions";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
   formatAge,
   shortSha,
   type Analysis,
+  type ApplyResult,
   type Finding,
+  type GitHubStatus,
   type OnboardingSession,
   type Plan,
   type PlanItem,
 } from "@/lib/onboarding";
+import { useSession } from "@/lib/session";
 
+/**
+ * The five outcomes a plan item can have, in the order an operator reads
+ * them: what appears, what attaches to something that exists, what CHANGES
+ * on a row that already exists, what stays as it is, and what Drake will not
+ * decide.
+ *
+ * `update_metadata` used to sit under "No change", which was the one
+ * grouping that could mislead: an item that rewrites a display name is not
+ * a no-op, and filing it under one hides the only part of an apply that
+ * edits an existing row.
+ */
 const GROUPS: { title: string; actions: string[]; note?: string }[] = [
   { title: "Would create", actions: ["create"] },
   { title: "Would link to an existing catalog row", actions: ["link"] },
-  { title: "No change", actions: ["no_change", "update_metadata"] },
+  {
+    title: "Would update metadata",
+    actions: ["update_metadata"],
+    note: "These rewrite fields on rows that already exist. Approving accepts these exact values.",
+  },
+  { title: "No change", actions: ["no_change"] },
   {
     title: "Needs a decision",
     actions: ["conflict", "unmapped", "unsupported"],
@@ -42,19 +63,84 @@ const GROUPS: { title: string; actions: string[]; note?: string }[] = [
   },
 ];
 
+/** Before and after, side by side. Never a raw JSON blob. */
+function Changes({ item }: { item: PlanItem }) {
+  const fields = Object.entries(item.changes ?? {});
+  if (fields.length === 0) return null;
+  return (
+    <dl className="mt-1 ml-6 space-y-1" data-testid={`changes-${item.item_key}`}>
+      {fields.map(([field, pair]) => (
+        <div key={field} className="text-[11px]">
+          <dt className="font-mono text-ink-secondary">{field}</dt>
+          <dd className="ml-3 flex flex-wrap gap-x-3">
+            <span className="text-ink-muted">
+              before:{" "}
+              <span className="font-mono text-ink-secondary">{renderValue(pair.before)}</span>
+            </span>
+            <span className="text-ink-muted">
+              after:{" "}
+              <span className="font-mono text-ink">{renderValue(pair.after)}</span>
+            </span>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * An absent value is shown as absent.
+ *
+ * `null` here means the field had nothing recorded, which is not the same
+ * as an empty string and definitely not the same as zero. Rendering it as
+ * `""` would make "there was no display name" look like "the display name
+ * was blank".
+ */
+function renderValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value === "" ? "—" : value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  // Objects and arrays are summarised, never dumped: a plan review is not a
+  // place to read serialized JSON.
+  return Array.isArray(value) ? `${value.length} item(s)` : "(structured value)";
+}
+
 export default function OnboardingSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const [session, retry] = useApi<OnboardingSession>(`/v1/onboarding/sessions/${sessionId}`);
-  const [plan] = useApi<{ plan: Plan | null; items: PlanItem[] }>(
+  const { state: auth } = useSession();
+  const csrfToken = auth.status === "authenticated" ? auth.me.csrf_token : "";
+  const [session, reloadSession] = useApi<OnboardingSession>(
+    `/v1/onboarding/sessions/${sessionId}`,
+  );
+  const [plan, reloadPlan] = useApi<{ plan: Plan | null; items: PlanItem[] }>(
     `/v1/onboarding/sessions/${sessionId}/plan`,
   );
-  const [findings] = useApi<{ analysis: Analysis | null; findings: Finding[] }>(
+  const [findings, reloadFindings] = useApi<{ analysis: Analysis | null; findings: Finding[] }>(
     `/v1/onboarding/sessions/${sessionId}/findings`,
   );
+  const [status] = useApi<GitHubStatus>("/v1/onboarding/github/status");
+
+  // Owned by the screen, not by the action panel. Reloading the session
+  // unmounts that panel, so a result kept inside it would disappear the
+  // instant the apply that produced it refreshed the page — and the
+  // idempotency key would be regenerated, turning the next retry into a
+  // second operation.
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const applyKey = useRef<{ version: number; key: string } | null>(null);
+
+  // One refresh for all three. A mutation can change the session's state,
+  // its plan and its findings together, and reloading only the one the
+  // button belongs to leaves the other two describing a session that has
+  // moved on.
+  const reloadAll = () => {
+    reloadSession();
+    reloadPlan();
+    reloadFindings();
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      <LoadGate value={session} retry={retry}>
+      <LoadGate value={session} retry={reloadSession}>
         {(data) => (
           <>
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -62,7 +148,7 @@ export default function OnboardingSessionPage() {
                 <h1 className="text-xl font-semibold text-ink">
                   {data.repository.full_name}
                 </h1>
-                <p className="mt-1 font-mono text-xs text-ink-muted">
+                <p className="mt-1 font-mono text-xs break-all text-ink-muted">
                   {data.repository.default_branch} ·{" "}
                   {shortSha(data.analyzed_commit_sha)}
                 </p>
@@ -93,6 +179,17 @@ export default function OnboardingSessionPage() {
                 </div>
               </Card>
             ) : null}
+
+            <SessionActions
+              session={data}
+              plan={plan.state === "ready" ? plan.data.plan : null}
+              csrfToken={csrfToken}
+              gitopsEnabled={status.state === "ready" ? status.data.gitops_pr_enabled : false}
+              onChanged={reloadAll}
+              result={applyResult}
+              onResult={setApplyResult}
+              applyKey={applyKey}
+            />
 
             <div className="grid gap-5 md:grid-cols-2">
               <Card title="Safe discovery">
@@ -178,7 +275,14 @@ export default function OnboardingSessionPage() {
                 />
               ) : (
                 <div className="space-y-4" data-testid="plan">
-                  <div className="flex flex-wrap gap-4 text-xs text-ink-secondary">
+                  {/*
+                    `min-w-0` and `break-all` on the digest: a 64-character
+                    monospace token is one unbreakable word, so flex-wrap
+                    cannot help it — it pushed the page 19px wider than the
+                    viewport at 768px, which scrolls every row's right-hand
+                    end (where the actions are) off screen.
+                  */}
+                  <div className="flex min-w-0 flex-wrap gap-4 text-xs text-ink-secondary">
                     <span>
                       Plan <span className="font-mono">v{plan.data.plan.plan_version}</span>
                     </span>
@@ -190,7 +294,9 @@ export default function OnboardingSessionPage() {
                     </span>
                     <span>
                       Digest{" "}
-                      <span className="font-mono">{plan.data.plan.plan_digest}</span>
+                      <span className="font-mono break-all">
+                        {plan.data.plan.plan_digest}
+                      </span>
                     </span>
                     <span>{plan.data.plan.total_items} items</span>
                   </div>
@@ -205,7 +311,10 @@ export default function OnboardingSessionPage() {
                         <p className="mb-1.5 text-xs font-medium text-ink">{group.title}</p>
                         <ul className="space-y-1.5">
                           {items.map((item) => (
-                            <li key={item.item_key} className="flex flex-wrap items-baseline gap-2">
+                            <li
+                              key={item.item_key}
+                              className="flex min-w-0 flex-wrap items-baseline gap-2 break-words"
+                            >
                               <ActionBadge action={item.action} />
                               <span className="font-mono text-xs text-ink">
                                 {item.entity_kind}
@@ -218,6 +327,16 @@ export default function OnboardingSessionPage() {
                                   {item.reason}
                                 </span>
                               ) : null}
+                              {item.entity_kind === "deployment_source" &&
+                              item.detail?.materialized === false ? (
+                                <span
+                                  className="text-[11px] text-ink-muted"
+                                  data-testid="deployment-source-note"
+                                >
+                                  Recorded as evidence only — no catalog row is written for it.
+                                </span>
+                              ) : null}
+                              <Changes item={item} />
                             </li>
                           ))}
                         </ul>

@@ -45,6 +45,18 @@ const FORBIDDEN_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: "promql", pattern: new RegExp("prom" + "ql") },
   // No absolute runtime URLs at all in Sprint 0 web code.
   { name: "absolute url", pattern: new RegExp("https?:" + "//", "i") },
+  // Sprint 12A.2a: the onboarding screens drive a GitHub App integration
+  // from the browser. None of the App's secrets, and none of a repository's
+  // content, may appear in code that ships to a page.
+  { name: "github installation token", pattern: new RegExp("gh" + "s_") },
+  { name: "github app token", pattern: new RegExp("gh" + "p_|gh" + "u_") },
+  { name: "private key block", pattern: new RegExp("BEGIN [A-Z ]*PRIVATE KEY") },
+  // `webhook_secret_reference` is allowed and is not an exception being
+  // carved out: it is the NAME of an operator input the status endpoint
+  // reports as missing. Naming which reference is absent is the whole point
+  // of that screen; carrying its value would be the problem.
+  { name: "webhook secret", pattern: new RegExp("webhook_" + "secret(?!_reference)") },
+  { name: "manifest api version", pattern: new RegExp("api" + "Version:") },
 ];
 
 function collectSourceFiles(dir: string): string[] {
@@ -60,6 +72,48 @@ function collectSourceFiles(dir: string): string[] {
   }
   return results;
 }
+
+/**
+ * The onboarding surface has a tighter rule than the rest of the app.
+ *
+ * It drives a GitHub App from the browser, so it is the one place where a
+ * provider identifier or a repository's content could plausibly be added
+ * "just to display it". The canonical endpoints return neither, and these
+ * files must not learn to expect them.
+ */
+const ONBOARDING_SOURCES = [
+  join(SRC_ROOT, "lib", "onboarding.ts"),
+  join(SRC_ROOT, "components", "onboarding"),
+  join(SRC_ROOT, "app", "onboarding"),
+];
+
+const ONBOARDING_FORBIDDEN: { name: string; pattern: RegExp }[] = [
+  { name: "installation id", pattern: new RegExp("installation_external_" + "id") },
+  { name: "provider node id", pattern: new RegExp("node_" + "id") },
+  { name: "repository content", pattern: new RegExp("file_" + "content|raw_" + "manifest") },
+  { name: "manifest body", pattern: new RegExp("manifest_" + "body|manifest_" + "text") },
+];
+
+describe("onboarding surface carries no provider identity or content", () => {
+  const files = ONBOARDING_SOURCES.flatMap((entry) =>
+    statSync(entry).isDirectory() ? collectSourceFiles(entry) : [entry],
+  );
+
+  it("scans the onboarding sources", () => {
+    expect(files.length).toBeGreaterThan(3);
+  });
+
+  it("finds no installation identifier, node id or repository content", () => {
+    const violations: string[] = [];
+    for (const file of files) {
+      const content = readFileSync(file, "utf8");
+      for (const { name, pattern } of ONBOARDING_FORBIDDEN) {
+        if (pattern.test(content)) violations.push(`${relative(SRC_ROOT, file)}: ${name}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
 
 describe("browser provider-access guard", () => {
   const files = collectSourceFiles(SRC_ROOT).filter(

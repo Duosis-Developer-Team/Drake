@@ -137,10 +137,80 @@ reason: a review of a commit is not a review of its successor.
 
 Apply is one transaction with **no network calls** — the freshness check
 happens before it opens — and is idempotent on
-`(plan, idempotency_key)`. A retry returns the recorded answer rather than
-a second project. That check runs before the approval check, because
-otherwise a client that merely lost a response would be told its own
-successful import was unapproved.
+`(session, idempotency_key)`. A retry returns the recorded answer, in full
+and including the outcome word, rather than a second project. That check
+runs before the approval check, because otherwise a client that merely lost
+a response would be told its own successful import was unapproved. The same
+key under a *different* plan version is a conflict
+(`idempotency_key_reused`), not a fresh apply.
+
+## Doing it from the browser (Sprint 12A.2a)
+
+`/onboarding` is the operator's screen, and it drives exactly the flow
+above:
+
+1. **Choose a repository.** The picker lists repositories from
+   `GET /v1/onboarding/repositories`, scoped to `onboarding.manage` — the
+   permission the Start button needs, not read access. A repository that
+   cannot be started says why: a security gate, lost access, or a session
+   already open (in which case the button opens that session instead of a
+   second one).
+2. **Start.** Nothing is created by opening the page, and a
+   `?repository_id=` link preselects a repository without acting on it.
+3. **Analyse**, then **Analyse again** if the repository moves.
+4. **Review.** The plan is grouped by what it would do, and
+   `update_metadata` items show `before` / `after` for each field. An
+   absent previous value renders as `—`, never as an empty string.
+5. **Approve.** The confirmation names the plan version, commit, digest and
+   item count. It never shows the manifest.
+6. **Apply.** The confirmation says plainly: *this writes the approved plan
+   to Drake's catalog; it does not write to the repository.* The result
+   card shows all seven counters. A counter a pre-0020 receipt never
+   recorded reads **Not recorded**, not `0`.
+
+Every button is a courtesy. The API re-checks the permission against the
+session's own scope and re-checks the state under a row lock, so a hidden
+button is not a boundary and a visible one is not a promise.
+
+### The idempotency key
+
+The browser generates one key per (session, plan version), keeps it in
+component memory, and reuses it across its own retries. A new key on a
+retry would describe a new operation, so an apply that committed before the
+connection dropped would be applied twice. The same value travels in the
+`Idempotency-Key` header and in the request body. It is never written to
+`localStorage`, `sessionStorage`, the URL or a log.
+
+## Getting a manifest to commit
+
+`GET /v1/onboarding/sessions/{id}/manifest-draft` returns a manifest built
+deterministically from that session's stored analysis — no provider call,
+no live read. It is served as an `application/yaml` attachment with
+`Cache-Control: no-store`, and the UI offers it as a download rather than
+rendering it: a manifest is a file to commit, not markup to put in a page.
+
+This is how an operator adds `.drake/project.yaml` to a repository that has
+none. Drake cannot commit it for them: `Contents: write` is not requested,
+and the GitOps pull-request provider is Sprint 12B with its flag off.
+
+## Session states, and what may act from them
+
+Enforced in the API inside the transaction that mutates, holding the
+session's row lock — so a double-click, or two operators, cannot both act
+on the same state.
+
+| Action | Allowed from |
+| --- | --- |
+| Analyze | `draft`, `discovery_pending`, `needs_review`, `ready`, `provider_unavailable`, `stale`, `failed` |
+| Approve | `ready` only |
+| Apply | `approved` only, at exactly `approved_plan_version` |
+| Cancel | every non-terminal state above, plus `approved` |
+| GitOps request | `needs_review`, `ready`, `approved` |
+
+`imported` and `cancelled` are terminal. A repository is revisited with a
+**new** session, which keeps the record of what the old one decided. A
+second analyse while one is running is one bounded `409`, not a second
+scan.
 
 ## GitOps pull requests
 
@@ -187,14 +257,21 @@ entirely — a 403 would confirm the session exists.
 
 ```
 GET  /v1/onboarding/github/status      POST /v1/onboarding/sessions
-GET  /v1/onboarding/sessions           POST /v1/onboarding/sessions/{id}/analyze
-GET  /v1/onboarding/sessions/{id}      POST /v1/onboarding/sessions/{id}/approve
+GET  /v1/onboarding/repositories       POST /v1/onboarding/sessions/{id}/analyze
+GET  /v1/onboarding/sessions           POST /v1/onboarding/sessions/{id}/approve
+GET  /v1/onboarding/sessions/{id}      POST /v1/onboarding/sessions/{id}/apply
 GET  /v1/onboarding/sessions/{id}/findings
-GET  /v1/onboarding/sessions/{id}/plan POST /v1/onboarding/sessions/{id}/apply
-GET  /v1/onboarding/filters            POST /v1/onboarding/sessions/{id}/cancel
-                                       POST /v1/onboarding/sessions/{id}/gitops-request
+GET  /v1/onboarding/sessions/{id}/plan POST /v1/onboarding/sessions/{id}/cancel
+GET  /v1/onboarding/sessions/{id}/manifest-draft
+GET  /v1/onboarding/filters            POST /v1/onboarding/sessions/{id}/gitops-request
 POST /v1/integrations/github/webhook
 ```
+
+The Sprint 5B path under
+`/v1/integrations/github/repositories/{id}/onboarding*` answers **410
+Gone** with `legacy_onboarding_retired`. It imported without a plan, an
+approval, a digest or a receipt; this path exists so that none of those is
+optional.
 
 No endpoint accepts a repository URL, an owner/name pair, a branch, a file
 path, a manifest body, a plan item, a catalog id, a cluster, a permission

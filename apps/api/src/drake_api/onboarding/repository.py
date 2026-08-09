@@ -11,13 +11,16 @@ carry a path, a kind and a confidence — enough to explain a proposal, and
 not enough to become a copy of the repository.
 """
 
+import base64
+import binascii
 import uuid
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from drake_api.catalog.authz import visible_scope_ids
+from drake_api.catalog.authz import escape_like, visible_scope_ids
+from drake_api.github_app import catalog as repo_catalog
 from drake_api.onboarding.model import REASON_TEXT, Action, SessionState
 from drake_api.rbac.service import Principal
 
@@ -57,7 +60,61 @@ async def scopes_for(
 
 
 async def can(connection: AsyncConnection, principal: Principal, permission: str) -> bool:
+    """Does the principal hold *permission* ANYWHERE?
+
+    This answers a page-level question — "is this feature worth showing at
+    all" — and nothing more. It must never decide whether a particular
+    session may be mutated: holding `onboarding.apply` on one project is not
+    permission to apply another project's plan. Use `permitted_in` for that.
+    """
     return bool(await visible_scope_ids(connection, principal, permission))
+
+
+async def permitted_in(
+    connection: AsyncConnection, principal: Principal, permission: str, scope_id: uuid.UUID
+) -> bool:
+    """Does the principal hold *permission* on THIS scope?
+
+    `visible_scope_ids` already walks the scope tree downward, so a grant on
+    an organisation still covers a project inside it — the direction real
+    delegation runs. It does not walk upward or sideways, so a grant on one
+    project is not a grant on its parent or on a sibling.
+    """
+    return scope_id in await visible_scope_ids(connection, principal, permission)
+
+
+async def authorize_session(
+    connection: AsyncConnection,
+    principal: Principal,
+    session_id: uuid.UUID,
+    permission: str,
+) -> uuid.UUID | None:
+    """The session's scope, if the principal may use *permission* on IT.
+
+    One function for every mutation, because the bug this replaces came from
+    each endpoint asking its own slightly different question. Two checks,
+    both against the session's own `scope_id`: the principal can SEE the
+    session, and holds the acting permission THERE.
+
+    Returns `None` for a session that does not exist, one the principal
+    cannot see, and one it can see but may not act on — the caller turns all
+    three into the same 404. Distinguishing them would let somebody with
+    read access anywhere enumerate what exists everywhere else.
+    """
+    row = (
+        await connection.execute(
+            text("SELECT scope_id FROM onboarding_sessions WHERE id = :id"),
+            {"id": session_id},
+        )
+    ).first()
+    if row is None:
+        return None
+    scope_id = uuid.UUID(str(row[0]))
+    if not await permitted_in(connection, principal, VIEW_PERMISSION, scope_id):
+        return None
+    if not await permitted_in(connection, principal, permission, scope_id):
+        return None
+    return scope_id
 
 
 _SESSION_COLUMNS = """
@@ -66,7 +123,8 @@ _SESSION_COLUMNS = """
     s.version, s.created_at,
     r.id, r.owner_login, r.name, r.full_name, r.default_branch, r.security_gate,
     p.plan_version, p.state, p.blocking_items, p.total_items, p.plan_digest, p.commit_sha,
-    pr.project_key
+    pr.project_key,
+    s.scope_id
 """
 
 _SESSION_JOINS = """
@@ -176,6 +234,219 @@ async def list_sessions(
     }
 
 
+# ---------------------------------------------------------------------------
+# repository candidates — what an operator may start a session on
+# ---------------------------------------------------------------------------
+
+#: Why a repository cannot be started, in the order they are evaluated.
+#: The order is the point: a gated repository reports the gate even when it
+#: is also archived, because the gate is the fact an operator must act on.
+STARTABLE_BLOCKERS = (
+    "security_gate_open",
+    "repository_unavailable",
+    "repository_not_ready",
+    "session_in_progress",
+)
+
+#: What counts as a session already occupying a repository.
+#:
+#: EXACTLY the partial unique index's predicate
+#: (`uq_onboarding_session_active`), and that is not a coincidence: the
+#: index is what actually stops a second session, so anything else here
+#: would make the picker and the database disagree. It said
+#: `NOT IN ('imported', 'cancelled')`, which counts a FAILED session as
+#: occupying the repository — so the picker reported `session_in_progress`
+#: and offered to open the existing one, while a direct POST cheerfully
+#: created a new draft beside it.
+_OCCUPYING_SESSION_STATES = "'imported', 'cancelled', 'failed'"
+
+#: Everything the eligibility decision reads. Selected once, by both the
+#: picker and the create endpoint, so the two cannot drift.
+_ELIGIBILITY_COLUMNS = """
+    r.id, r.full_name, r.default_branch, r.onboarding_state, r.security_gate,
+    r.archived, r.disabled, r.access_state, r.reconciliation_state,
+    (SELECT s.id FROM onboarding_sessions s
+      WHERE s.repository_id = r.id
+        AND s.state NOT IN ('imported', 'cancelled', 'failed')
+      ORDER BY s.created_at DESC LIMIT 1) AS active_session
+"""
+
+#: Projection states a session may be opened from. `discovered` is excluded
+#: on purpose: Drake has seen the repository exist and knows nothing else
+#: about it, and an analysis needs a reconciled projection to start from.
+_STARTABLE_PROJECTION = frozenset({"ready", "degraded"})
+
+
+def repository_eligibility(row: Any) -> dict[str, Any]:
+    """Whether an onboarding may START on this repository, and why not.
+
+    ONE function, called by the picker and by `POST /sessions`. They asked
+    slightly different questions before, which is the same shape of bug as
+    the authorization one: the list said a repository was unavailable and
+    the endpoint let a direct call open a session on it anyway. A greyed-out
+    option is a courtesy; this is the rule.
+
+    The gate is checked FIRST and from both sources — the persisted column
+    and the static catalogue — because a gate is the one blocker that must
+    never be reachable by fixing something else about the repository.
+    """
+    full_name = str(row[1])
+    # Either source closes it. The persisted column is what a webhook or an
+    # operator sets; the static catalogue is what ships with Drake. Trusting
+    # only one would make the gate depend on which mechanism set it.
+    gate = row[4] or repo_catalog.security_gate_for(full_name)
+    unavailable = bool(row[5]) or bool(row[6]) or str(row[7] or "accessible") != "accessible"
+    not_ready = str(row[8] or "never") != "complete" or str(row[3]) not in _STARTABLE_PROJECTION
+    active_session = str(row[9]) if row[9] else None
+
+    reason: str | None = None
+    if gate:
+        reason = "security_gate_open"
+    elif unavailable:
+        reason = "repository_unavailable"
+    elif not_ready:
+        reason = "repository_not_ready"
+    elif active_session:
+        # Not a refusal so much as a redirect: the operator wants the
+        # session that already exists, not a second one beside it.
+        reason = "session_in_progress"
+
+    return {
+        "id": str(row[0]),
+        "full_name": full_name,
+        "default_branch": str(row[2] or ""),
+        "onboarding_state": str(row[3]),
+        # Derived, not the raw provider fields: a client decides on this
+        # word, and `archived`/`disabled`/`access_state` are three ways of
+        # saying one thing to an operator.
+        "access_state": "accessible" if not unavailable else "unavailable",
+        "security_gate": gate,
+        "active_session_id": active_session,
+        "startable": reason is None,
+        "reason_code": reason,
+    }
+
+
+def _one_repository_query() -> str:
+    """The single-repository eligibility select.
+
+    Built here so the only interpolated fragment — a module constant of
+    column names — is visibly separate from anything a caller supplies.
+    Every value in it is a bind parameter.
+    """
+    query = (
+        f"SELECT {_ELIGIBILITY_COLUMNS} FROM github_repositories r "  # noqa: S608
+        "WHERE r.id = :id AND r.scope_id = ANY(:scopes)"
+    )
+    return query
+
+
+async def repository_for_start(
+    connection: AsyncConnection, principal: Principal, repository_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """One repository's eligibility, scoped to `onboarding.manage`.
+
+    Returns `None` for a repository that does not exist and for one outside
+    the caller's manage scopes — the same answer, so this cannot be used to
+    ask which repositories exist.
+    """
+    scopes = await scopes_for(connection, principal, MANAGE_PERMISSION)
+    row = (
+        await connection.execute(
+            text(_one_repository_query()),
+            {"id": repository_id, "scopes": scopes},
+        )
+    ).first()
+    return repository_eligibility(row) if row is not None else None
+
+
+def encode_cursor(full_name: str, repository_id: str) -> str:
+    """An opaque, bounded position in the total order.
+
+    Both halves travel, because `full_name` is NOT unique — a repository can
+    be deleted and recreated, and two provider ids can carry the same name.
+    A name-only cursor silently skips the second row at a page boundary.
+    """
+    raw = f"{full_name}\x00{repository_id}".encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_cursor(cursor: str) -> tuple[str, uuid.UUID]:
+    """The inverse, or a bounded refusal. Never a 500 and never unfiltered."""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        name, _, identifier = base64.urlsafe_b64decode(padded.encode()).decode().partition("\x00")
+        if not name or not identifier:
+            raise ValueError("incomplete cursor")
+        return name, uuid.UUID(identifier)
+    except (ValueError, UnicodeDecodeError, binascii.Error) as error:
+        raise FilterError("cursor is not a position this endpoint issued") from error
+
+
+async def repository_candidates(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    search: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """Repositories this principal may actually START an onboarding on.
+
+    Scoped by `onboarding.manage`, not by read access, because that is the
+    permission the button behind this list needs. Listing what somebody
+    cannot act on would be a working repository-name enumerator for anyone
+    with read access anywhere.
+
+    The scope filter is part of the SQL rather than applied afterwards, so
+    pagination and any count are computed over the rows the caller may see.
+    Filtering a page after selecting it leaks totals through page sizes.
+    """
+    scopes = await scopes_for(connection, principal, MANAGE_PERMISSION)
+    params: dict[str, Any] = {"scopes": scopes, "limit": limit + 1}
+    where = ["r.scope_id = ANY(:scopes)"]
+    if search:
+        # The escaper is what stops `%` in a search box from widening the
+        # match past the caller's own scopes.
+        params["search"] = f"%{escape_like(search)}%"
+        where.append("r.full_name ILIKE :search ESCAPE '\\'")
+    if cursor:
+        name, identifier = decode_cursor(cursor)
+        params["cursor_name"] = name
+        params["cursor_id"] = identifier
+        # Keyset on the SAME total order the query sorts by, as a row
+        # comparison so the tie-break is part of the boundary rather than
+        # something the caller has to reason about.
+        #
+        # `COLLATE "C"` deliberately: a locale collation orders names
+        # differently on different databases, so a cursor issued by one
+        # instance could skip or repeat rows on another.
+        where.append('(r.full_name COLLATE "C", r.id) > (:cursor_name COLLATE "C", :cursor_id)')
+
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT {_ELIGIBILITY_COLUMNS}
+                FROM github_repositories r
+                WHERE {" AND ".join(where)}
+                ORDER BY r.full_name COLLATE "C", r.id
+                LIMIT :limit
+                """  # noqa: S608 - every fragment is a module literal
+            ),
+            params,
+        )
+    ).all()
+
+    items = [repository_eligibility(row) for row in rows[:limit]]
+    next_cursor = (
+        encode_cursor(items[-1]["full_name"], items[-1]["id"])
+        if len(rows) > limit and items
+        else None
+    )
+    return {"items": items, "next_cursor": next_cursor}
+
+
 async def get_session(
     connection: AsyncConnection, principal: Principal, session_id: uuid.UUID
 ) -> dict[str, Any] | None:
@@ -196,9 +467,16 @@ async def get_session(
     session = _session_row(row)
     # UI gating only. Every mutation re-checks; hiding a button has never
     # been an authorization boundary.
-    session["can_manage"] = await can(connection, principal, MANAGE_PERMISSION)
-    session["can_apply"] = await can(connection, principal, APPLY_PERMISSION)
-    session["can_gitops"] = await can(connection, principal, GITOPS_PERMISSION)
+    #
+    # Scoped to THIS session. They used to answer "does this user hold the
+    # permission anywhere", so a user with `onboarding.apply` on one project
+    # saw an enabled Apply button on a session belonging to another — and a
+    # button that is enabled for someone who may not press it is a promise
+    # the API has to break.
+    scope_id = uuid.UUID(str(row[24]))
+    session["can_manage"] = await permitted_in(connection, principal, MANAGE_PERMISSION, scope_id)
+    session["can_apply"] = await permitted_in(connection, principal, APPLY_PERMISSION, scope_id)
+    session["can_gitops"] = await permitted_in(connection, principal, GITOPS_PERMISSION, scope_id)
     return session
 
 
@@ -208,13 +486,29 @@ async def session_findings(
     """Safe findings from the newest analysis of this session."""
     if await get_session(connection, principal, session_id) is None:
         return None
+    # Resolved through the session's newest PLAN, not by `session_id`.
+    #
+    # An analysis row is unique on `(repository, commit, analyzer_version)`
+    # — one analysis per commit, which is right — so a second session on the
+    # same repository at the same commit REUSES the first session's row and
+    # never gets one of its own. Filtering by `session_id` therefore made a
+    # session that had been analysed report "not analysed yet" beside a plan
+    # built from that very analysis. The plan knows which analysis it came
+    # from; that is the honest link.
+    #
+    # The fallback covers a session analysed but not yet planned.
     analysis = (
         await connection.execute(
             text(
-                "SELECT id, commit_sha, analyzer_version, status, truncated, manifest_found, "
-                "files_read, bytes_read, provider_calls, error_code, analyzed_at "
-                "FROM onboarding_analyses WHERE session_id = :id "
-                "ORDER BY analyzed_at DESC LIMIT 1"
+                "SELECT a.id, a.commit_sha, a.analyzer_version, a.status, a.truncated, "
+                "a.manifest_found, a.files_read, a.bytes_read, a.provider_calls, "
+                "a.error_code, a.analyzed_at "
+                "FROM onboarding_analyses a "
+                "WHERE a.id = (SELECT p.analysis_id FROM onboarding_plans p "
+                "              WHERE p.session_id = :id "
+                "              ORDER BY p.plan_version DESC LIMIT 1) "
+                "   OR a.session_id = :id "
+                "ORDER BY a.analyzed_at DESC LIMIT 1"
             ),
             {"id": session_id},
         )

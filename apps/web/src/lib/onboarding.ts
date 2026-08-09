@@ -16,7 +16,7 @@
  *   plan VERSION, never a set of edits.
  */
 
-import { apiGet } from "@/lib/api";
+import { apiGet, apiMutate } from "@/lib/api";
 
 export type SessionState =
   | "draft"
@@ -270,6 +270,74 @@ export const MISSING_INPUT_LABELS: Record<string, string> = {
   webhook_secret_reference: "No webhook secret reference is configured.",
 };
 
+/** A repository an operator may start an onboarding on. */
+export interface RepositoryCandidate {
+  id: string;
+  full_name: string;
+  default_branch: string;
+  onboarding_state: string;
+  access_state: string;
+  security_gate: string | null;
+  active_session_id: string | null;
+  startable: boolean;
+  reason_code: string | null;
+}
+
+export interface RepositoryCandidatePage {
+  items: RepositoryCandidate[];
+  next_cursor: string | null;
+}
+
+/** Why a repository cannot be started, in words an operator can act on. */
+export const CANDIDATE_BLOCKERS: Record<string, string> = {
+  security_gate_open: "Closed by a manual security review. Ask a platform owner to clear it.",
+  repository_unavailable:
+    "Drake cannot reach this repository — it is archived, disabled, or the installation lost access.",
+  repository_not_ready:
+    "Drake has not finished projecting this repository. Reconcile it first, then try again.",
+  session_in_progress: "An onboarding is already open for this repository.",
+};
+
+/**
+ * Bounded server codes, mapped to sentences a person can act on.
+ *
+ * The server never sends provider text, and neither does this: every entry
+ * is Drake's own wording for a code Drake defined. An unmapped code falls
+ * back to the server's message, which is also Drake's.
+ */
+export const ERROR_GUIDANCE: Record<string, string> = {
+  security_gate_open: "This repository is closed by a manual security review.",
+  provider_unavailable: "GitHub could not be reached. Nothing was changed.",
+  permission_missing: "The GitHub App installation is missing a read permission it needs.",
+  version_conflict: "This session changed while you were looking at it. Reloaded.",
+  plan_stale: "The repository moved after this plan was reviewed. Analyse again.",
+  plan_blocked: "This plan has conflicts that must be resolved before it can be approved.",
+  plan_integrity_mismatch:
+    "This plan no longer matches what was approved. Analyse and review it again.",
+  idempotency_key_reused: "That request was already used for a different plan version.",
+  invalid_session_state: "This action is not available from the session's current state.",
+  analysis_required: "Analyse the repository first.",
+  gitops_disabled: "Repository writes are disabled. No branch or pull request is created.",
+  legacy_onboarding_retired:
+    "That path is retired. Onboarding now runs through a reviewed plan.",
+  already_imported: "This session has already been applied.",
+  already_approved: "This plan version has already been approved.",
+  plan_not_found: "That plan version no longer exists. Reloaded.",
+  plan_superseded: "A newer analysis replaced this plan. Review the current one.",
+};
+
+/** Codes that mean the client's copy of the session is out of date. */
+export const REFETCH_CODES = new Set([
+  "version_conflict",
+  "plan_stale",
+  "plan_superseded",
+  "plan_not_found",
+  "invalid_session_state",
+  "plan_integrity_mismatch",
+  "already_imported",
+  "already_approved",
+]);
+
 export async function fetchStatus(): Promise<GitHubStatus> {
   return apiGet<GitHubStatus>("/v1/onboarding/github/status");
 }
@@ -307,4 +375,129 @@ export function formatAge(iso: string | null): string {
 
 export function shortSha(value: string | null): string {
   return value ? value.slice(0, 12) : "—";
+}
+
+/**
+ * A counter the server may not have recorded.
+ *
+ * `null` means an apply receipt written before migration 0020 replayed, and
+ * those never stored the extended counters. Rendering it as 0 would turn
+ * "we do not know" into "nothing happened".
+ */
+export function counterLabel(value: number | null): string {
+  return value === null ? "Not recorded" : String(value);
+}
+
+// ---------------------------------------------------------------------------
+// mutations
+// ---------------------------------------------------------------------------
+
+export async function fetchRepositoryCandidates(
+  options: { search?: string; limit?: number; cursor?: string } = {},
+): Promise<RepositoryCandidatePage> {
+  const query = new URLSearchParams();
+  if (options.search) query.set("search", options.search);
+  if (options.limit) query.set("limit", String(options.limit));
+  if (options.cursor) query.set("cursor", options.cursor);
+  const suffix = query.toString();
+  return apiGet<RepositoryCandidatePage>(
+    `/v1/onboarding/repositories${suffix ? `?${suffix}` : ""}`,
+  );
+}
+
+/** One repository's startability, target-specific and server-decided. */
+export async function fetchRepositoryCandidate(
+  repositoryId: string,
+): Promise<RepositoryCandidate> {
+  return apiGet<RepositoryCandidate>(`/v1/onboarding/repositories/${repositoryId}`);
+}
+
+export async function fetchSession(sessionId: string): Promise<OnboardingSession> {
+  return apiGet<OnboardingSession>(`/v1/onboarding/sessions/${sessionId}`);
+}
+
+export async function createSession(
+  csrfToken: string,
+  repositoryId: string,
+): Promise<{ session_id: string; created: boolean }> {
+  return apiMutate<{ session_id: string; created: boolean }>("/v1/onboarding/sessions", {
+    csrfToken,
+    body: { repository_id: repositoryId },
+  });
+}
+
+export async function analyzeSession(
+  csrfToken: string,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  return apiMutate<Record<string, unknown>>(
+    `/v1/onboarding/sessions/${sessionId}/analyze`,
+    { csrfToken },
+  );
+}
+
+export async function approvePlan(
+  csrfToken: string,
+  sessionId: string,
+  planVersion: number,
+  expectedVersion: number,
+): Promise<Record<string, unknown>> {
+  return apiMutate<Record<string, unknown>>(`/v1/onboarding/sessions/${sessionId}/approve`, {
+    csrfToken,
+    body: { plan_version: planVersion, expected_version: expectedVersion },
+  });
+}
+
+/**
+ * Apply an approved plan.
+ *
+ * The key is the caller's, and travels twice: in the `Idempotency-Key`
+ * header and in the body. The server binds its apply receipt to the body
+ * value, so the two must be the same value or a retry would be recorded
+ * under a key nobody sent. A caller that retries MUST pass the same key it
+ * used the first time — see `useApplyKey` in the session screen.
+ */
+export async function applyPlan(
+  csrfToken: string,
+  sessionId: string,
+  planVersion: number,
+  idempotencyKey: string,
+): Promise<ApplyResult> {
+  return apiMutate<ApplyResult>(`/v1/onboarding/sessions/${sessionId}/apply`, {
+    csrfToken,
+    idempotencyKey,
+    body: { plan_version: planVersion, idempotency_key: idempotencyKey },
+  });
+}
+
+export async function cancelSession(
+  csrfToken: string,
+  sessionId: string,
+  expectedVersion: number,
+): Promise<{ session_id: string; state: string }> {
+  return apiMutate<{ session_id: string; state: string }>(
+    `/v1/onboarding/sessions/${sessionId}/cancel`,
+    { csrfToken, body: { expected_version: expectedVersion } },
+  );
+}
+
+export async function requestGitOps(
+  csrfToken: string,
+  sessionId: string,
+): Promise<{ id: string; state: string; created: boolean }> {
+  return apiMutate<{ id: string; state: string; created: boolean }>(
+    `/v1/onboarding/sessions/${sessionId}/gitops-request`,
+    { csrfToken, body: {} },
+  );
+}
+
+/**
+ * Where the generated manifest lives.
+ *
+ * A path, not a fetch: the file is downloaded by navigation so the browser
+ * never holds the bytes, and the page never renders them. A manifest is a
+ * file to commit, not markup to put in a document.
+ */
+export function manifestDraftPath(sessionId: string): string {
+  return `/v1/onboarding/sessions/${sessionId}/manifest-draft`;
 }

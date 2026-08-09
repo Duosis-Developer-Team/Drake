@@ -32,6 +32,7 @@ from drake_api.onboarding.model import (
     EntityKind,
     build_plan,
 )
+from drake_api.rbac.service import Principal
 from drake_api.settings import Settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -465,6 +466,16 @@ async def _bootstrap(
     return row_id
 
 
+async def _principal(harness: Any, engine: AsyncEngine, subject: str = "user-owner") -> Principal:
+    """The caller `create_session` scopes its repository lookup by.
+
+    Passed explicitly rather than defaulted: the scope check happens inside
+    the locked transaction now, and a call that could omit the principal
+    would be a call that skips it.
+    """
+    return Principal(identity_id=await _identity(engine, subject), issuer=harness.provider.issuer)
+
+
 async def _identity(engine: AsyncEngine, subject: str = "user-owner") -> uuidlib.UUID:
     async with engine.connect() as connection:
         return uuidlib.UUID(
@@ -490,7 +501,11 @@ async def test_the_golden_path_produces_a_reviewable_plan_and_an_import(
     actor = await _identity(engine)
 
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     assert created["created"] is True
@@ -501,8 +516,6 @@ async def test_the_golden_path_produces_a_reviewable_plan_and_an_import(
     assert analysis["truncated"] is False
 
     async with engine.connect() as connection:
-        from drake_api.rbac.service import Principal
-
         principal = Principal(identity_id=actor, issuer=harness.provider.issuer)
         plan = await onboarding_repo.session_plan(connection, principal, session_id)
     assert plan is not None
@@ -582,7 +595,11 @@ async def test_nothing_in_the_repository_is_executed_and_secrets_are_never_read(
     actor = await _identity(engine)
 
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
@@ -621,7 +638,11 @@ async def test_the_same_commit_and_analyzer_produce_one_analysis(
     settings = harness.app.state.settings
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
 
@@ -659,7 +680,11 @@ async def test_a_moved_commit_makes_the_plan_stale_and_unappliable(
     actor = await _identity(engine)
 
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)
@@ -717,7 +742,11 @@ async def test_a_push_marks_a_reviewed_plan_stale(engine: AsyncEngine, tmp_path:
     settings = harness.app.state.settings
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
@@ -753,7 +782,11 @@ async def test_applying_twice_creates_one_project_and_one_audit(
     actor = await _identity(engine)
 
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)
@@ -834,7 +867,11 @@ async def test_an_unapproved_or_blocked_plan_cannot_be_applied(
     actor = await _identity(engine)
 
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     analysis = await service.analyze(engine, settings, client, session_id=session_id)
@@ -910,6 +947,7 @@ async def test_a_gated_repository_produces_no_session_and_no_provider_call(
             harness.app.state.settings,
             repository_row_id=row_id,
             actor_identity_id=actor,
+            principal=await _principal(harness, engine),
         )
     assert refusal.value.code == "security_gate_open"
     # Not one call, and not one token mint.
@@ -939,7 +977,11 @@ async def test_gitops_disabled_makes_no_request_and_no_provider_call(
     settings = harness.app.state.settings
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
@@ -971,7 +1013,11 @@ async def test_a_gitops_request_targets_only_the_allowlisted_path_and_branch(
     settings = harness.app.state.settings.model_copy(update={"github_gitops_pr_enabled": True})
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, harness.app.state.settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        harness.app.state.settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(
@@ -1019,7 +1065,11 @@ async def test_a_provider_failure_never_shows_as_an_open_pull_request(
     settings = base.model_copy(update={"github_gitops_pr_enabled": True})
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, base, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        base,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(engine, base, harness.app.state.github_client, session_id=session_id)
@@ -1055,11 +1105,13 @@ async def test_a_caller_outside_scope_sees_no_session_and_no_count(
     settings = harness.app.state.settings
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
-
-    from drake_api.rbac.service import Principal
 
     async with engine.begin() as connection:
         stranger = uuidlib.UUID(
@@ -1133,7 +1185,11 @@ async def test_no_read_response_carries_repository_content_or_a_url(
     settings = harness.app.state.settings
     actor = await _identity(engine)
     created = await service.create_session(
-        engine, settings, repository_row_id=row_id, actor_identity_id=actor
+        engine,
+        settings,
+        repository_row_id=row_id,
+        actor_identity_id=actor,
+        principal=await _principal(harness, engine),
     )
     session_id = uuidlib.UUID(created["session_id"])
     await service.analyze(engine, settings, harness.app.state.github_client, session_id=session_id)
