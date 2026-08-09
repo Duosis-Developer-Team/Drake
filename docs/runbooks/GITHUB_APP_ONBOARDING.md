@@ -194,9 +194,15 @@ and metrics profile are left as `REPLACE_ME` — a plausible guess would
 invite being committed unread.
 
 **Commit the file to the repository yourself, then analyse again.** Drake
-cannot commit it for you: `Contents: write` is not requested, and the
-GitOps pull-request provider is Sprint 12B with `github_gitops_pr_enabled`
-off. And a draft edited in the browser is never importable regardless:
+cannot commit it for you: `Contents: write` is not requested, and no
+pull-request provider exists.
+
+The only implementation is a recording test double used by the test suite.
+A production process may not hold one — it would report a pull request that
+does not exist — so `github_gitops_pr_enabled` and `gitops_worker_enabled`
+are refused outside local/test and the process fails to start with either
+set. Sprint 12B builds the real provider; switching it on is a separate
+decision after that. And a draft edited in the browser is never importable regardless:
 ADR-0007 makes the repository the source of intent, and an import that
 accepted a browser copy would record intent the repository never
 expressed.
