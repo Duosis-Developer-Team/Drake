@@ -395,6 +395,7 @@ describe("onboarding session", () => {
               file_path: ".drake/project.yaml",
               base_commit_sha: COMMIT,
               provider_pr_number: null,
+              pull_request_url: null,
               error_code: null,
               created_at: "2026-08-09T10:05:00Z",
               version: 1,
@@ -406,9 +407,50 @@ describe("onboarding session", () => {
     const requests = await screen.findByTestId("gitops-requests");
     expect(requests).toHaveTextContent("Pending at GitHub");
     expect(requests).not.toHaveTextContent("Pull request open");
-    expect(
-      screen.getByText(/merging a pull request does not import anything/i),
-    ).toBeInTheDocument();
+    // No link while there is no pull request: a link to nothing reads as
+    // one that exists.
+    expect(screen.queryByTestId("gitops-pr-link-g1")).not.toBeInTheDocument();
+    expect(screen.getByText(/merging it does not import anything/i)).toBeInTheDocument();
+  });
+
+  it("links to the draft pull request once one exists, and says it is a draft", async () => {
+    renderDetail({
+      "/v1/onboarding/sessions/sess-1": {
+        status: 200,
+        body: session({
+          gitops_requests: [
+            {
+              id: "g2",
+              state: "active",
+              branch_name: "drake/onboarding/abcd1234",
+              file_path: ".drake/project.yaml",
+              base_commit_sha: COMMIT,
+              provider_pr_number: 42,
+              pull_request_url: "https://github.com/Duosis-Developer-Team/Widget-Service/pull/42",
+              error_code: null,
+              created_at: "2026-08-09T10:05:00Z",
+              version: 2,
+            },
+          ],
+        }),
+      },
+    });
+
+    const link = await screen.findByTestId("gitops-pr-link-g2");
+    expect(link).toHaveTextContent("#42");
+    // Only ever a github.com address, and composed by the server.
+    expect(link).toHaveAttribute(
+      "href",
+      "https://github.com/Duosis-Developer-Team/Widget-Service/pull/42",
+    );
+    // A new tab must not be able to reach back through `window.opener`,
+    // and Drake's URL carries a session id that GitHub has no need for.
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link).toHaveAttribute("target", "_blank");
+
+    // The operator is told what the pull request actually is.
+    expect(screen.getByText(/REPLACE_ME/)).toBeInTheDocument();
+    expect(screen.getByText(/does not import anything into Drake/i)).toBeInTheDocument();
   });
 
   it("renders no repository content, credential or URL", async () => {

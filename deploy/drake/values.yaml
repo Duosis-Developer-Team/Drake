@@ -196,3 +196,20 @@ github:
   # Public identifiers, not secrets. Required when enabled.
   appId: ""
   clientId: ""
+  # --- repository writes ------------------------------------------------
+  #
+  # The ONLY path through which Drake would write to a repository: a branch
+  # and a DRAFT pull request carrying a generated manifest. Never a merge,
+  # never a force-push, never a commit to a default branch.
+  #
+  # Both flags are one decision and the chart refuses half of it. On its
+  # own, `gitopsPrEnabled` accepts requests nothing delivers, and
+  # `workerEnabled` runs a loop nothing can reach — two states that look
+  # like they are working.
+  #
+  # They also require `github.enabled`, because a write path needs a real
+  # App behind it. Turning these on is an explicit decision, not a default,
+  # and it needs the App's permissions to include Contents: write and Pull
+  # requests: write.
+  gitopsPrEnabled: false
+  workerEnabled: false

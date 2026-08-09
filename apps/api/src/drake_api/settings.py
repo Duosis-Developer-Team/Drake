@@ -435,22 +435,51 @@ class Settings(BaseSettings):
                 "GitOps pull requests require the GitHub App: a write path cannot be "
                 "enabled while the integration that authenticates it is off"
             )
-        if self.github_gitops_pr_enabled or self.gitops_worker_enabled:
-            # There is no real pull-request provider yet — Sprint 12B builds
-            # it. The only implementation that exists is a recording fake,
-            # and a fake returns a pull-request NUMBER: with it wired in
-            # production, Drake would report an open pull request that does
-            # not exist, against a branch nobody created.
-            #
-            # So this refuses at startup rather than at the first request.
-            # A half-enabled write path — a worker running against a fake,
-            # or requests accepted and never deliverable — is worse than a
-            # disabled one, because both of those look like they are working.
+        if self.github_gitops_pr_enabled != self.gitops_worker_enabled:
+            # The two flags are one decision. On its own,
+            # `github_gitops_pr_enabled` accepts requests nothing will ever
+            # deliver; `gitops_worker_enabled` alone runs a loop that can
+            # never be given work. Both are half-enabled states that look
+            # like they are working, which is the failure mode this whole
+            # boundary exists to prevent.
             raise RuntimeError(
-                "GitOps repository writes cannot be enabled outside local/test: no real "
-                "pull-request provider is configured. Turn off github_gitops_pr_enabled "
-                "and gitops_worker_enabled."
+                "GitOps flags must be set together outside local/test: "
+                "github_gitops_pr_enabled and gitops_worker_enabled are one decision, "
+                "and enabling only one accepts requests nothing delivers or runs a "
+                "worker nothing can reach"
             )
+        if self.github_gitops_pr_enabled:
+            # Repository writes need a real provider, and a real provider
+            # needs a real App: identity, both credential references, and
+            # GitHub's own API origin.
+            #
+            # The recording double is never constructed outside local/test
+            # (see `create_app`), so without these the write path would have
+            # nothing behind it at all.
+            missing = [
+                name
+                for name, present in (
+                    ("github_app_enabled", self.github_app_enabled),
+                    ("github app identity", bool(self.github_app_client_id or self.github_app_id)),
+                    ("github_app_private_key_file", bool(self.github_app_private_key_file)),
+                    ("github_webhook_secret_file", bool(self.github_webhook_secret_file)),
+                )
+                if not present
+            ]
+            if missing:
+                raise RuntimeError(
+                    "GitOps repository writes require a fully configured GitHub App "
+                    f"outside local/test; missing: {', '.join(missing)}"
+                )
+            if self.github_api_base_url.rstrip("/") != "https://api.github.com":
+                # A configurable API origin plus a write credential is an
+                # exfiltration primitive: point it elsewhere and Drake
+                # pushes a manifest, and its installation token, to whoever
+                # is listening.
+                raise RuntimeError(
+                    "GitOps repository writes may only target https://api.github.com "
+                    "outside local/test"
+                )
         if self.github_jwt_ttl_seconds > 600:
             raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
         for key, destination in self.notification_webhooks.items():

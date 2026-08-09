@@ -371,13 +371,28 @@ export default function OnboardingSessionPage() {
               <Card title="Manifest pull requests">
                 <ul className="space-y-2" data-testid="gitops-requests">
                   {data.gitops_requests.map((entry) => (
-                    <li key={entry.id} className="flex flex-wrap items-baseline gap-2">
+                    <li key={entry.id} className="flex min-w-0 flex-wrap items-baseline gap-2">
                       <GitOpsBadge state={entry.state} />
-                      <span className="font-mono text-xs text-ink-secondary">
+                      <span className="font-mono text-xs break-all text-ink-secondary">
                         {entry.branch_name} → {entry.file_path}
                       </span>
+                      {entry.pull_request_url ? (
+                        <a
+                          href={entry.pull_request_url}
+                          target="_blank"
+                          // `noopener` so the opened tab cannot reach back
+                          // through `window.opener`; `noreferrer` so Drake's
+                          // URL — which contains a session id — is not sent
+                          // to GitHub as a referrer.
+                          rel="noopener noreferrer"
+                          data-testid={`gitops-pr-link-${entry.id}`}
+                          className="text-xs text-ink hover:underline"
+                        >
+                          Open draft pull request #{entry.provider_pr_number} →
+                        </a>
+                      ) : null}
                       {entry.error_code ? (
-                        <span className="font-mono text-[11px] text-critical">
+                        <span className="font-mono text-[11px] break-all text-critical">
                           {entry.error_code}
                         </span>
                       ) : null}
@@ -385,8 +400,14 @@ export default function OnboardingSessionPage() {
                   ))}
                 </ul>
                 <p className="mt-3 text-xs text-ink-muted">
-                  Merging a pull request does not import anything into Drake. The catalog is
-                  applied separately, and only by an authorized operator.
+                  The pull request Drake opens is a <strong>draft</strong>, and deliberately
+                  incomplete: every <span className="font-mono">REPLACE_ME</span> in it is a
+                  decision a person has to make. Fill them in and merge it in GitHub.
+                </p>
+                <p className="mt-1.5 text-xs text-ink-muted">
+                  Merging it does not import anything into Drake — it puts the manifest in the
+                  repository, which is where Drake reads intent from. Analyse again afterwards
+                  and approve the plan; the import happens there.
                 </p>
               </Card>
             ) : null}

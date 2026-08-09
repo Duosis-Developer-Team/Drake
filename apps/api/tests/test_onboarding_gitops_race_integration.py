@@ -847,3 +847,112 @@ async def test_an_exhausted_request_is_retired_without_another_provider_call(
             ).scalar_one()
         )
     assert rows == 1
+
+
+# ===========================================================================
+# the real provider, driven through the worker
+# ===========================================================================
+
+
+@pytest.mark.anyio
+async def test_the_worker_drives_the_real_provider_to_exactly_one_pull_request(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Request → lease → real provider → one draft pull request.
+
+    The provider is the Sprint 12B implementation, over a stateful fake of
+    the GitHub write API. No network, no credential, no real repository —
+    and the assertion is on what the fake says was APPLIED, not on what the
+    provider claims it did.
+    """
+    import httpx
+    from drake_api.github_app.auth import GitHubAppAuth
+    from drake_api.github_app.client import GitHubClient
+    from drake_api.onboarding.github_provider import GitHubPullRequestProvider
+    from drake_api.settings import Settings
+    from fake_github_write import WriteFakeGitHub
+
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    async with engine.connect() as connection:
+        base_sha, branch = (
+            await connection.execute(
+                text(
+                    "SELECT base_commit_sha, branch_name FROM gitops_requests WHERE session_id = :s"
+                ),
+                {"s": session_id},
+            )
+        ).one()
+        external_id, installation_external_id, owner, name = (
+            await connection.execute(
+                text(
+                    "SELECT r.external_id, i.external_id, r.owner_login, r.name "
+                    "FROM github_repositories r "
+                    "JOIN github_installations i ON i.id = r.installation_id "
+                    "WHERE r.id = :r"
+                ),
+                {"r": row_id},
+            )
+        ).one()
+
+    writes = WriteFakeGitHub(
+        owner=str(owner),
+        name=str(name),
+        repository_id=int(external_id),
+        installation_id=int(installation_external_id),
+        base_sha=str(base_sha),
+    )
+
+    key = tmp_path / "provider-key.pem"
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key.write_bytes(
+        rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    provider_settings = Settings(
+        env="local",
+        github_app_enabled=True,
+        github_app_client_id="Iv1.local",
+        github_app_private_key_file=str(key),
+        github_api_base_url="https://api.github.test",
+    )
+    provider = GitHubPullRequestProvider(
+        GitHubClient(
+            provider_settings,
+            GitHubAppAuth(provider_settings),
+            transport=httpx.MockTransport(writes.handler),
+        )
+    )
+
+    assert await gitops.process_pending(engine, enabled, provider) == 1
+    assert writes.counts() == {"branches": 1, "commits": 1, "pulls": 1}
+    assert str(branch).startswith("drake/onboarding/")
+    assert list(writes.files) == [(str(branch), ".drake/project.yaml")]
+    assert writes.pulls[0]["draft"] is True
+
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "active"
+    assert settled["number"] == 101
+
+    # A second pass sends nothing: the request is terminal, and the
+    # provider would have reused rather than created in any case.
+    assert await gitops.process_pending(engine, enabled, provider) == 0
+    assert writes.counts()["pulls"] == 1
+
+    # The link the browser gets is composed by Drake, from Drake's own
+    # values — never from a provider response.
+    async with harness.api_client() as api:
+        await harness.login(api, "user-owner")
+        entries = (await api.get(f"/v1/onboarding/sessions/{session_id}")).json()["gitops_requests"]
+    assert len(entries) == 1
+    assert entries[0]["pull_request_url"] == (f"https://github.com/{owner}/{name}/pull/101")

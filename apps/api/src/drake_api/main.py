@@ -41,6 +41,7 @@ from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
 from drake_api.notifications.worker import NotificationWorker
+from drake_api.onboarding.github_provider import GitHubPullRequestProvider
 from drake_api.onboarding.gitops import GitOpsWorker, RecordingProvider
 from drake_api.onboarding.router import router as onboarding_router
 from drake_api.protection.router import router as protection_router
@@ -244,17 +245,22 @@ def create_app(
     # a repository. Off by default, and while it is off nothing is claimed,
     # no token is minted and no provider call is made.
     #
-    # The provider is wired ONLY in local/test. `RecordingProvider` is a
-    # test double that returns a pull-request number, and a production
+    # Which provider a process gets is decided by the ENVIRONMENT, not by a
+    # flag, and `RecordingProvider` can never be the production answer. It
+    # is a test double that returns a pull-request number, so a production
     # process holding one would report an open pull request that does not
-    # exist, against a branch nobody created. Settings validation already
-    # refuses the flags outside local/test; this is the same rule expressed
-    # where the object is actually constructed, so a future caller that
-    # bypasses the flags still cannot end up with a fake.
+    # exist, against a branch nobody created.
     #
-    # Sprint 12B brings a real provider. Until then, production has none —
-    # which is the honest state, not a gap.
-    app.state.gitops_provider = None if settings.is_production_like else RecordingProvider()
+    # Production gets the real provider, and only when a real GitHub App is
+    # configured — settings validation already requires that alongside the
+    # flags, and this is the same rule where the object is constructed, so a
+    # caller that bypassed the flags still cannot end up with a fake.
+    if settings.is_production_like:
+        app.state.gitops_provider = (
+            GitHubPullRequestProvider(github_client) if settings.github_app_enabled else None
+        )
+    else:
+        app.state.gitops_provider = RecordingProvider()
     app.state.gitops_worker = (
         GitOpsWorker(get_engine(settings), settings, app.state.gitops_provider)
         if (

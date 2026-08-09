@@ -423,3 +423,73 @@ real provider AND a separate CTO decision. The flags alone now refuse.
 Unchanged by this slice, and deliberately: no real GitHub write exists,
 `github_gitops_pr_enabled` is off, the Datalake `manual_env_review` gate is
 open, no migration was added (head stays `0020`), and nothing was deployed.
+
+## Sprint 12B — a real provider, still switched off
+
+`GitHubPullRequestProvider` is the real implementation. Production now gets
+it instead of nothing when a GitHub App is configured, and never gets the
+recording double. The flags stay off: shipping the code and turning it on
+are separate decisions, and this slice only makes the first.
+
+**The contract is one sentence.** The same session, at the same base
+commit, with the same content, produces at most one branch, one commit and
+one pull request — however many times it is attempted and whatever the
+network does in between.
+
+That is not a retry policy, it is why every step reads before it writes. A
+POST that timed out may have been applied, so re-sending it is how one
+intent becomes two pull requests. `GitHubAmbiguousWriteError` says "unknown
+outcome" and the next attempt RECONCILES: is the branch there, is the file
+already exactly right, does the pull request already exist. The same
+property makes an attempt interrupted anywhere safe to resume.
+
+Mutations do not go through the read client's retry loop. `_request`
+retries on transport failure, which is right for a GET and wrong for
+anything that changes state, so writes use `_mutate`: one attempt, same
+response-size budget, same redirect refusal, and a failure that is reported
+rather than repeated.
+
+**What the write path can do, exhaustively.** Create a branch that does not
+exist, write `.drake/project.yaml` on it, open a draft pull request. The
+client exposes ref CREATE — which cannot move an existing ref — a
+single-file write restricted to that path on a `drake/`-prefixed branch,
+and pull-request create. Merge, force-push, branch delete and
+default-branch commit are not refused by a check; there is no method that
+could perform one.
+
+**Refusals that write nothing at all**: a base branch that moved since the
+plan was reviewed, a repository whose numeric id no longer matches the
+projection, an archived repository, a `drake/` branch carrying content that
+is not this proposal, and a token granted less than
+`contents: write` + `pull_requests: write`. The last is terminal, because
+retrying cannot grant a permission.
+
+**The pull request is always a draft.** The manifest Drake generates leaves
+operator decisions as explicit `REPLACE_ME` fields, and a review-ready pull
+request would claim it is finished. The body names the fields a person must
+fill in and says plainly that merging it imports nothing — it puts the
+manifest in the repository, and the import still happens through analyse →
+review → approve → apply in Drake.
+
+The draft is re-checked immediately before it leaves: shape, size,
+credential-shaped content, and an ALLOWLIST of the placeholders it may
+contain. An unexpected placeholder means the generator changed and this
+provider was not re-reviewed, which is exactly the kind of thing noticed
+only afterwards.
+
+**The pull-request link is composed, not followed.** GitHub returns an
+`html_url`; using it would mean the browser navigates wherever a provider
+response says. The URL is built from the repository projection and the pull
+request number — three values Drake already holds — and anything that does
+not look like them produces no link at all.
+
+**Activation.** `github.gitopsPrEnabled` and `github.workerEnabled` are one
+decision: the chart and the API both refuse half of it, because one alone
+accepts requests nothing delivers or runs a worker nothing can reach.
+Turning them on also requires a configured App, its mounted credential
+references, and `https://api.github.com` — a configurable API origin plus a
+write credential is an exfiltration primitive.
+
+Nothing in this slice contacted GitHub. Every provider behaviour above is
+proved against a stateful fake that records which mutations were applied,
+including the ones where the response is dropped after the write landed.

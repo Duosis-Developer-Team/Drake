@@ -11,6 +11,7 @@ GitOps dispatcher is exercised only where a `RecordingProvider` is passed
 in explicitly — which is the only way it can be reached now.
 """
 
+import re
 import uuid as uuidlib
 from pathlib import Path
 
@@ -303,9 +304,16 @@ async def test_the_dispatcher_only_runs_against_a_provider_a_test_passes_in(
     assert len(entries) == 1
     assert entries[0]["state"] == "active"
     assert entries[0]["file_path"] == ".drake/project.yaml"
-    # Nothing provider-shaped travelled with it.
+
+    # Exactly ONE url may appear, and only because Sprint 12B composes it
+    # from values Drake already holds — the repository projection and the
+    # pull request number. A provider-supplied `html_url` is never used, so
+    # nothing in this response can point wherever a response said.
     body = str(session)
-    for forbidden in ("ghs_", "BEGIN", "://"):
+    urls = re.findall(r"https?://[^'\"\s]+", body)
+    assert urls == [entries[0]["pull_request_url"]], urls
+    assert urls[0].startswith("https://github.com/"), urls
+    for forbidden in ("ghs_", "ghp_", "BEGIN", "Authorization"):
         assert forbidden not in body, forbidden
 
 

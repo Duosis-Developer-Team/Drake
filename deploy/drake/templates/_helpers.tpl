@@ -338,4 +338,32 @@ imagePullSecrets:
 {{- include "drake.validateSecrets" . -}}
 {{- include "drake.validateNetworkPolicy" . -}}
 {{- include "drake.validateHost" . -}}
+{{- include "drake.validateGitOps" . -}}
+{{- end -}}
+
+{{/*
+Repository writes are refused unless the whole decision is made.
+
+Rendered rather than left to the API's own startup validation as well: a
+chart that renders a Deployment which cannot start is a rollout that fails
+in the cluster instead of at `helm template`, and the person who typed the
+value is no longer watching by then.
+*/}}
+{{- define "drake.validateGitOps" -}}
+{{- $gitops := .Values.github.gitopsPrEnabled | default false -}}
+{{- $worker := .Values.github.workerEnabled | default false -}}
+{{- if ne (toString $gitops) (toString $worker) -}}
+  {{- fail "github.gitopsPrEnabled and github.workerEnabled are one decision: set both or neither" -}}
+{{- end -}}
+{{- if $gitops -}}
+  {{- if not .Values.github.enabled -}}
+    {{- fail "github.gitopsPrEnabled requires github.enabled: repository writes need a real GitHub App" -}}
+  {{- end -}}
+  {{- if not .Values.github.existingSecret -}}
+    {{- fail "github.gitopsPrEnabled requires github.existingSecret: the App credential references are mounted from it" -}}
+  {{- end -}}
+  {{- if not (or .Values.github.appId .Values.github.clientId) -}}
+    {{- fail "github.gitopsPrEnabled requires github.appId or github.clientId" -}}
+  {{- end -}}
+{{- end -}}
 {{- end -}}

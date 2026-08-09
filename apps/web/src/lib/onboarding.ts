@@ -169,6 +169,10 @@ export interface GitOpsRequest {
   file_path: string;
   base_commit_sha: string;
   provider_pr_number: number | null;
+  /** Composed by the server from the repository projection and the pull
+   *  request number — never taken from a provider response. `null` until a
+   *  pull request actually exists. */
+  pull_request_url: string | null;
   error_code: string | null;
   created_at: string;
   version: number;
