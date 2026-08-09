@@ -61,6 +61,7 @@ from drake_api.github_app.onboarding_service import (
     assert_scannable,
     load_repository_context,
 )
+from drake_api.onboarding import repository as repo
 from drake_api.onboarding.model import (
     ACTIONABLE_ACTIONS,
     ANALYZER_VERSION,
@@ -159,6 +160,31 @@ async def _session_row(connection: AsyncConnection, session_id: uuid.UUID) -> Se
     )
 
 
+#: The sentence an operator sees for each bounded blocker.
+_NOT_STARTABLE_MESSAGES = {
+    "security_gate_open": (
+        "This repository is closed by a manual security gate and cannot be onboarded."
+    ),
+    "repository_unavailable": (
+        "Drake cannot reach this repository: it is archived, disabled, or the "
+        "installation has lost access to it."
+    ),
+    "repository_not_ready": (
+        "Drake has not finished projecting this repository. Reconcile it first."
+    ),
+}
+
+
+class NotStartableError(OnboardingError):
+    """The repository is not in a state an onboarding may start from."""
+
+    def __init__(self, reason_code: str) -> None:
+        super().__init__(
+            reason_code,
+            _NOT_STARTABLE_MESSAGES.get(reason_code, "This repository cannot be onboarded."),
+        )
+
+
 async def create_session(
     engine: AsyncEngine,
     settings: Settings,
@@ -168,26 +194,74 @@ async def create_session(
 ) -> dict[str, Any]:
     """Open a session for one repository, or return the live one.
 
-    The security gate is checked here, before anything else: a gated
-    repository must produce zero provider calls and zero token mints, and a
-    check that runs later would already have broken that.
+    Eligibility is decided by `repository.repository_eligibility` — the same
+    function the picker uses. They asked slightly different questions
+    before: the list reported a repository as unavailable and a direct call
+    to this endpoint opened a session on it anyway. A greyed-out option is a
+    courtesy; this is the rule, and it is checked here.
+
+    The gate is the first thing evaluated, so a gated repository produces
+    zero provider calls and zero token mints.
     """
     require_configured(settings)
 
     async with engine.connect() as connection:
-        context = await load_repository_context(connection, repository_row_id)
-    if context.security_gate:
-        raise OnboardingError(
-            "security_gate_open",
-            "This repository is closed by a manual security gate and cannot be onboarded.",
-        )
-    if repo_catalog.security_gate_for(context.full_name):
-        raise OnboardingError(
-            "security_gate_open",
-            "This repository is closed by a manual security gate and cannot be onboarded.",
-        )
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT r.id, r.full_name, r.default_branch, r.onboarding_state, "
+                    "r.security_gate, r.archived, r.disabled, r.access_state, "
+                    "r.reconciliation_state, (SELECT s.id FROM onboarding_sessions s "
+                    " WHERE s.repository_id = r.id "
+                    "   AND s.state NOT IN ('imported', 'cancelled') "
+                    " ORDER BY s.created_at DESC LIMIT 1), r.scope_id "
+                    "FROM github_repositories r WHERE r.id = :id"
+                ),
+                {"id": repository_row_id},
+            )
+        ).first()
+    if row is None:
+        raise OnboardingError("repository_not_found", "No such repository.", status=404)
+
+    eligibility = repo.repository_eligibility(row)
+    scope_id = uuid.UUID(str(row[10]))
+    if not eligibility["startable"] and eligibility["reason_code"] != "session_in_progress":
+        raise NotStartableError(str(eligibility["reason_code"]))
 
     async with engine.begin() as connection:
+        # Database-authoritative, not select-then-insert.
+        #
+        # Two concurrent creates both read "no active session" and both
+        # insert; the partial unique index stops the second, but as an
+        # IntegrityError surfacing to the caller as a 500. `ON CONFLICT DO
+        # NOTHING` against that index makes the loser's answer a normal
+        # result: it reads the winner's row and reports `created: false`.
+        inserted = (
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO onboarding_sessions
+                        (repository_id, scope_id, state, created_by)
+                    VALUES (:repo, :scope, 'draft', :actor)
+                    ON CONFLICT (repository_id)
+                        WHERE state NOT IN ('imported', 'cancelled', 'failed')
+                        DO NOTHING
+                    RETURNING id
+                    """
+                ),
+                {
+                    "repo": repository_row_id,
+                    "scope": scope_id,
+                    "actor": actor_identity_id,
+                },
+            )
+        ).first()
+        if inserted is not None:
+            return {"session_id": str(inserted[0]), "created": True}
+
+        # Lost the race, or a session was already open. Either way the
+        # caller gets the session that exists rather than an error about
+        # one it cannot see.
         existing = (
             await connection.execute(
                 text(
@@ -197,35 +271,12 @@ async def create_session(
                 {"repo": repository_row_id},
             )
         ).first()
-        if existing is not None:
-            # A live session already exists. Returning it beats opening a
-            # second one whose approval would race the first.
-            session_id = uuid.UUID(str(existing[0]))
-            created = False
-        else:
-            session_id = uuid.UUID(
-                str(
-                    (
-                        await connection.execute(
-                            text(
-                                """
-                                INSERT INTO onboarding_sessions
-                                    (repository_id, scope_id, state, created_by)
-                                VALUES (:repo, :scope, 'draft', :actor)
-                                RETURNING id
-                                """
-                            ),
-                            {
-                                "repo": repository_row_id,
-                                "scope": context.scope_id,
-                                "actor": actor_identity_id,
-                            },
-                        )
-                    ).scalar_one()
-                )
-            )
-            created = True
-    return {"session_id": str(session_id), "created": created}
+    if existing is None:  # pragma: no cover - the conflicting row cannot vanish
+        raise OnboardingError(
+            "session_unavailable",
+            "A session for this repository is being created. Try again.",
+        )
+    return {"session_id": str(existing[0]), "created": False}
 
 
 # ---------------------------------------------------------------------------
@@ -2269,7 +2320,22 @@ async def cancel(
                 "version_conflict", "The session changed since it was read.", status=409
             )
         await _set_state(connection, session_id, str(SessionState.CANCELLED))
-    return {"session_id": str(session_id), "state": str(SessionState.CANCELLED)}
+        # In the SAME transaction, still holding the session's row lock: a
+        # GitOps request that outlives its session is one the worker will
+        # push on behalf of a decision somebody withdrew.
+        # Imported here rather than at module scope: `gitops` imports this
+        # module for the state machine, so a top-level import both ways
+        # would be a cycle. The dependency is real in both directions —
+        # cancelling a session closes its requests, and making a request
+        # needs the session's state table.
+        from drake_api.onboarding import gitops as gitops_module
+
+        cancelled_requests = await gitops_module.cancel_pending_for_session(connection, session_id)
+    return {
+        "session_id": str(session_id),
+        "state": str(SessionState.CANCELLED),
+        "gitops_requests_cancelled": cancelled_requests,
+    }
 
 
 async def mark_stale_for_commit(

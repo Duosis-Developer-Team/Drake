@@ -201,9 +201,42 @@ async def repository_candidates(
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
-        return await repo.repository_candidates(
-            connection, auth.principal, search=search, limit=limit, cursor=cursor
-        )
+        try:
+            return await repo.repository_candidates(
+                connection, auth.principal, search=search, limit=limit, cursor=cursor
+            )
+        except repo.FilterError as error:
+            # A cursor this endpoint did not issue is a bad request, not an
+            # internal error — and certainly not a reason to answer with an
+            # unfiltered first page.
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_cursor", "message": str(error)},
+            ) from error
+
+
+@router.get("/repositories/{repository_id}")
+async def repository_candidate(
+    request: Request,
+    repository_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """One repository's startability, decided by the server.
+
+    The integration screen links here rather than deciding for itself. It
+    knows only whether the operator holds `onboarding.manage` SOMEWHERE,
+    which is exactly the mistake the session endpoints made: a live action
+    offered on a repository whose scope the operator has no rights in.
+
+    Unknown and out-of-scope answer the same 404.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+    async with engine.connect() as connection:
+        candidate = await repo.repository_for_start(connection, auth.principal, repository_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return candidate
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,8 @@ carry a path, a kind and a confidence — enough to explain a proposal, and
 not enough to become a copy of the repository.
 """
 
+import base64
+import binascii
 import uuid
 from typing import Any
 
@@ -18,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from drake_api.catalog.authz import escape_like, visible_scope_ids
+from drake_api.github_app import catalog as repo_catalog
 from drake_api.onboarding.model import REASON_TEXT, Action, SessionState
 from drake_api.rbac.service import Principal
 
@@ -235,13 +238,137 @@ async def list_sessions(
 # repository candidates — what an operator may start a session on
 # ---------------------------------------------------------------------------
 
-#: Why a repository cannot be started, in the order the reasons apply.
-#: Bounded codes: an operator sees a sentence Drake wrote, never a provider's.
+#: Why a repository cannot be started, in the order they are evaluated.
+#: The order is the point: a gated repository reports the gate even when it
+#: is also archived, because the gate is the fact an operator must act on.
 STARTABLE_BLOCKERS = (
     "security_gate_open",
     "repository_unavailable",
+    "repository_not_ready",
     "session_in_progress",
 )
+
+#: Everything the eligibility decision reads. Selected once, by both the
+#: picker and the create endpoint, so the two cannot drift.
+_ELIGIBILITY_COLUMNS = """
+    r.id, r.full_name, r.default_branch, r.onboarding_state, r.security_gate,
+    r.archived, r.disabled, r.access_state, r.reconciliation_state,
+    (SELECT s.id FROM onboarding_sessions s
+      WHERE s.repository_id = r.id
+        AND s.state NOT IN ('imported', 'cancelled')
+      ORDER BY s.created_at DESC LIMIT 1) AS active_session
+"""
+
+#: Projection states a session may be opened from. `discovered` is excluded
+#: on purpose: Drake has seen the repository exist and knows nothing else
+#: about it, and an analysis needs a reconciled projection to start from.
+_STARTABLE_PROJECTION = frozenset({"ready", "degraded"})
+
+
+def repository_eligibility(row: Any) -> dict[str, Any]:
+    """Whether an onboarding may START on this repository, and why not.
+
+    ONE function, called by the picker and by `POST /sessions`. They asked
+    slightly different questions before, which is the same shape of bug as
+    the authorization one: the list said a repository was unavailable and
+    the endpoint let a direct call open a session on it anyway. A greyed-out
+    option is a courtesy; this is the rule.
+
+    The gate is checked FIRST and from both sources — the persisted column
+    and the static catalogue — because a gate is the one blocker that must
+    never be reachable by fixing something else about the repository.
+    """
+    full_name = str(row[1])
+    # Either source closes it. The persisted column is what a webhook or an
+    # operator sets; the static catalogue is what ships with Drake. Trusting
+    # only one would make the gate depend on which mechanism set it.
+    gate = row[4] or repo_catalog.security_gate_for(full_name)
+    unavailable = bool(row[5]) or bool(row[6]) or str(row[7] or "accessible") != "accessible"
+    not_ready = str(row[8] or "never") != "complete" or str(row[3]) not in _STARTABLE_PROJECTION
+    active_session = str(row[9]) if row[9] else None
+
+    reason: str | None = None
+    if gate:
+        reason = "security_gate_open"
+    elif unavailable:
+        reason = "repository_unavailable"
+    elif not_ready:
+        reason = "repository_not_ready"
+    elif active_session:
+        # Not a refusal so much as a redirect: the operator wants the
+        # session that already exists, not a second one beside it.
+        reason = "session_in_progress"
+
+    return {
+        "id": str(row[0]),
+        "full_name": full_name,
+        "default_branch": str(row[2] or ""),
+        "onboarding_state": str(row[3]),
+        # Derived, not the raw provider fields: a client decides on this
+        # word, and `archived`/`disabled`/`access_state` are three ways of
+        # saying one thing to an operator.
+        "access_state": "accessible" if not unavailable else "unavailable",
+        "security_gate": gate,
+        "active_session_id": active_session,
+        "startable": reason is None,
+        "reason_code": reason,
+    }
+
+
+def _one_repository_query() -> str:
+    """The single-repository eligibility select.
+
+    Built here so the only interpolated fragment — a module constant of
+    column names — is visibly separate from anything a caller supplies.
+    Every value in it is a bind parameter.
+    """
+    query = (
+        f"SELECT {_ELIGIBILITY_COLUMNS} FROM github_repositories r "  # noqa: S608
+        "WHERE r.id = :id AND r.scope_id = ANY(:scopes)"
+    )
+    return query
+
+
+async def repository_for_start(
+    connection: AsyncConnection, principal: Principal, repository_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """One repository's eligibility, scoped to `onboarding.manage`.
+
+    Returns `None` for a repository that does not exist and for one outside
+    the caller's manage scopes — the same answer, so this cannot be used to
+    ask which repositories exist.
+    """
+    scopes = await scopes_for(connection, principal, MANAGE_PERMISSION)
+    row = (
+        await connection.execute(
+            text(_one_repository_query()),
+            {"id": repository_id, "scopes": scopes},
+        )
+    ).first()
+    return repository_eligibility(row) if row is not None else None
+
+
+def encode_cursor(full_name: str, repository_id: str) -> str:
+    """An opaque, bounded position in the total order.
+
+    Both halves travel, because `full_name` is NOT unique — a repository can
+    be deleted and recreated, and two provider ids can carry the same name.
+    A name-only cursor silently skips the second row at a page boundary.
+    """
+    raw = f"{full_name}\x00{repository_id}".encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_cursor(cursor: str) -> tuple[str, uuid.UUID]:
+    """The inverse, or a bounded refusal. Never a 500 and never unfiltered."""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        name, _, identifier = base64.urlsafe_b64decode(padded.encode()).decode().partition("\x00")
+        if not name or not identifier:
+            raise ValueError("incomplete cursor")
+        return name, uuid.UUID(identifier)
+    except (ValueError, UnicodeDecodeError, binascii.Error) as error:
+        raise FilterError("cursor is not a position this endpoint issued") from error
 
 
 async def repository_candidates(
@@ -272,28 +399,26 @@ async def repository_candidates(
         params["search"] = f"%{escape_like(search)}%"
         where.append("r.full_name ILIKE :search ESCAPE '\\'")
     if cursor:
-        # Keyset, on the same total order the query sorts by, so a page
-        # boundary cannot repeat or skip a row when the set changes.
-        params["cursor"] = cursor
-        # Same collation as the ORDER BY below, and deliberately `C`: a
-        # locale collation orders names differently on different databases,
-        # so a cursor issued by one instance could skip or repeat rows on
-        # another. Byte order is the same everywhere.
-        where.append('r.full_name COLLATE "C" > :cursor COLLATE "C"')
+        name, identifier = decode_cursor(cursor)
+        params["cursor_name"] = name
+        params["cursor_id"] = identifier
+        # Keyset on the SAME total order the query sorts by, as a row
+        # comparison so the tie-break is part of the boundary rather than
+        # something the caller has to reason about.
+        #
+        # `COLLATE "C"` deliberately: a locale collation orders names
+        # differently on different databases, so a cursor issued by one
+        # instance could skip or repeat rows on another.
+        where.append('(r.full_name COLLATE "C", r.id) > (:cursor_name COLLATE "C", :cursor_id)')
 
     rows = (
         await connection.execute(
             text(
                 f"""
-                SELECT r.id, r.full_name, r.default_branch, r.onboarding_state,
-                       r.security_gate, r.archived, r.disabled, r.access_state,
-                       (SELECT s.id FROM onboarding_sessions s
-                         WHERE s.repository_id = r.id
-                           AND s.state NOT IN ('imported', 'cancelled')
-                         ORDER BY s.created_at DESC LIMIT 1) AS active_session
+                SELECT {_ELIGIBILITY_COLUMNS}
                 FROM github_repositories r
                 WHERE {" AND ".join(where)}
-                ORDER BY r.full_name COLLATE "C"
+                ORDER BY r.full_name COLLATE "C", r.id
                 LIMIT :limit
                 """  # noqa: S608 - every fragment is a module literal
             ),
@@ -301,37 +426,12 @@ async def repository_candidates(
         )
     ).all()
 
-    items: list[dict[str, Any]] = []
-    for row in rows[:limit]:
-        gate = row[4]
-        unavailable = bool(row[5]) or bool(row[6]) or str(row[7] or "accessible") != "accessible"
-        active_session = str(row[8]) if row[8] else None
-        reason_code: str | None = None
-        if gate:
-            reason_code = "security_gate_open"
-        elif unavailable:
-            reason_code = "repository_unavailable"
-        elif active_session:
-            # Not a refusal so much as a redirect: the operator wants the
-            # session that already exists, not a second one beside it.
-            reason_code = "session_in_progress"
-        items.append(
-            {
-                "id": str(row[0]),
-                "full_name": str(row[1]),
-                "default_branch": str(row[2] or ""),
-                "onboarding_state": str(row[3]),
-                # Derived, not the raw provider fields: a client decides on
-                # this word, and `archived`/`disabled`/`access_state` are
-                # three ways of saying one thing to an operator.
-                "access_state": "accessible" if not unavailable else "unavailable",
-                "security_gate": gate,
-                "active_session_id": active_session,
-                "startable": reason_code is None,
-                "reason_code": reason_code,
-            }
-        )
-    next_cursor = items[-1]["full_name"] if len(rows) > limit and items else None
+    items = [repository_eligibility(row) for row in rows[:limit]]
+    next_cursor = (
+        encode_cursor(items[-1]["full_name"], items[-1]["id"])
+        if len(rows) > limit and items
+        else None
+    )
     return {"items": items, "next_cursor": next_cursor}
 
 
