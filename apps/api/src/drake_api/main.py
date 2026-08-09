@@ -242,13 +242,26 @@ def create_app(
     )
     # The GitOps worker is the only path through which Drake would WRITE to
     # a repository. Off by default, and while it is off nothing is claimed,
-    # no token is minted and no provider call is made. The provider is the
-    # recording fake until a real one is wired: a half-configured write path
-    # is worse than none.
-    app.state.gitops_provider = RecordingProvider()
+    # no token is minted and no provider call is made.
+    #
+    # The provider is wired ONLY in local/test. `RecordingProvider` is a
+    # test double that returns a pull-request number, and a production
+    # process holding one would report an open pull request that does not
+    # exist, against a branch nobody created. Settings validation already
+    # refuses the flags outside local/test; this is the same rule expressed
+    # where the object is actually constructed, so a future caller that
+    # bypasses the flags still cannot end up with a fake.
+    #
+    # Sprint 12B brings a real provider. Until then, production has none —
+    # which is the honest state, not a gap.
+    app.state.gitops_provider = None if settings.is_production_like else RecordingProvider()
     app.state.gitops_worker = (
         GitOpsWorker(get_engine(settings), settings, app.state.gitops_provider)
-        if (settings.gitops_worker_enabled and settings.github_gitops_pr_enabled)
+        if (
+            settings.gitops_worker_enabled
+            and settings.github_gitops_pr_enabled
+            and app.state.gitops_provider is not None
+        )
         else None
     )
     # The only outbound provider MUTATION in Drake. Off unless an operator
