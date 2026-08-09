@@ -27,8 +27,9 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 
 from drake_api.audit.service import AuditEventData, record_audit_event
 from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
@@ -90,12 +91,40 @@ def _failure(error: OnboardingError) -> HTTPException:
 
 
 async def _require(request: Request, auth: AuthContext, permission: str) -> None:
+    """A page-level gate, for endpoints with no target yet.
+
+    Only correct where there is nothing to be scoped TO — listing sessions,
+    creating one. Anything that acts on an existing session must use
+    `_require_session`, which asks about that session's scope.
+    """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
     async with engine.connect() as connection:
         if not await repo.can(connection, auth.principal, permission):
             # The same 404 an unknown session produces: a 403 would confirm
             # the session exists.
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+
+
+async def _require_session(
+    request: Request, auth: AuthContext, session_id: uuid.UUID, permission: str
+) -> None:
+    """Authorize an action against the scope of the session it acts on.
+
+    Every one of these endpoints used to ask "does this user hold the
+    permission anywhere", then load the session under VIEW scoping. A user
+    with `onboarding.view` on project A and `onboarding.apply` on project B
+    passed both halves and could apply A's plan — the permission came from
+    one place and the target from another.
+
+    Unknown session, invisible session and visible-but-not-permitted all
+    answer the same 404. A 403 would confirm the session exists, which is
+    the fact the scoping is there to keep.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+    async with engine.connect() as connection:
+        if await repo.authorize_session(connection, auth.principal, session_id, permission) is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
 
 
@@ -147,6 +176,34 @@ async def github_status(
 @router.get("/filters")
 async def onboarding_filters(_auth: AuthContext = Depends(require_auth)) -> dict[str, Any]:
     return repo.filter_options()
+
+
+@router.get("/repositories")
+async def repository_candidates(
+    request: Request,
+    search: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=repo.DEFAULT_PAGE_SIZE, ge=1, le=repo.MAX_PAGE_SIZE),
+    cursor: str | None = Query(default=None, max_length=400),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """Repositories this operator may start an onboarding on.
+
+    Deliberately NOT the integration repository list. That endpoint answers
+    a read question under read scoping; this one answers "what can I act on"
+    under `onboarding.manage`, and the two are not the same set. Pointing the
+    onboarding screen at the read endpoint would show repositories whose
+    Start button then 404s.
+
+    Nothing provider-shaped is returned: no installation id, no URL, no node
+    id, no repository content. A row id and a name are what starting a
+    session needs.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+    async with engine.connect() as connection:
+        return await repo.repository_candidates(
+            connection, auth.principal, search=search, limit=limit, cursor=cursor
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +283,66 @@ async def session_plan(
     return plan
 
 
+@router.get("/sessions/{session_id}/manifest-draft")
+async def manifest_draft(
+    request: Request,
+    session_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+) -> Response:
+    """A manifest an operator can commit themselves.
+
+    Drake cannot write to a repository yet — the GitOps provider is Sprint
+    12B and the flag is off — so the operator needs a way to get the
+    manifest a session's analysis implies and commit it by hand. Retiring
+    the old panel without this would remove a capability people rely on.
+
+    Generated from the session's STORED analysis, deterministically. No
+    provider call, no token, no live read: the bytes describe what Drake
+    found at the analysed commit, and asking GitHub again would produce a
+    document nobody reviewed.
+
+    Sent as an attachment with `no-store`, and the UI never renders it. A
+    manifest is a file to commit, not markup to put in a page.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+    await _require_session(request, auth, session_id, repo.VIEW_PERMISSION)
+
+    async with engine.connect() as connection:
+        # Same resolution the draft itself uses: an analysis belongs to a
+        # (repository, commit, analyzer_version), so a later session on the
+        # same commit reuses it and owns no row of its own.
+        analysed = (
+            await connection.execute(
+                text(
+                    "SELECT count(*) FROM onboarding_analyses a "
+                    "WHERE a.session_id = :id "
+                    "   OR a.id = (SELECT p.analysis_id FROM onboarding_plans p "
+                    "              WHERE p.session_id = :id "
+                    "              ORDER BY p.plan_version DESC LIMIT 1)"
+                ),
+                {"id": session_id},
+            )
+        ).scalar_one()
+        if not analysed:
+            raise _failure(
+                OnboardingError(
+                    "analysis_required",
+                    "Analyse the repository first: a draft is built from its analysis.",
+                )
+            )
+        draft = await gitops_module.draft_manifest(connection, session_id)
+
+    return Response(
+        content=draft,
+        media_type="application/yaml",
+        headers={
+            "Content-Disposition": f'attachment; filename="drake-project-{session_id}.yaml"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # mutations
 # ---------------------------------------------------------------------------
@@ -294,11 +411,7 @@ async def analyze(
     """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
-    await _require(request, auth, repo.MANAGE_PERMISSION)
-
-    async with engine.connect() as connection:
-        if await repo.get_session(connection, auth.principal, session_id) is None:
-            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    await _require_session(request, auth, session_id, repo.MANAGE_PERMISSION)
 
     client = getattr(request.app.state, "github_client", None)
     if client is None:
@@ -344,11 +457,7 @@ async def approve(
     """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
-    await _require(request, auth, repo.MANAGE_PERMISSION)
-
-    async with engine.connect() as connection:
-        if await repo.get_session(connection, auth.principal, session_id) is None:
-            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    await _require_session(request, auth, session_id, repo.MANAGE_PERMISSION)
 
     try:
         result = await service.approve(
@@ -391,11 +500,7 @@ async def apply(
     """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
-    await _require(request, auth, repo.APPLY_PERMISSION)
-
-    async with engine.connect() as connection:
-        if await repo.get_session(connection, auth.principal, session_id) is None:
-            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    await _require_session(request, auth, session_id, repo.APPLY_PERMISSION)
 
     client = getattr(request.app.state, "github_client", None)
     if client is None:
@@ -455,11 +560,7 @@ async def cancel(
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
-    await _require(request, auth, repo.MANAGE_PERMISSION)
-
-    async with engine.connect() as connection:
-        if await repo.get_session(connection, auth.principal, session_id) is None:
-            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    await _require_session(request, auth, session_id, repo.MANAGE_PERMISSION)
 
     try:
         result = await service.cancel(
@@ -501,11 +602,7 @@ async def gitops_request(
     """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
-    await _require(request, auth, repo.GITOPS_PERMISSION)
-
-    async with engine.connect() as connection:
-        if await repo.get_session(connection, auth.principal, session_id) is None:
-            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    await _require_session(request, auth, session_id, repo.GITOPS_PERMISSION)
 
     try:
         result = await gitops_module.request_pull_request(

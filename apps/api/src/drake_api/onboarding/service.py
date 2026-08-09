@@ -228,6 +228,141 @@ async def create_session(
     return {"session_id": str(session_id), "created": created}
 
 
+# ---------------------------------------------------------------------------
+# the session state machine
+# ---------------------------------------------------------------------------
+
+#: Which states each mutation may act from. Hiding a button is not a state
+#: machine: an endpoint that accepts anything the UI happens to send can
+#: resurrect a cancelled session or re-open an imported one, and both of
+#: those rewrite history somebody already acted on.
+#:
+#: `imported` and `cancelled` appear in no list. They are terminal, and the
+#: way to revisit a repository is a NEW session — which keeps the record of
+#: what the old one decided.
+ALLOWED_STATES: dict[str, frozenset[str]] = {
+    "analyze": frozenset(
+        {
+            str(SessionState.DRAFT),
+            str(SessionState.DISCOVERY_PENDING),
+            str(SessionState.NEEDS_REVIEW),
+            str(SessionState.READY),
+            str(SessionState.PROVIDER_UNAVAILABLE),
+            str(SessionState.STALE),
+            str(SessionState.FAILED),
+        }
+    ),
+    # An approval is of one reviewed plan, so the session has to be showing
+    # one. `needs_review` is excluded on purpose: it means the plan has
+    # blocking items, and approving around them is the whole failure mode.
+    "approve": frozenset({str(SessionState.READY)}),
+    "apply": frozenset({str(SessionState.APPROVED)}),
+    "cancel": frozenset(
+        {
+            str(SessionState.DRAFT),
+            str(SessionState.DISCOVERY_PENDING),
+            str(SessionState.NEEDS_REVIEW),
+            str(SessionState.READY),
+            str(SessionState.APPROVED),
+            str(SessionState.PROVIDER_UNAVAILABLE),
+            str(SessionState.STALE),
+            str(SessionState.FAILED),
+        }
+    ),
+    # GitOps proposes a manifest built from an analysis, so there has to be
+    # one. It stays available after approval because the repository still
+    # has no manifest until somebody merges the proposal.
+    "gitops": frozenset(
+        {
+            str(SessionState.NEEDS_REVIEW),
+            str(SessionState.READY),
+            str(SessionState.APPROVED),
+        }
+    ),
+}
+
+
+class InvalidSessionStateError(OnboardingError):
+    """This action is not available from the state the session is in."""
+
+    def __init__(self, action: str, state: str) -> None:
+        super().__init__(
+            "invalid_session_state",
+            f"A session in state '{state}' cannot be {action}.",
+            status=409,
+        )
+
+
+async def _state_of(connection: AsyncConnection, session_id: uuid.UUID) -> str | None:
+    return (
+        await connection.execute(
+            text("SELECT state FROM onboarding_sessions WHERE id = :id"), {"id": session_id}
+        )
+    ).scalar_one_or_none()
+
+
+#: States that deserve a more specific refusal than "wrong state".
+#: `needs_review` IS a state approve may not act from, but saying only that
+#: hides the reason: the plan has blocking items. The narrower code tells an
+#: operator what to fix; the generic one tells them to guess.
+_SPECIFIC_REFUSALS: dict[tuple[str, str], tuple[str, str]] = {
+    ("approve", str(SessionState.NEEDS_REVIEW)): (
+        "plan_blocked",
+        "This plan has conflicts or unmapped bindings that must be resolved first.",
+    ),
+    ("approve", str(SessionState.APPROVED)): (
+        "already_approved",
+        "This plan version has already been approved.",
+    ),
+    ("apply", str(SessionState.IMPORTED)): (
+        "already_imported",
+        "This session has already been applied.",
+    ),
+}
+
+
+async def lock_session_for(
+    connection: AsyncConnection, session_id: uuid.UUID, action: str
+) -> SessionRow:
+    """Take the session's row lock, then check the action is legal from here.
+
+    The lock is the point. Reading the state, deciding, and then writing
+    leaves a window in which a second request reads the same state and
+    decides the same thing — two analyses from one `ready`, two cancels, an
+    apply racing a cancel. `FOR UPDATE` makes the second request wait for
+    the first to commit and then see what it did.
+
+    Must be called inside the transaction that performs the mutation. A lock
+    released before the write protects nothing.
+    """
+    row = (
+        await connection.execute(
+            text(
+                "SELECT id, repository_id, scope_id, state, version, analyzed_commit_sha, "
+                "approved_plan_version FROM onboarding_sessions WHERE id = :id FOR UPDATE"
+            ),
+            {"id": session_id},
+        )
+    ).first()
+    if row is None:
+        raise OnboardingError("session_not_found", "No such onboarding session.", status=404)
+    session = SessionRow(
+        id=uuid.UUID(str(row[0])),
+        repository_id=uuid.UUID(str(row[1])),
+        scope_id=uuid.UUID(str(row[2])),
+        state=str(row[3]),
+        version=int(row[4]),
+        analyzed_commit_sha=row[5],
+        approved_plan_version=row[6],
+    )
+    if session.state not in ALLOWED_STATES[action]:
+        specific = _SPECIFIC_REFUSALS.get((action, session.state))
+        if specific is not None:
+            raise OnboardingError(specific[0], specific[1], status=409)
+        raise InvalidSessionStateError(action, session.state)
+    return session
+
+
 async def _set_state(
     connection: AsyncConnection,
     session_id: uuid.UUID,
@@ -285,7 +420,10 @@ async def analyze(
             "security_gate_open", "This repository is closed by a manual security gate."
         )
 
+    # Claiming `analyzing` is the critical section: two clicks, or a click
+    # and a retry, otherwise both read `ready` and both start scanning.
     async with engine.begin() as connection:
+        await lock_session_for(connection, session_id, "analyze")
         await _set_state(connection, session_id, str(SessionState.ANALYZING))
 
     try:
@@ -916,9 +1054,7 @@ async def approve(
     a new version, and the old approval no longer matches.
     """
     async with engine.begin() as connection:
-        session = await _session_row(connection, session_id)
-        if session is None:
-            raise OnboardingError("session_not_found", "No such onboarding session.", status=404)
+        session = await lock_session_for(connection, session_id, "approve")
         if session.version != expected_version:
             raise OnboardingError(
                 "version_conflict", "The session changed since it was read.", status=409
@@ -1222,9 +1358,22 @@ async def _materialise(
             idempotency_key=idempotency_key,
         )
         if claim.replay is not None:
+            # A replay is answered before the state is examined, and that
+            # order matters: after a successful apply the session is
+            # `imported`, which is not a state an apply may start from. It
+            # is not starting one. The work is already committed and this is
+            # its recorded answer.
             return claim.replay
         assert claim.apply_id is not None
         apply_id = claim.apply_id
+
+        # Only a caller that actually claimed gets here, so this is the one
+        # that is about to mutate. The state check holds the session's row
+        # lock: `apply` already refused a session that was not `approved`,
+        # but that read happened outside this transaction, and a cancel or a
+        # re-analysis committed in between would otherwise be overwritten by
+        # an apply that never saw it.
+        await lock_session_for(connection, session.id, "apply")
 
         # Coverage check, before a single mutation. An actionable item with
         # no handler stops the whole apply.
@@ -2109,13 +2258,12 @@ async def cancel(
     engine: AsyncEngine, *, session_id: uuid.UUID, expected_version: int
 ) -> dict[str, Any]:
     async with engine.begin() as connection:
-        session = await _session_row(connection, session_id)
-        if session is None:
-            raise OnboardingError("session_not_found", "No such onboarding session.", status=404)
-        if session.state == str(SessionState.IMPORTED):
+        if await _state_of(connection, session_id) == str(SessionState.IMPORTED):
             # An import already happened. Cancelling it would suggest the
-            # catalog rows went away, and they did not.
+            # catalog rows went away, and they did not — so this keeps its
+            # own named refusal rather than the generic state error.
             raise OnboardingError("already_imported", "This session has already been applied.")
+        session = await lock_session_for(connection, session_id, "cancel")
         if session.version != expected_version:
             raise OnboardingError(
                 "version_conflict", "The session changed since it was read.", status=409

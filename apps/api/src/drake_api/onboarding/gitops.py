@@ -37,6 +37,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.github_app.onboarding_service import OnboardingError, load_repository_context
+from drake_api.onboarding import service
 from drake_api.settings import Settings
 
 logger = logging.getLogger("drake_api.onboarding.gitops")
@@ -144,20 +145,13 @@ async def request_pull_request(
     if not settings.github_gitops_pr_enabled:
         raise GitOpsDisabledError()
 
-    async with engine.connect() as connection:
-        row = (
-            await connection.execute(
-                text(
-                    "SELECT s.repository_id, s.analyzed_commit_sha, s.state "
-                    "FROM onboarding_sessions s WHERE s.id = :id"
-                ),
-                {"id": session_id},
-            )
-        ).first()
-        if row is None:
-            raise OnboardingError("session_not_found", "No such onboarding session.", status=404)
-        repository_id = uuid.UUID(str(row[0]))
-        commit_sha = str(row[1] or "")
+    async with engine.begin() as connection:
+        # A proposal describes an analysed session, so the state has to be
+        # one that HAS an analysis. Locked, so a cancel committing alongside
+        # this cannot leave a pending request against a closed session.
+        session = await service.lock_session_for(connection, session_id, "gitops")
+        repository_id = session.repository_id
+        commit_sha = str(session.analyzed_commit_sha or "")
         if not commit_sha:
             raise OnboardingError(
                 "analysis_required",
@@ -168,7 +162,7 @@ async def request_pull_request(
             raise OnboardingError(
                 "security_gate_open", "This repository is closed by a manual security gate."
             )
-        draft = await _draft_manifest(connection, session_id)
+        draft = await draft_manifest(connection, session_id)
 
     digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
     key = idempotency_key(session_id, commit_sha, digest)
@@ -211,20 +205,30 @@ async def request_pull_request(
     return {"id": str(created[0]), "state": "pending", "created": True}
 
 
-async def _draft_manifest(connection: AsyncConnection, session_id: uuid.UUID) -> str:
+async def draft_manifest(connection: AsyncConnection, session_id: uuid.UUID) -> str:
     """Regenerate the proposal deterministically from the analysis.
 
     Regenerated rather than stored: what is reviewed and what is pushed then
     cannot diverge, and Drake keeps no copy of a repository file.
     """
+    # The analysis is resolved through the session's newest plan, falling
+    # back to one this session owns. An analysis row is unique per
+    # `(repository, commit, analyzer_version)`, so a second session on the
+    # same repository at the same commit reuses the first session's row —
+    # joining on `session_id` alone found nothing and produced a draft with
+    # an empty commit.
     row = (
         await connection.execute(
             text(
                 "SELECT r.owner_login, r.name, r.default_branch, a.commit_sha "
                 "FROM onboarding_sessions s "
                 "JOIN github_repositories r ON r.id = s.repository_id "
-                "LEFT JOIN onboarding_analyses a ON a.session_id = s.id "
-                "WHERE s.id = :id ORDER BY a.analyzed_at DESC LIMIT 1"
+                "LEFT JOIN onboarding_analyses a "
+                "  ON a.id = (SELECT p.analysis_id FROM onboarding_plans p "
+                "             WHERE p.session_id = s.id "
+                "             ORDER BY p.plan_version DESC LIMIT 1) "
+                "  OR a.session_id = s.id "
+                "WHERE s.id = :id ORDER BY a.analyzed_at DESC NULLS LAST LIMIT 1"
             ),
             {"id": session_id},
         )
@@ -352,7 +356,7 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                 {"ids": [entry["id"] for entry in claimed]},
             )
         for entry in claimed:
-            entry["content"] = await _draft_manifest(connection, entry["session_id"])
+            entry["content"] = await draft_manifest(connection, entry["session_id"])
     return claimed
 
 
