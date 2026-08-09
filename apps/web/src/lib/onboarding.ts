@@ -204,6 +204,21 @@ export interface GitHubStatus {
   gitops_failed: number;
 }
 
+/** What an apply actually committed. Counters are additive; older clients
+ * that read only the first three keep working. */
+export interface ApplyResult {
+  outcome: "applied" | "unchanged" | "failed";
+  project_id: string | null;
+  created_entities: number;
+  linked_entities: number;
+  unchanged_entities: number;
+  no_change_count: number;
+  metadata_updated: number;
+  slo_definitions_created: number;
+  slo_definitions_updated: number;
+  bindings_created: number;
+}
+
 export interface SessionPage {
   items: OnboardingSession[];
   total: number;

@@ -40,13 +40,14 @@ import hashlib
 import json
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from drake_api.alerting.contracts import default_burn_profile, indicator_template
 from drake_api.catalog.service import CatalogService
 from drake_api.github_app import catalog as repo_catalog
 from drake_api.github_app import manifest as manifest_module
@@ -60,7 +61,13 @@ from drake_api.github_app.onboarding_service import (
     load_repository_context,
 )
 from drake_api.onboarding.model import (
+    ACTIONABLE_ACTIONS,
     ANALYZER_VERSION,
+    BINDABLE_WORKLOAD_KINDS,
+    MUTABLE_ENVIRONMENT_FIELDS,
+    MUTABLE_PROJECT_FIELDS,
+    MUTABLE_SERVICE_FIELDS,
+    PLACEHOLDER_INTEGRATIONS,
     Action,
     CatalogSnapshot,
     EntityKind,
@@ -69,7 +76,13 @@ from drake_api.onboarding.model import (
     SessionState,
     build_plan,
     deployment_source_item,
+    slo_metadata,
 )
+from drake_api.onboarding.model import _environment_metadata as model_environment_metadata
+from drake_api.onboarding.model import _project_metadata as model_project_metadata
+from drake_api.onboarding.model import _service_metadata as model_service_metadata
+from drake_api.service_health.policy import DEFAULT_POLICY_KEY
+from drake_api.service_health.presets import DEFAULT_PRESET_KEY
 from drake_api.settings import Settings
 
 logger = logging.getLogger("drake_api.onboarding")
@@ -557,22 +570,89 @@ async def load_snapshot(
     environments: dict[tuple[str, str], str] = {}
     services: dict[tuple[str, str], str] = {}
     catalog_only: list[str] = []
+    project_metadata: dict[str, dict[str, Any]] = {}
+    environment_metadata: dict[tuple[str, str], dict[str, Any]] = {}
+    service_metadata: dict[tuple[str, str], dict[str, Any]] = {}
+    slo_definitions: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
+
     if project_id is not None:
+        current = (
+            await connection.execute(
+                text(
+                    "SELECT project_key, display_name, criticality, tenant_model, "
+                    "repo_provider, repo_owner, repo_name FROM projects WHERE id = :p"
+                ),
+                {"p": project_id},
+            )
+        ).one()
+        project_metadata[project_key] = {
+            "project_key": str(current[0]),
+            "display_name": str(current[1] or ""),
+            "criticality": str(current[2] or ""),
+            "tenant_model": str(current[3] or ""),
+            "repo_provider": str(current[4] or ""),
+            "repo_owner": str(current[5] or ""),
+            "repo_name": str(current[6] or ""),
+        }
         for entry in (
             await connection.execute(
-                text("SELECT environment_key, id FROM environments WHERE project_id = :p"),
+                text(
+                    "SELECT e.environment_key, e.id, e.branch, e.criticality, e.runtime, "
+                    "e.namespace, c.cluster_ref FROM environments e "
+                    "LEFT JOIN clusters c ON c.id = e.cluster_id WHERE e.project_id = :p"
+                ),
                 {"p": project_id},
             )
         ).all():
             environments[(project_key, str(entry[0]))] = str(entry[1])
+            environment_metadata[(project_key, str(entry[0]))] = {
+                "environment_key": str(entry[0]),
+                "branch": str(entry[2] or ""),
+                "criticality": str(entry[3] or ""),
+                "runtime": str(entry[4] or ""),
+                "namespace": str(entry[5] or ""),
+                "cluster_ref": str(entry[6] or ""),
+            }
+        for entry in (
+            await connection.execute(
+                text(
+                    "SELECT slo_key, id, display_name, indicator, objective_ratio, "
+                    "window_seconds FROM slo_definitions WHERE project_id = :p"
+                ),
+                {"p": project_id},
+            )
+        ).all():
+            slo_definitions[(project_key, str(entry[0]))] = (
+                str(entry[1]),
+                {
+                    "slo_key": str(entry[0]),
+                    "display_name": str(entry[2] or ""),
+                    "indicator": str(entry[3] or ""),
+                    "objective_ratio": round(float(entry[4]), 7),
+                    "window_seconds": int(entry[5]),
+                },
+            )
         manifest_services = {str(item.get("name") or "") for item in spec.get("services") or []}
         for entry in (
             await connection.execute(
-                text("SELECT service_key, id FROM service_definitions WHERE project_id = :p"),
+                text(
+                    "SELECT service_key, id, display_name, component, runtime, "
+                    "metrics_profile, workload_selector, health "
+                    "FROM service_definitions WHERE project_id = :p"
+                ),
                 {"p": project_id},
             )
         ).all():
             services[(project_key, str(entry[0]))] = str(entry[1])
+            service_metadata[(project_key, str(entry[0]))] = {
+                "service_key": str(entry[0]),
+                "display_name": str(entry[2] or ""),
+                "component": str(entry[3] or ""),
+                "runtime": str(entry[4] or ""),
+                "metrics_profile": str(entry[5] or ""),
+                "workload_selector": dict(entry[6] or {}),
+                "health": dict(entry[7] or {}),
+            }
             if str(entry[0]) not in manifest_services:
                 catalog_only.append(str(entry[0]))
 
@@ -599,6 +679,8 @@ async def load_snapshot(
         ).all()
     }
 
+    observed, existing_bindings = await _binding_evidence(connection, document, project_id)
+
     return CatalogSnapshot(
         projects=projects,
         project_repository=project_repository,
@@ -610,7 +692,101 @@ async def load_snapshot(
         slo_profiles=frozenset({"availability", "latency"}),
         namespace_bindings=namespace_bindings,
         catalog_only_services=tuple(sorted(catalog_only)),
+        project_metadata=project_metadata,
+        environment_metadata=environment_metadata,
+        service_metadata=service_metadata,
+        slo_definitions=slo_definitions,
+        observed_workloads=observed,
+        existing_bindings=existing_bindings,
     )
+
+
+async def _binding_evidence(
+    connection: AsyncConnection, document: dict[str, Any], project_id: uuid.UUID | None
+) -> tuple[
+    dict[tuple[str, str], tuple[dict[str, str], ...]], dict[tuple[str, str], dict[str, Any]]
+]:
+    """Workloads the cluster agent has OBSERVED, and bindings that exist.
+
+    The manifest says a service exists; only the agent knows which workload
+    runs it. So candidates come from `inventory_resources` — things actually
+    seen in the cluster — matched by namespace and by the service's own
+    `workloadSelector` labels. No selector means no evidence, and no
+    evidence means no proposal.
+    """
+    spec = document.get("spec") or {}
+    observed: dict[tuple[str, str], tuple[dict[str, str], ...]] = {}
+    existing: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for environment in spec.get("environments") or []:
+        environment_key = str(environment.get("name") or "")
+        if str(environment.get("runtime") or "") != "kubernetes":
+            continue
+        namespace = str(environment.get("namespace") or "")
+        cluster_ref = str(environment.get("clusterRef") or "")
+        if not (namespace and cluster_ref):
+            continue
+
+        for service in spec.get("services") or []:
+            service_key = str(service.get("name") or "")
+            selector = service.get("workloadSelector") or {}
+            if not isinstance(selector, dict) or not selector:
+                # Without a selector Drake has no way to tell this service's
+                # workload from any other in the namespace.
+                continue
+            rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT r.kind, r.name
+                        FROM inventory_resources r
+                        JOIN clusters c ON c.id = r.cluster_id
+                        WHERE c.cluster_ref = :cluster
+                          AND r.namespace = :namespace
+                          AND r.lifecycle = 'active'
+                          AND r.kind = ANY(:kinds)
+                          AND (r.payload -> 'labels') @> CAST(:selector AS jsonb)
+                        ORDER BY r.kind, r.name
+                        LIMIT 5
+                        """
+                    ),
+                    {
+                        "cluster": cluster_ref,
+                        "namespace": namespace,
+                        "kinds": sorted(BINDABLE_WORKLOAD_KINDS),
+                        "selector": json.dumps(
+                            {str(key): str(value) for key, value in selector.items()}
+                        ),
+                    },
+                )
+            ).all()
+            if rows:
+                observed[(environment_key, service_key)] = tuple(
+                    {"kind": str(row[0]), "name": str(row[1])} for row in rows
+                )
+
+    if project_id is not None:
+        for row in (
+            await connection.execute(
+                text(
+                    """
+                    SELECT e.environment_key, sd.service_key, b.id, b.workload_kind,
+                           b.workload_name
+                    FROM service_workload_bindings b
+                    JOIN environments e ON e.id = b.environment_id
+                    JOIN service_definitions sd ON sd.id = b.service_id
+                    WHERE b.project_id = :p AND b.lifecycle = 'active'
+                    """
+                ),
+                {"p": project_id},
+            )
+        ).all():
+            existing[(str(row[0]), str(row[1]))] = {
+                "id": str(row[2]),
+                "workload_kind": str(row[3]),
+                "workload_name": str(row[4]),
+            }
+    return observed, existing
 
 
 def _metric_profiles() -> frozenset[str]:
@@ -777,12 +953,22 @@ async def approve(
 
 @dataclass
 class ApplyOutcome:
+    """What actually committed.
+
+    Every counter reflects a COMMITTED transaction. A rollback returns no
+    outcome at all, so nothing here can report work that was undone.
+    """
+
     outcome: str
     project_id: uuid.UUID | None
     created: int = 0
     linked: int = 0
     unchanged: int = 0
     error_code: str | None = None
+    metadata_updated: int = 0
+    slo_definitions_created: int = 0
+    slo_definitions_updated: int = 0
+    bindings_created: int = 0
 
 
 async def apply(
@@ -911,6 +1097,62 @@ async def apply(
     )
 
 
+@dataclass
+class _ApplyCounters:
+    """What actually committed. Every field is incremented by a handler."""
+
+    created: int = 0
+    linked: int = 0
+    unchanged: int = 0
+    metadata_updated: int = 0
+    slo_definitions_created: int = 0
+    slo_definitions_updated: int = 0
+    bindings_created: int = 0
+
+
+@dataclass
+class _ApplyContext:
+    """Everything a handler may touch, resolved once."""
+
+    connection: AsyncConnection
+    catalog: CatalogService
+    document: dict[str, Any]
+    repository: RepositoryContext
+    commit_sha: str
+    source_ref: str
+    counters: _ApplyCounters
+    project_id: uuid.UUID | None = None
+    project_scope: uuid.UUID | None = None
+    #: environment_key -> id, filled as environments are applied
+    environments: dict[str, uuid.UUID] = field(default_factory=dict)
+    #: service_key -> id
+    services: dict[str, uuid.UUID] = field(default_factory=dict)
+
+    def spec(self, section: str) -> list[dict[str, Any]]:
+        return list((self.document.get("spec") or {}).get(section) or [])
+
+    def find(self, section: str, key: str) -> dict[str, Any] | None:
+        for entry in self.spec(section):
+            if str(entry.get("name") or "") == key:
+                return entry
+        return None
+
+
+class PlanNotApplicableError(OnboardingError):
+    """An approved plan item nothing knows how to apply.
+
+    Raised BEFORE any mutation. Applying the rest and reporting success
+    would leave a catalog half-matching a plan somebody approved, which is
+    worse than refusing: the operator would have no way to tell which half.
+    """
+
+    def __init__(self, item_keys: list[str]) -> None:
+        super().__init__(
+            "plan_item_unsupported",
+            "This plan contains items Drake cannot apply: " + ", ".join(sorted(item_keys)[:5]),
+        )
+
+
 async def _materialise(
     engine: AsyncEngine,
     *,
@@ -924,10 +1166,20 @@ async def _materialise(
     idempotency_key: str,
     actor_identity_id: uuid.UUID,
 ) -> ApplyOutcome:
-    """One transaction. Any failure leaves no catalog rows behind."""
-    spec = document["spec"]
-    metadata = document["metadata"]
-    project_key = str(metadata["name"])
+    """Apply the APPROVED PLAN, item by item, in one transaction.
+
+    This used to walk the manifest and infer what to do, which is how the
+    two drifted: the plan could propose something apply never did, and apply
+    could change something the plan never mentioned. Now the plan is the
+    instruction set — every actionable item is dispatched to exactly one
+    registered handler, and a handler runs only for an item that is in the
+    approved plan.
+
+    The VALUES still come from the manifest, and safely: apply has already
+    re-read it at the approved commit and checked its digest against the one
+    frozen on the plan, so the document below is byte-for-byte the content
+    that was reviewed.
+    """
     source_ref = f"github:{context.external_id}:{MANIFEST_PATH}"
 
     async with engine.begin() as connection:
@@ -935,11 +1187,9 @@ async def _materialise(
         # the work: a client that lost the response repeats the call and
         # gets the recorded answer instead of a second project.
         #
-        # Claimed as `failed` and promoted to `applied` at the end. That is
-        # not bookkeeping — it keeps the row's invariant true at every
-        # instant, so a row that names no project never claims to have made
-        # one. The whole thing is one transaction, so nobody observes the
-        # intermediate state.
+        # Claimed as `failed` and promoted to `applied` at the end, so the
+        # row's invariant holds at every instant and a row that names no
+        # project never claims to have made one.
         claim = (
             await connection.execute(
                 text(
@@ -979,140 +1229,44 @@ async def _materialise(
             )
         apply_id = uuid.UUID(str(claim[0]))
 
-        service = CatalogService(connection)
-        created = linked = unchanged = 0
+        items = await _approved_items(connection, plan_id)
 
-        project_row = (
-            await connection.execute(
-                text("SELECT id, scope_id FROM projects WHERE project_key = :key"),
-                {"key": project_key},
-            )
-        ).first()
-        if project_row is None:
-            project = await service.create_project(
-                project_key,
-                str(metadata.get("displayName") or project_key),
-                repo_provider=str(spec["repository"]["provider"]),
-                repo_owner=str(spec["repository"]["owner"]),
-                repo_name=str(spec["repository"]["name"]),
-                default_branch=str(spec["repository"].get("defaultBranch") or ""),
-                criticality=max(
-                    (str(env["criticality"]) for env in spec["environments"]),
-                    key=["low", "medium", "high", "critical"].index,
-                ),
-                tenant_model=str(spec["tenantModel"]["mode"]),
-                owners=[
-                    (str(owner["team"]), str(owner.get("role") or "primary"))
-                    for owner in spec["owners"]
-                ],
-                source_ref=source_ref,
-                source_revision=commit_sha,
-            )
-            project_id, project_scope = project.id, project.scope_id
-            created += 1
-        else:
-            # Linking an existing project. Its identity stays authoritative —
-            # nothing about the existing row is replaced from the manifest.
-            project_id = uuid.UUID(str(project_row[0]))
-            project_scope = uuid.UUID(str(project_row[1]))
-            unchanged += 1
+        # Coverage check, before a single mutation. An actionable item with
+        # no handler stops the whole apply.
+        unsupported = [
+            item["item_key"]
+            for item in items
+            if item["action"] in ACTIONABLE_ACTIONS
+            and (item["entity_kind"], item["action"]) not in _HANDLERS
+        ]
+        if unsupported:
+            raise PlanNotApplicableError(unsupported)
 
-        for environment in spec["environments"]:
-            environment_key = str(environment["name"])
-            cluster_id = None
-            if str(environment["runtime"]) == "kubernetes":
-                cluster_row = (
-                    await connection.execute(
-                        text("SELECT id FROM clusters WHERE cluster_ref = :ref"),
-                        {"ref": str(environment["clusterRef"])},
-                    )
-                ).first()
-                if cluster_row is None:
-                    # The plan should have caught this. Re-checked here
-                    # because a cluster can be removed between plan and
-                    # apply, and a manifest never conjures infrastructure.
-                    raise OnboardingError(
-                        "unknown_cluster",
-                        "The manifest references a cluster that is not registered in Drake.",
-                    )
-                cluster_id = uuid.UUID(str(cluster_row[0]))
-
-            existing_env = (
-                await connection.execute(
-                    text(
-                        "SELECT id FROM environments WHERE project_id = :p "
-                        "AND environment_key = :key"
-                    ),
-                    {"p": project_id, "key": environment_key},
-                )
-            ).first()
-            if existing_env is None:
-                environment_entity = await service.create_environment(
-                    project_id,
-                    environment_key,
-                    runtime=str(environment["runtime"]),
-                    branch=str(environment.get("branch") or ""),
-                    criticality=str(environment["criticality"]),
-                    cluster_id=cluster_id,
-                    namespace=environment.get("namespace"),
-                    source_ref=source_ref,
-                    source_revision=commit_sha,
-                )
-                environment_id = environment_entity.id
-                created += 1
-            else:
-                environment_id = uuid.UUID(str(existing_env[0]))
-                linked += 1
-
-            for service_spec in spec["services"]:
-                service_key = str(service_spec["name"])
-                existing_service = (
-                    await connection.execute(
-                        text(
-                            "SELECT id FROM service_definitions WHERE project_id = :p "
-                            "AND service_key = :key"
-                        ),
-                        {"p": project_id, "key": service_key},
-                    )
-                ).first()
-                if existing_service is None:
-                    service_id = await service.create_service_definition(
-                        project_id,
-                        service_key,
-                        component=str(service_spec["component"]),
-                        runtime=str(service_spec["runtime"]),
-                        metrics_profile=str(service_spec["metricsProfile"]),
-                        workload_selector=service_spec.get("workloadSelector") or {},
-                        health=service_spec.get("health") or {},
-                        source_ref=source_ref,
-                        source_revision=commit_sha,
-                    )
-                    created += 1
-                else:
-                    service_id = uuid.UUID(str(existing_service[0]))
-                    unchanged += 1
-                await service.bind_service(environment_id, service_id)
-
-        # Honest placeholders. The project exists; nothing is wired up yet,
-        # and each of these will report `not_configured` until it is.
-        for integration_type in ("prometheus", "github", "cluster-agent", "backup-reporter"):
-            await service.register_integration(integration_type, project_scope)
-
-        await connection.execute(
-            text(
-                "INSERT INTO github_repository_projects "
-                "(repository_id, project_id, scope_id, commit_sha, manifest_digest) "
-                "VALUES (:repo, :project, :scope, :commit, :digest) "
-                "ON CONFLICT (repository_id) DO NOTHING"
-            ),
-            {
-                "repo": context.row_id,
-                "project": project_id,
-                "scope": context.scope_id,
-                "commit": commit_sha,
-                "digest": manifest_digest,
-            },
+        apply_context = _ApplyContext(
+            connection=connection,
+            catalog=CatalogService(connection),
+            document=document,
+            repository=context,
+            commit_sha=commit_sha,
+            source_ref=source_ref,
+            counters=_ApplyCounters(),
         )
+
+        # Deterministic order: a project before its environments, an
+        # environment before the services bound into it, and bindings last
+        # because they need both.
+        for item in sorted(items, key=lambda entry: _ORDER.get(entry["entity_kind"], 99)):
+            if item["action"] == str(Action.NO_CHANGE):
+                apply_context.counters.unchanged += 1
+                continue
+            if item["action"] not in ACTIONABLE_ACTIONS:
+                continue
+            handler = _HANDLERS[(item["entity_kind"], item["action"])]
+            await handler(apply_context, item)
+
+        assert apply_context.project_id is not None
+        counters = apply_context.counters
+
         await connection.execute(
             text(
                 "UPDATE onboarding_applies SET outcome = 'applied', project_id = :project, "
@@ -1121,10 +1275,10 @@ async def _materialise(
             ),
             {
                 "id": apply_id,
-                "project": project_id,
-                "created": created,
-                "linked": linked,
-                "unchanged": unchanged,
+                "project": apply_context.project_id,
+                "created": counters.created,
+                "linked": counters.linked,
+                "unchanged": counters.unchanged,
             },
         )
         await connection.execute(
@@ -1135,18 +1289,538 @@ async def _materialise(
             connection,
             session.id,
             str(SessionState.IMPORTED),
-            imported_project_id=project_id,
+            imported_project_id=apply_context.project_id,
             imported_at=datetime.now(UTC),
         )
+        _ = (plan_version, manifest_digest)
 
-    _ = plan_version
     return ApplyOutcome(
         outcome="applied",
-        project_id=project_id,
-        created=created,
-        linked=linked,
-        unchanged=unchanged,
+        project_id=apply_context.project_id,
+        created=counters.created,
+        linked=counters.linked,
+        unchanged=counters.unchanged,
+        metadata_updated=counters.metadata_updated,
+        slo_definitions_created=counters.slo_definitions_created,
+        slo_definitions_updated=counters.slo_definitions_updated,
+        bindings_created=counters.bindings_created,
     )
+
+
+async def _approved_items(connection: AsyncConnection, plan_id: uuid.UUID) -> list[dict[str, Any]]:
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT entity_kind, action, item_key, proposed_name, existing_entity_id, "
+                "detail FROM onboarding_plan_items WHERE plan_id = :id ORDER BY item_key"
+            ),
+            {"id": plan_id},
+        )
+    ).all()
+    return [
+        {
+            "entity_kind": str(row[0]),
+            "action": str(row[1]),
+            "item_key": str(row[2]),
+            "proposed_name": row[3],
+            "existing_entity_id": row[4],
+            "detail": dict(row[5] or {}),
+        }
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# apply handlers — one per (entity kind, action) the plan may propose
+# ---------------------------------------------------------------------------
+
+
+async def _apply_project_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    spec = context.document["spec"]
+    metadata = context.document["metadata"]
+    project = await context.catalog.create_project(
+        str(metadata["name"]),
+        str(metadata.get("displayName") or metadata["name"]),
+        repo_provider=str(spec["repository"]["provider"]),
+        repo_owner=str(spec["repository"]["owner"]),
+        repo_name=str(spec["repository"]["name"]),
+        default_branch=str(spec["repository"].get("defaultBranch") or ""),
+        criticality=max(
+            (str(env["criticality"]) for env in spec["environments"]),
+            key=["low", "medium", "high", "critical"].index,
+        ),
+        tenant_model=str(spec["tenantModel"]["mode"]),
+        # Owner teams are created with the project. The plan says so on its
+        # own `owner_team` items rather than leaving it implicit.
+        owners=[
+            (str(owner["team"]), str(owner.get("role") or "primary")) for owner in spec["owners"]
+        ],
+        source_ref=context.source_ref,
+        source_revision=context.commit_sha,
+    )
+    context.project_id, context.project_scope = project.id, project.scope_id
+    context.counters.created += 1
+    # Declared on this item in the plan, so registering them is not a
+    # mutation the plan failed to mention.
+    for integration_type in PLACEHOLDER_INTEGRATIONS:
+        await context.catalog.register_integration(integration_type, project.scope_id)
+    _ = item
+
+
+async def _resolve_project(context: _ApplyContext, item: dict[str, Any]) -> uuid.UUID:
+    row = (
+        await context.connection.execute(
+            text("SELECT id, scope_id FROM projects WHERE project_key = :key"),
+            {"key": str(item["proposed_name"])},
+        )
+    ).one()
+    context.project_id = uuid.UUID(str(row[0]))
+    context.project_scope = uuid.UUID(str(row[1]))
+    return context.project_id
+
+
+async def _apply_project_link(context: _ApplyContext, item: dict[str, Any]) -> None:
+    """Take ownership of an unclaimed project row. Nothing about it changes."""
+    await _resolve_project(context, item)
+    context.counters.linked += 1
+
+
+async def _apply_project_update(context: _ApplyContext, item: dict[str, Any]) -> None:
+    project_id = await _resolve_project(context, item)
+    fields = [str(name) for name in item["detail"].get("fields") or []]
+    proposed = model_project_metadata(context.document)
+    # Only the fields the PLAN named, and only from the mutable allowlist.
+    # A field that appeared after approval is not applied.
+    updates = {
+        name: proposed[name]
+        for name in fields
+        if name in MUTABLE_PROJECT_FIELDS and name in proposed
+    }
+    if not updates:
+        context.counters.unchanged += 1
+        return
+    assignments = ", ".join(f"{name} = :{name}" for name in sorted(updates))
+    await context.connection.execute(
+        text(
+            f"UPDATE projects SET {assignments}, source_revision = :revision, "  # noqa: S608
+            "version = version + 1, updated_at = now() WHERE id = :id"
+        ),
+        {**updates, "id": project_id, "revision": context.commit_sha},
+    )
+    context.counters.metadata_updated += 1
+
+
+async def _apply_environment_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    environment_key = str(item["proposed_name"])
+    spec = context.find("environments", environment_key)
+    assert spec is not None
+    assert context.project_id is not None
+    cluster_id = await _require_cluster(context, spec)
+    entity = await context.catalog.create_environment(
+        context.project_id,
+        environment_key,
+        runtime=str(spec["runtime"]),
+        branch=str(spec.get("branch") or ""),
+        criticality=str(spec["criticality"]),
+        cluster_id=cluster_id,
+        namespace=spec.get("namespace"),
+        source_ref=context.source_ref,
+        source_revision=context.commit_sha,
+    )
+    context.environments[environment_key] = entity.id
+    context.counters.created += 1
+
+
+async def _require_cluster(context: _ApplyContext, environment: dict[str, Any]) -> uuid.UUID | None:
+    """Re-checked here as well as in the plan: a cluster can be removed
+    between review and apply, and a manifest never conjures infrastructure."""
+    if str(environment["runtime"]) != "kubernetes":
+        return None
+    row = (
+        await context.connection.execute(
+            text("SELECT id FROM clusters WHERE cluster_ref = :ref"),
+            {"ref": str(environment["clusterRef"])},
+        )
+    ).first()
+    if row is None:
+        raise OnboardingError(
+            "unknown_cluster",
+            "The manifest references a cluster that is not registered in Drake.",
+        )
+    return uuid.UUID(str(row[0]))
+
+
+async def _resolve_environment(context: _ApplyContext, key: str) -> uuid.UUID:
+    if key in context.environments:
+        return context.environments[key]
+    assert context.project_id is not None
+    row = (
+        await context.connection.execute(
+            text("SELECT id FROM environments WHERE project_id = :p AND environment_key = :key"),
+            {"p": context.project_id, "key": key},
+        )
+    ).one()
+    resolved = uuid.UUID(str(row[0]))
+    context.environments[key] = resolved
+    return resolved
+
+
+async def _apply_environment_link(context: _ApplyContext, item: dict[str, Any]) -> None:
+    await _resolve_environment(context, str(item["proposed_name"]))
+    context.counters.linked += 1
+
+
+async def _apply_environment_update(context: _ApplyContext, item: dict[str, Any]) -> None:
+    key = str(item["proposed_name"])
+    environment_id = await _resolve_environment(context, key)
+    spec = context.find("environments", key)
+    assert spec is not None
+    proposed = model_environment_metadata(spec)
+    updates = {
+        name: proposed[name]
+        for name in (str(field) for field in item["detail"].get("fields") or [])
+        if name in MUTABLE_ENVIRONMENT_FIELDS and name in proposed
+    }
+    if not updates:
+        context.counters.unchanged += 1
+        return
+    assignments = ", ".join(f"{name} = :{name}" for name in sorted(updates))
+    await context.connection.execute(
+        text(
+            f"UPDATE environments SET {assignments}, source_revision = :revision, "  # noqa: S608
+            "version = version + 1, updated_at = now() WHERE id = :id"
+        ),
+        {**updates, "id": environment_id, "revision": context.commit_sha},
+    )
+    context.counters.metadata_updated += 1
+
+
+async def _resolve_service(context: _ApplyContext, key: str) -> uuid.UUID:
+    if key in context.services:
+        return context.services[key]
+    assert context.project_id is not None
+    row = (
+        await context.connection.execute(
+            text("SELECT id FROM service_definitions WHERE project_id = :p AND service_key = :k"),
+            {"p": context.project_id, "k": key},
+        )
+    ).one()
+    resolved = uuid.UUID(str(row[0]))
+    context.services[key] = resolved
+    return resolved
+
+
+async def _apply_service_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    if item["detail"].get("binding"):
+        await _apply_binding_create(context, item)
+        return
+    key = str(item["proposed_name"])
+    spec = context.find("services", key)
+    assert spec is not None
+    assert context.project_id is not None
+    service_id = await context.catalog.create_service_definition(
+        context.project_id,
+        key,
+        component=str(spec["component"]),
+        runtime=str(spec["runtime"]),
+        metrics_profile=str(spec["metricsProfile"]),
+        workload_selector=spec.get("workloadSelector") or {},
+        health=spec.get("health") or {},
+        source_ref=context.source_ref,
+        source_revision=context.commit_sha,
+    )
+    context.services[key] = service_id
+    context.counters.created += 1
+    await _bind_to_environments(context, service_id)
+
+
+async def _apply_service_link(context: _ApplyContext, item: dict[str, Any]) -> None:
+    service_id = await _resolve_service(context, str(item["proposed_name"]))
+    context.counters.linked += 1
+    await _bind_to_environments(context, service_id)
+
+
+async def _apply_service_update(context: _ApplyContext, item: dict[str, Any]) -> None:
+    key = str(item["proposed_name"])
+    service_id = await _resolve_service(context, key)
+    spec = context.find("services", key)
+    assert spec is not None
+    proposed = model_service_metadata(spec)
+    named = [str(field) for field in item["detail"].get("fields") or []]
+    updates = {
+        name: proposed[name]
+        for name in named
+        if name in MUTABLE_SERVICE_FIELDS and name in proposed
+    }
+    await _bind_to_environments(context, service_id)
+    if not updates:
+        context.counters.unchanged += 1
+        return
+    assignments = ", ".join(
+        f"{name} = CAST(:{name} AS jsonb)"
+        if name in ("workload_selector", "health")
+        else f"{name} = :{name}"
+        for name in sorted(updates)
+    )
+    parameters = {
+        name: json.dumps(value) if name in ("workload_selector", "health") else value
+        for name, value in updates.items()
+    }
+    await context.connection.execute(
+        text(
+            f"UPDATE service_definitions SET {assignments}, "  # noqa: S608
+            "source_revision = :revision, version = version + 1, "
+            "updated_at = now() WHERE id = :id"
+        ),
+        {**parameters, "id": service_id, "revision": context.commit_sha},
+    )
+    context.counters.metadata_updated += 1
+
+
+async def _bind_to_environments(context: _ApplyContext, service_id: uuid.UUID) -> None:
+    """Attach the service to every environment this manifest declares.
+
+    Idempotent in the catalog service, so a repeated apply attaches nothing
+    twice.
+    """
+    for environment in context.spec("environments"):
+        environment_id = await _resolve_environment(context, str(environment["name"]))
+        # `bind_service` raises on a duplicate, which is right for the
+        # catalog API and wrong for a re-apply. Checked here so a second
+        # apply of the same plan is a no-op rather than an error.
+        already = (
+            await context.connection.execute(
+                text(
+                    "SELECT 1 FROM environment_services "
+                    "WHERE environment_id = :e AND service_id = :s"
+                ),
+                {"e": environment_id, "s": service_id},
+            )
+        ).first()
+        if already is None:
+            await context.catalog.bind_service(environment_id, service_id)
+
+
+async def _apply_binding_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    """One service → workload binding, from an OBSERVED workload only.
+
+    Everything here comes from the approved plan item, which the planner
+    built from `inventory_resources`. Nothing is inferred at apply time.
+    """
+    detail = item["detail"]
+    environment_key, service_key = item["item_key"].split(":")[1:3]
+    environment_id = await _resolve_environment(context, environment_key)
+    service_id = await _resolve_service(context, service_key)
+    assert context.project_id is not None
+
+    row = (
+        await context.connection.execute(
+            text(
+                """
+                SELECT es.id, c.id
+                FROM environment_services es
+                JOIN environments e ON e.id = es.environment_id
+                JOIN clusters c ON c.cluster_ref = :cluster
+                WHERE es.environment_id = :environment AND es.service_id = :service
+                """
+            ),
+            {
+                "environment": environment_id,
+                "service": service_id,
+                "cluster": str(detail.get("cluster_ref") or ""),
+            },
+        )
+    ).first()
+    if row is None:
+        raise OnboardingError(
+            "binding_target_missing",
+            "The service is not bound into this environment, so it cannot be bound to a workload.",
+        )
+
+    inserted = (
+        await context.connection.execute(
+            text(
+                """
+                INSERT INTO service_workload_bindings
+                    (environment_service_id, project_id, environment_id, service_id,
+                     cluster_id, namespace, workload_kind, workload_name,
+                     preset_key, health_policy_key)
+                VALUES (:es, :project, :environment, :service, :cluster, :namespace,
+                        :kind, :name, :preset, :policy)
+                -- A repeated apply finds the same target and changes nothing.
+                ON CONFLICT (environment_service_id, cluster_id, namespace,
+                             workload_kind, workload_name) DO NOTHING
+                RETURNING id
+                """
+            ),
+            {
+                "es": row[0],
+                "project": context.project_id,
+                "environment": environment_id,
+                "service": service_id,
+                "cluster": row[1],
+                "namespace": str(detail.get("namespace") or ""),
+                "kind": str(detail.get("workload_kind") or ""),
+                "name": str(detail.get("workload_name") or ""),
+                "preset": DEFAULT_PRESET_KEY,
+                "policy": DEFAULT_POLICY_KEY,
+            },
+        )
+    ).first()
+    if inserted is None:
+        context.counters.unchanged += 1
+        return
+    context.counters.bindings_created += 1
+
+
+async def _apply_repository_link(context: _ApplyContext, item: dict[str, Any]) -> None:
+    assert context.project_id is not None
+    await context.connection.execute(
+        text(
+            "INSERT INTO github_repository_projects "
+            "(repository_id, project_id, scope_id, commit_sha, manifest_digest) "
+            "VALUES (:repo, :project, :scope, :commit, :digest) "
+            "ON CONFLICT (repository_id) DO NOTHING"
+        ),
+        {
+            "repo": context.repository.row_id,
+            "project": context.project_id,
+            "scope": context.repository.scope_id,
+            "commit": context.commit_sha,
+            "digest": _manifest_digest_of(context),
+        },
+    )
+    context.counters.linked += 1
+    _ = item
+
+
+def _manifest_digest_of(context: _ApplyContext) -> str:
+    return hashlib.sha256(json.dumps(context.document, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+async def _apply_slo_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    await _write_slo(context, item, update=False)
+
+
+async def _apply_slo_update(context: _ApplyContext, item: dict[str, Any]) -> None:
+    await _write_slo(context, item, update=True)
+
+
+async def _write_slo(context: _ApplyContext, item: dict[str, Any], *, update: bool) -> None:
+    """Materialise one manifest SLO into `slo_definitions`.
+
+    Sprint 11 read `spec.slos` to propose a profile and then stored nothing,
+    so an operator could approve an objective Drake never recorded.
+
+    Deliberately NOT deleting: an SLO removed from a manifest keeps its
+    definition and its evaluation history. Retiring one is a separate,
+    explicit decision — see the ADR.
+    """
+    key = str(item["proposed_name"])
+    declared = next(
+        (entry for entry in context.spec("slos") if str(entry.get("name") or "") == key), None
+    )
+    assert declared is not None
+    values = slo_metadata(declared)
+    assert context.project_id is not None
+
+    service_ref = str(values["service_ref"])
+    service_id = await _resolve_service(context, service_ref) if service_ref else None
+    environment_service_id = None
+    if service_id is not None:
+        environment_service_id = (
+            await context.connection.execute(
+                text(
+                    "SELECT id FROM environment_services WHERE project_id = :p "
+                    "AND service_id = :s ORDER BY created_at LIMIT 1"
+                ),
+                {"p": context.project_id, "s": service_id},
+            )
+        ).scalar_one_or_none()
+
+    template_key = indicator_template(str(values["indicator"]))
+    if not template_key:
+        # The planner refuses an unknown indicator, so reaching here means
+        # the registry changed between plan and apply.
+        raise OnboardingError("slo_indicator_unsupported", "Unsupported SLO indicator.")
+
+    await context.connection.execute(
+        text(
+            """
+            INSERT INTO slo_definitions
+                (project_id, environment_id, service_id, environment_service_id, slo_key,
+                 display_name, indicator, objective_ratio, window_seconds,
+                 sli_template_key, burn_profile_key)
+            VALUES (:project, NULL, :service, :es, :key, :name, :indicator, :objective,
+                    :window, :template, :burn)
+            ON CONFLICT (project_id, slo_key) DO UPDATE
+            SET display_name = EXCLUDED.display_name,
+                indicator = EXCLUDED.indicator,
+                objective_ratio = EXCLUDED.objective_ratio,
+                window_seconds = EXCLUDED.window_seconds,
+                service_id = EXCLUDED.service_id,
+                environment_service_id = EXCLUDED.environment_service_id,
+                -- A changed objective is a NEW version. Historical
+                -- evaluations keep the version they were judged against.
+                version = CASE
+                    WHEN slo_definitions.objective_ratio <> EXCLUDED.objective_ratio
+                      OR slo_definitions.window_seconds <> EXCLUDED.window_seconds
+                    THEN slo_definitions.version + 1
+                    ELSE slo_definitions.version
+                END,
+                updated_at = now()
+            """
+        ),
+        {
+            "project": context.project_id,
+            "service": service_id,
+            "es": environment_service_id,
+            "key": key,
+            "name": str(values["display_name"]),
+            "indicator": str(values["indicator"]),
+            "objective": values["objective_ratio"],
+            "window": values["window_seconds"],
+            "template": template_key,
+            "burn": default_burn_profile(),
+        },
+    )
+    if update:
+        context.counters.slo_definitions_updated += 1
+    else:
+        context.counters.slo_definitions_created += 1
+
+
+# The registry. An actionable plan item with no entry here stops the apply
+# before any mutation — see `PlanNotApplicableError`.
+_HANDLERS: dict[tuple[str, str], Any] = {
+    (str(EntityKind.PROJECT), str(Action.CREATE)): _apply_project_create,
+    (str(EntityKind.PROJECT), str(Action.LINK)): _apply_project_link,
+    (str(EntityKind.PROJECT), str(Action.UPDATE_METADATA)): _apply_project_update,
+    (str(EntityKind.ENVIRONMENT), str(Action.CREATE)): _apply_environment_create,
+    (str(EntityKind.ENVIRONMENT), str(Action.LINK)): _apply_environment_link,
+    (str(EntityKind.ENVIRONMENT), str(Action.UPDATE_METADATA)): _apply_environment_update,
+    (str(EntityKind.SERVICE), str(Action.CREATE)): _apply_service_create,
+    (str(EntityKind.SERVICE), str(Action.LINK)): _apply_service_link,
+    (str(EntityKind.SERVICE), str(Action.UPDATE_METADATA)): _apply_service_update,
+    (str(EntityKind.REPOSITORY), str(Action.LINK)): _apply_repository_link,
+    (str(EntityKind.SLO_PROFILE), str(Action.CREATE)): _apply_slo_create,
+    (str(EntityKind.SLO_PROFILE), str(Action.UPDATE_METADATA)): _apply_slo_update,
+}
+
+# A project exists before its environments; an environment before the
+# services bound into it; the repository link last, once the project is real.
+_ORDER: dict[str, int] = {
+    str(EntityKind.PROJECT): 0,
+    str(EntityKind.OWNER_TEAM): 1,
+    str(EntityKind.ENVIRONMENT): 2,
+    str(EntityKind.CLUSTER_BINDING): 3,
+    str(EntityKind.NAMESPACE_BINDING): 4,
+    str(EntityKind.SERVICE): 5,
+    str(EntityKind.METRIC_PROFILE): 6,
+    str(EntityKind.SLO_PROFILE): 7,
+    str(EntityKind.DEPLOYMENT_SOURCE): 8,
+    str(EntityKind.REPOSITORY): 9,
+}
 
 
 async def cancel(

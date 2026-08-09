@@ -28,3 +28,6 @@ or operational details.
 | [ADR-0020](ADR-0020-repository-onboarding-and-policy-evaluation.md) | Repository onboarding and read-only policy evaluation |
 | [ADR-0021](ADR-0021-production-edge-contract.md) | Production edge contract: one origin, /v1 direct to the API |
 | [ADR-0022](ADR-0022-service-health.md) | Service health computed from stored service→workload bindings |
+| [ADR-0023](ADR-0023-incident-lifecycle.md) | Incident lifecycle driven by consecutive trustworthy health verdicts |
+| [ADR-0024](ADR-0024-notification-delivery.md) | Notification routing and reliable, deduplicated delivery |
+| [ADR-0025](ADR-0025-authoritative-onboarding-and-plan-apply-parity.md) | One authoritative onboarding path; the approved plan is the instruction set |

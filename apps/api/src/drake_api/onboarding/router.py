@@ -432,17 +432,27 @@ async def apply(
                     "project_id": str(outcome.project_id),
                     "created": outcome.created,
                     "linked": outcome.linked,
+                    "metadata_updated": outcome.metadata_updated,
+                    "slo_definitions": outcome.slo_definitions_created
+                    + outcome.slo_definitions_updated,
+                    "bindings_created": outcome.bindings_created,
                 },
             ),
         )
     # Normalized result only: no manifest, no provider body, no repository
-    # content.
+    # content. Every counter is from the COMMITTED transaction — a rollback
+    # raises rather than returning partial numbers.
     return {
         "outcome": outcome.outcome,
         "project_id": str(outcome.project_id) if outcome.project_id else None,
         "created_entities": outcome.created,
         "linked_entities": outcome.linked,
         "unchanged_entities": outcome.unchanged,
+        "no_change_count": outcome.unchanged,
+        "metadata_updated": outcome.metadata_updated,
+        "slo_definitions_created": outcome.slo_definitions_created,
+        "slo_definitions_updated": outcome.slo_definitions_updated,
+        "bindings_created": outcome.bindings_created,
     }
 
 
