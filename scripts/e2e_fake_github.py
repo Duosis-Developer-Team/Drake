@@ -58,11 +58,13 @@ spec:
 # recoverable only through rediscovery, by design. Borrowing one of those
 # for the onboarding golden path made it pass or fail on which spec ran
 # first, which is a property of the test suite rather than of Drake.
-WIDGET_MANIFEST = HERMES_MANIFEST.replace("name: hermes", "name: widget").replace(
-    "displayName: Hermes", "displayName: Widget Service"
-).replace("name: Hermes", "name: Widget-Service").replace(
-    "name: hermes-api", "name: widget-api"
-).replace("namespace: hermes-dev", "namespace: widget-dev")
+WIDGET_MANIFEST = (
+    HERMES_MANIFEST.replace("name: hermes", "name: widget")
+    .replace("displayName: Hermes", "displayName: Widget Service")
+    .replace("name: Hermes", "name: Widget-Service")
+    .replace("name: hermes-api", "name: widget-api")
+    .replace("namespace: hermes-dev", "namespace: widget-dev")
+)
 
 TREES = {
     "Widget-Service": {
