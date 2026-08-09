@@ -405,3 +405,277 @@ async def test_a_delivered_request_is_not_rewritten_by_a_later_cancel(
     )
     assert result["gitops_requests_cancelled"] == 0
     assert await _requests(engine, session_id) == delivered
+
+
+# ===========================================================================
+# the dispatch lease
+# ===========================================================================
+
+
+class BlockingProvider(gitops.RecordingProvider):
+    """A provider that stops inside the call, on request.
+
+    Two workers racing a live provider call is the whole point of the lease,
+    and a provider that returns immediately never gives the second worker a
+    window to race into.
+    """
+
+    def __init__(self, *, number: int = 1) -> None:
+        super().__init__(number=number)
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def create_pull_request(self, **kwargs: Any) -> gitops.PullRequestResult:
+        self.calls.append(dict(kwargs))
+        self.entered.set()
+        await self.release.wait()
+        return gitops.PullRequestResult("created", self._number, None)
+
+
+async def _request_row(engine: AsyncEngine, session_id: uuidlib.UUID) -> dict[str, Any]:
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT id, state, error_code, attempts, version, next_attempt_at, "
+                    "provider_pr_number FROM gitops_requests WHERE session_id = :s"
+                ),
+                {"s": session_id},
+            )
+        ).one()
+    return {
+        "id": row[0],
+        "state": str(row[1]),
+        "error_code": row[2],
+        "attempts": int(row[3]),
+        "version": int(row[4]),
+        "next_attempt_at": row[5],
+        "number": row[6],
+    }
+
+
+@pytest.mark.anyio
+async def test_a_second_worker_cannot_take_over_a_live_dispatch(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Two workers, one in-flight request, exactly one provider call.
+
+    `_claim` used to treat `next_attempt_at IS NULL` as due — which is what
+    a row being dispatched looked like — so a second worker took the row
+    over while the first was still talking to GitHub and opened the same
+    pull request twice. `SKIP LOCKED` does not help: the first worker's
+    claim commits BEFORE the provider call.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    provider_a = BlockingProvider(number=31)
+    worker_a = asyncio.create_task(gitops.process_pending(engine, enabled, provider_a))
+    await asyncio.wait_for(provider_a.entered.wait(), timeout=5)
+
+    # A is now inside the provider call, holding the lease.
+    leased = await _request_row(engine, session_id)
+    assert leased["state"] == "pending"
+    assert leased["error_code"] == gitops.DISPATCH_MARKER
+    assert leased["attempts"] == 1
+
+    provider_b = gitops.RecordingProvider(number=32)
+    assert await gitops.process_pending(engine, enabled, provider_b) == 0
+    assert provider_b.calls == [], "the lease must not be stealable while it is live"
+
+    provider_a.release.set()
+    assert await worker_a == 1
+    assert len(provider_a.calls) == 1
+
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "active"
+    assert settled["number"] == 31
+    assert settled["error_code"] is None
+    assert settled["next_attempt_at"] is None
+    # One claim, one attempt. A stolen lease would have shown two.
+    assert settled["attempts"] == 1
+
+
+@pytest.mark.anyio
+async def test_a_worker_that_dies_mid_dispatch_is_recovered_when_its_lease_expires(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The other half of the lease: it has to end.
+
+    A row owned by a worker that no longer exists must not be stranded. It
+    is protected for the lease and reclaimed after it — and the reclaim goes
+    through the provider's create-or-reuse path, so a pull request the dead
+    worker had already opened is adopted rather than duplicated.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    # A worker claims and marks in flight, then dies: nothing records a
+    # result. `process_pending` is stopped at exactly that point.
+    original = gitops._finish
+    died: list[int] = []
+
+    async def die_before_finishing(*args: Any, **kwargs: Any) -> None:
+        died.append(1)
+        raise RuntimeError("worker died before recording the result")
+
+    gitops._finish = die_before_finishing  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError):
+            await gitops.process_pending(engine, enabled, gitops.RecordingProvider(number=41))
+    finally:
+        gitops._finish = original  # type: ignore[assignment]
+    assert died == [1]
+
+    stranded = await _request_row(engine, session_id)
+    assert stranded["state"] == "pending"
+    assert stranded["error_code"] == gitops.DISPATCH_MARKER
+
+    # While the lease is live, nobody else may touch it.
+    blocked = gitops.RecordingProvider(number=42)
+    assert await gitops.process_pending(engine, enabled, blocked) == 0
+    assert blocked.calls == []
+
+    # Expire the lease — the same thing time would do.
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE gitops_requests SET next_attempt_at = now() - interval '1 second' "
+                "WHERE session_id = :s"
+            ),
+            {"s": session_id},
+        )
+
+    # The provider reports the pull request the dead worker had already
+    # opened. Create-or-reuse, not a second one.
+    class ReusingProvider(gitops.RecordingProvider):
+        async def create_pull_request(self, **kwargs: Any) -> gitops.PullRequestResult:
+            self.calls.append(dict(kwargs))
+            return gitops.PullRequestResult("exists", 41, None)
+
+    recovering = ReusingProvider(number=41)
+    assert await gitops.process_pending(engine, enabled, recovering) == 1
+    assert len(recovering.calls) == 1
+
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "active"
+    assert settled["number"] == 41, "the existing pull request is adopted, not duplicated"
+    assert settled["next_attempt_at"] is None
+    # Two claims, two attempts, and bounded well under the retry ceiling.
+    assert settled["attempts"] == 2
+    assert settled["attempts"] < gitops.MAX_ATTEMPTS
+
+    async with engine.connect() as connection:
+        rows = int(
+            (
+                await connection.execute(
+                    text("SELECT count(*) FROM gitops_requests WHERE session_id = :s"),
+                    {"s": session_id},
+                )
+            ).scalar_one()
+        )
+    assert rows == 1, "recovery must not create a second request"
+
+
+@pytest.mark.anyio
+async def test_a_gate_opened_after_the_claim_stops_the_dispatch(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Authority to send is settled at dispatch, so the gate is checked there.
+
+    `_claim` checks it too, but a claim is only a lease. A gate that closes
+    a repository between the two is exactly what a gate is for, and the old
+    dispatch check looked only at the session's state.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    original = gitops._begin_dispatch
+    gated_between: list[int] = []
+
+    async def gate_then_dispatch(*args: Any, **kwargs: Any) -> bool:
+        # The claim has committed. This is where the old code went straight
+        # to the provider.
+        if not gated_between:
+            gated_between.append(1)
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE github_repositories SET security_gate = 'manual_review' "
+                        "WHERE id = :r"
+                    ),
+                    {"r": row_id},
+                )
+        return await original(*args, **kwargs)
+
+    gitops._begin_dispatch = gate_then_dispatch  # type: ignore[assignment]
+    try:
+        provider = gitops.RecordingProvider(number=51)
+        assert await gitops.process_pending(engine, enabled, provider) == 0
+    finally:
+        gitops._begin_dispatch = original  # type: ignore[assignment]
+
+    assert gated_between == [1]
+    assert provider.calls == []
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "failed"
+    assert settled["error_code"] == "security_gate_open"
+    assert settled["next_attempt_at"] is None
+
+    # Terminal: never reclaimed, even after any lease would have expired.
+    again = gitops.RecordingProvider(number=52)
+    assert await gitops.process_pending(engine, enabled, again) == 0
+    assert again.calls == []
+
+
+@pytest.mark.anyio
+async def test_a_static_catalogue_gate_stops_the_dispatch_too(
+    engine: AsyncEngine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other gate source, checked at the same boundary.
+
+    Which mechanism closed a repository — the persisted column or the
+    catalogue Drake ships — must not decide whether a pull request goes out.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    session_id, actor, enabled = await _analysed_session(harness, engine, row_id)
+    await gitops.request_pull_request(
+        engine, enabled, session_id=session_id, actor_identity_id=actor
+    )
+
+    original = gitops._begin_dispatch
+    gated: list[int] = []
+
+    async def gate_then_dispatch(*args: Any, **kwargs: Any) -> bool:
+        if not gated:
+            gated.append(1)
+            monkeypatch.setattr(
+                gitops.repo_catalog, "security_gate_for", lambda _name: "manual_env_review"
+            )
+        return await original(*args, **kwargs)
+
+    gitops._begin_dispatch = gate_then_dispatch  # type: ignore[assignment]
+    try:
+        provider = gitops.RecordingProvider(number=61)
+        assert await gitops.process_pending(engine, enabled, provider) == 0
+    finally:
+        gitops._begin_dispatch = original  # type: ignore[assignment]
+
+    assert gated == [1]
+    assert provider.calls == []
+    settled = await _request_row(engine, session_id)
+    assert settled["state"] == "failed"
+    assert settled["error_code"] == "security_gate_open"

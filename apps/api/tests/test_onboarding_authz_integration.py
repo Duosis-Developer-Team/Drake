@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from drake_api.onboarding import service
+from drake_api.rbac.service import Principal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_catalog_api_integration import grant, login_all, make_role
@@ -482,14 +484,12 @@ async def test_two_simultaneous_cancels_produce_one_cancel(
     """
     import asyncio
 
-    from drake_api.onboarding import service as onboarding_service
-
     _harness, _fake, session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
     barrier = asyncio.Barrier(2)
 
     async def worker() -> Any:
         await barrier.wait()
-        return await onboarding_service.cancel(engine, session_id=session_a, expected_version=1)
+        return await service.cancel(engine, session_id=session_a, expected_version=1)
 
     results = await asyncio.gather(worker(), worker(), return_exceptions=True)
     succeeded = [item for item in results if not isinstance(item, BaseException)]
@@ -497,7 +497,7 @@ async def test_two_simultaneous_cancels_produce_one_cancel(
     assert len(succeeded) == 1, results
     assert len(refused) == 1, results
     # The loser is refused by a bounded code, not by a database error.
-    assert isinstance(refused[0], onboarding_service.OnboardingError)
+    assert isinstance(refused[0], service.OnboardingError)
     assert refused[0].code in ("version_conflict", "invalid_session_state")
 
     async with engine.connect() as connection:
@@ -690,8 +690,6 @@ async def test_two_simultaneous_creates_produce_one_session(
     against that index makes the loser's answer ordinary: the session that
     exists, and `created: false`.
     """
-    from drake_api.onboarding import service as onboarding_service
-
     harness, _fake, _session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
     async with engine.connect() as connection:
         row_id = uuidlib.UUID(
@@ -719,7 +717,7 @@ async def test_two_simultaneous_creates_produce_one_session(
 
     async def worker() -> Any:
         await barrier.wait()
-        return await onboarding_service.create_session(
+        return await service.create_session(
             engine,
             settings,
             repository_row_id=row_id,
@@ -1040,6 +1038,11 @@ async def test_a_repository_that_leaves_the_callers_scope_cannot_be_onboarded(
     # organisation root, which a root-level grant would still cover — and
     # covering it would be correct, so the test has to move the repository
     # somewhere the caller genuinely has nothing.
+    #
+    # A parentless PROJECT scope rather than a second organisation:
+    # `test_idempotency_integration` asserts there is exactly one
+    # `organization` scope, and `scopes` is not truncated between tests, so
+    # an extra one left here is a landmine for whatever runs next.
     async with engine.begin() as connection:
         other = uuidlib.UUID(
             str(
@@ -1047,7 +1050,7 @@ async def test_a_repository_that_leaves_the_callers_scope_cannot_be_onboarded(
                     await connection.execute(
                         text(
                             "INSERT INTO scopes (scope_type, external_ref, display_name, "
-                            " parent_id) VALUES ('organization', 'other-tenant', "
+                            " parent_id) VALUES ('project', 'other-tenant', "
                             " 'Other Tenant', NULL) "
                             "ON CONFLICT (scope_type, external_ref) DO UPDATE "
                             " SET display_name = EXCLUDED.display_name RETURNING id"
@@ -1119,3 +1122,264 @@ async def test_a_repository_that_leaves_the_callers_scope_cannot_be_onboarded(
             ).scalar_one()
         )
     assert opened == 0
+
+
+@pytest.mark.anyio
+async def test_a_scope_move_committing_mid_create_is_linearizable(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The transaction race, forced rather than hoped for.
+
+    Moving a repository BEFORE the request starts proves the 404. It does
+    not prove what this fix was about: that the scope decision is made
+    against the row that gets written. Here the mover holds the repository's
+    row lock, the create blocks on it, and the mover commits first — so the
+    create re-evaluates against the new scope, which is the ordering that
+    used to let a stale read through.
+    """
+    harness, fake, _session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
+    async with engine.connect() as connection:
+        row_id = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT id FROM github_repositories "
+                            "WHERE full_name = 'Duosis-Developer-Team/Hermes'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE onboarding_sessions SET state = 'cancelled' WHERE repository_id = :r"),
+            {"r": row_id},
+        )
+    await _reconciled(engine, row_id)
+
+    await login_all(harness, ["user-racer"])
+    await grant(engine, harness, "user-racer", OPERATOR_ROLE, "organization", "root")
+    principal = Principal(
+        identity_id=await _identity(engine, "user-racer"), issuer=harness.provider.issuer
+    )
+    actor = await _identity(engine, "user-racer")
+    settings = harness.app.state.settings
+
+    holding = asyncio.Event()
+    release = asyncio.Event()
+
+    async def move_scope() -> None:
+        async with engine.begin() as connection:
+            # The same row the create locks.
+            await connection.execute(
+                text("SELECT id FROM github_repositories WHERE id = :r FOR UPDATE"),
+                {"r": row_id},
+            )
+            other = uuidlib.UUID(
+                str(
+                    (
+                        await connection.execute(
+                            text(
+                                "INSERT INTO scopes (scope_type, external_ref, display_name, "
+                                " parent_id) VALUES ('project', 'racer-tenant', "
+                                " 'Racer Tenant', NULL) "
+                                "ON CONFLICT (scope_type, external_ref) DO UPDATE "
+                                " SET display_name = EXCLUDED.display_name RETURNING id"
+                            )
+                        )
+                    ).scalar_one()
+                )
+            )
+            installation = uuidlib.UUID(
+                str(
+                    (
+                        await connection.execute(
+                            text(
+                                "INSERT INTO github_installations (external_id, scope_id, "
+                                " account_login, account_type, state) "
+                                "VALUES (912777, :scope, 'racer', 'Organization', 'active') "
+                                "ON CONFLICT (provider, external_id) DO UPDATE "
+                                " SET scope_id = EXCLUDED.scope_id RETURNING id"
+                            ),
+                            {"scope": other},
+                        )
+                    ).scalar_one()
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE github_repositories SET scope_id = :scope, "
+                    "installation_id = :inst WHERE id = :r"
+                ),
+                {"scope": other, "inst": installation, "r": row_id},
+            )
+            holding.set()
+            await release.wait()
+        # Commits here; the create is unblocked from this point.
+
+    mover = asyncio.create_task(move_scope())
+    await holding.wait()
+
+    creating = asyncio.create_task(
+        service.create_session(
+            engine,
+            settings,
+            repository_row_id=row_id,
+            actor_identity_id=actor,
+            principal=principal,
+        )
+    )
+    await asyncio.sleep(0.2)
+    assert not creating.done(), "the create must be waiting on the repository's row lock"
+    fake.calls.clear()
+    async with engine.connect() as connection:
+        audits_before = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM audit_events "
+                        "WHERE action = 'onboarding.session.create'"
+                    )
+                )
+            ).scalar_one()
+        )
+    release.set()
+    await mover
+
+    # It woke up, re-read the row it had locked, and found a scope this
+    # caller holds nothing in.
+    with pytest.raises(service.OnboardingError) as refused:
+        await creating
+    assert refused.value.code == "repository_not_found"
+    assert refused.value.status == 404
+
+    assert fake.calls == [], "no provider call and no token mint"
+    async with engine.connect() as connection:
+        opened = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM onboarding_sessions WHERE repository_id = :r "
+                        "AND state = 'draft'"
+                    ),
+                    {"r": row_id},
+                )
+            ).scalar_one()
+        )
+        audits = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM audit_events "
+                        "WHERE action = 'onboarding.session.create'"
+                    )
+                )
+            ).scalar_one()
+        )
+    assert opened == 0
+    # `audit_events` is append-only and not reset between tests, so this is
+    # a delta rather than an absolute count.
+    assert audits == audits_before
+
+
+@pytest.mark.anyio
+async def test_a_create_that_holds_the_lock_first_commits_under_the_scope_it_saw(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The reverse ordering, and the reason it is also correct.
+
+    The create takes the row lock first, so the scope it evaluates IS the
+    authoritative scope at that instant. The move waits, and applies after.
+    Linearizable either way: what must never happen is an insert against a
+    scope the caller lost before the write.
+    """
+    harness, _fake, _session_a, _session_b = await _mixed_scope_world(engine, tmp_path)
+    async with engine.connect() as connection:
+        row_id = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT id FROM github_repositories "
+                            "WHERE full_name = 'Duosis-Developer-Team/Hermes'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE onboarding_sessions SET state = 'cancelled' WHERE repository_id = :r"),
+            {"r": row_id},
+        )
+    await _reconciled(engine, row_id)
+
+    await login_all(harness, ["user-first"])
+    await grant(engine, harness, "user-first", OPERATOR_ROLE, "organization", "root")
+    created = await service.create_session(
+        engine,
+        harness.app.state.settings,
+        repository_row_id=row_id,
+        actor_identity_id=await _identity(engine, "user-first"),
+        principal=Principal(
+            identity_id=await _identity(engine, "user-first"), issuer=harness.provider.issuer
+        ),
+    )
+    assert created["created"] is True
+
+    # The move lands afterwards. The session that already exists is not
+    # retroactively invalid — it was created under the scope that was
+    # authoritative when it was written.
+    async with engine.begin() as connection:
+        other = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO scopes (scope_type, external_ref, display_name, "
+                            " parent_id) VALUES ('project', 'after-tenant', "
+                            " 'After Tenant', NULL) "
+                            "ON CONFLICT (scope_type, external_ref) DO UPDATE "
+                            " SET display_name = EXCLUDED.display_name RETURNING id"
+                        )
+                    )
+                ).scalar_one()
+            )
+        )
+        installation = uuidlib.UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO github_installations (external_id, scope_id, "
+                            " account_login, account_type, state) "
+                            "VALUES (912888, :scope, 'after', 'Organization', 'active') "
+                            "RETURNING id"
+                        ),
+                        {"scope": other},
+                    )
+                ).scalar_one()
+            )
+        )
+        await connection.execute(
+            text(
+                "UPDATE github_repositories SET scope_id = :scope, installation_id = :inst "
+                "WHERE id = :r"
+            ),
+            {"scope": other, "inst": installation, "r": row_id},
+        )
+
+    # And a create attempted AFTER the move is refused, by the same rule.
+    with pytest.raises(service.OnboardingError) as refused:
+        await service.create_session(
+            engine,
+            harness.app.state.settings,
+            repository_row_id=row_id,
+            actor_identity_id=await _identity(engine, "user-first"),
+            principal=Principal(
+                identity_id=await _identity(engine, "user-first"),
+                issuer=harness.provider.issuer,
+            ),
+        )
+    assert refused.value.code == "repository_not_found"
