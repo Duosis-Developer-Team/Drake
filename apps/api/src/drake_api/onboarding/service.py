@@ -1018,6 +1018,25 @@ async def apply(
     if plan_row is None:
         raise OnboardingError("plan_not_found", "No such plan version.", status=404)
 
+    plan_id = uuid.UUID(str(plan_row[0]))
+    planned_commit = str(plan_row[2])
+    plan_digest = str(plan_row[4])
+
+    # Integrity FIRST, ahead of everything: ahead of the replay lookup and
+    # ahead of the first provider call.
+    #
+    # Ahead of the provider because a plan somebody rewrote should not buy
+    # an installation token and two GitHub reads before being refused —
+    # refusing after spending is a way to make refusing expensive.
+    #
+    # Ahead of the replay lookup because a receipt would otherwise let a
+    # tampered plan through: the first apply succeeds, the plan is rewritten
+    # afterwards, and the same idempotency key returns the recorded answer
+    # without ever looking at what the plan now says. A client that asks
+    # again gets told the current plan applied cleanly. It did not.
+    async with engine.connect() as connection:
+        await verify_plan_integrity(connection, plan_id, plan_digest)
+
     # "Have I already done exactly this?" is asked BEFORE "may I do it now?".
     # After a successful apply the session is `imported`, so the ordinary
     # approval check would refuse a retry — and a client that merely lost
@@ -1025,7 +1044,7 @@ async def apply(
     async with engine.connect() as connection:
         recorded = await _recorded_receipt(connection, session.id, idempotency_key)
     if recorded is not None:
-        if str(recorded["plan_id"]) != str(plan_row[0]):
+        if str(recorded["plan_id"]) != str(plan_id):
             raise IdempotencyKeyReusedError()
         return _outcome_from_receipt(recorded)
 
@@ -1040,10 +1059,6 @@ async def apply(
         )
     if int(plan_row[5]) > 0:
         raise OnboardingError("plan_blocked", "This plan has unresolved conflicts.")
-
-    plan_id = uuid.UUID(str(plan_row[0]))
-    planned_commit = str(plan_row[2])
-    plan_digest = str(plan_row[4])
 
     # --- freshness, outside the transaction --------------------------------
     token = await client.installation_token(
@@ -1189,52 +1204,27 @@ async def _materialise(
     source_ref = f"github:{context.external_id}:{MANIFEST_PATH}"
 
     async with engine.begin() as connection:
-        # Integrity FIRST — before the claim, before any mutation, before
-        # anything is written at all. An approval binds the values in the
-        # plan; those values are only binding if they are checked, and a
-        # check that runs after the claim has already recorded an attempt
-        # that should never have started.
-        items = await _approved_items(connection, plan_id)
-        if _recompute_digest(items) != plan_digest:
-            raise PlanIntegrityError()
+        # Integrity again, and inside the transaction this time. `apply`
+        # already checked before it spoke to the provider; that round-trip
+        # takes real time, and a plan can be rewritten during it. Checking
+        # here — before the claim, before any mutation — is what makes the
+        # items below the ones that were approved.
+        items = await verify_plan_integrity(connection, plan_id, plan_digest)
 
-        # The idempotency claim comes next, inside the same transaction as
-        # the work: a client that lost the response repeats the call and
-        # gets the recorded answer instead of a second project.
-        #
-        # Claimed as `failed` and promoted to `applied` at the end, so the
-        # row's invariant holds at every instant and a row that names no
-        # project never claims to have made one.
-        claim = (
-            await connection.execute(
-                text(
-                    """
-                    INSERT INTO onboarding_applies
-                        (plan_id, session_id, actor_identity_id, outcome, idempotency_key)
-                    VALUES (:plan, :session, :actor, 'failed', :key)
-                    ON CONFLICT (session_id, idempotency_key) DO NOTHING
-                    RETURNING id
-                    """
-                ),
-                {
-                    "plan": plan_id,
-                    "session": session.id,
-                    "actor": actor_identity_id,
-                    "key": idempotency_key,
-                },
-            )
-        ).first()
-        if claim is None:
-            # Lost the race, or a retry. The unique constraint is on
-            # `(session_id, idempotency_key)`, so this also catches a reuse
-            # under a different plan — in the database, where a concurrent
-            # pair cannot both pass an application pre-check.
-            existing = await _recorded_receipt(connection, session.id, idempotency_key)
-            assert existing is not None
-            if str(existing["plan_id"]) != str(plan_id):
-                raise IdempotencyKeyReusedError()
-            return _outcome_from_receipt(existing)
-        apply_id = uuid.UUID(str(claim[0]))
+        # The claim comes next, in the same transaction as the work: a
+        # client that lost the response repeats the call and gets the
+        # recorded answer instead of a second project.
+        claim = await claim_apply(
+            connection,
+            plan_id=plan_id,
+            session_id=session.id,
+            actor_identity_id=actor_identity_id,
+            idempotency_key=idempotency_key,
+        )
+        if claim.replay is not None:
+            return claim.replay
+        assert claim.apply_id is not None
+        apply_id = claim.apply_id
 
         # Coverage check, before a single mutation. An actionable item with
         # no handler stops the whole apply.
@@ -1332,6 +1322,78 @@ async def _materialise(
     )
 
 
+@dataclass
+class ApplyClaim:
+    """Who holds `(session, key)` — this call, or an apply that already ran.
+
+    Exactly one of the two is set. `apply_id` means this caller owns the
+    receipt and must finish it; `replay` means somebody else already did the
+    work and this is its recorded answer.
+    """
+
+    apply_id: uuid.UUID | None = None
+    replay: ApplyOutcome | None = None
+
+
+async def claim_apply(
+    connection: AsyncConnection,
+    *,
+    plan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    actor_identity_id: uuid.UUID,
+    idempotency_key: str,
+) -> ApplyClaim:
+    """Take `(session, key)` for this apply, or resolve who already has it.
+
+    Claimed as `failed` and promoted to `applied` once the work is done, so
+    the row's invariant holds at every instant and a row that names no
+    project never claims to have made one.
+
+    `ON CONFLICT DO NOTHING` against an UNCOMMITTED conflicting row waits
+    for that transaction to finish, so a loser reads a settled receipt
+    rather than an absent one. If the holder rolled back, the insert
+    succeeds and this caller becomes the holder — which is why a retry after
+    a failed apply works.
+
+    The reuse decision lives here rather than in the caller because this is
+    the only place that learns, from the database, that somebody else got
+    there first. A pre-check cannot: both callers read "no receipt" before
+    either writes one.
+    """
+    claimed = (
+        await connection.execute(
+            text(
+                """
+                INSERT INTO onboarding_applies
+                    (plan_id, session_id, actor_identity_id, outcome, idempotency_key)
+                VALUES (:plan, :session, :actor, 'failed', :key)
+                ON CONFLICT (session_id, idempotency_key) DO NOTHING
+                RETURNING id
+                """
+            ),
+            {
+                "plan": plan_id,
+                "session": session_id,
+                "actor": actor_identity_id,
+                "key": idempotency_key,
+            },
+        )
+    ).first()
+    if claimed is not None:
+        return ApplyClaim(apply_id=uuid.UUID(str(claimed[0])))
+
+    existing = await _recorded_receipt(connection, session_id, idempotency_key)
+    if existing is None:  # pragma: no cover - the row cannot vanish
+        raise OnboardingError(
+            "apply_claim_unavailable",
+            "This idempotency key is held by an apply whose result is not readable.",
+            status=409,
+        )
+    if str(existing["plan_id"]) != str(plan_id):
+        raise IdempotencyKeyReusedError()
+    return ApplyClaim(replay=_outcome_from_receipt(existing))
+
+
 async def _promote_receipt(
     connection: AsyncConnection,
     apply_id: uuid.UUID,
@@ -1404,6 +1466,12 @@ async def _recorded_receipt(
 def _outcome_from_receipt(receipt: dict[str, Any]) -> ApplyOutcome:
     """A retry returns exactly what the first call returned.
 
+    Including the outcome WORD. An earlier version answered `unchanged`
+    here, which reads as "this request changed nothing" — but the request
+    did change things; it changed them the first time it was sent. Reusing
+    an idempotency key is not a new operation with a different result, it is
+    a replay of one committed answer, so the whole answer is replayed.
+
     Every counter is restored, not recomputed — the work already happened
     and counting it again would mean re-deriving it from a catalog that has
     since moved on.
@@ -1413,7 +1481,7 @@ def _outcome_from_receipt(receipt: dict[str, Any]) -> ApplyOutcome:
     forward rather than presenting stored zeros as measured work.
     """
     return ApplyOutcome(
-        outcome="unchanged",
+        outcome=receipt["outcome"],
         project_id=uuid.UUID(str(receipt["project_id"])) if receipt["project_id"] else None,
         created=receipt["created"],
         linked=receipt["linked"],
@@ -1448,7 +1516,9 @@ class PlanIntegrityError(OnboardingError):
 
     Somebody — or something — changed a plan item after approval. The values
     an approval binds are only binding if they are checked, so this refuses
-    before any claim, any mutation and any provider call.
+    before any provider call, before the replay lookup, before any claim and
+    before any mutation. See `verify_plan_integrity` for where each of those
+    checks sits.
     """
 
     def __init__(self) -> None:
@@ -1457,6 +1527,45 @@ class PlanIntegrityError(OnboardingError):
             "This plan no longer matches what was approved. Analyse and review again.",
             status=409,
         )
+
+
+async def verify_plan_integrity(
+    connection: AsyncConnection, plan_id: uuid.UUID, plan_digest: str
+) -> list[dict[str, Any]]:
+    """Load the stored plan and prove it is still the one that was approved.
+
+    Runs TWICE on the way to a mutation, and both are load-bearing:
+
+    - once before anything else the apply does — before the receipt lookup,
+      before a single provider call — so a tampered plan costs nothing and
+      cannot be replayed past the check by reusing an idempotency key;
+    - once inside the mutation transaction, before the claim, because the
+      provider round-trip between the two takes real time and a plan can be
+      rewritten during it.
+
+    Returns the items, so the caller that is about to apply them does not
+    read them a second time and risk checking one list and applying another.
+    """
+    items = await _approved_items(connection, plan_id)
+    if _recompute_digest(items) != plan_digest:
+        raise PlanIntegrityError()
+    return items
+
+
+def _stored_mapping(value: Any) -> dict[str, Any]:
+    """A stored JSON object, or a bounded refusal.
+
+    `dict()` raises `ValueError`/`TypeError` on a string or a list, which
+    would leave a 500 for what is really a detected tamper: a plan item
+    whose `detail` is no longer an object cannot hash to the digest that was
+    approved. Refusing here says that in the same words the digest check
+    uses, instead of as an unhandled exception.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    raise PlanIntegrityError()
 
 
 def _recompute_digest(items: list[dict[str, Any]]) -> str:
@@ -1506,12 +1615,12 @@ async def _approved_items(connection: AsyncConnection, plan_id: uuid.UUID) -> li
             "item_key": str(row[2]),
             "proposed_name": row[3],
             "existing_entity_id": row[4],
-            "detail": dict(row[5] or {}),
+            "detail": _stored_mapping(row[5]),
             # The approved values. A handler reads these and re-reads
             # nothing: the manifest, the analysis and the live request are
             # all mutable between approval and apply, and this is not.
-            "payload": dict((row[5] or {}).get("payload") or {}),
-            "changes": dict((row[5] or {}).get("changes") or {}),
+            "payload": _stored_mapping(_stored_mapping(row[5]).get("payload")),
+            "changes": _stored_mapping(_stored_mapping(row[5]).get("changes")),
             "reason_code": row[6],
         }
         for row in rows

@@ -18,6 +18,7 @@ nobody can discover it afterwards.
 """
 
 import asyncio
+import dataclasses
 import json
 import uuid as uuidlib
 from pathlib import Path
@@ -257,19 +258,44 @@ async def _apply(
     )
 
 
+async def _counts(connection: Any, session_id: uuidlib.UUID) -> tuple[int, int, int]:
+    """(projects, receipts, apply audits) — what a refusal must not move."""
+    projects = int((await connection.execute(text("SELECT count(*) FROM projects"))).scalar_one())
+    receipts = int(
+        (
+            await connection.execute(
+                text("SELECT count(*) FROM onboarding_applies WHERE session_id = :s"),
+                {"s": session_id},
+            )
+        ).scalar_one()
+    )
+    audits = int(
+        (
+            await connection.execute(
+                text(
+                    "SELECT count(*) FROM audit_events WHERE action = 'onboarding.apply' "
+                    "AND target_id = :t"
+                ),
+                {"t": str(session_id)},
+            )
+        ).scalar_one()
+    )
+    return projects, receipts, audits
+
+
 _TAMPER_TARGET = (
     "WHERE plan_id = (SELECT id FROM onboarding_plans WHERE session_id = :s "
     "ORDER BY plan_version DESC LIMIT 1) AND item_key = 'project:datalake'"
 )
 
 
-async def _tamper(engine: AsyncEngine, session_id: uuidlib.UUID, sql: str) -> None:
+async def _tamper(engine: AsyncEngine, session_id: uuidlib.UUID, sql: str, **params: Any) -> None:
     """Rewrite an approved plan item behind the approval's back."""
     # `sql` is one of this module's own literals — the point of the test is
     # that the tamper is real, not that it is user-supplied.
     statement = f"{sql} {_TAMPER_TARGET}"
     async with engine.begin() as connection:
-        changed = (await connection.execute(text(statement), {"s": session_id})).rowcount
+        changed = (await connection.execute(text(statement), {"s": session_id, **params})).rowcount
     # A tamper that changed nothing would make the test pass for the wrong
     # reason — the earlier version of this test did exactly that.
     assert changed == 1, "the tamper matched no row"
@@ -361,6 +387,169 @@ async def test_every_digested_field_is_covered_by_the_integrity_check(
     with pytest.raises(service.OnboardingError) as raised:
         await _apply(harness, engine, session_id, plan_version, actor, f"tamper-{label}")
     assert raised.value.code == "plan_integrity_mismatch", label
+
+
+@pytest.mark.anyio
+async def test_a_tampered_plan_is_refused_before_the_provider_is_called(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Refusing after spending is a way to make refusing expensive.
+
+    The check used to run inside the apply transaction, which is after an
+    installation token, a branch-head read and a manifest read. A plan
+    somebody rewrote bought all three before being turned away. It now runs
+    before the first provider call, and this counts them to prove it.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    await _tamper(
+        engine,
+        session_id,
+        "UPDATE onboarding_plan_items SET detail = "
+        "jsonb_set(detail, '{payload,display_name}', '\"Datalake Pwned\"')",
+    )
+
+    fake.calls.clear()
+    with pytest.raises(service.OnboardingError) as raised:
+        await _apply(harness, engine, session_id, plan_version, actor, "no-provider-01")
+    assert raised.value.code == "plan_integrity_mismatch"
+    assert fake.calls == [], fake.calls
+
+    async with engine.connect() as connection:
+        assert await _counts(connection, session_id) == (0, 0, 0)
+
+
+@pytest.mark.anyio
+async def test_a_tampered_plan_is_refused_even_when_a_receipt_exists(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """A receipt is not a licence to stop checking.
+
+    The integrity check used to sit behind the replay lookup, so this
+    sequence passed silently: apply once, rewrite the plan afterwards, send
+    the same idempotency key. The receipt answered and nothing looked at the
+    plan — the client was told the plan it can read applied cleanly, which
+    was no longer true of a single item in it.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    first = await _apply(harness, engine, session_id, plan_version, actor, "tamper-retry-1")
+    assert first.outcome == "applied"
+    async with engine.connect() as connection:
+        before = await _counts(connection, session_id)
+
+    await _tamper(
+        engine,
+        session_id,
+        "UPDATE onboarding_plan_items SET detail = "
+        "jsonb_set(detail, '{payload,display_name}', '\"Datalake Pwned\"')",
+    )
+
+    fake.calls.clear()
+    with pytest.raises(service.OnboardingError) as raised:
+        await _apply(harness, engine, session_id, plan_version, actor, "tamper-retry-1")
+    assert raised.value.code == "plan_integrity_mismatch"
+    assert raised.value.status == 409
+    assert fake.calls == [], fake.calls
+
+    # The first apply's record is untouched; nothing new was written.
+    async with engine.connect() as connection:
+        assert await _counts(connection, session_id) == before
+        display_name = (
+            await connection.execute(
+                text("SELECT display_name FROM projects WHERE id = :p"),
+                {"p": first.project_id},
+            )
+        ).scalar_one()
+    assert display_name == "Datalake Platform"
+
+
+@pytest.mark.anyio
+async def test_a_plan_rewritten_during_the_provider_round_trip_is_caught(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The early check cannot be the only one.
+
+    Between it and the mutation there is an installation token and two
+    GitHub reads — real time, over a network, during which the stored plan
+    can be rewritten. The second check, inside the transaction and before
+    the claim, is what closes that window.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    client = harness.app.state.github_client
+    original = client.get_content
+    tampered: list[int] = []
+
+    async def tamper_mid_flight(*args: Any, **kwargs: Any) -> Any:
+        # The manifest read is the last provider call before the mutation
+        # transaction opens — exactly the window the second check exists for.
+        if not tampered:
+            tampered.append(1)
+            await _tamper(
+                engine,
+                session_id,
+                "UPDATE onboarding_plan_items SET detail = "
+                "jsonb_set(detail, '{payload,display_name}', CAST(:shape AS jsonb))",
+                shape='"Datalake Pwned"',
+            )
+        return await original(*args, **kwargs)
+
+    client.get_content = tamper_mid_flight  # type: ignore[method-assign]
+    try:
+        with pytest.raises(service.OnboardingError) as raised:
+            await _apply(harness, engine, session_id, plan_version, actor, "mid-flight-001")
+    finally:
+        client.get_content = original  # type: ignore[method-assign]
+
+    assert tampered == [1], "the tamper has to land while the provider is being read"
+    assert raised.value.code == "plan_integrity_mismatch"
+    async with engine.connect() as connection:
+        assert await _counts(connection, session_id) == (0, 0, 0)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("value", ['"a string"', "[1, 2, 3]", "42"])
+async def test_a_malformed_stored_payload_is_a_bounded_refusal(
+    engine: AsyncEngine, tmp_path: Path, value: str
+) -> None:
+    """A tamper that breaks the SHAPE is still a tamper.
+
+    `dict()` on a string or a list raises, and an unhandled `ValueError`
+    would surface as a 500 — an internal error for something the service
+    detected perfectly well. It is a plan that cannot hash to the digest
+    that was approved, and it says so in those words.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    await _tamper(
+        engine,
+        session_id,
+        "UPDATE onboarding_plan_items SET detail = "
+        "jsonb_set(detail, '{payload}', CAST(:shape AS jsonb))",
+        shape=value,
+    )
+
+    fake.calls.clear()
+    with pytest.raises(service.OnboardingError) as raised:
+        await _apply(harness, engine, session_id, plan_version, actor, "malformed-001")
+    assert raised.value.code == "plan_integrity_mismatch"
+    assert raised.value.status == 409
+    assert fake.calls == []
+    async with engine.connect() as connection:
+        assert await _counts(connection, session_id) == (0, 0, 0)
 
 
 @pytest.mark.anyio
@@ -688,7 +877,7 @@ async def test_the_apply_receipt_commits_with_the_catalog_change(
         idempotency_key="receipt-0001",
         actor_identity_id=actor,
     )
-    assert repeat.outcome == "unchanged"
+    assert repeat.outcome == "applied"
     async with engine.connect() as connection:
         audits_after = int(
             (
@@ -727,8 +916,8 @@ async def test_two_concurrent_applies_produce_exactly_one_of_everything(
     Calling the same function twice in sequence proves nothing about
     concurrency: the second call sees the first one's committed rows. This
     starts both and lets PostgreSQL arbitrate — the unique constraint on
-    `(plan_id, idempotency_key)` is the thing under test, and one of the two
-    has to lose it.
+    `(session_id, idempotency_key)` is the thing under test, and one of the
+    two has to lose it.
     """
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
@@ -752,9 +941,11 @@ async def test_two_concurrent_applies_produce_exactly_one_of_everything(
     results = await asyncio.gather(worker("a"), worker("b"), return_exceptions=True)
     failures = [item for item in results if isinstance(item, BaseException)]
     assert failures == [], failures
-    outcomes = sorted(item.outcome for item in results)  # type: ignore[union-attr]
-    # One did the work; the other found it done. Neither raised.
-    assert outcomes == ["applied", "unchanged"] or outcomes == ["unchanged", "unchanged"]
+    # One did the work; the other found it done and replayed the recorded
+    # answer verbatim. Neither raised, and neither reports a different
+    # result from the other — that only one mutation happened is proved by
+    # the row counts below, not by the outcome word.
+    assert [item.outcome for item in results] == ["applied", "applied"]  # type: ignore[union-attr]
 
     async with engine.connect() as connection:
         counts = {
@@ -886,29 +1077,40 @@ async def test_two_sessions_may_use_the_same_key(engine: AsyncEngine, tmp_path: 
 async def test_a_race_on_one_key_and_two_plans_is_settled_by_the_database(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
-    """The conflict is decided in PostgreSQL, not by a pre-check.
+    """The conflict is decided in PostgreSQL, by the code apply really runs.
 
     Two callers both read "no receipt for this key" before either writes
-    one, so an application-level check passes for BOTH and two different
+    one, so an application-level pre-check passes for BOTH and two different
     plans apply under a single key. Only the unique constraint on
     `(session_id, idempotency_key)` can settle that.
 
-    This drives the claim statement `apply` uses, on two independent
-    connections released together, rather than driving `apply` itself:
-    a session has one approved plan at a time, so the approval gate stops
-    two different plans from reaching the claim through the public path.
-    That gate is not what is under test here — what happens when two writers
-    reach the claim at once is.
+    This drives `service.claim_apply` — the same function `_materialise`
+    calls, not a copy of its SQL — on two independent connections released
+    together. A copied statement would prove the constraint works and prove
+    nothing about the claim → read → refuse decision that production makes
+    on top of it.
+
+    It calls that primitive directly rather than `apply()` because a session
+    has one approved plan at a time, so the approval gate stops two
+    different plans from reaching the claim through the public path. The
+    sequential conflict through the public path is covered by
+    `test_the_same_key_under_a_different_plan_is_a_conflict`.
     """
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     actor = await _identity(engine)
-    session_id, first_version = await _approved_session(harness, engine, row_id, actor)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    # A real apply first, so the winner promotes a receipt that names a real
+    # project instead of a fabricated one.
+    applied = await _apply(harness, engine, session_id, plan_version, actor, "seed-key-0001")
+    assert applied.outcome == "applied"
+    assert applied.project_id is not None
     await _second_plan(harness, engine, session_id)
 
     async with engine.connect() as connection:
         plans = [
-            row[0]
+            uuidlib.UUID(str(row[0]))
             for row in (
                 await connection.execute(
                     text(
@@ -919,55 +1121,60 @@ async def test_a_race_on_one_key_and_two_plans_is_settled_by_the_database(
                 )
             ).all()
         ]
+        before = await _counts(connection, session_id)
     assert len(plans) == 2, "two genuinely different plans"
 
     barrier = asyncio.Barrier(2)
-    claim_sql = text(
-        """
-        INSERT INTO onboarding_applies
-            (plan_id, session_id, actor_identity_id, outcome, idempotency_key)
-        VALUES (:plan, :session, :actor, 'failed', :key)
-        ON CONFLICT (session_id, idempotency_key) DO NOTHING
-        RETURNING id
-        """
-    )
 
-    async def claim(plan_id: Any) -> bool:
+    async def caller(plan_id: uuidlib.UUID) -> Any:
         async with engine.begin() as connection:
             await barrier.wait()
-            row = (
-                await connection.execute(
-                    claim_sql,
-                    {
-                        "plan": plan_id,
-                        "session": session_id,
-                        "actor": actor,
-                        "key": "raced-key-0001",
-                    },
+            claim = await service.claim_apply(
+                connection,
+                plan_id=plan_id,
+                session_id=session_id,
+                actor_identity_id=actor,
+                idempotency_key="raced-key-0001",
+            )
+            if claim.apply_id is not None:
+                # Finish it, so the loser reads a settled receipt rather
+                # than waiting on a transaction that never resolves.
+                await service._promote_receipt(
+                    connection, claim.apply_id, applied.project_id, service._ApplyCounters()
                 )
-            ).first()
-            return row is not None
+            return claim
 
-    won = await asyncio.gather(claim(plans[0]), claim(plans[1]))
-    assert sorted(won) == [False, True], "exactly one writer may claim the key"
+    results = await asyncio.gather(caller(plans[0]), caller(plans[1]), return_exceptions=True)
+    winners = [item for item in results if isinstance(item, service.ApplyClaim)]
+    conflicts = [
+        item
+        for item in results
+        if isinstance(item, service.OnboardingError) and item.code == "idempotency_key_reused"
+    ]
+    unexpected = [
+        item for item in results if isinstance(item, BaseException) and item not in conflicts
+    ]
+    assert unexpected == [], unexpected
+    assert len(winners) == 1, results
+    assert winners[0].apply_id is not None, "the winner claimed the key"
+    assert len(conflicts) == 1, results
+    assert conflicts[0].status == 409
 
     async with engine.connect() as connection:
-        receipts = (
+        raced = (
             await connection.execute(
-                text("SELECT plan_id FROM onboarding_applies WHERE session_id = :s"),
+                text(
+                    "SELECT plan_id FROM onboarding_applies "
+                    "WHERE session_id = :s AND idempotency_key = 'raced-key-0001'"
+                ),
                 {"s": session_id},
             )
         ).all()
-    assert len(receipts) == 1
-
-    # And the loser's read of that receipt is what raises the conflict: the
-    # plan it holds is not the plan it tried to apply.
-    async with engine.connect() as connection:
-        recorded = await service._recorded_receipt(connection, session_id, "raced-key-0001")
-    assert recorded is not None
-    loser_plan = plans[0] if str(recorded["plan_id"]) == str(plans[1]) else plans[1]
-    assert str(recorded["plan_id"]) != str(loser_plan)
-    assert first_version  # the approved version is untouched by any of this
+        after = await _counts(connection, session_id)
+    # One receipt for the raced key, and the loser added nothing else: no
+    # second project, no second audit row.
+    assert len(raced) == 1
+    assert after == (before[0], before[1] + 1, before[2])
 
 
 # ===========================================================================
@@ -1022,12 +1229,10 @@ async def test_a_retry_returns_the_first_answer_on_every_field(
     assert retried.status_code == 200, retried.text
     replay = retried.json()
 
-    # Everything except the outcome word, which correctly changes from
-    # "applied" to "unchanged" — the work happened once.
-    assert set(replay) == set(body)
-    for field in set(body) - {"outcome"}:
-        assert replay[field] == body[field], field
-    assert replay["outcome"] == "unchanged"
+    # The whole body, field for field, with nothing excused. An earlier
+    # version of this test excluded `outcome` from the comparison, which
+    # meant the one field that had drifted was the one field not checked.
+    assert replay == body
 
     async with engine.connect() as connection:
         audits = int(
@@ -1066,18 +1271,38 @@ async def test_the_concurrent_loser_receives_the_whole_result(
         return await _apply(harness, engine, session_id, plan_version, actor, "loser-0001")
 
     first, second = await asyncio.gather(worker(), worker())
-    for field in (
-        "created",
-        "linked",
-        "unchanged",
-        "metadata_updated",
-        "slo_definitions_created",
-        "slo_definitions_updated",
-        "bindings_created",
-        "project_id",
-    ):
-        assert getattr(first, field) == getattr(second, field), field
+    # Every public field, including the outcome word: the loser is handed
+    # the winner's committed answer, not a summary of it.
+    assert dataclasses.asdict(first) == dataclasses.asdict(second)
+    assert first.outcome == "applied"
     assert first.slo_definitions_created > 0
+
+    # One mutation, one receipt, one audit — proved by counting, not by the
+    # two callers disagreeing about what happened.
+    async with engine.connect() as connection:
+        receipts = int(
+            (
+                await connection.execute(
+                    text("SELECT count(*) FROM onboarding_applies WHERE session_id = :s"),
+                    {"s": session_id},
+                )
+            ).scalar_one()
+        )
+        audits = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM audit_events WHERE action = 'onboarding.apply' "
+                        "AND target_id = :t"
+                    ),
+                    {"t": str(session_id)},
+                )
+            ).scalar_one()
+        )
+        projects = int(
+            (await connection.execute(text("SELECT count(*) FROM projects"))).scalar_one()
+        )
+    assert (receipts, audits, projects) == (1, 1, 1)
 
 
 @pytest.mark.anyio
@@ -1111,7 +1336,7 @@ async def test_a_pre_0020_receipt_reports_unrecorded_rather_than_zero(
         )
 
     replay = (await _apply_http(harness, engine, session_id, plan_version, "legacy-0001")).json()
-    assert replay["outcome"] == "unchanged"
+    assert replay["outcome"] == "applied"
     # The three counters the old schema DID record still come back.
     assert replay["created_entities"] > 0
     # The four it did not are absent, not zero.

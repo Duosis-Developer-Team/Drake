@@ -234,7 +234,15 @@ export interface GitHubStatus {
 }
 
 /** What an apply actually committed. Counters are additive; older clients
- * that read only the first three keep working. */
+ * that read only the first three keep working.
+ *
+ * The four extended counters are `number | null`, and the `null` is load
+ * bearing. Apply receipts written before migration 0020 never recorded
+ * them, so a replay of one of those reports "not recorded" rather than a
+ * zero that would read as a measurement. Do NOT normalise it to 0 — that
+ * turns "we do not know" into "nothing happened", which is the exact
+ * confusion the backend went to the trouble of avoiding. Render it as
+ * unknown, or omit the counter. */
 export interface ApplyResult {
   outcome: "applied" | "unchanged" | "failed";
   project_id: string | null;
@@ -242,10 +250,10 @@ export interface ApplyResult {
   linked_entities: number;
   unchanged_entities: number;
   no_change_count: number;
-  metadata_updated: number;
-  slo_definitions_created: number;
-  slo_definitions_updated: number;
-  bindings_created: number;
+  metadata_updated: number | null;
+  slo_definitions_created: number | null;
+  slo_definitions_updated: number | null;
+  bindings_created: number | null;
 }
 
 export interface SessionPage {

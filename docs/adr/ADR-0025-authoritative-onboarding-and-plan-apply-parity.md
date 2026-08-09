@@ -208,16 +208,31 @@ kept pointing at it.
 
 Apply now rebuilds the digest from the stored items — the same canonical
 shape, the same ordering, the same serialization used to compute it at plan
-time — and compares it to the digest recorded on the plan. This runs
-*first*: before the idempotency claim, before any handler, before any
-mutation. A difference raises `plan_integrity_mismatch` (409) and nothing
-is written, not even a receipt, because a request that was never applied
-must not be replayable as though it had been.
+time — and compares it to the digest recorded on the plan. A difference
+raises `plan_integrity_mismatch` (409) and nothing is written, not even a
+receipt, because a request that was never applied must not be replayable as
+though it had been.
+
+It runs **twice**, and both are load bearing:
+
+- Once as the first thing `apply` does after finding the plan: ahead of the
+  idempotency replay lookup and ahead of the first provider call. Ahead of
+  the provider because a rewritten plan should not buy an installation
+  token and two GitHub reads before being refused — refusing after spending
+  is a way to make refusing expensive. Ahead of the replay lookup because a
+  receipt would otherwise be a licence to stop checking: apply once, rewrite
+  a plan item, send the same idempotency key, and the recorded answer comes
+  back without anything having looked at what the plan now says.
+- Once inside the mutation transaction, before the claim and before any
+  handler. The provider round-trip between the two takes real time over a
+  network, and the stored plan can be rewritten during it.
 
 The check covers every field the digest covers: identity, action,
 `reason_code`, the mutation payload and the before/after `changes`. It is
 canonical, so re-serializing a payload with its keys in a different order
-is not a mismatch — only a change in meaning is.
+is not a mismatch — only a change in meaning is. A stored `detail` that is
+no longer a JSON object is also a mismatch and says so, rather than
+surfacing a `ValueError` as a 500 for something the service detected.
 
 **Apply no longer reads the manifest at all.** Decision 2 claimed handlers
 read the payload "and nothing else". One did not: the repository projection
@@ -243,6 +258,23 @@ three counters and the response carries seven, so a retried apply reported
 `metadata_updated: 0` for work that had happened. That breaks the only
 promise an idempotency key makes. Migration `0020` stores all seven, and a
 retry replays them instead of recomputing anything.
+
+That includes the outcome word. An intermediate version answered
+`unchanged` on a replay, which reads as "this request changed nothing" —
+but the request did change things, the first time it was sent. A reused
+idempotency key is not a new operation with its own result; it is one
+committed answer, sent back. So the replayed body equals the first body
+exactly, and that only one mutation happened is proved by counting
+receipts, audit rows and catalog rows, not by wording one response
+differently from the other. No `replayed` flag was added: that would be a
+new API field, and this slice is not the place to decide one.
+
+**The claim decision lives in one function.** `claim_apply` inserts the
+receipt, and when the insert conflicts it reads what already holds the key
+and either replays it or refuses. Keeping that in a single production
+helper is what lets the concurrency test drive the real decision instead of
+a copy of its SQL — a copied statement proves the constraint works and
+proves nothing about the claim → read → refuse path built on top of it.
 
 Receipts written before `0020` never recorded the four extended counters.
 They come back as `null` — "not recorded" — not as zero. They are not

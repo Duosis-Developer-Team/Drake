@@ -794,8 +794,9 @@ async def test_applying_twice_creates_one_project_and_one_audit(
     )
     assert first.outcome == "applied"
     # A client that lost the response repeats the call and gets the recorded
-    # answer rather than a second project.
-    assert second.outcome == "unchanged"
+    # answer rather than a second project — the WHOLE recorded answer,
+    # outcome word included. A replay is not a different operation.
+    assert second.outcome == "applied"
     assert second.project_id == first.project_id
 
     async with engine.connect() as connection:

@@ -817,7 +817,8 @@ async def test_applying_twice_updates_nothing_a_second_time(
         actor_identity_id=actor,
     )
     assert first.outcome == "applied"
-    assert repeat.outcome == "unchanged"
+    # The replay repeats the recorded answer, outcome included.
+    assert repeat.outcome == "applied"
 
     async with engine.connect() as connection:
         counts = {

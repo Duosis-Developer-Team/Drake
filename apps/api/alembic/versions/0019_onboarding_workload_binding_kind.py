@@ -59,7 +59,8 @@ def downgrade() -> None:
 
     So this fails closed. An operator who genuinely wants to go back decides
     what happens to those plans first; the migration will not decide for
-    them.
+    them. Note that cancelling a session does not clear its plan items —
+    the decision has to be about the items themselves.
     """
     conn = op.get_bind()
     # The table name is a module constant and the value is a literal, so
@@ -71,7 +72,10 @@ def downgrade() -> None:
             f"cannot downgrade 0019: {remaining} plan item(s) use the "
             "'workload_binding' kind. Downgrading would delete part of an "
             "approved plan and the evidence its digest was computed over. "
-            "Resolve or cancel those onboarding sessions first."
+            "Remove those plan items deliberately, with a decision recorded "
+            "for why the approvals they belong to no longer matter, before "
+            "downgrading. Cancelling the sessions is not enough on its own: "
+            "a cancelled session keeps its plan items."
         )
     op.drop_constraint(_CONSTRAINT, _TABLE, type_="check")
     op.create_check_constraint(_CONSTRAINT, _TABLE, f"entity_kind IN ({_KINDS_0018})")
