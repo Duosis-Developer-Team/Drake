@@ -30,7 +30,7 @@ commit is not a review of its successor.
 **Apply is one transaction, and it makes no network calls.** A slow GitHub
 must not hold a catalog lock, and a failing one must not roll back the
 import that succeeded. Provider work happens before, in the analysis, or
-after, through the GitOps outbox.
+after, through GitOps.
 
 **Nothing is deleted, ever.** There is no code path here that removes a
 catalog row. A service that vanished from a manifest is reported.
@@ -976,6 +976,9 @@ class ApplyOutcome:
     slo_definitions_created: int = 0
     slo_definitions_updated: int = 0
     bindings_created: int = 0
+    #: False for a receipt written before migration 0020, whose extended
+    #: counters were never recorded. Stored zeros are not measured zeros.
+    counters_complete: bool = True
 
 
 async def apply(
@@ -1020,24 +1023,11 @@ async def apply(
     # approval check would refuse a retry — and a client that merely lost
     # the response would be told its own successful import was unapproved.
     async with engine.connect() as connection:
-        recorded = (
-            await connection.execute(
-                text(
-                    "SELECT outcome, project_id, created_entities, linked_entities, "
-                    "unchanged_entities FROM onboarding_applies "
-                    "WHERE plan_id = :plan AND idempotency_key = :key"
-                ),
-                {"plan": uuid.UUID(str(plan_row[0])), "key": idempotency_key},
-            )
-        ).first()
+        recorded = await _recorded_receipt(connection, session.id, idempotency_key)
     if recorded is not None:
-        return ApplyOutcome(
-            outcome="unchanged",
-            project_id=uuid.UUID(str(recorded[1])) if recorded[1] else None,
-            created=int(recorded[2]),
-            linked=int(recorded[3]),
-            unchanged=int(recorded[4]),
-        )
+        if str(recorded["plan_id"]) != str(plan_row[0]):
+            raise IdempotencyKeyReusedError()
+        return _outcome_from_receipt(recorded)
 
     if session.state != str(SessionState.APPROVED):
         raise OnboardingError("not_approved", "This plan has not been approved.")
@@ -1127,9 +1117,12 @@ class _ApplyContext:
 
     connection: AsyncConnection
     catalog: CatalogService
-    document: dict[str, Any]
     repository: RepositoryContext
     commit_sha: str
+    #: The digest recorded on the approved plan. Not recomputed from a
+    #: document at apply time: that would be a second, differently-derived
+    #: value pretending to be the one that was reviewed.
+    manifest_digest: str
     source_ref: str
     counters: _ApplyCounters
     project_id: uuid.UUID | None = None
@@ -1140,15 +1133,6 @@ class _ApplyContext:
     services: dict[str, uuid.UUID] = field(default_factory=dict)
     #: environment keys the approved plan created or linked
     planned_environments: set[str] = field(default_factory=set)
-
-    def spec(self, section: str) -> list[dict[str, Any]]:
-        return list((self.document.get("spec") or {}).get(section) or [])
-
-    def find(self, section: str, key: str) -> dict[str, Any] | None:
-        for entry in self.spec(section):
-            if str(entry.get("name") or "") == key:
-                return entry
-        return None
 
 
 class PlanNotApplicableError(OnboardingError):
@@ -1190,15 +1174,31 @@ async def _materialise(
     registered handler, and a handler runs only for an item that is in the
     approved plan.
 
-    The VALUES still come from the manifest, and safely: apply has already
-    re-read it at the approved commit and checked its digest against the one
-    frozen on the plan, so the document below is byte-for-byte the content
-    that was reviewed.
+    No value comes from the manifest. Every one comes from the approved
+    item's payload, and the digest over those items is verified against the
+    plan's stored digest before anything is written — so what applies is
+    what was approved, not what the stored plan happens to say now.
+
+    `document` is deliberately unused here. It is the proof, carried down
+    from the freshness check, that the manifest at the approved commit still
+    hashes to the digest frozen on the plan; keeping it in the signature is
+    what lets a test replace it with an empty object and demonstrate that no
+    handler reads it. If that ever stops being true the test fails, which is
+    the point.
     """
     source_ref = f"github:{context.external_id}:{MANIFEST_PATH}"
 
     async with engine.begin() as connection:
-        # The idempotency claim comes first, inside the same transaction as
+        # Integrity FIRST — before the claim, before any mutation, before
+        # anything is written at all. An approval binds the values in the
+        # plan; those values are only binding if they are checked, and a
+        # check that runs after the claim has already recorded an attempt
+        # that should never have started.
+        items = await _approved_items(connection, plan_id)
+        if _recompute_digest(items) != plan_digest:
+            raise PlanIntegrityError()
+
+        # The idempotency claim comes next, inside the same transaction as
         # the work: a client that lost the response repeats the call and
         # gets the recorded answer instead of a second project.
         #
@@ -1212,7 +1212,7 @@ async def _materialise(
                     INSERT INTO onboarding_applies
                         (plan_id, session_id, actor_identity_id, outcome, idempotency_key)
                     VALUES (:plan, :session, :actor, 'failed', :key)
-                    ON CONFLICT (plan_id, idempotency_key) DO NOTHING
+                    ON CONFLICT (session_id, idempotency_key) DO NOTHING
                     RETURNING id
                     """
                 ),
@@ -1225,26 +1225,16 @@ async def _materialise(
             )
         ).first()
         if claim is None:
-            existing = (
-                await connection.execute(
-                    text(
-                        "SELECT outcome, project_id, created_entities, linked_entities, "
-                        "unchanged_entities FROM onboarding_applies "
-                        "WHERE plan_id = :plan AND idempotency_key = :key"
-                    ),
-                    {"plan": plan_id, "key": idempotency_key},
-                )
-            ).one()
-            return ApplyOutcome(
-                outcome="unchanged",
-                project_id=uuid.UUID(str(existing[1])) if existing[1] else None,
-                created=int(existing[2]),
-                linked=int(existing[3]),
-                unchanged=int(existing[4]),
-            )
+            # Lost the race, or a retry. The unique constraint is on
+            # `(session_id, idempotency_key)`, so this also catches a reuse
+            # under a different plan — in the database, where a concurrent
+            # pair cannot both pass an application pre-check.
+            existing = await _recorded_receipt(connection, session.id, idempotency_key)
+            assert existing is not None
+            if str(existing["plan_id"]) != str(plan_id):
+                raise IdempotencyKeyReusedError()
+            return _outcome_from_receipt(existing)
         apply_id = uuid.UUID(str(claim[0]))
-
-        items = await _approved_items(connection, plan_id)
 
         # Coverage check, before a single mutation. An actionable item with
         # no handler stops the whole apply.
@@ -1260,9 +1250,9 @@ async def _materialise(
         apply_context = _ApplyContext(
             connection=connection,
             catalog=CatalogService(connection),
-            document=document,
             repository=context,
             commit_sha=commit_sha,
+            manifest_digest=manifest_digest,
             source_ref=source_ref,
             counters=_ApplyCounters(),
         )
@@ -1287,20 +1277,7 @@ async def _materialise(
         assert apply_context.project_id is not None
         counters = apply_context.counters
 
-        await connection.execute(
-            text(
-                "UPDATE onboarding_applies SET outcome = 'applied', project_id = :project, "
-                "created_entities = :created, linked_entities = :linked, "
-                "unchanged_entities = :unchanged WHERE id = :id"
-            ),
-            {
-                "id": apply_id,
-                "project": apply_context.project_id,
-                "created": counters.created,
-                "linked": counters.linked,
-                "unchanged": counters.unchanged,
-            },
-        )
+        await _promote_receipt(connection, apply_id, apply_context.project_id, counters)
         await connection.execute(
             text("UPDATE onboarding_plans SET state = 'applied' WHERE id = :id"),
             {"id": plan_id},
@@ -1355,12 +1332,169 @@ async def _materialise(
     )
 
 
+async def _promote_receipt(
+    connection: AsyncConnection,
+    apply_id: uuid.UUID,
+    project_id: uuid.UUID,
+    counters: "_ApplyCounters",
+) -> None:
+    """Finish the receipt, inside the transaction that did the work.
+
+    Every counter the response carries is stored, because a retry replays
+    this row rather than recounting anything. Storing three of seven is how
+    a retried apply came to report zero for work that had happened.
+    """
+    await connection.execute(
+        text(
+            "UPDATE onboarding_applies SET outcome = 'applied', project_id = :project, "
+            "created_entities = :created, linked_entities = :linked, "
+            "unchanged_entities = :unchanged, metadata_updated = :metadata, "
+            "slo_definitions_created = :slo_created, "
+            "slo_definitions_updated = :slo_updated, "
+            "bindings_created = :bindings, counters_complete = true "
+            "WHERE id = :id"
+        ),
+        {
+            "id": apply_id,
+            "project": project_id,
+            "created": counters.created,
+            "linked": counters.linked,
+            "unchanged": counters.unchanged,
+            "metadata": counters.metadata_updated,
+            "slo_created": counters.slo_definitions_created,
+            "slo_updated": counters.slo_definitions_updated,
+            "bindings": counters.bindings_created,
+        },
+    )
+
+
+async def _recorded_receipt(
+    connection: AsyncConnection, session_id: uuid.UUID, idempotency_key: str
+) -> dict[str, Any] | None:
+    """The receipt for one (session, key), or nothing."""
+    row = (
+        await connection.execute(
+            text(
+                "SELECT plan_id, outcome, project_id, created_entities, linked_entities, "
+                "unchanged_entities, metadata_updated, slo_definitions_created, "
+                "slo_definitions_updated, bindings_created, counters_complete "
+                "FROM onboarding_applies "
+                "WHERE session_id = :session AND idempotency_key = :key"
+            ),
+            {"session": session_id, "key": idempotency_key},
+        )
+    ).first()
+    if row is None:
+        return None
+    return {
+        "plan_id": row[0],
+        "outcome": str(row[1]),
+        "project_id": row[2],
+        "created": int(row[3]),
+        "linked": int(row[4]),
+        "unchanged": int(row[5]),
+        "metadata_updated": int(row[6]),
+        "slo_definitions_created": int(row[7]),
+        "slo_definitions_updated": int(row[8]),
+        "bindings_created": int(row[9]),
+        "counters_complete": bool(row[10]),
+    }
+
+
+def _outcome_from_receipt(receipt: dict[str, Any]) -> ApplyOutcome:
+    """A retry returns exactly what the first call returned.
+
+    Every counter is restored, not recomputed — the work already happened
+    and counting it again would mean re-deriving it from a catalog that has
+    since moved on.
+
+    A receipt written before migration 0020 never recorded the extended
+    counters. `counters_complete` says so, and the outcome carries that
+    forward rather than presenting stored zeros as measured work.
+    """
+    return ApplyOutcome(
+        outcome="unchanged",
+        project_id=uuid.UUID(str(receipt["project_id"])) if receipt["project_id"] else None,
+        created=receipt["created"],
+        linked=receipt["linked"],
+        unchanged=receipt["unchanged"],
+        metadata_updated=receipt["metadata_updated"],
+        slo_definitions_created=receipt["slo_definitions_created"],
+        slo_definitions_updated=receipt["slo_definitions_updated"],
+        bindings_created=receipt["bindings_created"],
+        counters_complete=receipt["counters_complete"],
+    )
+
+
+class IdempotencyKeyReusedError(OnboardingError):
+    """The same key, the same session, a different plan.
+
+    An idempotency key is a client's statement that a request is the SAME
+    request. Honouring it across plan versions would let a retry apply an
+    approval the client never meant to send — so a reuse under another plan
+    is a conflict, not a replay.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "idempotency_key_reused",
+            "This idempotency key was already used for a different plan version in this session.",
+            status=409,
+        )
+
+
+class PlanIntegrityError(OnboardingError):
+    """The stored plan no longer hashes to the digest that was approved.
+
+    Somebody — or something — changed a plan item after approval. The values
+    an approval binds are only binding if they are checked, so this refuses
+    before any claim, any mutation and any provider call.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "plan_integrity_mismatch",
+            "This plan no longer matches what was approved. Analyse and review again.",
+            status=409,
+        )
+
+
+def _recompute_digest(items: list[dict[str, Any]]) -> str:
+    """Rebuild the plan's digest from what is stored, the same way it was made.
+
+    The reconstruction has to use the SAME canonical shape `Plan.digest()`
+    used, or this check would fail on plans nobody touched — and a check
+    that cries wolf gets turned off.
+    """
+    rebuilt = Plan(
+        items=[
+            PlanItem(
+                entity_kind=item["entity_kind"],
+                action=item["action"],
+                item_key=item["item_key"],
+                proposed_name=item["proposed_name"],
+                existing_entity_id=(
+                    str(item["existing_entity_id"])
+                    if item["existing_entity_id"] is not None
+                    else None
+                ),
+                reason_code=item["reason_code"],
+                payload=item["payload"],
+                changes=item["changes"],
+            )
+            for item in items
+        ]
+    )
+    return rebuilt.digest()
+
+
 async def _approved_items(connection: AsyncConnection, plan_id: uuid.UUID) -> list[dict[str, Any]]:
     rows = (
         await connection.execute(
             text(
                 "SELECT entity_kind, action, item_key, proposed_name, existing_entity_id, "
-                "detail FROM onboarding_plan_items WHERE plan_id = :id ORDER BY item_key"
+                "detail, reason_code FROM onboarding_plan_items WHERE plan_id = :id "
+                "ORDER BY item_key"
             ),
             {"id": plan_id},
         )
@@ -1377,6 +1511,8 @@ async def _approved_items(connection: AsyncConnection, plan_id: uuid.UUID) -> li
             # nothing: the manifest, the analysis and the live request are
             # all mutable between approval and apply, and this is not.
             "payload": dict((row[5] or {}).get("payload") or {}),
+            "changes": dict((row[5] or {}).get("changes") or {}),
+            "reason_code": row[6],
         }
         for row in rows
     ]
@@ -1729,15 +1865,11 @@ async def _apply_repository_link(context: _ApplyContext, item: dict[str, Any]) -
             "project": context.project_id,
             "scope": context.repository.scope_id,
             "commit": context.commit_sha,
-            "digest": _manifest_digest_of(context),
+            "digest": context.manifest_digest,
         },
     )
     context.counters.linked += 1
     _ = item
-
-
-def _manifest_digest_of(context: _ApplyContext) -> str:
-    return hashlib.sha256(json.dumps(context.document, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 async def _apply_slo_create(context: _ApplyContext, item: dict[str, Any]) -> None:

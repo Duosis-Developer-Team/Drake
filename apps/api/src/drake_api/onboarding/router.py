@@ -424,6 +424,14 @@ async def apply(
     # Normalized result only: no manifest, no provider body, no repository
     # content. Every counter is from the COMMITTED transaction — a rollback
     # raises rather than returning partial numbers.
+    #
+    # A retry replays the stored receipt. Receipts written before migration
+    # 0020 never recorded the four extended counters, so those come back as
+    # `null` — "this was not recorded" — rather than as a zero that reads
+    # like measured work. They are not reconstructed from audit metadata:
+    # audit records what happened, not how many rows a counter reached, and
+    # inferring one from the other would produce a confident wrong number.
+    unrecorded = not outcome.counters_complete
     return {
         "outcome": outcome.outcome,
         "project_id": str(outcome.project_id) if outcome.project_id else None,
@@ -431,10 +439,10 @@ async def apply(
         "linked_entities": outcome.linked,
         "unchanged_entities": outcome.unchanged,
         "no_change_count": outcome.unchanged,
-        "metadata_updated": outcome.metadata_updated,
-        "slo_definitions_created": outcome.slo_definitions_created,
-        "slo_definitions_updated": outcome.slo_definitions_updated,
-        "bindings_created": outcome.bindings_created,
+        "metadata_updated": None if unrecorded else outcome.metadata_updated,
+        "slo_definitions_created": None if unrecorded else outcome.slo_definitions_created,
+        "slo_definitions_updated": None if unrecorded else outcome.slo_definitions_updated,
+        "bindings_created": None if unrecorded else outcome.bindings_created,
     }
 
 

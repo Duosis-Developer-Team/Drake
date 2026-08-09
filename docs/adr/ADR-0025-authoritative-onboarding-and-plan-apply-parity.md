@@ -166,24 +166,96 @@ discover it afterwards. `record_audit_event_in` shares the caller's
 transaction, and a failing audit fails the apply. That is the intended
 trade — fail closed.
 
-**`onboarding_applies` is the transactional outbox row.** Drake's outbox
-contract (ADR-0024) is a durable row written in the same transaction as the
-domain change and read by a worker afterwards. For an apply that row is
-`onboarding_applies`: it commits with the catalog change and the audit, and
-it is what any later reconciliation reads. No second event table was added,
-because an event nothing consumes is a surface to keep safe for no reason —
-the same rule that kept `pull_request` out of the webhook allowlist.
+**`onboarding_applies` is a transactional apply receipt, not an outbox
+row.** An earlier draft of this ADR called it one and cited ADR-0024. That
+was wrong, and the wrong word hid a design question. ADR-0024 describes a
+notification flow: a durable row written with the domain change and *read
+by a worker afterwards*. Nothing reads `onboarding_applies`. It is a
+receipt — it commits inside the apply transaction, it records what that
+apply did, and it is what a retry of the same request replays. No worker,
+no queue, no consumer.
+
+**Onboarding-completion outbox: `not_applicable` for this slice.** No
+consumer is defined for "an onboarding finished", so there is nothing for
+an outbox to deliver. Adding an event table now would mean a durable,
+security-relevant surface with no reader — the same reasoning that kept
+`pull_request` out of the webhook allowlist. When a consumer exists, this
+decision gets revisited on its own evidence; until then the honest record
+is that the question does not arise, not that it was answered.
 
 **Idempotency is concurrency-safe, and proved as such.** Two independent
 PostgreSQL sessions, released together by a barrier, race one plan and one
-key. The unique constraint on `(plan_id, idempotency_key)` arbitrates; one
-applies, the other returns the recorded outcome, and the catalog ends with
-exactly one of everything. Uniqueness is on the PAIR, so the same key under
-a different plan is a different request rather than a silent replay of
-somebody else's approval.
+key. A unique constraint arbitrates; one applies, the other returns the
+recorded outcome, and the catalog ends with exactly one of everything.
 
 **Deployment source stays informational**, and says so in the payload:
 `materialized: false` with the bounded reason
 `catalog_projection_not_supported`. A client decides on the code, never on
 the sentence beside it. Whether the catalog grows a column for it is a
 separate schema decision.
+
+## Later decisions (Sprint 12A.1 acceptance review)
+
+Six problems found by reading the source at `0149a31`, not by running it.
+Each one is a case of a guarantee that was claimed but not enforced.
+
+**The approved plan is verified before it is trusted.** Decision 2 says the
+plan is the instruction set. It did not say who checks the instruction set
+is still the one that was approved. The digest was stored beside the items
+and never recompared, so a direct write to `onboarding_plan_items` between
+approval and apply changed what apply executed while the approval record
+kept pointing at it.
+
+Apply now rebuilds the digest from the stored items — the same canonical
+shape, the same ordering, the same serialization used to compute it at plan
+time — and compares it to the digest recorded on the plan. This runs
+*first*: before the idempotency claim, before any handler, before any
+mutation. A difference raises `plan_integrity_mismatch` (409) and nothing
+is written, not even a receipt, because a request that was never applied
+must not be replayable as though it had been.
+
+The check covers every field the digest covers: identity, action,
+`reason_code`, the mutation payload and the before/after `changes`. It is
+canonical, so re-serializing a payload with its keys in a different order
+is not a mismatch — only a change in meaning is.
+
+**Apply no longer reads the manifest at all.** Decision 2 claimed handlers
+read the payload "and nothing else". One did not: the repository projection
+wrote a `manifest_digest` recomputed from the live document. The value now
+comes from the plan-bound digest, and `_ApplyContext` no longer carries the
+document, so a handler that tried to read it would not compile. The
+strip-document test asserts the projected `commit_sha` and `manifest_digest`
+alongside the SLO and binding values, rather than only that the apply
+succeeded.
+
+**An idempotency key is scoped to its session, and reuse is a conflict.**
+Uniqueness was `(plan_id, idempotency_key)`, which made the same key under
+a *different* plan version a different request — so a client retrying what
+it believed was one call could apply a second, newer approval it never
+intended to send. Uniqueness moves to `(session_id, idempotency_key)`.
+Reuse within a session under another plan raises `idempotency_key_reused`
+(409). Different sessions may reuse a key freely; it is the client's
+namespace, not a global one. The decision is enforced by the database
+constraint, because a pre-check is exactly what a concurrent pair defeats.
+
+**A retry returns the first answer, on every field.** The receipt stored
+three counters and the response carries seven, so a retried apply reported
+`metadata_updated: 0` for work that had happened. That breaks the only
+promise an idempotency key makes. Migration `0020` stores all seven, and a
+retry replays them instead of recomputing anything.
+
+Receipts written before `0020` never recorded the four extended counters.
+They come back as `null` — "not recorded" — not as zero. They are not
+reconstructed from audit metadata: audit records what happened, not how
+many rows a counter reached, and deriving one from the other would produce
+a confident wrong number.
+
+**Migration `0019` refuses to downgrade rather than deleting plans.** Its
+downgrade deleted the `workload_binding` items that the narrowed CHECK
+would reject. A plan item is the evidence of what somebody approved, and
+the digest above is computed over exactly those items — deleting some to
+make a schema change fit destroys the record of a decision and silently
+breaks the integrity check for the rest. The downgrade now fails closed
+with a bounded error naming the count; an operator decides what happens to
+those sessions. `0020`'s downgrade refuses on the same grounds when any
+receipt carries counters the older schema cannot hold.

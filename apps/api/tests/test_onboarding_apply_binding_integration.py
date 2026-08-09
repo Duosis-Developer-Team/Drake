@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 from drake_api.onboarding import service
 from drake_api.onboarding.model import (
+    BINDABLE_WORKLOAD_KINDS,
     MAX_PAYLOAD_BYTES,
     PAYLOAD_ALLOWLIST,
     Action,
@@ -225,49 +226,184 @@ async def _approved_session(
     return session_id, int(analysis["plan_version"])
 
 
+async def _session_version(engine: AsyncEngine, session_id: uuidlib.UUID) -> int:
+    async with engine.connect() as connection:
+        return int(
+            (
+                await connection.execute(
+                    text("SELECT version FROM onboarding_sessions WHERE id = :s"),
+                    {"s": session_id},
+                )
+            ).scalar_one()
+        )
+
+
+async def _apply(
+    harness: Any,
+    engine: AsyncEngine,
+    session_id: uuidlib.UUID,
+    version: int,
+    actor: uuidlib.UUID,
+    key: str,
+) -> Any:
+    return await service.apply(
+        engine,
+        harness.app.state.settings,
+        harness.app.state.github_client,
+        session_id=session_id,
+        plan_version=version,
+        idempotency_key=key,
+        actor_identity_id=actor,
+    )
+
+
+_TAMPER_TARGET = (
+    "WHERE plan_id = (SELECT id FROM onboarding_plans WHERE session_id = :s "
+    "ORDER BY plan_version DESC LIMIT 1) AND item_key = 'project:datalake'"
+)
+
+
+async def _tamper(engine: AsyncEngine, session_id: uuidlib.UUID, sql: str) -> None:
+    """Rewrite an approved plan item behind the approval's back."""
+    # `sql` is one of this module's own literals — the point of the test is
+    # that the tamper is real, not that it is user-supplied.
+    statement = f"{sql} {_TAMPER_TARGET}"
+    async with engine.begin() as connection:
+        changed = (await connection.execute(text(statement), {"s": session_id})).rowcount
+    # A tamper that changed nothing would make the test pass for the wrong
+    # reason — the earlier version of this test did exactly that.
+    assert changed == 1, "the tamper matched no row"
+
+
 @pytest.mark.anyio
-async def test_editing_the_analysis_after_approval_changes_nothing_applied(
+async def test_a_tampered_payload_value_refuses_the_apply(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
-    """The TOCTOU case, stated plainly.
+    """The TOCTOU case, with a tamper that actually changes something.
 
-    An approval that bound only field names would let whatever the manifest
-    or the stored analysis says at apply time decide the values. It binds
-    the values, so tampering with the stored plan's source data cannot
-    change what lands in the catalog.
+    An earlier version of this test issued `SET proposed_name =
+    proposed_name` — a no-op that asserted nothing. Here the stored payload
+    really is rewritten between approval and apply, which is the whole
+    attack: the approval record still points at these items, so if apply
+    trusts them without checking, it executes a value nobody approved.
     """
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     actor = await _identity(engine)
     session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
 
-    # Someone rewrites the analysis row the plan was built from.
+    await _tamper(
+        engine,
+        session_id,
+        "UPDATE onboarding_plan_items SET detail = "
+        "jsonb_set(detail, '{payload,display_name}', '\"Datalake Pwned\"')",
+    )
+
+    with pytest.raises(service.OnboardingError) as raised:
+        await _apply(harness, engine, session_id, plan_version, actor, "tamper-0001")
+    assert raised.value.code == "plan_integrity_mismatch"
+    assert raised.value.status == 409
+
+    # Nothing was written — not the project, and not a receipt that a retry
+    # could replay as though the apply had succeeded.
+    async with engine.connect() as connection:
+        projects = int(
+            (
+                await connection.execute(
+                    text("SELECT count(*) FROM projects WHERE project_key = 'datalake'")
+                )
+            ).scalar_one()
+        )
+        receipts = int(
+            (
+                await connection.execute(
+                    text("SELECT count(*) FROM onboarding_applies WHERE session_id = :s"),
+                    {"s": session_id},
+                )
+            ).scalar_one()
+        )
+    assert projects == 0
+    assert receipts == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("label", "sql"),
+    [
+        (
+            "changes",
+            "UPDATE onboarding_plan_items SET detail = "
+            "jsonb_set(detail, '{changes}', '{\"display_name\": "
+            '{"before": "a", "after": "b"}}\')',
+        ),
+        ("reason_code", "UPDATE onboarding_plan_items SET reason_code = 'rewritten'"),
+        ("action", "UPDATE onboarding_plan_items SET action = 'no_change'"),
+        ("identity", "UPDATE onboarding_plan_items SET proposed_name = 'Somebody Else'"),
+    ],
+)
+async def test_every_digested_field_is_covered_by_the_integrity_check(
+    engine: AsyncEngine, tmp_path: Path, label: str, sql: str
+) -> None:
+    """Whatever the digest covers, the check covers.
+
+    A gap in any one of these is a field an attacker can move freely: a
+    rewritten `reason_code` changes why a reviewer said yes, a rewritten
+    `changes` block changes what they were shown, and an action flipped to
+    `no_change` silently removes work from an approved plan.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    await _tamper(engine, session_id, sql)
+
+    with pytest.raises(service.OnboardingError) as raised:
+        await _apply(harness, engine, session_id, plan_version, actor, f"tamper-{label}")
+    assert raised.value.code == "plan_integrity_mismatch", label
+
+
+@pytest.mark.anyio
+async def test_a_canonically_equivalent_rewrite_is_not_a_mismatch(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The check is on meaning, not on bytes.
+
+    JSONB does not preserve key order, and a dump/restore or a routine
+    re-serialization may hand the payload back in a different one. If that
+    read as tampering, the integrity check would fail closed on healthy
+    plans — an alarm that fires without an intruder gets switched off.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    # Rebuild every payload object with its keys in reverse order. Same
+    # mapping, different serialization.
     async with engine.begin() as connection:
         await connection.execute(
             text(
-                "UPDATE onboarding_analyses SET commit_sha = commit_sha, "
-                "manifest_digest = manifest_digest WHERE session_id = :s"
+                """
+                UPDATE onboarding_plan_items AS i SET detail = jsonb_set(
+                    i.detail, '{payload}',
+                    COALESCE(
+                        (SELECT jsonb_object_agg(k, v)
+                         FROM (SELECT key AS k, value AS v
+                               FROM jsonb_each(i.detail->'payload')
+                               ORDER BY key DESC) AS reordered),
+                        i.detail->'payload'
+                    )
+                )
+                WHERE i.plan_id = (SELECT id FROM onboarding_plans
+                                   WHERE session_id = :s ORDER BY plan_version DESC LIMIT 1)
+                  AND i.detail ? 'payload'
+                """
             ),
             {"s": session_id},
         )
-        # And tampers with a stored plan item's DETAIL, leaving the payload
-        # in place — the shape a name-only binding would have trusted.
-        await connection.execute(
-            text(
-                "UPDATE onboarding_plan_items SET proposed_name = proposed_name "
-                "WHERE item_key = 'project:datalake'"
-            )
-        )
 
-    outcome = await service.apply(
-        engine,
-        harness.app.state.settings,
-        harness.app.state.github_client,
-        session_id=session_id,
-        plan_version=plan_version,
-        idempotency_key="toctou-0001",
-        actor_identity_id=actor,
-    )
+    outcome = await _apply(harness, engine, session_id, plan_version, actor, "reorder-0001")
     assert outcome.outcome == "applied"
 
     async with engine.connect() as connection:
@@ -277,7 +413,6 @@ async def test_editing_the_analysis_after_approval_changes_nothing_applied(
                 {"p": outcome.project_id},
             )
         ).scalar_one()
-    # Exactly what the approved payload said.
     assert display_name == "Datalake Platform"
 
 
@@ -319,6 +454,7 @@ async def test_apply_reads_no_value_from_the_manifest(engine: AsyncEngine, tmp_p
 
     assert captured["document"]["spec"], "the real manifest was passed in"
     assert outcome.outcome == "applied"
+
     async with engine.connect() as connection:
         rows = (
             await connection.execute(
@@ -335,9 +471,78 @@ async def test_apply_reads_no_value_from_the_manifest(engine: AsyncEngine, tmp_p
                 )
             ).all()
         )
+        # The repository projection. Its `manifest_digest` used to be
+        # recomputed from the live document, which is exactly the value an
+        # empty document would have made wrong — so it is asserted here
+        # rather than left to the apply's return code.
+        projection = (
+            await connection.execute(
+                text(
+                    "SELECT commit_sha, manifest_digest, repository_id FROM "
+                    "github_repository_projects WHERE project_id = :p"
+                ),
+                {"p": outcome.project_id},
+            )
+        ).one()
+        plan_bound = (
+            await connection.execute(
+                text(
+                    "SELECT a.commit_sha, a.manifest_digest FROM onboarding_analyses AS a "
+                    "WHERE a.session_id = :s"
+                ),
+                {"s": session_id},
+            )
+        ).one()
+        slo = (
+            await connection.execute(
+                text(
+                    "SELECT slo_key, indicator, objective_ratio, window_seconds "
+                    "FROM slo_definitions WHERE project_id = :p"
+                ),
+                {"p": outcome.project_id},
+            )
+        ).all()
+        bindings = (
+            await connection.execute(
+                text(
+                    "SELECT namespace, workload_kind, workload_name FROM "
+                    "service_workload_bindings WHERE project_id = :p ORDER BY workload_name"
+                ),
+                {"p": outcome.project_id},
+            )
+        ).all()
+        environments = sorted(
+            row[0]
+            for row in (
+                await connection.execute(
+                    text("SELECT environment_key FROM environments WHERE project_id = :p"),
+                    {"p": outcome.project_id},
+                )
+            ).all()
+        )
+
     assert rows[0] == "datalake"
     assert rows[1] == "Datalake Platform"
     assert services == ["datalake-api", "datalake-gui"]
+    assert environments == ["dev"]
+
+    # The projection carries the plan-bound commit and digest — the values
+    # the approval was computed over, not values re-derived at apply time.
+    assert projection[0] == plan_bound[0]
+    assert projection[1] == plan_bound[1]
+    assert uuidlib.UUID(str(projection[2])) == row_id
+
+    # The SLO, from the approved payload rather than from `spec.slos`.
+    assert len(slo) == 1
+    assert slo[0][0] == "datalake-api-availability"
+    assert slo[0][1] == "availability"
+    assert float(slo[0][2]) == pytest.approx(0.995)
+    assert int(slo[0][3]) == 30 * 24 * 3600
+
+    # Bindings come from observed inventory, and the values land intact.
+    for namespace, kind, _name in bindings:
+        assert namespace == "datalake-dev"
+        assert kind in BINDABLE_WORKLOAD_KINDS
 
 
 # ===========================================================================
@@ -419,17 +624,19 @@ async def test_a_failed_audit_write_rolls_back_the_whole_apply(
 
 
 @pytest.mark.anyio
-async def test_the_apply_record_is_the_durable_outbox_row(
+async def test_the_apply_receipt_commits_with_the_catalog_change(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
-    """Drake's outbox contract (ADR-0024) is a durable row written in the
-    same transaction as the domain change, read by a worker afterwards.
+    """`onboarding_applies` is a transactional apply receipt.
 
-    For an onboarding apply that row is `onboarding_applies`: it commits
-    with the catalog change and the audit, and it is the record any later
-    reconciliation reads. There is deliberately no second event table with
-    no consumer — an event nothing acts on is a surface to keep safe for no
-    reason.
+    It is NOT an outbox row: nothing reads it, no worker consumes it, and
+    ADR-0024's notification flow does not describe it. It commits inside the
+    apply transaction alongside the catalog change and the audit, and it is
+    what a retry of the same request replays.
+
+    There is deliberately no event table beside it, because no consumer for
+    "an onboarding finished" exists — an event nothing acts on is a durable
+    surface to keep safe for no reason.
     """
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
@@ -442,7 +649,7 @@ async def test_the_apply_record_is_the_durable_outbox_row(
         harness.app.state.github_client,
         session_id=session_id,
         plan_version=plan_version,
-        idempotency_key="outbox-0001",
+        idempotency_key="receipt-0001",
         actor_identity_id=actor,
     )
     assert outcome.outcome == "applied"
@@ -478,7 +685,7 @@ async def test_the_apply_record_is_the_durable_outbox_row(
         harness.app.state.github_client,
         session_id=session_id,
         plan_version=plan_version,
-        idempotency_key="outbox-0001",
+        idempotency_key="receipt-0001",
         actor_identity_id=actor,
     )
     assert repeat.outcome == "unchanged"
@@ -586,61 +793,385 @@ async def test_two_concurrent_applies_produce_exactly_one_of_everything(
     assert audits == 1
 
 
+async def _second_plan(harness: Any, engine: AsyncEngine, session_id: uuidlib.UUID) -> int:
+    """Re-analyse a session, producing a genuinely different plan version."""
+    analysis = await service.analyze(
+        engine,
+        harness.app.state.settings,
+        harness.app.state.github_client,
+        session_id=session_id,
+    )
+    return int(analysis["plan_version"])
+
+
 @pytest.mark.anyio
-async def test_the_same_key_against_a_different_plan_is_a_separate_apply(
+async def test_the_same_key_under_a_different_plan_is_a_conflict(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
-    """Idempotency is per (plan, key), not per key.
+    """An idempotency key means "this is the same request".
 
-    The same key against a DIFFERENT plan version is a different request and
-    must not silently return the first plan's result — that would apply one
-    approval and report another.
+    Uniqueness used to be on `(plan_id, idempotency_key)`, which made the
+    same key under a NEWER plan a different request — so a client retrying
+    what it believed was one call could apply a second approval it never
+    meant to send. The scope is the session; a reuse inside it is a
+    conflict, not a replay and not a fresh apply.
     """
     harness, fake = github_harness(tmp_path)
     row_id = await _bootstrap(harness, engine, fake, golden_tree())
     actor = await _identity(engine)
     session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
-    await service.apply(
-        engine,
-        harness.app.state.settings,
-        harness.app.state.github_client,
-        session_id=session_id,
-        plan_version=plan_version,
-        idempotency_key="shared-key",
-        actor_identity_id=actor,
-    )
+    first = await _apply(harness, engine, session_id, plan_version, actor, "shared-key")
+    assert first.outcome == "applied"
+
+    # A real second plan, from a real second analysis of the same session.
+    second_version = await _second_plan(harness, engine, session_id)
+    assert second_version != plan_version
+
+    with pytest.raises(service.OnboardingError) as raised:
+        await _apply(harness, engine, session_id, second_version, actor, "shared-key")
+    assert raised.value.code == "idempotency_key_reused"
+    assert raised.value.status == 409
 
     async with engine.connect() as connection:
-        plans = int(
+        receipts = int(
             (
                 await connection.execute(
-                    text("SELECT count(*) FROM onboarding_plans WHERE session_id = :s"),
+                    text("SELECT count(*) FROM onboarding_applies WHERE session_id = :s"),
                     {"s": session_id},
                 )
             ).scalar_one()
         )
-        applies = [
+        projects = int(
+            (await connection.execute(text("SELECT count(*) FROM projects"))).scalar_one()
+        )
+    assert receipts == 1
+    assert projects == 1
+
+
+@pytest.mark.anyio
+async def test_two_sessions_may_use_the_same_key(engine: AsyncEngine, tmp_path: Path) -> None:
+    """The key is the client's namespace, not a global one.
+
+    Scoping uniqueness to the session is only correct if it does not make
+    one client's choice of key collide with another's. Two independent
+    onboardings pick the obvious key and neither is refused.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+
+    first_session, first_version = await _approved_session(harness, engine, row_id, actor)
+    assert (
+        await _apply(harness, engine, first_session, first_version, actor, "reused-key-0001")
+    ).outcome == ("applied")
+
+    second_session, second_version = await _approved_session(harness, engine, row_id, actor)
+    second = await _apply(harness, engine, second_session, second_version, actor, "reused-key-0001")
+    assert second.outcome == "applied"
+
+    async with engine.connect() as connection:
+        keys = [
             (str(row[0]), str(row[1]))
             for row in (
                 await connection.execute(
-                    text("SELECT plan_id, idempotency_key FROM onboarding_applies")
+                    text("SELECT session_id, idempotency_key FROM onboarding_applies")
                 )
             ).all()
         ]
-    assert plans == 1
-    assert len(applies) == 1
-    # The uniqueness is on the pair, so the same key under another plan is
-    # not the same request.
+    assert sorted(key for _, key in keys) == ["reused-key-0001"] * 2
+    assert len({session for session, _ in keys}) == 2
+
+
+@pytest.mark.anyio
+async def test_a_race_on_one_key_and_two_plans_is_settled_by_the_database(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The conflict is decided in PostgreSQL, not by a pre-check.
+
+    Two callers both read "no receipt for this key" before either writes
+    one, so an application-level check passes for BOTH and two different
+    plans apply under a single key. Only the unique constraint on
+    `(session_id, idempotency_key)` can settle that.
+
+    This drives the claim statement `apply` uses, on two independent
+    connections released together, rather than driving `apply` itself:
+    a session has one approved plan at a time, so the approval gate stops
+    two different plans from reaching the claim through the public path.
+    That gate is not what is under test here — what happens when two writers
+    reach the claim at once is.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, first_version = await _approved_session(harness, engine, row_id, actor)
+    await _second_plan(harness, engine, session_id)
+
     async with engine.connect() as connection:
-        constraint = (
-            await connection.execute(
-                text(
-                    "SELECT indexdef FROM pg_indexes "
-                    "WHERE indexname = 'uq_onboarding_apply_identity'"
+        plans = [
+            row[0]
+            for row in (
+                await connection.execute(
+                    text(
+                        "SELECT id FROM onboarding_plans WHERE session_id = :s "
+                        "ORDER BY plan_version"
+                    ),
+                    {"s": session_id},
                 )
+            ).all()
+        ]
+    assert len(plans) == 2, "two genuinely different plans"
+
+    barrier = asyncio.Barrier(2)
+    claim_sql = text(
+        """
+        INSERT INTO onboarding_applies
+            (plan_id, session_id, actor_identity_id, outcome, idempotency_key)
+        VALUES (:plan, :session, :actor, 'failed', :key)
+        ON CONFLICT (session_id, idempotency_key) DO NOTHING
+        RETURNING id
+        """
+    )
+
+    async def claim(plan_id: Any) -> bool:
+        async with engine.begin() as connection:
+            await barrier.wait()
+            row = (
+                await connection.execute(
+                    claim_sql,
+                    {
+                        "plan": plan_id,
+                        "session": session_id,
+                        "actor": actor,
+                        "key": "raced-key-0001",
+                    },
+                )
+            ).first()
+            return row is not None
+
+    won = await asyncio.gather(claim(plans[0]), claim(plans[1]))
+    assert sorted(won) == [False, True], "exactly one writer may claim the key"
+
+    async with engine.connect() as connection:
+        receipts = (
+            await connection.execute(
+                text("SELECT plan_id FROM onboarding_applies WHERE session_id = :s"),
+                {"s": session_id},
             )
-        ).scalar_one()
-    assert "plan_id" in constraint and "idempotency_key" in constraint
+        ).all()
+    assert len(receipts) == 1
+
+    # And the loser's read of that receipt is what raises the conflict: the
+    # plan it holds is not the plan it tried to apply.
+    async with engine.connect() as connection:
+        recorded = await service._recorded_receipt(connection, session_id, "raced-key-0001")
+    assert recorded is not None
+    loser_plan = plans[0] if str(recorded["plan_id"]) == str(plans[1]) else plans[1]
+    assert str(recorded["plan_id"]) != str(loser_plan)
+    assert first_version  # the approved version is untouched by any of this
+
+
+# ===========================================================================
+# the receipt is what a retry replays
+# ===========================================================================
+
+
+async def _apply_http(
+    harness: Any, engine: AsyncEngine, session_id: uuidlib.UUID, version: int, key: str
+) -> Any:
+    """Apply over the real endpoint, so the assertion is on the response."""
+    from harness_s1 import grant_platform_owner
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+        me = await client.get("/v1/me")
+        return await client.post(
+            f"/v1/onboarding/sessions/{session_id}/apply",
+            json={"plan_version": version, "idempotency_key": key},
+            headers={"X-CSRF-Token": me.json()["csrf_token"], "Origin": harness.client_base_url},
+        )
+
+
+@pytest.mark.anyio
+async def test_a_retry_returns_the_first_answer_on_every_field(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The one promise an idempotency key makes.
+
+    The receipt stored three counters while the response carried seven, so
+    a retried apply reported `metadata_updated: 0` and `bindings_created: 0`
+    for work that had really happened. A client reconciling on those numbers
+    would conclude the apply did less than it did. Every public field is
+    compared, not a chosen few, because the fields nobody thought to check
+    are exactly the ones that drifted.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    first = await _apply_http(harness, engine, session_id, plan_version, "retry-0001")
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["outcome"] == "applied"
+    # A fixture that changed nothing would make the comparison vacuous.
+    assert body["created_entities"] > 0
+    assert body["slo_definitions_created"] > 0
+
+    retried = await _apply_http(harness, engine, session_id, plan_version, "retry-0001")
+    assert retried.status_code == 200, retried.text
+    replay = retried.json()
+
+    # Everything except the outcome word, which correctly changes from
+    # "applied" to "unchanged" — the work happened once.
+    assert set(replay) == set(body)
+    for field in set(body) - {"outcome"}:
+        assert replay[field] == body[field], field
+    assert replay["outcome"] == "unchanged"
+
+    async with engine.connect() as connection:
+        audits = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM audit_events WHERE action = 'onboarding.apply' "
+                        "AND target_id = :t"
+                    ),
+                    {"t": str(session_id)},
+                )
+            ).scalar_one()
+        )
+    assert audits == 1
+
+
+@pytest.mark.anyio
+async def test_the_concurrent_loser_receives_the_whole_result(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """A lost race and a retry are the same thing to the caller.
+
+    The loser reads the receipt rather than doing the work, so if the
+    receipt were partial the loser would receive a partial answer — and it
+    has no way to tell that from a genuinely small apply.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    barrier = asyncio.Barrier(2)
+
+    async def worker() -> Any:
+        await barrier.wait()
+        return await _apply(harness, engine, session_id, plan_version, actor, "loser-0001")
+
+    first, second = await asyncio.gather(worker(), worker())
+    for field in (
+        "created",
+        "linked",
+        "unchanged",
+        "metadata_updated",
+        "slo_definitions_created",
+        "slo_definitions_updated",
+        "bindings_created",
+        "project_id",
+    ):
+        assert getattr(first, field) == getattr(second, field), field
+    assert first.slo_definitions_created > 0
+
+
+@pytest.mark.anyio
+async def test_a_pre_0020_receipt_reports_unrecorded_rather_than_zero(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Receipts written before migration 0020 never held these counters.
+
+    Returning the stored zeros would present "never recorded" as "measured
+    zero", which is the same failure the retry bug had, only quieter. They
+    are not reconstructed from audit metadata either: audit records what
+    happened, not how many rows a counter reached.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+    assert (
+        await _apply_http(harness, engine, session_id, plan_version, "legacy-0001")
+    ).status_code == 200
+
+    # Exactly the shape 0020's server default leaves an old row in.
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE onboarding_applies SET counters_complete = false, "
+                "metadata_updated = 0, slo_definitions_created = 0, "
+                "slo_definitions_updated = 0, bindings_created = 0 WHERE session_id = :s"
+            ),
+            {"s": session_id},
+        )
+
+    replay = (await _apply_http(harness, engine, session_id, plan_version, "legacy-0001")).json()
+    assert replay["outcome"] == "unchanged"
+    # The three counters the old schema DID record still come back.
+    assert replay["created_entities"] > 0
+    # The four it did not are absent, not zero.
+    for field in (
+        "metadata_updated",
+        "slo_definitions_created",
+        "slo_definitions_updated",
+        "bindings_created",
+    ):
+        assert replay[field] is None, field
+
+
+@pytest.mark.anyio
+async def test_a_failed_receipt_write_rolls_back_the_whole_apply(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The receipt commits with the work or neither commits.
+
+    If the receipt write could fail on its own, an apply would change the
+    catalog and leave no record that it did — so a retry would apply it a
+    second time, which is the exact outcome idempotency exists to prevent.
+    """
+    harness, fake = github_harness(tmp_path)
+    row_id = await _bootstrap(harness, engine, fake, golden_tree())
+    actor = await _identity(engine)
+    session_id, plan_version = await _approved_session(harness, engine, row_id, actor)
+
+    original = service._promote_receipt
+    calls: list[int] = []
+
+    async def explode(*args: Any, **kwargs: Any) -> None:
+        calls.append(1)
+        raise RuntimeError("receipt write failed")
+
+    service._promote_receipt = explode  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError):
+            await _apply(harness, engine, session_id, plan_version, actor, "receipt-fail-01")
+    finally:
+        service._promote_receipt = original  # type: ignore[assignment]
+    assert calls == [1], "the injected failure has to be reached"
+
+    async with engine.connect() as connection:
+        projects = int(
+            (await connection.execute(text("SELECT count(*) FROM projects"))).scalar_one()
+        )
+        receipts = int(
+            (
+                await connection.execute(
+                    text("SELECT count(*) FROM onboarding_applies WHERE session_id = :s"),
+                    {"s": session_id},
+                )
+            ).scalar_one()
+        )
+    assert projects == 0
+    assert receipts == 0
+
+    # And the same request still works once the fault is gone.
+    retried = await _apply(harness, engine, session_id, plan_version, actor, "receipt-fail-01")
+    assert retried.outcome == "applied"
 
 
 # ===========================================================================
