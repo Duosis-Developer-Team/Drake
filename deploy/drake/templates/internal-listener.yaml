@@ -63,7 +63,7 @@ spec:
         - name: {{ $surface }}
           image: {{ include "drake.image" (dict "ctx" $ "image" $.Values.api.image "name" "api") | quote }}
           imagePullPolicy: IfNotPresent
-          command: ["python", "-m", "scripts.run_internal_agent_api"]
+          command: ["python", "-m", "drake_api.agents.run_internal_listener"]
           args:
             - "--host=0.0.0.0"
             - "--port={{ if $isIngest }}{{ $.Values.internalAgentApi.ingestPort }}{{ else }}{{ $.Values.internalAgentApi.enrollPort }}{{ end }}"
