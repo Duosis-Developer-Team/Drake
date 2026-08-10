@@ -66,6 +66,18 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy apps/api/src apps/worker/src
       - run: uv run pytest -m "not integration" -q
+      # Does the production image contain the code the chart tells it to run?
+      #
+      # It did not, once: the internal listener was started with a module
+      # that lived at the repository root, which the API image does not
+      # copy. Both containers exited on start and a production upgrade
+      # rolled back. The chart tests were checking the arguments and the TLS
+      # test ran the runner from the working tree — nothing asked the image.
+      #
+      # An explicit step rather than a pytest with a docker guard: a guarded
+      # test that silently skips is how this gets missed a second time.
+      - name: production image runs the chart's entrypoint
+        run: bash scripts/api_image_entrypoint_smoke.sh
 
   integration:
     name: integration (migrations + audit append-only + queue)

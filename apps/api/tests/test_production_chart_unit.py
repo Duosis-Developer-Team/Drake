@@ -1670,3 +1670,69 @@ def test_the_listener_still_owns_no_datastore_or_secret() -> None:
     docs = render_listener()
     for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet"):
         assert forbidden not in {d["kind"] for d in docs}
+
+
+def test_the_listener_runs_a_module_the_image_actually_contains() -> None:
+    """The bug that rolled a production upgrade back.
+
+    The chart started the listener with `python -m
+    scripts.run_internal_agent_api`. The API image copies `apps/api` and
+    `packages`; the repository root is not in it. Both containers exited on
+    start, readiness never passed, and `helm upgrade --atomic` rolled the
+    release back.
+
+    This asserts the command names a module inside the application package
+    — the only part of the tree the image contains. It is deliberately NOT
+    the whole guarantee: `scripts/api_image_entrypoint_smoke.sh` builds the
+    real image and runs the real command in it, because a string assertion
+    cannot tell whether a module is present in a filesystem.
+    """
+    gateway = next(
+        d
+        for d in by_kind(render_listener(), "Deployment")
+        if d["metadata"]["name"] == "drake-agent-gateway"
+    )
+    for container in gateway["spec"]["template"]["spec"]["containers"]:
+        command = container["command"]
+        assert command[:2] == ["python", "-m"], container["name"]
+        module = command[2]
+        assert module == "drake_api.agents.run_internal_listener", container["name"]
+        # Anything outside the package is not in the image.
+        assert not module.startswith("scripts."), container["name"]
+
+    # And the public API's own command is untouched by moving a listener.
+    api = next(
+        d for d in by_kind(render_listener(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    assert "command" not in api["spec"]["template"]["spec"]["containers"][0]
+
+
+def test_the_packaged_runner_is_importable_and_keeps_its_contract() -> None:
+    """Moving the entrypoint must not quietly change what it accepts."""
+    import argparse
+    import inspect
+
+    from drake_api.agents import run_internal_listener
+
+    assert inspect.isfunction(run_internal_listener.main)
+    source = inspect.getsource(run_internal_listener)
+    for option in ("--host", "--port", "--tls-cert", "--tls-key", "--client-ca", "--surface"):
+        assert option in source, option
+    # The TLS asymmetry the two listeners exist for.
+    assert "CERT_NONE" in source and "CERT_REQUIRED" in source
+
+    # Importing it must not start a listener.
+    assert isinstance(argparse.ArgumentParser(), argparse.ArgumentParser)
+
+
+def test_the_legacy_script_delegates_rather_than_duplicating() -> None:
+    """Two copies of a TLS bootstrap are two places for it to drift.
+
+    The root script stays — local development, the chart smoke and two test
+    suites invoke it by path — but it holds no logic of its own.
+    """
+    legacy = (CHART / ".." / ".." / "scripts" / "run_internal_agent_api.py").resolve()
+    text = legacy.read_text()
+    assert "from drake_api.agents.run_internal_listener import main" in text
+    for reimplemented in ("argparse", "uvicorn.run", "CERT_REQUIRED", "ssl."):
+        assert reimplemented not in text, reimplemented
