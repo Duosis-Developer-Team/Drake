@@ -200,7 +200,11 @@ IMMUTABLE_PROJECT_FIELDS: frozenset[str] = frozenset(
     {"project_key", "tenant_model", "repo_provider", "repo_owner", "repo_name"}
 )
 IMMUTABLE_ENVIRONMENT_FIELDS: frozenset[str] = frozenset(
-    {"environment_key", "runtime", "cluster_ref", "namespace"}
+    # `hosting_provider` joins the immutable set for the same reason as
+    # `cluster_ref`: it is where the environment runs. A manifest changing it
+    # is a relocation, which is a conflict for a human to settle rather than
+    # a metadata update to apply quietly.
+    {"environment_key", "runtime", "cluster_ref", "namespace", "hosting_provider"}
 )
 IMMUTABLE_SERVICE_FIELDS: frozenset[str] = frozenset({"service_key"})
 
@@ -234,7 +238,15 @@ PAYLOAD_ALLOWLIST: dict[str, frozenset[str]] = {
         }
     ),
     str(EntityKind.ENVIRONMENT): frozenset(
-        {"environment_key", "runtime", "branch", "criticality", "cluster_ref", "namespace"}
+        {
+            "environment_key",
+            "runtime",
+            "branch",
+            "criticality",
+            "cluster_ref",
+            "namespace",
+            "hosting_provider",
+        }
     ),
     str(EntityKind.SERVICE): frozenset(
         {
@@ -678,6 +690,10 @@ def _environment_metadata(environment: dict[str, Any]) -> dict[str, Any]:
         "criticality": str(environment.get("criticality") or ""),
         "cluster_ref": str(environment.get("clusterRef") or ""),
         "namespace": str(environment.get("namespace") or ""),
+        # Only meaningful for an external runtime; a Kubernetes environment
+        # is run by whoever runs the cluster, and the database refuses a
+        # provider on one.
+        "hosting_provider": str(environment.get("hostingProvider") or ""),
     }
 
 
@@ -687,6 +703,8 @@ def _service_metadata(service: dict[str, Any]) -> dict[str, Any]:
         "display_name": str(service.get("displayName") or service.get("name") or ""),
         "component": str(service.get("component") or ""),
         "runtime": str(service.get("runtime") or ""),
+        # "" carries through to NULL: no metrics source, reported as
+        # not_configured rather than as a profile that does not exist.
         "metrics_profile": str(service.get("metricsProfile") or ""),
         "workload_selector": service.get("workloadSelector") or {},
         "health": service.get("health") or {},

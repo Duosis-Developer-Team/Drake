@@ -167,6 +167,7 @@ class CatalogService:
         criticality: str = "medium",
         cluster_id: uuid.UUID | None = None,
         namespace: str | None = None,
+        hosting_provider: str | None = None,
         source_ref: str = "",
         source_revision: str = "",
     ) -> CreatedEntity:
@@ -183,10 +184,11 @@ class CatalogService:
             """
             INSERT INTO environments
                 (project_id, environment_key, runtime, branch, criticality,
-                 cluster_id, namespace, catalog_source_kind, catalog_source_ref,
-                 source_revision, scope_id)
+                 cluster_id, namespace, hosting_provider, catalog_source_kind,
+                 catalog_source_ref, source_revision, scope_id)
             VALUES (:project_id, :key, :runtime, :branch, :criticality,
-                    :cluster_id, :namespace, :kind, :source_ref, :revision, :scope_id)
+                    :cluster_id, :namespace, :hosting_provider, :kind, :source_ref,
+                    :revision, :scope_id)
             RETURNING id
             """,
             {
@@ -197,6 +199,10 @@ class CatalogService:
                 "criticality": criticality,
                 "cluster_id": cluster_id,
                 "namespace": namespace,
+                # A database check constraint refuses a provider on a
+                # Kubernetes environment; this keeps the write honest rather
+                # than relying on the caller to remember.
+                "hosting_provider": hosting_provider or None,
                 "kind": self._source_kind,
                 "source_ref": source_ref,
                 "revision": source_revision,
@@ -213,7 +219,9 @@ class CatalogService:
         *,
         component: str,
         runtime: str,
-        metrics_profile: str,
+        # None means no metrics source. It is stored as NULL and reported as
+        # `not_configured`, never filled in to satisfy a NOT NULL column.
+        metrics_profile: str | None = None,
         display_name: str = "",
         workload_selector: dict[str, Any] | None = None,
         health: dict[str, Any] | None = None,
@@ -239,7 +247,7 @@ class CatalogService:
                 "name": display_name or service_key,
                 "component": component,
                 "runtime": runtime,
-                "profile": metrics_profile,
+                "profile": metrics_profile or None,
                 "selector": json.dumps(selector),
                 "health": json.dumps(health_meta),
                 "kind": self._source_kind,

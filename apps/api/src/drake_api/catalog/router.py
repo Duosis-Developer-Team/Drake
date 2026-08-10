@@ -20,6 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from drake_api.agents.observation import agent_observations
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.catalog.authz import escape_like, visible_scope_ids
+from drake_api.catalog.external_runtime import (
+    EXTERNAL_NOT_APPLICABLE,
+    RuntimeKind,
+    metrics_profile_state,
+)
 from drake_api.db import get_engine
 from drake_api.settings import Settings
 
@@ -275,10 +280,15 @@ async def get_project(
         return await _project_payload(connection, auth, row, include_details=True)
 
 
+# NOTE: callers append `p.project_key` AFTER this list, so read it as
+# `row[-1]`. Indexing it by number broke silently when `hosting_provider`
+# was appended here — the payload still rendered, with `None` as the
+# project key.
 _ENV_COLUMNS = """
     e.id, e.environment_key, e.runtime, e.branch, e.criticality, e.namespace,
     e.lifecycle, e.catalog_source_kind, e.catalog_source_ref, e.source_revision,
-    e.accepted_at, e.version, c.cluster_ref, c.display_name, e.project_id, e.scope_id
+    e.accepted_at, e.version, c.cluster_ref, c.display_name, e.project_id, e.scope_id,
+    e.hosting_provider
 """
 
 
@@ -291,7 +301,14 @@ def _environment_payload(row: Any, project_key: str) -> dict[str, Any]:
         "criticality": row[4],
         "namespace": row[5],
         "lifecycle": row[6],
+        "hosting_provider": row[16],
         "cluster": ({"ref": row[12], "display_name": row[13]} if row[12] is not None else None),
+        # Explicit, additive, and backward compatible: `cluster` and
+        # `namespace` keep their existing types, and a client that knows
+        # about this list can tell "this runtime has no such concept" from
+        # "nobody recorded one". Conflating those is what makes an external
+        # application look like a Kubernetes one that lost its cluster.
+        "not_applicable": sorted(EXTERNAL_NOT_APPLICABLE) if row[2] == RuntimeKind.EXTERNAL else [],
         "version": row[11],
         "scope": {"type": "environment", "ref": f"{project_key}/{row[1]}"},
         "source": {
@@ -329,7 +346,7 @@ async def _authorized_environment(
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
-    return row, str(row[16])
+    return row, str(row[-1])
 
 
 @router.get("/projects/{project_id}/environments")
@@ -392,7 +409,7 @@ async def list_environments(
             _encode_cursor(page[-1][1], str(page[-1][0])) if len(rows) > limit and page else None
         )
         return {
-            "environments": [_environment_payload(row, str(row[16])) for row in page],
+            "environments": [_environment_payload(row, str(row[-1])) for row in page],
             "next_cursor": next_cursor,
             "as_of": _as_of(),
         }
@@ -487,7 +504,7 @@ async def list_services(
                     "display_name": row[2],
                     "component": row[3],
                     "runtime": row[4],
-                    "metrics_profile": row[5],
+                    "metrics_profile": metrics_profile_state(row[5])[0],
                     "lifecycle": row[6],
                     "version": row[7],
                     "scope": {
@@ -547,7 +564,7 @@ async def get_service(
             "display_name": row[2],
             "component": row[3],
             "runtime": row[4],
-            "metrics_profile": row[5],
+            "metrics_profile": metrics_profile_state(row[5])[0],
             "workload_selector": row[6],
             "health": row[7],
             "lifecycle": row[8],
