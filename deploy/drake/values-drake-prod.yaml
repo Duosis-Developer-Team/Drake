@@ -15,51 +15,51 @@
 
 deploymentMode: production
 
-# The first rollout publishes NO public route.
+# This deployment IS published, and has been since the first install.
 #
-# Drake is proven to start, migrate, pass its probes and serve on its
-# ClusterIP Services before a hostname, a certificate and an identity
-# provider are attached to it. Those are a separate integration task, and
-# coupling them to "does the application run at all" is how a failure in
-# one gets diagnosed as the other.
-#
-# This is a change from the earlier draft of this file, which shipped a
-# dedicated ingress controller and a NodePort. Publishing an origin is a
-# decision about DNS, certificates and an identity provider's redirect
-# allowlist; none of those exist yet, and a route that answers before they
-# do is a route serving a name nobody owns.
+# An earlier revision of this file set `edge.mode: internal` on the theory
+# that the rollout had not published a route yet. It had: the live release
+# serves https://drake-84-247-180-172.sslip.io:30773/ through Drake's own
+# controller, and installing the internal profile over it would have
+# deleted the Ingress, the IngressClass and the edge Service and taken the
+# origin down. The mode here has to describe the deployment that exists,
+# not the one the file was first written for.
 edge:
-  mode: internal
-  # Drake's own controller, for when a route IS published: the shared ones
-  # already serve other applications, and one publishes a hostless
-  # catch-all Ingress, so Drake cannot add rules there without competing
-  # for `/`. Off here — internal mode renders no controller at all.
+  mode: ingress
+  # Drake's own controller. The shared ones already serve other
+  # applications, and one publishes a hostless catch-all Ingress, so Drake
+  # cannot add rules there without competing for `/`.
   dedicatedController:
-    enabled: false
+    enabled: true
+    ingressClassName: drake-nginx
+    controllerClass: k8s.io/drake-nginx
+    replicas: 1
+    # The only port Drake publishes. HTTPS only; verified free cluster-wide
+    # and from outside before it was chosen, and in use by this deployment
+    # today.
+    httpsNodePort: 30773
+    image:
+      repository: registry.k8s.io/ingress-nginx/controller
+      # Same build the cluster's existing controllers run, pinned.
+      digest: "sha256:f95a79b85fb93ac3de752c71a5c27d5ceae10a18b61904dec224c1c6a4581e47"
 
-# No Ingress, no IngressClass, no NodePort, no LoadBalancer. The only way
-# in is a port-forward to a ClusterIP Service, which is deliberate: it
-# means an internal smoke test cannot be mistaken for public availability.
 ingress:
-  enabled: false
+  enabled: true
+  className: drake-nginx
+  host: drake-84-247-180-172.sslip.io
+  tls:
+    enabled: true
+    # The controller's own default certificate, exactly as the other
+    # applications on this cluster are served today. It is self-signed:
+    # browsers will warn. Accepted for now, and stated rather than hidden.
+    mode: controller-default
 
-# REQUIRED even though nothing is published yet.
+# The deployment's identity, not merely its address: the session cookie,
+# the CSRF origin comparison and the OIDC redirect URL all derive from it,
+# and the API refuses to start in production without a valid https origin.
 #
-# Writing this hostname creates NO DNS record, NO certificate, NO Ingress
-# and NO route of any kind. `edge.mode` is `internal`; this is only the
-# origin Drake will answer on once a route is added.
-#
-# This is the deployment's identity, not merely its address: the session
-# cookie, the CSRF origin comparison and the OIDC redirect URL all derive
-# from it, and the API refuses to start in production without a valid
-# https origin. Declaring it now means that publishing a route later
-# changes the route and nothing about identity — cookies minted today stay
-# valid, and the OIDC redirect registered against this origin keeps
-# matching.
-#
-# The port is part of that future identity because the route, when it
-# exists, is expected to be a NodePort on this host. Nothing listens on it
-# today.
+# It carries the port because the route is a NodePort, and the browser is
+# told this exact origin.
 publicOrigin: https://drake-84-247-180-172.sslip.io:30773
 
 # Drake's GHCR packages are private. Without this every pod stops at
