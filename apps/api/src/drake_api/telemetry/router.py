@@ -227,5 +227,23 @@ async def internal_metrics(request: Request) -> Any:
     internal listener/service/network policy — never the public API app.
     """
     from fastapi.responses import PlainTextResponse
+    from sqlalchemy import text as sql_text
 
-    return PlainTextResponse(request.app.state.telemetry_metrics.render())
+    from drake_api.db import get_engine
+    from drake_api.protection.metrics import (
+        PROTECTION_METRIC_QUERY,
+        metric_rows,
+        render_protection_metrics,
+    )
+
+    body = request.app.state.telemetry_metrics.render()
+    # Protection gauges join the same bounded exposition. Their labels are
+    # controlled identities only — no artifact id, filename or checksum.
+    try:
+        engine = get_engine(request.app.state.settings)
+        async with engine.connect() as connection:
+            rows = (await connection.execute(sql_text(PROTECTION_METRIC_QUERY))).all()
+        body += render_protection_metrics(metric_rows(list(rows)))
+    except Exception:  # noqa: S110 - metrics must not take the endpoint down
+        pass
+    return PlainTextResponse(body)

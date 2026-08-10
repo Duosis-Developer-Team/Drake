@@ -29,6 +29,112 @@ MANIFEST_PATH = ".drake/project.yaml"
 # A manifest is a statement of intent, not a data file.
 MAX_MANIFEST_BYTES = 128 * 1024
 
+# Bounds on the document SHAPE, checked while parsing rather than after.
+MAX_YAML_DEPTH = 12
+MAX_YAML_NODES = 4_000
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """`SafeLoader`, plus the thing SafeLoader does not refuse.
+
+    **Duplicate keys.** PyYAML takes the last one silently. In a manifest
+    that means a reviewer approves the value they can see and the parser
+    uses a different one further down the file — the easiest way there is
+    to get something past a review.
+    """
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
+def _check_shape(node: Any, depth: int = 0, counter: list[int] | None = None) -> None:
+    """Depth and node bounds, so a pathological document is cheap to refuse."""
+    counter = counter if counter is not None else [0]
+    counter[0] += 1
+    if depth > MAX_YAML_DEPTH:
+        raise ValueError("Manifest nesting exceeds the supported depth.")
+    if counter[0] > MAX_YAML_NODES:
+        raise ValueError("Manifest contains more nodes than the contract allows.")
+    if isinstance(node, dict):
+        for value in node.values():
+            _check_shape(value, depth + 1, counter)
+    elif isinstance(node, list):
+        for item in node:
+            _check_shape(item, depth + 1, counter)
+
+
+class ManifestParseError(ValueError):
+    """Manifest text that could not be safely parsed into a mapping.
+
+    Carries the same `rule`/`path` vocabulary the findings use, so a caller
+    that renders findings and a caller that only needs "yes or no" share one
+    implementation of what safe parsing means.
+    """
+
+    def __init__(self, rule: str, message: str, path: str = MANIFEST_PATH) -> None:
+        super().__init__(message)
+        self.rule = rule
+        self.message = message
+        self.path = path
+
+
+def parse_strict(content: str) -> dict[str, Any]:
+    """Parse manifest text safely, or say why it could not be.
+
+    Parse ONLY — no schema, no policy. It is the shared boundary for every
+    caller that has to decide whether a blob of YAML is safe to look at:
+    bounded in size, constructed by a SafeLoader subclass that cannot
+    instantiate arbitrary objects, refusing duplicate keys, bounded in depth
+    and node count, and required to be a mapping.
+
+    Reused rather than reimplemented. A second copy of these rules is a
+    second place for them to be relaxed by accident, and the two would then
+    disagree about what is safe.
+    """
+    raw = content.encode("utf-8")
+    if len(raw) > MAX_MANIFEST_BYTES:
+        raise ManifestParseError(
+            "manifest-too-large", f"Manifest exceeds the {MAX_MANIFEST_BYTES // 1024} KiB limit."
+        )
+    try:
+        document = yaml.load(content, Loader=_StrictLoader)  # noqa: S506 - a SafeLoader subclass
+        _check_shape(document)
+    except ValueError as error:
+        raise ManifestParseError("manifest-shape", str(error)) from error
+    except yaml.YAMLError as error:
+        # The parser's message can quote the offending line, so only the
+        # position is kept.
+        mark = getattr(error, "problem_mark", None)
+        where = f"line {mark.line + 1}" if mark is not None else "unknown position"
+        # Named specifically: a duplicate key is a review-integrity problem,
+        # not a syntax error, and the two deserve different words.
+        duplicate = "duplicate key" in str(getattr(error, "problem", ""))
+        raise ManifestParseError(
+            "duplicate-key" if duplicate else "yaml-parse",
+            (
+                f"Manifest defines the same key twice ({where}). A reviewer "
+                "would see one value and the parser would use another."
+                if duplicate
+                else f"Manifest is not valid YAML ({where})."
+            ),
+        ) from error
+    if not isinstance(document, dict):
+        raise ManifestParseError(
+            "not-an-object", "A manifest must be a YAML mapping.", path="(document)"
+        )
+    return document
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -204,38 +310,17 @@ def validate_document(document: Any) -> ValidationResult:
 def validate_content(content: str) -> ValidationResult:
     """Parse and validate raw manifest text.
 
-    `yaml.safe_load` is the only parser used: it constructs plain Python
-    values and cannot instantiate arbitrary objects the way the full loader
-    can, which matters because this text came from a repository.
+    Parsing is `parse_strict`: the SAFE loader, which constructs plain
+    Python values and cannot instantiate arbitrary objects the way the full
+    loader can — which matters because this text came from a repository —
+    plus duplicate-key refusal and shape bounds.
     """
-    raw = content.encode("utf-8")
-    if len(raw) > MAX_MANIFEST_BYTES:
-        return ValidationResult(
-            valid=False,
-            findings=[
-                Finding(
-                    path=MANIFEST_PATH,
-                    rule="manifest-too-large",
-                    message=(f"Manifest exceeds the {MAX_MANIFEST_BYTES // 1024} KiB limit."),
-                )
-            ],
-        )
     try:
-        document = yaml.safe_load(content)
-    except yaml.YAMLError as error:
-        # The parser's message can quote the offending line, so only the
-        # position is kept.
-        mark = getattr(error, "problem_mark", None)
-        where = f"line {mark.line + 1}" if mark is not None else "unknown position"
+        document = parse_strict(content)
+    except ManifestParseError as error:
         return ValidationResult(
             valid=False,
-            findings=[
-                Finding(
-                    path=MANIFEST_PATH,
-                    rule="yaml-parse",
-                    message=f"Manifest is not valid YAML ({where}).",
-                )
-            ],
+            findings=[Finding(path=error.path, rule=error.rule, message=error.message)],
         )
     return validate_document(document)
 

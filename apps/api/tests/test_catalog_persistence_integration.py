@@ -43,6 +43,57 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         # Sprint 4 agent/inventory tables reference clusters with RESTRICT;
         # clear them first whenever they exist (order-independent resets).
         for table in (
+            # Sprint 11 onboarding tables reference github projections,
+            # identities and the catalog with RESTRICT, so they clear first.
+            "gitops_requests",
+            "onboarding_applies",
+            "onboarding_plan_items",
+            "onboarding_plans",
+            "onboarding_findings",
+            "onboarding_analyses",
+            "onboarding_sessions",
+            # Sprint 10 alerting tables reference integrations, incidents
+            # and the catalog with RESTRICT, so they clear before any of them.
+            "silence_requests",
+            "slo_evaluations",
+            "slo_definitions",
+            "alert_incident_links",
+            "alert_events",
+            "alert_instances",
+            "alertmanager_deliveries",
+            # Sprint 9 protection tables reference the catalog with
+            # RESTRICT, so they clear before projects and environments.
+            "protection_snapshots",
+            "protection_ingest_events",
+            "protection_evaluations",
+            "restore_drills",
+            "integrity_checks",
+            "replication_copies",
+            "backup_artifacts",
+            "backup_runs",
+            "backup_policies",
+            # Sprint 8 deployment revisions reference clusters, bindings
+            # and the catalog with RESTRICT, so they clear first.
+            "deployment_health_comparisons",
+            "deployment_revisions",
+            # Sprint 7 notification tables reference incident events,
+            # identities and projects with RESTRICT, so they clear first.
+            "webhook_delivery_attempts",
+            "webhook_deliveries",
+            "in_app_notifications",
+            "notification_event_plans",
+            "notification_policy_destinations",
+            "notification_destinations",
+            "notification_policies",
+            # Sprint 6 incident tables reference bindings and the catalog
+            # with RESTRICT, so they clear before the binding they describe.
+            "incident_events",
+            "incidents",
+            "service_health_transitions",
+            "service_health_state",
+            # Sprint 5 bindings reference environment_services and clusters
+            # with RESTRICT, so they clear before either.
+            "service_workload_bindings",
             "github_policy_evaluations",
             "github_webhook_deliveries",
             "github_repository_projects",

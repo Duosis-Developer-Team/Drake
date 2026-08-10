@@ -6,6 +6,7 @@ import { Suspense } from "react";
 
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { IdentityMenu } from "@/components/shell/IdentityMenu";
+import { NotificationBell } from "@/components/shell/NotificationBell";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { TimeRangeControl } from "@/components/telemetry/TimeRangeControl";
 
@@ -37,13 +38,21 @@ export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
 
       <RouteBreadcrumb />
 
-      <div className="ml-auto flex items-center gap-2">
+      {/*
+        `shrink-0` so the controls keep their size, and the breadcrumb
+        beside them is allowed to shrink instead. At exactly 768px a
+        two-segment route — the first of which is `/onboarding/{id}` — put
+        the breadcrumb, its "detail" chip and this cluster 19px past the
+        viewport, and the whole page scrolled sideways.
+      */}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <CatalogSearch />
         {isTelemetryRoute(pathname) ? (
           <Suspense fallback={null}>
             <TimeRangeControl />
           </Suspense>
         ) : null}
+        <NotificationBell />
         <ThemeToggle />
         <IdentityMenu />
       </div>
@@ -68,12 +77,12 @@ function RouteBreadcrumb() {
     segments.length === 0 ? "Command Center" : SEGMENT_LABELS[segments[0]] ?? segments[0];
   const depth = segments.length;
   return (
-    <div className="hidden items-center gap-2 text-sm text-ink-muted sm:flex">
-      <span className="font-medium text-ink-secondary">Organization</span>
+    <div className="hidden min-w-0 items-center gap-2 text-sm text-ink-muted sm:flex">
+      <span className="shrink-0 font-medium text-ink-secondary">Organization</span>
       <span aria-hidden>/</span>
-      <span className="text-ink">{label}</span>
+      <span className="truncate text-ink">{label}</span>
       {depth > 1 ? (
-        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+        <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
           detail
         </span>
       ) : null}

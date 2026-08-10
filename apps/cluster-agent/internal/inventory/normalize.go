@@ -48,6 +48,10 @@ const (
 	maxSummary    = 24
 	maxConditions = 12
 	maxOwners     = 8
+	// A workload's container list is bounded like everything else here.
+	// Images are references, not payloads: no env, no args, no volumes.
+	maxContainers = 8
+	maxImageLen   = 512
 )
 
 // allowedKeyPrefixes bounds label/annotation cardinality to reviewed keys.
@@ -186,6 +190,17 @@ func putSummary(target map[string]any, key string, value any) {
 	}
 }
 
+// putContainers is the ONE nested shape allowed into a summary, and it is
+// built here rather than copied from the object: a bounded list of
+// {name, image[, image_id]} strings, each already truncated. Relaxing
+// summaryValue instead would let any nested structure through.
+func putContainers(target map[string]any, key string, value []map[string]string) {
+	if len(target) >= maxSummary || len(value) == 0 {
+		return
+	}
+	target[key] = value
+}
+
 // Normalize converts one unstructured object into the bounded record.
 func Normalize(gvr schema.GroupVersionResource, obj *unstructured.Unstructured, observedAt string) Resource {
 	kind := obj.GetKind()
@@ -237,6 +252,10 @@ func specSummary(kind string, obj *unstructured.Unstructured) map[string]any {
 		// metadata.generation vs status.observedGeneration exposes rollout
 		// lag deterministically — no name guessing involved.
 		putSummary(out, "generation", obj.GetGeneration())
+		// Container NAME and IMAGE REFERENCE only. This is what lets Drake
+		// say which build is running; it is deliberately not the pod spec,
+		// so no env var, arg, mount or secret reference comes with it.
+		putContainers(out, "containers", containerImages(obj, "spec", "template", "spec", "containers"))
 	case "CronJob":
 		if v, ok := nested(obj, "spec", "schedule"); ok {
 			putSummary(out, "schedule", v)
@@ -330,6 +349,11 @@ func statusSummary(kind string, obj *unstructured.Unstructured) (map[string]any,
 		if v, ok := nested(obj, "status", "reason"); ok {
 			putSummary(out, "reason", v)
 		}
+		// The kubelet resolves a tag to an immutable digest and reports it
+		// as imageID. That resolution is the only place the digest a node
+		// actually pulled is observable, so it is the evidence that turns
+		// "some tag" into "this build".
+		putContainers(out, "container_images", resolvedImages(obj))
 		restarts, oom, crashloop, waitingReason := podContainerFacts(obj)
 		putSummary(out, "restarts", restarts)
 		if oom {
@@ -414,6 +438,88 @@ func quotaSummary(obj *unstructured.Unstructured, out map[string]any) {
 			putSummary(out, "used_"+safe, value)
 		}
 	}
+}
+
+// boundedImage trims an image reference to the contract bound. A reference
+// is a name, never a payload, so truncation loses nothing that matters.
+func boundedImage(value string) string {
+	if len(value) > maxImageLen {
+		return value[:maxImageLen]
+	}
+	return value
+}
+
+// containerImages returns bounded {name, image} pairs from a container list.
+func containerImages(obj *unstructured.Unstructured, path ...string) []map[string]string {
+	raw, ok := nested(obj, path...)
+	if !ok {
+		return nil
+	}
+	list, isList := raw.([]any)
+	if !isList {
+		return nil
+	}
+	out := make([]map[string]string, 0, len(list))
+	for _, item := range list {
+		if len(out) >= maxContainers {
+			break
+		}
+		container, isMap := item.(map[string]any)
+		if !isMap {
+			continue
+		}
+		name, _ := container["name"].(string)
+		image, _ := container["image"].(string)
+		if image == "" {
+			continue
+		}
+		out = append(out, map[string]string{
+			"name":  boundedImage(name),
+			"image": boundedImage(image),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// resolvedImages pairs each container with the digest the kubelet actually
+// pulled (status.containerStatuses[].imageID).
+func resolvedImages(obj *unstructured.Unstructured) []map[string]string {
+	raw, ok := nested(obj, "status", "containerStatuses")
+	if !ok {
+		return nil
+	}
+	list, isList := raw.([]any)
+	if !isList {
+		return nil
+	}
+	out := make([]map[string]string, 0, len(list))
+	for _, item := range list {
+		if len(out) >= maxContainers {
+			break
+		}
+		status, isMap := item.(map[string]any)
+		if !isMap {
+			continue
+		}
+		name, _ := status["name"].(string)
+		image, _ := status["image"].(string)
+		imageID, _ := status["imageID"].(string)
+		if image == "" && imageID == "" {
+			continue
+		}
+		out = append(out, map[string]string{
+			"name":     boundedImage(name),
+			"image":    boundedImage(image),
+			"image_id": boundedImage(imageID),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func podContainerFacts(obj *unstructured.Unstructured) (int64, bool, bool, string) {

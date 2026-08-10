@@ -1,0 +1,91 @@
+# Safe, reviewable Alertmanager routing EXAMPLE.
+#
+# Not applied to any cluster by this repository. It exists so the property
+# below can be stated, reviewed, and checked by `amtool check-config`
+# before anyone changes a real Alertmanager.
+#
+# ---------------------------------------------------------------------------
+# The property: Drake is an ADDITIONAL receiver, never the only one.
+# ---------------------------------------------------------------------------
+#
+# Every critical alert reaches an independent base receiver that Drake has
+# nothing to do with, and it reaches Drake as well. The `continue: true` on
+# the Drake route is what makes that true — without it, matching the Drake
+# route would consume the alert and the base receiver would never be called.
+#
+# So:
+#   * If Drake's webhook is down, unreachable, or returns 500, Alertmanager
+#     still delivers to the base receiver. Drake is not in the delivery path.
+#   * If someone deletes the Drake receiver entirely, base notification is
+#     unchanged.
+#   * Grouping, dedupe, inhibition and silencing stay in Alertmanager. Drake
+#     does not reimplement any of them.
+#
+# ---------------------------------------------------------------------------
+# What is NOT in this file
+# ---------------------------------------------------------------------------
+#
+# No production URL, no token, no password, no tenant identifier. Every
+# credential is a file reference into the operator's secret store, and every
+# host is a placeholder. A real deployment substitutes them at apply time,
+# outside this repository.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: base-oncall
+  group_by: ['alertname', 'project', 'environment', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # ---- Drake, first and NON-terminal --------------------------------
+    # `continue: true` is the whole gate. Drake observes; it does not
+    # intercept.
+    - receiver: drake-webhook
+      continue: true
+      matchers:
+        - severity=~"critical|high"
+
+    # ---- the independent base path ------------------------------------
+    # Reached whatever happened above. This route is what an operator is
+    # actually paged by.
+    - receiver: base-oncall
+      matchers:
+        - severity="critical"
+      group_wait: 10s
+
+receivers:
+  # Drake's alert projection. A failure here costs Drake context, not the page.
+  - name: drake-webhook
+    webhook_configs:
+      - url: https://drake.example.invalid/webhooks/alertmanager/REPLACE_WITH_OPAQUE_KEY
+        send_resolved: true
+        max_alerts: 200
+        http_config:
+          authorization:
+            type: Bearer
+            # A REFERENCE. The token never lives in this file or this repo.
+            credentials_file: /etc/alertmanager/secrets/drake-webhook-token
+          tls_config:
+            insecure_skip_verify: false
+
+  # The independent base receiver. Deliberately not a Drake endpoint, and
+  # deliberately not reachable through Drake.
+  - name: base-oncall
+    webhook_configs:
+      - url: https://oncall.example.invalid/hooks/REPLACE_WITH_OPERATOR_ENDPOINT
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/base-oncall-token
+          tls_config:
+            insecure_skip_verify: false
+
+inhibit_rules:
+  # Inhibition stays here, in Alertmanager, where it belongs.
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="high"]
+    equal: ['project', 'environment', 'service']

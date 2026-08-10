@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from sqlalchemy import Table, insert
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.audit.models import AuditEvent
 from drake_api.correlation import correlation_id_var, new_correlation_id
@@ -75,7 +75,13 @@ def validate_event(event: AuditEventData) -> dict[str, Any]:
 
 
 async def record_audit_event(engine: AsyncEngine, event: AuditEventData) -> uuid.UUID:
-    """Insert an audit event and return its id. Raises on failure."""
+    """Insert an audit event in its OWN transaction. Raises on failure.
+
+    Right for anything audited after its work has already committed — an
+    acknowledgement, a login. Wrong for anything that must not exist unless
+    its audit row does; those use `record_audit_event_in` below and share
+    the caller's transaction.
+    """
     values = validate_event(event)
     # Insert via the table (not the ORM entity): the "metadata" column key
     # would otherwise collide with the declarative Base.metadata attribute.
@@ -83,3 +89,21 @@ async def record_audit_event(engine: AsyncEngine, event: AuditEventData) -> uuid
     async with engine.begin() as connection:
         result = await connection.execute(insert(table).values(**values).returning(table.c.id))
         return cast(uuid.UUID, result.scalar_one())
+
+
+async def record_audit_event_in(connection: AsyncConnection, event: AuditEventData) -> uuid.UUID:
+    """Insert an audit event inside the CALLER'S transaction.
+
+    For work that is not allowed to exist unauditably. An onboarding apply
+    writes catalog rows, an SLO, a binding and its own result row; if the
+    audit insert fails, all of it has to disappear with it — otherwise Drake
+    has changed a customer's catalog with no record of who asked or why, and
+    the operator has no way to discover that happened.
+
+    The cost is that a failing audit fails the operation. That is the
+    intended trade: fail closed.
+    """
+    values = validate_event(event)
+    table = cast(Table, AuditEvent.__table__)
+    result = await connection.execute(insert(table).values(**values).returning(table.c.id))
+    return cast(uuid.UUID, result.scalar_one())

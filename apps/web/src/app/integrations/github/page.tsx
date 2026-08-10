@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
@@ -10,11 +10,15 @@ import {
   VerdictBadge,
   formatUtc,
 } from "@/components/github/primitives";
-import { OnboardingPanel } from "@/components/github/OnboardingPanel";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
 import { ApiError, apiGet, apiMutate } from "@/lib/api";
+import {
+  CANDIDATE_BLOCKERS,
+  fetchRepositoryCandidate,
+  type RepositoryCandidate,
+} from "@/lib/onboarding";
 import { useSession } from "@/lib/session";
 import {
   isStale,
@@ -34,6 +38,9 @@ const MISSING_INPUT_LABELS: Record<string, string> = {
 export default function GitHubIntegrationPage() {
   const { hasPermission } = useSession();
   const canManage = hasPermission("integration.manage");
+  // Separate on purpose: managing the GitHub integration is not permission
+  // to onboard a project into the catalog.
+  const canOnboard = hasPermission("onboarding.manage");
 
   const [status, retryStatus] = useApi<GitHubStatus>("/v1/integrations/github/status");
   const [installations, retryInstallations] = useApi<{
@@ -132,6 +139,7 @@ export default function GitHubIntegrationPage() {
                       key={repository.id}
                       repository={repository}
                       canManage={canManage}
+                      canOnboard={canOnboard}
                     />
                   ))}
                 </div>
@@ -201,13 +209,14 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
 function RepositoryCard({
   repository,
   canManage,
+  canOnboard,
 }: {
   repository: GitHubRepository;
   canManage: boolean;
+  canOnboard: boolean;
 }) {
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<PolicySnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -336,21 +345,111 @@ function RepositoryCard({
 
       {snapshot ? <PolicyResult snapshot={snapshot} /> : null}
 
+      {/*
+        Onboarding lives on its own screen now. The panel that used to open
+        here drove the Sprint 5B import — scan, validate, import — which
+        wrote catalog rows with no plan, no approval and no receipt. Those
+        endpoints answer 410, and this is a link to the reviewed flow rather
+        than a second way in.
+
+        Gated on `onboarding.manage`, not `integration.manage`: managing an
+        integration is not permission to onboard a project, and a link that
+        leads somewhere the operator is refused is worse than no link.
+      */}
       <div className="mt-3">
-        <button
-          type="button"
-          onClick={() => setOnboardingOpen((open) => !open)}
-          aria-expanded={onboardingOpen}
-          data-testid="onboarding-toggle"
-          className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
-        >
-          {onboardingOpen ? "Hide onboarding" : "Start onboarding"}
-        </button>
+        <OnboardingLink repositoryId={repository.id} canOnboard={canOnboard} />
       </div>
-      {onboardingOpen ? (
-        <OnboardingPanel repository={repository} csrfToken={csrf} canManage={canManage} />
-      ) : null}
     </section>
+  );
+}
+
+/**
+ * The onboarding action for ONE repository, decided by the server.
+ *
+ * `hasPermission("onboarding.manage")` only says the operator holds it
+ * SOMEWHERE. Offering a live action on that basis is the same mistake the
+ * session endpoints made before this sprint: the permission came from one
+ * place and the target from another, so the link led to a screen that
+ * refuses. The server answers about this repository, in this scope.
+ */
+function OnboardingLink({
+  repositoryId,
+  canOnboard,
+}: {
+  repositoryId: string;
+  canOnboard: boolean;
+}) {
+  const [candidate, setCandidate] = useState<RepositoryCandidate | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "denied">(
+    canOnboard ? "loading" : "denied",
+  );
+
+  useEffect(() => {
+    if (!canOnboard) return;
+    let cancelled = false;
+    fetchRepositoryCandidate(repositoryId)
+      .then((value) => {
+        if (cancelled) return;
+        setCandidate(value);
+        setState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setState("denied");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canOnboard, repositoryId]);
+
+  if (state === "loading") {
+    return (
+      <p className="text-xs text-ink-muted" data-testid="onboarding-link-loading">
+        Checking whether this repository can be onboarded…
+      </p>
+    );
+  }
+
+  if (state === "denied") {
+    // Says nothing about whether the repository exists elsewhere: the same
+    // answer covers "no such repository" and "not in a scope you may act
+    // in", which is the distinction the scoping is there to keep.
+    return (
+      <p className="text-xs text-ink-muted" data-testid="onboarding-link-denied">
+        Onboarding this repository needs the onboarding manage permission on the scope it
+        belongs to.
+      </p>
+    );
+  }
+
+  if (candidate?.active_session_id) {
+    return (
+      <Link
+        href={`/onboarding/${candidate.active_session_id}`}
+        data-testid="onboarding-link-existing"
+        className="inline-block rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+      >
+        Open the open onboarding session →
+      </Link>
+    );
+  }
+
+  if (!candidate?.startable) {
+    return (
+      <p className="text-xs text-warning" data-testid="onboarding-link-blocked">
+        {CANDIDATE_BLOCKERS[candidate?.reason_code ?? ""] ??
+          "This repository cannot be onboarded right now."}
+      </p>
+    );
+  }
+
+  return (
+    <Link
+      href={`/onboarding?repository_id=${repositoryId}`}
+      data-testid="onboarding-link"
+      className="inline-block rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+    >
+      Onboard this repository →
+    </Link>
   );
 }
 

@@ -27,6 +27,88 @@ class TelemetryConnector(BaseModel):
     allow_private: bool = False
 
 
+class WebhookDestination(BaseModel):
+    """Operator-owned webhook target, resolved from an opaque key.
+
+    Modelled on `TelemetryConnector` for the same reason: the endpoint must
+    never come from a request. A policy references a KEY; this map is the
+    only place a URL exists, and it lives in settings (environment or
+    external-secret backed), never in the database or an API response.
+
+    `signing_secret_file` is a REFERENCE, following the same `*_file`
+    convention as the Agent CA and GitHub App material. The secret is read
+    at send time and never becomes a settings value, a column, a log line,
+    or part of any response.
+    """
+
+    url: str
+    display_name: str = ""
+    allow_private: bool = False
+    signing_secret_file: str = ""
+    timeout_seconds: float = 10.0
+    payload_schema_version: int = 1
+
+
+class ProtectionConnector(BaseModel):
+    """A backup reporter Drake will accept evidence from.
+
+    The connector key in this map decides which project the evidence may
+    touch — a payload cannot name its own project, environment or store
+    outside what its connector is registered for. That is the whole reason
+    the registry exists rather than a `project_id` field in the event.
+
+    `signing_secret_file` is a REFERENCE, following the same `*_file`
+    convention as the Agent CA and webhook signing material. The secret is
+    read at verification time and never becomes a settings value, a column,
+    a log line, or part of any response.
+    """
+
+    project_key: str
+    display_name: str = ""
+    signing_secret_file: str = ""
+    # How far out of clock a signed request may be before it is refused.
+    # Bounded, because a wide window is a replay window.
+    replay_window_seconds: int = 300
+    # How long this reporter may go quiet before its evidence is treated as
+    # stale rather than current.
+    stale_after_seconds: int = 129_600
+
+
+class AlertmanagerIntegration(BaseModel):
+    """One Alertmanager Drake accepts alerts from and can silence at.
+
+    The opaque webhook key in this map decides which project the alerts may
+    resolve into — a payload cannot name its own project. That is the whole
+    reason the registry exists rather than a `project` field being trusted.
+
+    Both credentials are REFERENCES, following the same `*_file` convention
+    as the Agent CA, the GitHub App key and the webhook signing material.
+    Neither becomes a settings value, a column, a log line, or a response.
+
+    `api_base_url` is where silences are created. It lives here and nowhere
+    else: a browser never talks to Alertmanager, and no payload or request
+    can point Drake at a different one.
+    """
+
+    project_key: str
+    display_name: str = ""
+    # Inbound: the bearer token Alertmanager presents on its webhook calls.
+    # Native Alertmanager signs nothing, so this is the authentication —
+    # pretending a body HMAC exists would be inventing a guarantee.
+    webhook_token_file: str = ""
+    # Outbound: Alertmanager API v2 base and its credential.
+    api_base_url: str = ""
+    api_token_file: str = ""
+    allow_private: bool = False
+    api_timeout_seconds: float = 10.0
+    # How long this Alertmanager may go quiet before its alert projection is
+    # treated as possibly out of date.
+    stale_after_seconds: int = 900
+    # Silence duration bounds. A silence is a pause, not an off switch.
+    min_silence_seconds: int = 300
+    max_silence_seconds: int = 86_400
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DRAKE_",
@@ -155,6 +237,102 @@ class Settings(BaseSettings):
     # outstanding reconciliation intents, and how many to take per sweep.
     github_recovery_poll_seconds: float = 30.0
     github_recovery_batch_size: int = 50
+    # Which organizations and repositories this deployment will look at.
+    # Empty means "whatever the installation grants", which is already
+    # bounded by the App installation itself; a non-empty list narrows it
+    # further and is checked server-side, never against a payload's claim.
+    github_allowed_organizations: list[str] = []
+    github_allowed_repositories: list[str] = []
+    # GitOps pull requests are the only path through which Drake would ever
+    # WRITE to a repository. Off by default: while it is off no token is
+    # minted and no provider call is made.
+    github_gitops_pr_enabled: bool = False
+    gitops_worker_enabled: bool = False
+    gitops_worker_interval_seconds: float = 60.0
+
+    # --- Incident evaluation runner (Sprint 6) ----------------------
+    # OFF by default, like every other background actor here: a feature
+    # that queries a datasource on a timer must be turned on deliberately,
+    # not inherited from a default. Nothing below runs until it is.
+    incident_runner_enabled: bool = False
+    # Server-controlled and bounded. There is no per-service schedule and
+    # no user-supplied interval: the clamp below is the whole contract.
+    incident_runner_interval_seconds: float = 60.0
+    incident_runner_batch_size: int = 25
+    incident_runner_concurrency: int = 4
+    # How long one cycle may hold the distributed lease. Long enough for a
+    # full batch, short enough that a crashed replica's lease expires
+    # rather than blocking evaluation until someone notices.
+    incident_runner_lease_seconds: int = 120
+
+    # --- Notification routing and delivery (Sprint 7) ---------------
+    # Both actors are OFF by default. A control plane that starts calling
+    # external endpoints because a default said so is a control plane
+    # nobody can safely upgrade.
+    notification_planner_enabled: bool = False
+    notification_planner_interval_seconds: float = 60.0
+    notification_planner_batch_size: int = 50
+    webhook_worker_enabled: bool = False
+    webhook_worker_interval_seconds: float = 30.0
+    webhook_worker_batch_size: int = 20
+    # Two ceilings: how much Drake sends at once, and how much it sends to
+    # any single receiver. The second one stops one slow endpoint from
+    # consuming the whole worker.
+    webhook_worker_concurrency: int = 4
+    webhook_destination_concurrency: int = 2
+    # Bounded retry. Six attempts over at most a day, then dead-letter —
+    # retrying forever is how a queue becomes a permanent backlog.
+    webhook_max_attempts: int = 6
+    webhook_max_elapsed_seconds: int = 86_400
+    webhook_claim_seconds: int = 120
+    webhook_max_response_bytes: int = 64 * 1024
+    # Server-owned registry: opaque key → operator-controlled endpoint.
+    # Empty by default, so a deployment that configures nothing sends
+    # nothing.
+    notification_webhooks: dict[str, WebhookDestination] = {}
+    # Where a notification's incident link points. Empty means links are
+    # emitted as relative paths only.
+    public_app_base_url: str = ""
+
+    # --- Deployment intelligence (Sprint 8) -------------------------
+    # Base for composing a workflow-run link from typed provenance parts.
+    # Empty means no link is produced — Drake never stores or accepts a URL,
+    # so without a configured base there is simply nothing to link to.
+    workflow_run_base_url: str = "https://github.com"
+    deployment_ingest_enabled: bool = False
+    deployment_ingest_interval_seconds: float = 120.0
+    deployment_ingest_batch_size: int = 200
+
+    # --- Protection Center (Sprint 9) -------------------------------
+    # Server-owned registry of backup reporters. Empty by default: a
+    # deployment that registers no connector accepts no protection
+    # evidence at all.
+    protection_connectors: dict[str, ProtectionConnector] = {}
+    protection_max_body_bytes: int = 256 * 1024
+    protection_max_page_records: int = 500
+    # Periodic re-evaluation. Off by default like every other background
+    # actor here; evaluation also runs inline after ingest.
+    protection_evaluation_enabled: bool = False
+    protection_evaluation_interval_seconds: float = 300.0
+
+    # --- Alerts, SLO and incident operations (Sprint 10) ------------
+    # Server-owned registry of Alertmanagers. Empty by default: a
+    # deployment that registers none accepts no alerts and can silence
+    # nothing.
+    alertmanager_integrations: dict[str, AlertmanagerIntegration] = {}
+    alertmanager_max_body_bytes: int = 1_048_576
+    # The silence worker performs the only outbound provider mutation in
+    # Drake. Off by default, like every other background actor here.
+    silence_worker_enabled: bool = False
+    silence_worker_interval_seconds: float = 30.0
+    silence_worker_batch_size: int = 20
+    silence_max_attempts: int = 5
+    # SLO evaluation runs through the Sprint 5 broker, so it is a query
+    # load against someone's Prometheus. Off unless deliberately enabled.
+    slo_evaluator_enabled: bool = False
+    slo_evaluator_interval_seconds: float = 300.0
+    slo_evaluator_batch_size: int = 25
+    slo_evaluator_lease_seconds: int = 300
 
     @property
     def effective_session_cookie_name(self) -> str:
@@ -252,8 +430,92 @@ class Settings(BaseSettings):
                 raise RuntimeError("GitHub App requires a client id (or app id) outside local/test")
             if not self.github_api_base_url.startswith("https://"):
                 raise RuntimeError("GitHub API base URL must be https outside local/test")
+        if self.github_gitops_pr_enabled and not self.github_app_enabled:
+            raise RuntimeError(
+                "GitOps pull requests require the GitHub App: a write path cannot be "
+                "enabled while the integration that authenticates it is off"
+            )
+        if self.github_gitops_pr_enabled != self.gitops_worker_enabled:
+            # The two flags are one decision. On its own,
+            # `github_gitops_pr_enabled` accepts requests nothing will ever
+            # deliver; `gitops_worker_enabled` alone runs a loop that can
+            # never be given work. Both are half-enabled states that look
+            # like they are working, which is the failure mode this whole
+            # boundary exists to prevent.
+            raise RuntimeError(
+                "GitOps flags must be set together outside local/test: "
+                "github_gitops_pr_enabled and gitops_worker_enabled are one decision, "
+                "and enabling only one accepts requests nothing delivers or runs a "
+                "worker nothing can reach"
+            )
+        if self.github_gitops_pr_enabled:
+            # Repository writes need a real provider, and a real provider
+            # needs a real App: identity, both credential references, and
+            # GitHub's own API origin.
+            #
+            # The recording double is never constructed outside local/test
+            # (see `create_app`), so without these the write path would have
+            # nothing behind it at all.
+            missing = [
+                name
+                for name, present in (
+                    ("github_app_enabled", self.github_app_enabled),
+                    ("github app identity", bool(self.github_app_client_id or self.github_app_id)),
+                    ("github_app_private_key_file", bool(self.github_app_private_key_file)),
+                    ("github_webhook_secret_file", bool(self.github_webhook_secret_file)),
+                )
+                if not present
+            ]
+            if missing:
+                raise RuntimeError(
+                    "GitOps repository writes require a fully configured GitHub App "
+                    f"outside local/test; missing: {', '.join(missing)}"
+                )
+            if self.github_api_base_url.rstrip("/") != "https://api.github.com":
+                # A configurable API origin plus a write credential is an
+                # exfiltration primitive: point it elsewhere and Drake
+                # pushes a manifest, and its installation token, to whoever
+                # is listening.
+                raise RuntimeError(
+                    "GitOps repository writes may only target https://api.github.com "
+                    "outside local/test"
+                )
         if self.github_jwt_ttl_seconds > 600:
             raise RuntimeError("GitHub App JWT lifetime cannot exceed GitHub's 10-minute ceiling")
+        for key, destination in self.notification_webhooks.items():
+            # Plaintext to an external receiver would put a signed incident
+            # payload on the wire in the clear.
+            if not destination.url.startswith("https://"):
+                raise RuntimeError(
+                    f"notification webhook {key!r} must use https outside local/test"
+                )
+        if self.webhook_max_attempts > 10:
+            raise RuntimeError("webhook retry budget above 10 attempts is not bounded delivery")
+        for key, alertmanager in self.alertmanager_integrations.items():
+            # Plaintext to Alertmanager would put the API credential on the
+            # wire, and a silence request is a privileged operation.
+            if alertmanager.api_base_url and not alertmanager.api_base_url.startswith("https://"):
+                raise RuntimeError(
+                    f"alertmanager integration {key!r} must use https outside local/test"
+                )
+            # An unauthenticated webhook endpoint would let anyone forge
+            # alerts into a project, which is worse than having no alerts.
+            if not alertmanager.webhook_token_file:
+                raise RuntimeError(
+                    f"alertmanager integration {key!r} requires a webhook token reference "
+                    "outside local/test"
+                )
+            if alertmanager.max_silence_seconds > 604_800:
+                raise RuntimeError(
+                    f"alertmanager integration {key!r} allows a silence longer than a week; "
+                    "that is an off switch, not a pause"
+                )
+        if self.slo_evaluator_enabled and self.slo_evaluator_interval_seconds < 60:
+            raise RuntimeError("SLO evaluator interval below 60s is local/test only")
+        if self.incident_runner_enabled and self.incident_runner_interval_seconds < 30:
+            # A tighter loop than this is a load generator pointed at
+            # someone's Prometheus, not monitoring.
+            raise RuntimeError("incident runner interval below 30s is local/test only")
 
 
 @lru_cache

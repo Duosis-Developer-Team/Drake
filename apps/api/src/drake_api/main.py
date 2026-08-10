@@ -11,6 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
+from drake_api.alerting.router import router as alerting_router
+from drake_api.alerting.router_webhook import router as alertmanager_webhook_router
+from drake_api.alerting.silences import SilenceWorker
+from drake_api.alerting.slo_service import SloEvaluator
 from drake_api.audit.router import router as audit_router
 from drake_api.auth.flows import AuthFlows
 from drake_api.auth.oidc import OidcClient
@@ -19,6 +23,8 @@ from drake_api.auth.sessions import SessionStore
 from drake_api.catalog.router import router as catalog_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines, get_engine
+from drake_api.deployments.router import router as deployments_router
+from drake_api.deployments.worker import DeploymentIngestWorker
 from drake_api.errors import register_error_handlers
 from drake_api.github_app.auth import GitHubAppAuth
 from drake_api.github_app.auth import validate_credentials as validate_github_credentials
@@ -29,10 +35,22 @@ from drake_api.github_app.router_onboarding import router as github_onboarding_r
 from drake_api.github_app.router_webhook import router as github_webhook_router
 from drake_api.github_app.service import DeliveryRecoveryWorker, GitHubReconciler
 from drake_api.health import router as health_router
+from drake_api.incidents.router import router as incidents_router
+from drake_api.incidents.runner import EvaluationRunner
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
+from drake_api.notifications.router import router as notifications_router
+from drake_api.notifications.worker import NotificationWorker
+from drake_api.onboarding.github_provider import GitHubPullRequestProvider
+from drake_api.onboarding.gitops import GitOpsWorker, RecordingProvider
+from drake_api.onboarding.router import router as onboarding_router
+from drake_api.protection.router import router as protection_router
+from drake_api.protection.router_ingest import router as protection_ingest_router
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
+from drake_api.service_health.cache import HealthCache
+from drake_api.service_health.orchestrator import HealthOrchestrator
+from drake_api.service_health.router import router as service_health_router
 from drake_api.settings import Settings, get_settings
 from drake_api.telemetry.broker import TelemetryBroker
 from drake_api.telemetry.metrics import BrokerMetrics
@@ -49,9 +67,43 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     worker = getattr(app.state, "github_recovery_worker", None)
     if worker is not None:
         await worker.start()
+    # Same contract for the incident evaluator: absent unless enabled, so a
+    # disabled feature issues no query and holds no lease.
+    evaluator = getattr(app.state, "incident_runner", None)
+    if evaluator is not None:
+        await evaluator.start()
+    # Planning and delivery each have their own flag; the worker exists
+    # only if at least one of them is on.
+    notifier = getattr(app.state, "notification_worker", None)
+    if notifier is not None:
+        await notifier.start()
+    ingestor = getattr(app.state, "deployment_ingest_worker", None)
+    if ingestor is not None:
+        await ingestor.start()
+    slo_evaluator = getattr(app.state, "slo_evaluator", None)
+    if slo_evaluator is not None:
+        await slo_evaluator.start()
+    silence_worker = getattr(app.state, "silence_worker", None)
+    if silence_worker is not None:
+        await silence_worker.start()
+    gitops_worker = getattr(app.state, "gitops_worker", None)
+    if gitops_worker is not None:
+        await gitops_worker.start()
     try:
         yield
     finally:
+        if gitops_worker is not None:
+            await gitops_worker.stop()
+        if silence_worker is not None:
+            await silence_worker.stop()
+        if slo_evaluator is not None:
+            await slo_evaluator.stop()
+        if ingestor is not None:
+            await ingestor.stop()
+        if notifier is not None:
+            await notifier.stop()
+        if evaluator is not None:
+            await evaluator.stop()
         if worker is not None:
             # Deterministic cancellation, so no task outlives the process.
             await worker.stop()
@@ -66,6 +118,7 @@ def create_app(
     oidc_client: OidcClient | None = None,
     telemetry_transport: "httpx.AsyncBaseTransport | None" = None,
     github_transport: "httpx.AsyncBaseTransport | None" = None,
+    webhook_transport: "httpx.AsyncBaseTransport | None" = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast on insecure identity configuration outside local/test —
@@ -137,6 +190,93 @@ def create_app(
         adapter=PrometheusAdapter(settings, transport=telemetry_transport),
         metrics=app.state.telemetry_metrics,
     )
+    # The evaluator reuses the Sprint 5 read path exactly as the API does —
+    # same orchestrator, same broker, same budgets — so a scheduled
+    # evaluation and a screen refresh can never disagree about a service.
+    app.state.health_orchestrator = HealthOrchestrator(
+        get_engine(settings),
+        app.state.telemetry_broker,
+        app.state.telemetry_registry,
+        HealthCache(app.state.telemetry_redis),
+    )
+    app.state.incident_runner = (
+        EvaluationRunner(
+            get_engine(settings),
+            app.state.health_orchestrator,
+            app.state.telemetry_redis,
+            interval_seconds=settings.incident_runner_interval_seconds,
+            batch_size=settings.incident_runner_batch_size,
+            concurrency=settings.incident_runner_concurrency,
+            lease_seconds=settings.incident_runner_lease_seconds,
+        )
+        if settings.incident_runner_enabled
+        else None
+    )
+    app.state.notification_worker = (
+        NotificationWorker(
+            get_engine(settings),
+            settings,
+            app.state.telemetry_redis,
+            transport=webhook_transport,
+        )
+        if (settings.notification_planner_enabled or settings.webhook_worker_enabled)
+        else None
+    )
+    app.state.deployment_ingest_worker = (
+        DeploymentIngestWorker(get_engine(settings), settings, app.state.telemetry_redis)
+        if settings.deployment_ingest_enabled
+        else None
+    )
+    # The SLO evaluator reuses the Sprint 5 broker exactly as the API does,
+    # so a scheduled evaluation and a screen refresh can never disagree.
+    app.state.slo_evaluator = (
+        SloEvaluator(
+            get_engine(settings),
+            app.state.telemetry_broker,
+            app.state.telemetry_redis,
+            interval_seconds=settings.slo_evaluator_interval_seconds,
+            batch_size=settings.slo_evaluator_batch_size,
+            lease_seconds=settings.slo_evaluator_lease_seconds,
+        )
+        if settings.slo_evaluator_enabled
+        else None
+    )
+    # The GitOps worker is the only path through which Drake would WRITE to
+    # a repository. Off by default, and while it is off nothing is claimed,
+    # no token is minted and no provider call is made.
+    #
+    # Which provider a process gets is decided by the ENVIRONMENT, not by a
+    # flag, and `RecordingProvider` can never be the production answer. It
+    # is a test double that returns a pull-request number, so a production
+    # process holding one would report an open pull request that does not
+    # exist, against a branch nobody created.
+    #
+    # Production gets the real provider, and only when a real GitHub App is
+    # configured — settings validation already requires that alongside the
+    # flags, and this is the same rule where the object is constructed, so a
+    # caller that bypassed the flags still cannot end up with a fake.
+    if settings.is_production_like:
+        app.state.gitops_provider = (
+            GitHubPullRequestProvider(github_client) if settings.github_app_enabled else None
+        )
+    else:
+        app.state.gitops_provider = RecordingProvider()
+    app.state.gitops_worker = (
+        GitOpsWorker(get_engine(settings), settings, app.state.gitops_provider)
+        if (
+            settings.gitops_worker_enabled
+            and settings.github_gitops_pr_enabled
+            and app.state.gitops_provider is not None
+        )
+        else None
+    )
+    # The only outbound provider MUTATION in Drake. Off unless an operator
+    # turned it on and registered an Alertmanager.
+    app.state.silence_worker = (
+        SilenceWorker(get_engine(settings), settings, transport=webhook_transport)
+        if settings.silence_worker_enabled
+        else None
+    )
 
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -149,7 +289,16 @@ def create_app(
     app.include_router(integrations_router)
     app.include_router(github_router)
     app.include_router(github_onboarding_router)
+    app.include_router(onboarding_router)
     app.include_router(github_webhook_router)
+    app.include_router(deployments_router)
+    app.include_router(protection_router)
+    app.include_router(protection_ingest_router)
+    app.include_router(service_health_router)
+    app.include_router(incidents_router)
+    app.include_router(alerting_router)
+    app.include_router(alertmanager_webhook_router)
+    app.include_router(notifications_router)
     app.include_router(telemetry_router)
     if settings.internal_metrics_enabled and settings.env in ("local", "test"):
         # Explicit local/test opt-in only; validate_runtime_security refuses

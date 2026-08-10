@@ -412,6 +412,135 @@
       }
     },
     {
+      "key": "workload.cpu-limit.v1",
+      "version": 1,
+      "metricKey": "workload.cpu_limit_cores",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(kube_pod_container_resource_limits_cpu_cores{ {{matchers}} })",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.cpu-throttling.v1",
+      "version": 1,
+      "metricKey": "workload.cpu_throttled_ratio",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(container_cpu_cfs_throttled_periods_total{ {{matchers}} }[{{window}}])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{ {{matchers}} }[{{window}}])), 1)",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.cpu-usage.v1",
+      "version": 1,
+      "metricKey": "workload.cpu_usage_cores",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(container_cpu_usage_seconds_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
       "key": "workload.cpu-utilization.v1",
       "version": 1,
       "metricKey": "workload.cpu.utilization",
@@ -451,6 +580,393 @@
       "output": {
         "resultType": "timeseries",
         "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.error-ratio.v1",
+      "version": 1,
+      "metricKey": "workload.error_ratio",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(http_server_requests_total{ status_class=\"5xx\",{{matchers}} }[{{window}}])) / clamp_min(sum(rate(http_server_requests_total{ {{matchers}} }[{{window}}])), 1)",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_traffic",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.latency-p95.v1",
+      "version": 1,
+      "metricKey": "workload.latency_p95",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{ {{matchers}} }[{{window}}])))",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "seconds",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_traffic",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.memory-limit.v1",
+      "version": 1,
+      "metricKey": "workload.memory_limit_bytes",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(kube_pod_container_resource_limits_memory_bytes{ {{matchers}} })",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "bytes",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.memory-usage.v1",
+      "version": 1,
+      "metricKey": "workload.memory_working_set_bytes",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(container_memory_working_set_bytes{ {{matchers}} })",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "bytes",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.replicas-desired.v1",
+      "version": 1,
+      "metricKey": "workload.replicas_desired",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "max(kube_workload_spec_replicas{ {{matchers}} })",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.replicas-ready.v1",
+      "version": 1,
+      "metricKey": "workload.replicas_ready",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "max(kube_workload_status_ready_replicas{ {{matchers}} })",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.request-rate.v1",
+      "version": 1,
+      "metricKey": "workload.request_rate",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(http_server_requests_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "requests_per_second",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.restarts-delta.v1",
+      "version": 1,
+      "metricKey": "workload.restarts_delta",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(increase(kube_pod_container_status_restarts_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "restarts",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "workload.telemetry-freshness.v1",
+      "version": 1,
+      "metricKey": "workload.scrape_up",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "max(up{ {{matchers}} })",
+      "scopeTypes": [
+        "workload"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "workload_name",
+          "source": "workload_name"
+        },
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
         "labels": []
       },
       "semantics": {

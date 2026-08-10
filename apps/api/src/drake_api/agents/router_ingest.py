@@ -66,7 +66,30 @@ _CREDENTIAL_VALUE_PATTERNS = (
 )
 
 BoundedStr = Annotated[str, StringConstraints(max_length=512)]
-SummaryValue = Annotated[str, StringConstraints(max_length=256)] | int | float | bool | None
+
+# The ONE nested shape a summary may carry: a bounded list of bounded
+# string→string maps. It exists because a workload's container list is
+# name + image REFERENCE, and Drake cannot say which build is running
+# without it (Sprint 8 deployment intelligence reads exactly this).
+#
+# Deliberately not `dict[str, Any]` and deliberately not recursive. Every
+# bound below mirrors the agent's own limits in
+# `apps/cluster-agent/internal/inventory/normalize.go`, so the wire contract
+# has one definition rather than two that drift:
+#
+#     maxContainers = 8      list length
+#     maxImageLen   = 512    value length
+#
+# Keys are the three the agent emits (`name`, `image`, `image_id`); anything
+# else is refused rather than stored, so this cannot become a general-purpose
+# hole for env vars, args, mounts or secret references.
+ContainerRefKey = Literal["name", "image", "image_id"]
+ContainerRef = dict[ContainerRefKey, Annotated[str, StringConstraints(max_length=512)]]
+ContainerRefList = Annotated[list[ContainerRef], Field(max_length=8)]
+
+SummaryValue = (
+    Annotated[str, StringConstraints(max_length=256)] | int | float | bool | ContainerRefList | None
+)
 
 
 class OwnerRef(BaseModel):
@@ -260,6 +283,18 @@ def _validate_resource(resource: ResourceRecord) -> None:
                 raise _rejected("credential-shaped key")
             if isinstance(summary_value, str):
                 _reject_credential_value(summary_value)
+            elif isinstance(summary_value, list):
+                # Container references. Scanned like every other summary
+                # value: widening the accepted SHAPE must not narrow what is
+                # inspected, or the new field becomes the way in.
+                for entry in summary_value:
+                    for nested_key, nested_value in entry.items():
+                        if any(
+                            fragment in nested_key.lower() for fragment in _FORBIDDEN_KEY_SUBSTRINGS
+                        ):
+                            raise _rejected("credential-shaped key")
+                        if isinstance(nested_value, str):
+                            _reject_credential_value(nested_value)
     for condition in resource.conditions:
         if condition.message:
             _reject_credential_value(condition.message)

@@ -279,6 +279,13 @@
           },
           {
             "type": "null"
+          },
+          {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/$defs/containerRef"
+            }
           }
         ]
       }
@@ -437,6 +444,26 @@
         },
         "resource": {
           "$ref": "#/$defs/resource"
+        }
+      }
+    },
+    "containerRef": {
+      "description": "The one nested shape a summary may carry: a container's NAME and image REFERENCE. Bounded to the three keys the agent emits, so this cannot become a hole for env vars, args, mounts or secret refs.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "image": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "image_id": {
+          "type": "string",
+          "maxLength": 512
         }
       }
     }

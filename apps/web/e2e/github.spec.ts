@@ -195,7 +195,11 @@ test("replay is idempotent and a forged replay is refused", async ({ page }) => 
   expect(notJson.status()).toBe(400);
 
   // An event outside the allowlist is refused, not silently absorbed.
-  const outside = await deliver(request, { event: "push", body: payload });
+  // `pull_request` rather than `push`: Sprint 11 gave `push` a consumer (a
+  // default-branch push marks onboarding plans stale), so it is now in the
+  // allowlist. This assertion is about events Drake does not act on, and
+  // `pull_request` is still one of them.
+  const outside = await deliver(request, { event: "pull_request", body: payload });
   expect(outside.status()).toBe(401);
 
   // `ping` is the one event we acknowledge without doing domain work.
@@ -409,12 +413,10 @@ test("an unsupported action is reported as unsupported", async ({ page }) => {
   expect((await response.json()).status).toBe("unsupported");
 });
 
-test("static scan, manifest review and catalog import", async ({ page }) => {
+test("the Sprint 5B import path is retired and writes nothing", async ({ page }) => {
   await signInAs(page, "user-owner");
   const request = page.request;
 
-  // Re-announce so this scenario does not depend on what earlier tests in
-  // this file left behind.
   const announced = await deliver(request, {
     event: "installation",
     body: installationPayload("created"),
@@ -425,89 +427,60 @@ test("static scan, manifest review and catalog import", async ({ page }) => {
     await request.get("/v1/integrations/github/repositories?limit=50")
   ).json()) as { repositories: { id: string; full_name: string }[] };
   const hermes = listed.repositories.find((r) => r.full_name.endsWith("/Hermes"))!;
-  const logislot = listed.repositories.find((r) => r.full_name.endsWith("/logislot"))!;
   const csrf = await csrfToken(page);
+  expect((await reconcile(page, hermes.id)).status()).toBe(202);
 
-  // Reconcile first: a scan needs a complete projection.
-  const reconciled = await reconcile(page, hermes.id);
-  expect(reconciled.status(), await reconciled.text()).toBe(202);
-
-  // 1. Scan at a pinned commit.
-  const scanned = await request.post(
-    `/v1/integrations/github/repositories/${hermes.id}/onboarding/scan`,
-    { headers: { "x-csrf-token": csrf }, failOnStatusCode: false },
-  );
-  expect(scanned.status(), await scanned.text()).toBe(202);
-  const draft = (await scanned.json()) as {
-    state: string;
-    commit_sha: string;
-    manifest_source: string;
-    importable: boolean;
-    discovery: { files: { path: string }[] };
+  const before = (await (await request.get("/v1/projects?limit=100")).json()) as {
+    total: number;
   };
-  expect(draft.state).toBe("ready_to_import");
-  expect(draft.manifest_source).toBe("repository");
-  expect(draft.commit_sha).toHaveLength(40);
-  expect(draft.importable).toBe(true);
 
-  // Only allowlisted metadata was read — never the shell scripts present
-  // in the fixture repository.
-  const readPaths = draft.discovery.files.map((file) => file.path);
-  expect(readPaths).toContain(".drake/project.yaml");
-  expect(readPaths).not.toContain("Makefile");
-  expect(readPaths).not.toContain("install.sh");
-
-  // 2. Import atomically.
-  const imported = await request.post(
-    `/v1/integrations/github/repositories/${hermes.id}/onboarding/import`,
-    {
+  // Every route the old panel drove, including the one that wrote catalog
+  // rows with no plan, no approval and no receipt.
+  const routes: [string, string][] = [
+    ["GET", `/v1/integrations/github/repositories/${hermes.id}/onboarding`],
+    ["POST", `/v1/integrations/github/repositories/${hermes.id}/onboarding/scan`],
+    ["POST", `/v1/integrations/github/repositories/${hermes.id}/onboarding/validate`],
+    ["GET", `/v1/integrations/github/repositories/${hermes.id}/onboarding/download`],
+    ["POST", `/v1/integrations/github/repositories/${hermes.id}/onboarding/import`],
+  ];
+  for (const [method, url] of routes) {
+    const response = await request.fetch(url, {
+      method,
       headers: { "x-csrf-token": csrf, "idempotency-key": crypto.randomUUID() },
       failOnStatusCode: false,
-    },
-  );
-  expect(imported.status()).toBe(201);
-  const { project_id: projectId, project_key: projectKey } = (await imported.json()) as {
-    project_id: string;
-    project_key: string;
-  };
-  expect(projectKey).toBe("hermes");
+    });
+    expect(response.status(), `${method} ${url}`).toBe(410);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("legacy_onboarding_retired");
+  }
 
-  // 3. The project is a real catalog project.
-  await page.goto(`/projects/${projectId}`);
-  await expect(page.getByRole("heading", { name: /hermes/i }).first()).toBeVisible();
+  const after = (await (await request.get("/v1/projects?limit=100")).json()) as { total: number };
+  expect(after.total).toBe(before.total);
 
-  // A repository without a manifest gets a downloadable draft and no import.
-  await reconcile(page, logislot.id);
-  const missing = await request.post(
-    `/v1/integrations/github/repositories/${logislot.id}/onboarding/scan`,
-    { headers: { "x-csrf-token": csrf }, failOnStatusCode: false },
-  );
-  expect(missing.status()).toBe(202);
-  const generated = (await missing.json()) as {
-    state: string;
-    manifest_source: string;
-    importable: boolean;
-    draft_manifest: string;
-  };
-  expect(generated.state).toBe("needs_input");
-  expect(generated.manifest_source).toBe("operator_draft");
-  expect(generated.importable).toBe(false);
-  expect(generated.draft_manifest).toContain("REPLACE_ME");
+  // And the integration screen points at the reviewed flow instead of
+  // opening a second way in.
+  await page.goto("/integrations/github");
+  await expect(page.getByTestId("onboarding-toggle")).toHaveCount(0);
 
-  const refused = await request.post(
-    `/v1/integrations/github/repositories/${logislot.id}/onboarding/import`,
-    {
-      headers: { "x-csrf-token": csrf, "idempotency-key": crypto.randomUUID() },
-      failOnStatusCode: false,
-    },
-  );
-  expect(refused.status()).toBe(409);
+  // The card asks the SERVER about this repository rather than deciding
+  // from "the operator holds onboarding.manage somewhere". So it shows one
+  // of three honest answers — a link, the open session, or why not — and
+  // never the retired panel.
+  const card = page.getByTestId("repository-list").locator("section").first();
+  await expect(
+    card
+      .getByTestId("onboarding-link")
+      .or(card.getByTestId("onboarding-link-existing"))
+      .or(card.getByTestId("onboarding-link-blocked"))
+      .or(card.getByTestId("onboarding-link-denied"))
+      .first(),
+  ).toBeVisible();
 
-  const download = await request.get(
-    `/v1/integrations/github/repositories/${logislot.id}/onboarding/download`,
-  );
-  expect(download.status()).toBe(200);
-  expect(await download.text()).toContain("apiVersion: drake.duosis.com/v1alpha1");
+  // Where it does offer to start, it points at the canonical screen.
+  const startable = page.getByTestId("onboarding-link").first();
+  if (await startable.count()) {
+    await expect(startable).toHaveAttribute("href", /\/onboarding\?repository_id=/);
+  }
 });
 
 test("onboarding refuses the gated repository and leaks nothing", async ({ page }) => {
@@ -522,19 +495,36 @@ test("onboarding refuses the gated repository and leaks nothing", async ({ page 
   const csrf = await csrfToken(page);
   const before = await fakeGitHubCalls(request);
 
-  const scan = await request.post(
-    `/v1/integrations/github/repositories/${datalake.id}/onboarding/scan`,
-    { headers: { "x-csrf-token": csrf }, failOnStatusCode: false },
-  );
-  expect(scan.status()).toBe(409);
+  // The gate is checked on the canonical path now. Opening a session is
+  // allowed — it reads nothing — and the analysis is where Drake would have
+  // to touch the repository, so that is where it refuses.
+  const opened = await request.post("/v1/onboarding/sessions", {
+    headers: { "x-csrf-token": csrf },
+    data: { repository_id: datalake.id },
+    failOnStatusCode: false,
+  });
+  expect([201, 409]).toContain(opened.status());
+  if (opened.status() === 201) {
+    const { session_id: sessionId } = (await opened.json()) as { session_id: string };
+    const analysed = await request.post(`/v1/onboarding/sessions/${sessionId}/analyze`, {
+      headers: { "x-csrf-token": csrf },
+      failOnStatusCode: false,
+    });
+    expect(analysed.status()).toBe(409);
+    expect(((await analysed.json()) as { error: { code: string } }).error.code).toBe(
+      "security_gate_open",
+    );
+  }
+  // Whatever happened, no token was minted and no repository was read.
   expect(await fakeGitHubCalls(request)).toEqual(before);
 
-  // A read-only user cannot scan at all.
+  // A read-only user cannot even open a session on it.
   await signInAs(page, "user-plain");
-  const denied = await page.request.post(
-    `/v1/integrations/github/repositories/${datalake.id}/onboarding/scan`,
-    { headers: { "x-csrf-token": await csrfToken(page) }, failOnStatusCode: false },
-  );
+  const denied = await page.request.post("/v1/onboarding/sessions", {
+    headers: { "x-csrf-token": await csrfToken(page) },
+    data: { repository_id: datalake.id },
+    failOnStatusCode: false,
+  });
   expect(denied.status()).toBe(404);
 });
 

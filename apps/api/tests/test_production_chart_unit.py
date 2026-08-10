@@ -1416,3 +1416,79 @@ def test_a_hostname_origin_with_a_port_is_accepted_but_a_bare_ip_is_not() -> Non
     for refused in ("https://84.247.180.172:30773", "http://drake-x.sslip.io:30773"):
         with pytest.raises(InvalidOriginError):
             parse_public_origin(refused)
+
+
+# --- repository writes ----------------------------------------------------
+
+
+def test_production_values_keep_repository_writes_off() -> None:
+    """The shipped production values enable no write path.
+
+    Asserted on the rendered Deployment rather than on the values file: what
+    matters is what the container is told, and a default that is right in
+    YAML and wrong in a template is still wrong.
+    """
+    deployments = by_kind(render(), "Deployment")
+    assert deployments
+    env = {
+        entry["name"]: entry.get("value")
+        for entry in deployments[0]["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert env["DRAKE_GITHUB_GITOPS_PR_ENABLED"] == "false"
+    assert env["DRAKE_GITOPS_WORKER_ENABLED"] == "false"
+    assert env["DRAKE_GITHUB_APP_ENABLED"] == "false"
+
+
+def test_the_chart_refuses_half_of_the_write_decision() -> None:
+    """Both flags or neither.
+
+    One alone accepts requests nothing delivers, or runs a worker nothing
+    can reach — states that look like they are working.
+    """
+    assert refuses("--set", "github.gitopsPrEnabled=true")
+    assert refuses("--set", "github.workerEnabled=true")
+
+
+def test_the_chart_refuses_repository_writes_without_a_real_app() -> None:
+    """A write path needs an App, and an App needs its credential mount."""
+    both = ("--set", "github.gitopsPrEnabled=true", "--set", "github.workerEnabled=true")
+    assert refuses(*both), "no GitHub App at all"
+    assert refuses(*both, "--set", "github.enabled=true"), "no secret reference"
+    assert refuses(
+        *both,
+        "--set",
+        "github.enabled=true",
+        "--set",
+        "github.existingSecret=drake-github-app",
+    ), "no app identity"
+
+
+def test_the_chart_renders_a_fully_specified_write_path() -> None:
+    """The refusal has to let a complete decision through.
+
+    A guard that refuses everything is an outage, not a guard.
+    """
+    docs = render(
+        "--set",
+        "github.enabled=true",
+        "--set",
+        "github.existingSecret=drake-github-app",
+        "--set",
+        "github.clientId=Iv1.example",
+        "--set",
+        "github.gitopsPrEnabled=true",
+        "--set",
+        "github.workerEnabled=true",
+    )
+    deployment = by_kind(docs, "Deployment")[0]
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    env = {entry["name"]: entry.get("value") for entry in container["env"]}
+    assert env["DRAKE_GITHUB_GITOPS_PR_ENABLED"] == "true"
+    assert env["DRAKE_GITOPS_WORKER_ENABLED"] == "true"
+    # References, never material: the private key and the webhook secret
+    # are file paths the API reads from a mounted Secret.
+    assert env["DRAKE_GITHUB_APP_PRIVATE_KEY_FILE"].endswith("private-key.pem")
+    assert env["DRAKE_GITHUB_WEBHOOK_SECRET_FILE"].endswith("webhook-secret")
+    rendered = yaml.safe_dump(docs)
+    for forbidden in ("BEGIN RSA", "BEGIN PRIVATE", "ghs_", "ghp_"):
+        assert forbidden not in rendered, forbidden

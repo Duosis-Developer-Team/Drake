@@ -24,6 +24,21 @@ b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/query-templ
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:49
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:137
 
+# Sprint 5 — the `hermes.pilot.v1` metric preset identifier, flagged by the
+# generic-api-key rule on entropy alone. It is a preset contract id: it is
+# published by GET /v1/service-health/presets, typed by operators into a
+# binding, and authenticates nothing.
+#
+# The tracked tree needs no entry here — each occurrence carries an inline
+# `gitleaks:allow` marker with its justification, so the exemption travels
+# with the literal and cannot drift onto another line. These three entries
+# cover only the historical commit that introduced the lines before those
+# markers existed. A commit's patch is immutable and this branch does not
+# rewrite history, so they can never go stale or widen.
+cc408f0e7b11531c36c877b6c9988888faa700e9:apps/api/src/drake_api/service_health/presets.py:generic-api-key:113
+cc408f0e7b11531c36c877b6c9988888faa700e9:docs/runbooks/SERVICE_HEALTH_BINDINGS.md:generic-api-key:26
+cc408f0e7b11531c36c877b6c9988888faa700e9:docs/runbooks/SERVICE_HEALTH_BINDINGS.md:generic-api-key:121
+
 # Sprint 5A CTO fix gate — one commit-scoped exemption.
 # 56083ff introduced a test that proves a credential-validation failure
 # never quotes the file it read. The assertion needed a PEM-shaped string,

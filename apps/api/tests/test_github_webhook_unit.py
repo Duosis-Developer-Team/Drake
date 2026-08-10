@@ -121,7 +121,11 @@ def test_supported_events_pass(event: str) -> None:
     assert validate_event_name(event) == event
 
 
-@pytest.mark.parametrize("event", ["push", "pull_request", "workflow_run", "check_suite"])
+# `push` moved into SUPPORTED_EVENTS in Sprint 11 because it acquired a
+# real consumer: a default-branch push marks onboarding plans stale. These
+# three still have none, and an event nothing acts on is a parser to keep
+# safe for no reason.
+@pytest.mark.parametrize("event", ["pull_request", "workflow_run", "check_suite"])
 def test_unsupported_events_are_refused(event: str) -> None:
     with pytest.raises(WebhookRejectedError) as refusal:
         validate_event_name(event)

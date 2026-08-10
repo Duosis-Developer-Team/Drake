@@ -1,0 +1,96 @@
+# SLO label and rule CONTRACT fixture.
+#
+# Not applied to any cluster by this repository — applying PrometheusRules
+# to a real cluster is go-live work, not this sprint. What this file fixes
+# is the contract: which labels a rule must carry for Drake to resolve it
+# into the catalog, and what a multi-window burn-rate rule looks like.
+#
+# ---------------------------------------------------------------------------
+# Required labels
+# ---------------------------------------------------------------------------
+#
+#   project      project_key from the Drake catalog
+#   environment  environment_key within that project
+#   service      service_key within that project (omit for a project-level alert)
+#   severity     critical | high | medium | info
+#
+# Optional, and resolved server-side against reviewed registries:
+#
+#   cluster      cluster_ref
+#   namespace    kubernetes namespace
+#   team         owning team key
+#   slo          slo_key this alert belongs to
+#   runbook      runbook KEY — never a URL
+#   signal       protection | availability | latency  (correlation hint)
+#
+# Anything else is dropped at Drake's ingest boundary. A label carrying an
+# email, a user id, a trace id, a raw path or a URL is refused outright:
+# an alert label is writable by anyone who can write a recording rule.
+#
+# `generatorURL` and `externalURL` are ignored. Drake composes its own links
+# from server-controlled references, so an inbound one is never needed.
+
+groups:
+  - name: drake.slo.availability
+    rules:
+      # Page-level burn: 14.4x over 1h AND 5m. Both windows, or neither.
+      - alert: SloErrorBudgetBurnFast
+        expr: |
+          (
+            service:request_errors:ratio_rate1h{project="REPLACE",environment="REPLACE",service="REPLACE"} > (14.4 * 0.001)
+            and
+            service:request_errors:ratio_rate5m{project="REPLACE",environment="REPLACE",service="REPLACE"} > (14.4 * 0.001)
+          )
+        for: 2m
+        labels:
+          severity: critical
+          project: REPLACE
+          environment: REPLACE
+          service: REPLACE
+          slo: availability.30d
+          signal: availability
+          burn_level: page_fast
+          long_window: 1h
+          short_window: 5m
+        annotations:
+          summary: Error budget burning at 14.4x over one hour and five minutes
+          description: At this rate the 30-day budget is exhausted in about two days.
+
+      # Ticket-level burn: 6x over 6h AND 30m.
+      - alert: SloErrorBudgetBurnSlow
+        expr: |
+          (
+            service:request_errors:ratio_rate6h{project="REPLACE",environment="REPLACE",service="REPLACE"} > (6 * 0.001)
+            and
+            service:request_errors:ratio_rate30m{project="REPLACE",environment="REPLACE",service="REPLACE"} > (6 * 0.001)
+          )
+        for: 15m
+        labels:
+          severity: high
+          project: REPLACE
+          environment: REPLACE
+          service: REPLACE
+          slo: availability.30d
+          signal: availability
+          burn_level: page_slow
+          long_window: 6h
+          short_window: 30m
+        annotations:
+          summary: Error budget burning at 6x over six hours and thirty minutes
+
+  - name: drake.protection
+    rules:
+      # A protection problem Drake's own evaluator also detects. The
+      # `signal: protection` label is what lets Drake link the two into one
+      # incident instead of paging twice for the same fact.
+      - alert: BackupOverdue
+        expr: |
+          time() - drake_backup_last_success_timestamp_seconds{project="REPLACE",environment="REPLACE"} > 604800
+        for: 30m
+        labels:
+          severity: high
+          project: REPLACE
+          environment: REPLACE
+          signal: protection
+        annotations:
+          summary: No successful backup within the policy RPO

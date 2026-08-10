@@ -135,8 +135,116 @@ async def integration_health(
             }
             for row in page
         ]
+        # Alertmanager evidence, attached to the rows it belongs to. Counts
+        # and states only — never a payload, a URL, a token, or a label.
+        alertmanager = await _alertmanager_evidence(
+            connection, [row[10] for row in page if row[0] == "alertmanager"]
+        )
+    for result, row in zip(results, page, strict=True):
+        detail = alertmanager.get(str(row[10]))
+        if detail is not None:
+            result["alertmanager"] = detail
     return {
         "integrations": results,
         "next_cursor": next_cursor,
         "as_of": datetime.now(UTC).isoformat(),
     }
+
+
+async def _alertmanager_evidence(
+    connection: Any, integration_ids: list[Any]
+) -> dict[str, dict[str, Any]]:
+    """Delivery, mapping and silence health for one or more Alertmanagers.
+
+    Everything here is a count, a timestamp or a bounded state. There is no
+    branch that can return an alert name, a label value, a group key, a
+    provider message or an address.
+
+    `base_route_verified` is deliberately `unknown` and stays that way.
+    Whether Alertmanager still notifies an independent receiver when Drake
+    is unreachable is a fact about a config file Drake does not read and
+    must not guess at — claiming `verified` without operator evidence would
+    be the single most dangerous wrong answer this screen could give.
+    """
+    if not integration_ids:
+        return {}
+    rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT d.integration_id,
+                       max(d.received_at) AS last_received,
+                       count(*) FILTER (WHERE d.outcome <> 'rejected') AS accepted,
+                       count(*) FILTER (WHERE d.outcome = 'rejected') AS rejected,
+                       coalesce(sum(d.truncated_alerts), 0) AS truncated,
+                       coalesce(sum(d.unmapped_count), 0) AS unmapped
+                FROM alertmanager_deliveries d
+                WHERE d.integration_id = ANY(:ids)
+                GROUP BY d.integration_id
+                """
+            ),
+            {"ids": integration_ids},
+        )
+    ).all()
+    silences = (
+        await connection.execute(
+            text(
+                """
+                SELECT s.integration_id,
+                       count(*) FILTER (WHERE s.state = 'active') AS active,
+                       count(*) FILTER (WHERE s.state IN ('pending', 'cancel_pending'))
+                           AS pending,
+                       count(*) FILTER (WHERE s.state = 'failed') AS failed
+                FROM silence_requests s
+                WHERE s.integration_id = ANY(:ids)
+                GROUP BY s.integration_id
+                """
+            ),
+            {"ids": integration_ids},
+        )
+    ).all()
+    silence_by_id = {str(row[0]): row for row in silences}
+    ambiguous = (
+        await connection.execute(
+            text(
+                """
+                SELECT integration_id,
+                       count(*) FILTER (WHERE mapping_state = 'unmapped') AS unmapped,
+                       count(*) FILTER (WHERE mapping_state = 'ambiguous') AS ambiguous
+                FROM alert_instances
+                WHERE integration_id = ANY(:ids)
+                GROUP BY integration_id
+                """
+            ),
+            {"ids": integration_ids},
+        )
+    ).all()
+    mapping_by_id = {str(row[0]): row for row in ambiguous}
+
+    evidence: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row[0])
+        silence_row = silence_by_id.get(key)
+        mapping_row = mapping_by_id.get(key)
+        evidence[key] = {
+            "webhook_last_received_at": row[1].isoformat() if row[1] else None,
+            "deliveries_accepted": int(row[2]),
+            "deliveries_rejected": int(row[3]),
+            # A truncated delivery means Alertmanager dropped alerts before
+            # Drake saw them. Shown as partial rather than silently absorbed.
+            "truncated_payloads": int(row[4]),
+            "alerts_unmapped": int(mapping_row[1]) if mapping_row else 0,
+            "alerts_ambiguous": int(mapping_row[2]) if mapping_row else 0,
+            "silences_active": int(silence_row[1]) if silence_row else 0,
+            "silences_pending": int(silence_row[2]) if silence_row else 0,
+            "silence_worker_failures": int(silence_row[3]) if silence_row else 0,
+            # verified | unknown | invalid. Only an operator attestation can
+            # move this off `unknown`; Drake will not assume its own absence
+            # is survivable.
+            "base_route_verified": "unknown",
+            "base_route_note": (
+                "Drake cannot see Alertmanager's routing tree. Independent base "
+                "notification is verified by reviewing the route config, not by Drake."
+            ),
+        }
+    return evidence

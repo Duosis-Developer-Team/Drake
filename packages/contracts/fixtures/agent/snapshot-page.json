@@ -22,13 +22,75 @@
         "drake.duosis.com/project": "alpha"
       },
       "owners": [],
-      "spec_summary": {"replicas": 3, "strategy": "RollingUpdate"},
-      "status_summary": {"available_replicas": 3, "ready_replicas": 3, "updated_replicas": 3},
+      "spec_summary": {
+        "replicas": 3,
+        "strategy": "RollingUpdate",
+        "generation": 7,
+        "containers": [
+          {
+            "name": "api",
+            "image": "ghcr.io/duosis/core-api:1.4.2"
+          }
+        ]
+      },
+      "status_summary": {
+        "available_replicas": 3,
+        "ready_replicas": 3,
+        "updated_replicas": 3
+      },
       "conditions": [
-        {"type": "Available", "status": "True"},
-        {"type": "Progressing", "status": "True", "reason": "NewReplicaSetAvailable"}
+        {
+          "type": "Available",
+          "status": "True"
+        },
+        {
+          "type": "Progressing",
+          "status": "True",
+          "reason": "NewReplicaSetAvailable"
+        }
       ],
       "observed_at": "2026-08-06T11:59:58Z"
+    },
+    {
+      "api_group": "",
+      "api_version": "v1",
+      "kind": "Pod",
+      "namespace": "alpha-dev",
+      "name": "core-api-7d9f6c8b4-x2knm",
+      "uid": "9a1c33d2-55b7-4a0e-b1c8-6f2ea0d41b77",
+      "resource_version": "812455",
+      "labels": {
+        "app.kubernetes.io/name": "core-api"
+      },
+      "owners": [
+        {
+          "kind": "ReplicaSet",
+          "name": "core-api-7d9f6c8b4",
+          "uid": "1c0b5e7a-2f44-4d31-9a6b-7e8c1d2f3a45"
+        }
+      ],
+      "spec_summary": {
+        "node": "node-1",
+        "containers": 1
+      },
+      "status_summary": {
+        "phase": "Running",
+        "restarts": 0,
+        "container_images": [
+          {
+            "name": "api",
+            "image": "ghcr.io/duosis/core-api:1.4.2",
+            "image_id": "ghcr.io/duosis/core-api@sha256:3b1e0c9a7d5f2841bd6ae09c47f3style0000000"
+          }
+        ]
+      },
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "True"
+        }
+      ],
+      "observed_at": "2026-08-06T11:59:59Z"
     }
   ]
 }

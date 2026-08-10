@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -201,5 +202,93 @@ func TestAllowlistNeverContainsForbiddenKinds(t *testing.T) {
 		if strings.Contains(gvr.Resource, "/") {
 			t.Fatalf("subresource in allowlist: %v", gvr)
 		}
+	}
+}
+
+// --- Sprint 8: image references for deployment provenance ----------------
+
+func TestWorkloadCarriesContainerImagesAndNothingElse(t *testing.T) {
+	// The pod template holds env vars, mounts and secret references. Only
+	// the container name and image reference may leave this package.
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name": "api", "namespace": "prod", "uid": "u1", "generation": int64(7),
+		},
+		"spec": map[string]any{
+			"replicas": int64(3),
+			"template": map[string]any{"spec": map[string]any{"containers": []any{
+				map[string]any{
+					"name":  "api",
+					"image": "ghcr.io/example/api@sha256:abc",
+					"env": []any{map[string]any{
+						"name": "DATABASE_PASSWORD", "value": "hunter2",
+					}},
+					"volumeMounts": []any{map[string]any{"name": "creds"}},
+				},
+			}}},
+		},
+	}}
+
+	record := Normalize(
+		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+		obj, "2026-08-08T12:00:00Z",
+	)
+
+	containers, ok := record.SpecSummary["containers"].([]map[string]string)
+	if !ok || len(containers) != 1 {
+		t.Fatalf("expected one bounded container, got %#v", record.SpecSummary["containers"])
+	}
+	if containers[0]["name"] != "api" {
+		t.Fatalf("unexpected container name: %v", containers[0])
+	}
+	if containers[0]["image"] != "ghcr.io/example/api@sha256:abc" {
+		t.Fatalf("unexpected image: %v", containers[0])
+	}
+	// Nothing from the pod template beyond name and image.
+	if len(containers[0]) != 2 {
+		t.Fatalf("container summary carries extra fields: %v", containers[0])
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"hunter2", "DATABASE_PASSWORD", "volumeMounts", "creds"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("record leaked %q", forbidden)
+		}
+	}
+}
+
+func TestPodCarriesTheDigestTheKubeletActuallyPulled(t *testing.T) {
+	// imageID is the only place the resolved digest is observable, and it
+	// is what turns "some tag" into "this build".
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "api-1", "namespace": "prod", "uid": "p1"},
+		"status": map[string]any{
+			"phase": "Running",
+			"containerStatuses": []any{map[string]any{
+				"name":         "api",
+				"image":        "ghcr.io/example/api:v2",
+				"imageID":      "ghcr.io/example/api@sha256:deadbeef",
+				"restartCount": int64(0),
+			}},
+		},
+	}}
+
+	record := Normalize(
+		schema.GroupVersionResource{Version: "v1", Resource: "pods"},
+		obj, "2026-08-08T12:00:00Z",
+	)
+
+	images, ok := record.StatusSummary["container_images"].([]map[string]string)
+	if !ok || len(images) != 1 {
+		t.Fatalf("expected resolved images, got %#v", record.StatusSummary["container_images"])
+	}
+	if images[0]["image_id"] != "ghcr.io/example/api@sha256:deadbeef" {
+		t.Fatalf("unexpected imageID: %v", images[0])
 	}
 }
