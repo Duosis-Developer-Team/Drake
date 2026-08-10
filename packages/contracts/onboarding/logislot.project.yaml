@@ -1,0 +1,150 @@
+# LogiSlot → Drake onboarding manifest.
+#
+# Every value here was read from the LogiSlot repository or observed on the
+# cluster, read-only, and the evidence is recorded in
+# docs/onboarding/LOGISLOT.md. Where evidence was missing it says so rather
+# than guessing — an unresolvable reference becomes an `unmapped` plan item
+# a human settles, which is the designed behaviour and better than a
+# confident wrong answer.
+#
+# This states INTENT. It does not create clusters, teams or permissions;
+# those resolve against server-controlled catalog rows.
+#
+# Sources:
+#   repository   github.com/Duosis-Developer-Team/logislot @ dev
+#   k8s intent   k8s/base + k8s/overlays/{dev,prod} (Kustomize)
+#   runtime      namespace logislot-dev, observed read-only 2026-08-10
+#   prior scope  drake_cto_pack_v1.0/09_project_onboarding/LOGISLOT_INTEGRATION.md
+
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+
+metadata:
+  name: logislot
+  displayName: LogiSlot
+
+spec:
+  # defaultBranch is `dev`, not `main` — verified against the repository,
+  # and the deploy workflow keys its environments off `dev` and `prod`.
+  repository:
+    provider: github
+    owner: Duosis-Developer-Team
+    name: logislot
+    defaultBranch: dev
+
+  # UNVERIFIED. The repository has no CODEOWNERS and no team is named in the
+  # CTO integration pack, so this is intent, not evidence. Drake's owner-team
+  # catalog is authoritative: until a team exists there, this resolves to an
+  # `unmapped` plan item, which is the correct outcome for an ownership
+  # claim nobody has confirmed.
+  owners:
+    - team: logislot
+      role: primary
+
+  environments:
+    # Observed: namespace exists, 6 Deployments + 1 StatefulSet, all Ready.
+    - name: dev
+      runtime: kubernetes
+      branch: dev
+      clusterRef: duosis-prod-1
+      namespace: logislot-dev
+      criticality: medium
+    # Declared by k8s/overlays/prod and by the deploy workflow's `prod`
+    # branch, and NOT observed: the namespace does not exist on the cluster
+    # and no Deploy run has ever targeted prod. Drake should therefore
+    # report it as expected-and-not-observed rather than healthy or absent.
+    # `criticality: high` describes what prod would be, not what it is.
+    - name: prod
+      runtime: kubernetes
+      branch: prod
+      clusterRef: duosis-prod-1
+      namespace: logislot-prod
+      criticality: high
+
+  # Six services, because discovery found six workloads — not because a
+  # web/api pair was assumed. The three portals exist only in the dev
+  # overlay; in prod they are expected-and-not-observed like everything
+  # else there, which the drift report distinguishes.
+  services:
+    - name: logislot-api
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-api}
+      health: {livePath: /health, readyPath: /health}
+
+    # Runs the API image with a different command; still its own workload,
+    # so its health is its own.
+    - name: logislot-scheduler
+      component: worker
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-scheduler}
+
+    # The web probes target /login, which is a page rather than a health
+    # endpoint. Recorded as observed, not corrected: this manifest describes
+    # LogiSlot, it does not redesign it.
+    - name: logislot-web
+      component: web
+      runtime: nextjs
+      metricsProfile: nextjs-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-web}
+      health: {livePath: /login, readyPath: /login}
+
+    - name: logislot-web-admin
+      component: web
+      runtime: nextjs
+      metricsProfile: nextjs-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-web-admin}
+      health: {livePath: /login, readyPath: /login}
+
+    - name: logislot-web-platform
+      component: web
+      runtime: nextjs
+      metricsProfile: nextjs-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-web-platform}
+      health: {livePath: /login, readyPath: /login}
+
+    - name: logislot-web-supplier
+      component: web
+      runtime: nextjs
+      metricsProfile: nextjs-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-web-supplier}
+      health: {livePath: /login, readyPath: /login}
+
+    # The database is BOTH a workload and a datastore, so it appears twice:
+    # here, because it is a StatefulSet with its own rollout and readiness,
+    # and under dataStores below, because it holds state with storage and
+    # backup semantics a Deployment does not have.
+    #
+    # Declaring only the datastore left a running StatefulSet that no
+    # service described, and the drift report correctly called it out —
+    # every run, forever. A permanent finding nobody can resolve is how a
+    # drift report gets ignored.
+    #
+    # `kubernetes-service-v1` rather than a postgres profile: Drake sees
+    # this through cluster inventory only. Claiming an application-metrics
+    # profile would promise database internals nothing is collecting.
+    - name: logislot-postgres
+      component: database
+      runtime: postgresql
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: logislot-postgres}
+
+  # Tenant, Plan and a 1:1 Facility in shared, facility-scoped tables —
+  # from the CTO integration pack, which took it from the LogiSlot domain
+  # model. No tenant data is read to establish this; it is a shape, not
+  # content.
+  tenantModel:
+    mode: shared_table
+
+  dataStores:
+    # `postgres-v1` is not in Drake's current metric catalog, so it will
+    # surface as an `unmapped` plan item. That is deliberate: the datastore
+    # is real and belongs in the manifest, and the missing profile is a
+    # decision for a human rather than a reason to omit a StatefulSet that
+    # holds the entire application's state.
+    - name: logislot-db
+      engine: postgresql
+      scope: environment
+      measurementProfile: postgres-v1
