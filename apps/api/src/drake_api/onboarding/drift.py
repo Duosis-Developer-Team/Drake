@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from drake_api.catalog.external_runtime import dependency_is_workload
+
 
 class DriftKind(StrEnum):
     """What the comparison concluded about one expectation or observation."""
@@ -244,6 +246,13 @@ def expected_datastores_from_manifest(
         for store in datastores:
             name = str(store.get("name") or "")
             if not name:
+                continue
+            # Only an in-cluster datastore is a workload. A provider-managed
+            # platform has no Deployment in this namespace, so expecting one
+            # produced a permanent `expected_not_observed` — Drake reporting
+            # a managed database as a missing workload, which is both wrong
+            # and unfixable by anyone who reads it.
+            if not dependency_is_workload(store.get("dependencyClass")):
                 continue
             expected.append(
                 ExpectedWorkload(

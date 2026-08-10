@@ -54,6 +54,19 @@ export interface Environment {
    * clients keep reading `cluster` and `namespace` as before.
    */
   not_applicable?: string[];
+  /**
+   * Computed by the API's domain state machine, never asserted by the UI.
+   * Present for an external runtime; absent for Kubernetes, whose health
+   * comes from the existing service-health path.
+   */
+  health?: {
+    status: string;
+    freshness: "fresh" | "stale" | "unavailable";
+    source: { status: "configured" | "not_configured" };
+    verification?: string;
+    last_observed_at: string | null;
+    reason?: string;
+  };
   version: number;
   scope: ScopeRef;
   source: Provenance;
