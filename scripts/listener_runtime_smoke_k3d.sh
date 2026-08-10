@@ -269,31 +269,35 @@ else
   fail "enrollment 8144 did not complete a verified handshake"
 fi
 
-# Ingest: a connection with no client certificate must not survive.
-if openssl s_client -connect "127.0.0.1:$INGEST_PORT" -CAfile "$WORK_DIR/server-ca.crt" \
-    </dev/null 2>&1 | grep -qiE "alert|handshake failure|sslv3|certificate required"; then
-  ok "ingest 8143: refused a connection with no client certificate"
-else
-  fail "ingest 8143 accepted a connection with no client certificate"
-fi
+# Ingest without a usable client certificate must not answer.
+#
+# Measured with a REQUEST, not a handshake. Under TLS 1.3 the client
+# certificate exchange happens after the client already considers the
+# handshake finished, so `openssl s_client` reports success and the
+# server's refusal only surfaces when data is actually exchanged. Asking
+# "did a request get a response" is the question that matters anyway.
+NO_CERT="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
+  -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/heartbeat" -d '{}' \
+  -H 'content-type: application/json' --max-time 15 || echo 000)"
+[ "$NO_CERT" = "000" ] && ok "ingest 8143: no client certificate gets no response" \
+  || fail "ingest 8143 answered $NO_CERT without a client certificate"
 
-# A client certificate from a CA the listener does not trust: also refused.
-if openssl s_client -connect "127.0.0.1:$INGEST_PORT" -CAfile "$WORK_DIR/server-ca.crt" \
-    -cert "$WORK_DIR/rogue.crt" -key "$WORK_DIR/rogue.key" </dev/null 2>&1 |
-    grep -qiE "alert|handshake failure|unknown ca"; then
-  ok "ingest 8143: refused a certificate from an untrusted CA"
-else
-  fail "ingest 8143 accepted a certificate from an untrusted CA"
-fi
+ROGUE="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
+  --cert "$WORK_DIR/rogue.crt" --key "$WORK_DIR/rogue.key" \
+  -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/heartbeat" -d '{}' \
+  -H 'content-type: application/json' --max-time 15 || echo 000)"
+[ "$ROGUE" = "000" ] && ok "ingest 8143: a certificate from an untrusted CA gets no response" \
+  || fail "ingest 8143 answered $ROGUE for a certificate from an untrusted CA"
 
-# The Agent CA's own client certificate completes the handshake.
-if openssl s_client -connect "127.0.0.1:$INGEST_PORT" -CAfile "$WORK_DIR/server-ca.crt" \
-    -cert "$WORK_DIR/good.crt" -key "$WORK_DIR/good.key" </dev/null 2>&1 |
-    grep -q "Verify return code: 0"; then
-  ok "ingest 8143: accepted the Agent CA's client certificate"
-else
-  fail "ingest 8143 rejected a certificate its own CA issued"
-fi
+# And the Agent CA's own client certificate does get through the transport
+# — the application then applies proof-of-possession, which is a different
+# layer and not what this test is about.
+GOOD="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
+  --cert "$WORK_DIR/good.crt" --key "$WORK_DIR/good.key" \
+  -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/heartbeat" -d '{}' \
+  -H 'content-type: application/json' --max-time 15 || echo 000)"
+[ "$GOOD" != "000" ] && ok "ingest 8143: the Agent CA's certificate reaches the application ($GOOD)" \
+  || fail "ingest 8143 refused a certificate its own CA issued"
 
 echo "[listener-smoke] surface isolation, over the wire"
 # /enroll must not exist on the ingest listener, and the enrolled-agent
