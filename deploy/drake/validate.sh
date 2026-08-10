@@ -197,14 +197,9 @@ PY
 
 # --- The drake-prod release ------------------------------------------------
 #
-# Same chart, first rollout: NO public route. The application must be
+# Same chart, first deployment: no public route yet. The application must be
 # provable on its ClusterIP Services before a hostname, a certificate and an
 # identity provider are attached to it.
-#
-# The generic production contract above still exercises the full ingress
-# edge, against `values-production.test.yaml` with `edge.mode=ingress`. That
-# is the right split: the chart must keep proving it can publish an origin
-# safely, and this deployment must keep proving it does not publish one.
 echo "[policy] drake-prod production values"
 
 # The production values are complete as committed: images are pinned to
@@ -214,9 +209,11 @@ FILL=()
 
 for override in \
   "edge.mode=bogus" \
-  "ingress.enabled=true" \
+  "edge.mode=internal" \
   "publicOrigin=" \
   "publicOrigin=https://84.247.180.172:30773" \
+  "ingress.tls.mode=bogus" \
+  "edge.dedicatedController.image.digest=" \
   "api.image.digest=" \
   "api.existingSecret=" \
   "networkPolicy.database.podSelector.matchLabels=null" \
@@ -297,38 +294,55 @@ def die(message: str) -> None:
     print(f"  {message}", file=sys.stderr)
     raise SystemExit(1)
 
-# NOTHING is published. Not an Ingress, not an IngressClass, not a
-# NodePort, not a LoadBalancer, not an edge controller.
-#
-# Counted rather than described: a rollout that quietly acquired a public
-# entrance would still pass every other check in this file, and "we did not
-# publish anything" is the one claim an internal rollout makes.
-for forbidden in ("Ingress", "IngressClass"):
-    if kinds.get(forbidden):
-        die(f"internal mode rendered {len(kinds[forbidden])} {forbidden}; expected none")
-
-published = {
-    (svc["metadata"]["name"], svc["spec"]["type"])
-    for svc in kinds.get("Service", [])
-    if svc["spec"]["type"] != "ClusterIP"
-}
-if published:
-    die(f"internal mode published {sorted(published)}; every Service must be ClusterIP")
-
+# Exactly one public entrance, and it is the dedicated controller's HTTPS
+# node port. The application Services stay internal.
 node_ports = {
     (svc["metadata"]["name"], p["nodePort"])
     for svc in kinds.get("Service", [])
     for p in svc["spec"]["ports"]
     if p.get("nodePort")
 }
-if node_ports:
-    die(f"internal mode allocated node ports {sorted(node_ports)}; expected none")
+if node_ports != {("drake-edge", 30773)}:
+    die(f"expected exactly one public node port (drake-edge:30773), found {sorted(node_ports)}")
+for svc in kinds.get("Service", []):
+    if svc["metadata"]["name"] in ("drake-api", "drake-web") and svc["spec"]["type"] != "ClusterIP":
+        die(f"{svc['metadata']['name']} must stay ClusterIP")
 
-if any(d["metadata"]["name"] == "drake-edge" for d in docs):
-    die("internal mode rendered the dedicated edge controller")
+ingresses = kinds.get("Ingress", [])
+if len(ingresses) != 1:
+    die(f"expected exactly one Ingress, found {len(ingresses)}")
+ing = ingresses[0]
+host = ing["spec"]["rules"][0]["host"]
+if ":" in host:
+    die(f"the Ingress host must carry no port, found {host}")
+if ing["spec"]["ingressClassName"] != "drake-nginx":
+    die("the Ingress must use Drake's own class, not a shared one")
+paths = {p["path"]: p["backend"]["service"]["name"] for p in ing["spec"]["rules"][0]["http"]["paths"]}
+if paths.get("/v1") != "drake-api":
+    die("/v1 must reach the API directly")
+if paths.get("/") != "drake-web":
+    die("/ must reach the web app")
 
+classes = kinds.get("IngressClass", [])
+if [c["metadata"]["name"] for c in classes] != ["drake-nginx"]:
+    die("Drake must define exactly its own IngressClass")
+if classes[0]["spec"]["controller"] != "k8s.io/drake-nginx":
+    die("the controller class must be unique to Drake")
+if classes[0]["metadata"].get("annotations", {}).get(
+    "ingressclass.kubernetes.io/is-default-class"
+) == "true":
+    die("Drake's class must not be the cluster default")
 if "Secret" in kinds:
     die("the chart must never create a Secret")
+# The application Services stay internal; only the edge is published, and
+# that is asserted precisely above.
+for svc in kinds.get("Service", []):
+    if svc["metadata"]["name"] == "drake-edge":
+        continue
+    if svc["spec"]["type"] != "ClusterIP":
+        die(f"{svc['metadata']['name']} must stay ClusterIP")
+    if any("nodePort" in p for p in svc["spec"]["ports"]):
+        die(f"{svc['metadata']['name']} must not allocate a NodePort")
 
 for d in docs:
     if d["kind"] in ("ClusterRole", "ClusterRoleBinding", "IngressClass"):
