@@ -56,6 +56,24 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        runAsGroup: 65532
+        # Secret volume files are owned by root. Without an fsGroup the
+        # non-root process cannot read them at any mode tighter than
+        # world-readable — which is how a production rollout failed:
+        # `PermissionError: /etc/drake/agent-ca/ca.crt`, both containers
+        # crash-looping on a file the chart had just handed them.
+        #
+        # fsGroup makes the volume group-owned by this gid, so 0440 is
+        # readable by the process and by nobody else. The alternative,
+        # 0444, would put the Agent CA PRIVATE KEY in the same directory
+        # within reach of any other uid in the pod, and the alternative to
+        # that — a root initContainer running chmod — trades a permission
+        # problem for a privileged one.
+        fsGroup: 65532
+        # Only relabel what is not already correct: the volumes here are
+        # small Secrets, but the policy is the right default for a mount
+        # whose ownership Kubernetes already set.
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile: {type: RuntimeDefault}
       containers:
         {{- range $surface := (list "enroll" "ingest") }}
@@ -131,13 +149,24 @@ spec:
             {{- toYaml $.Values.internalAgentApi.resources | nindent 12 }}
         {{- end }}
       volumes:
+        # 0440 on both: readable by the pod's fsGroup and nothing else.
+        # Each of these directories holds a private key — the listener's own
+        # server key here, the Agent CA signing key below — and neither
+        # belongs in a world-readable file.
         - name: agent-tls
           secret:
             secretName: {{ required "internalAgentApi.tlsSecret is required" .Values.internalAgentApi.tlsSecret }}
+            defaultMode: 0440
+        # BOTH listeners mount the CA key, and both genuinely need it: the
+        # enrolment surface signs an agent's first certificate, and the
+        # ingest surface signs its renewals. Renewal has to stay behind
+        # mutual TLS, so it cannot move to the listener that asks for no
+        # certificate — narrowing this mount would break renewal rather
+        # than tighten anything.
         - name: agent-ca
           secret:
             secretName: {{ required "internalAgentApi.caSecret is required" .Values.internalAgentApi.caSecret }}
-            defaultMode: 0400
+            defaultMode: 0440
         - name: tmp
           emptyDir:
             medium: Memory
