@@ -93,7 +93,7 @@ k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
 k3d cluster create "$CLUSTER_NAME" --no-lb --wait --timeout 180s \
   --k3s-arg "--disable=traefik@server:0" >/dev/null
 kubectl config use-context "k3d-$CLUSTER_NAME" >/dev/null
-k3d image import "$IMAGE_TAG" -c "$CLUSTER_NAME" >/dev/null
+bash "$REPO_ROOT/scripts/k3d_image_import.sh" "$IMAGE_TAG" "$CLUSTER_NAME"
 
 echo "[listener-smoke] ephemeral test PKI"
 # Generated per run, inside a 0700 directory, deleted by the trap. Never

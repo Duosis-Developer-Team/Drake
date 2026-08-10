@@ -61,7 +61,11 @@ def main() -> None:
     target = Path(sys.argv[1] if len(sys.argv) > 1 else ".e2e-agent")
     target.mkdir(parents=True, exist_ok=True)
     ca_cert, ca_key = generate_ephemeral_ca(target / "ca")
-    server_cert, server_key = make_server_tls(target)
+    # The address the cluster reaches this listener on. Passed explicitly
+    # so the certificate names it: the smoke connects by address rather
+    # than through k3d's CoreDNS alias, which k3s can drop from under it.
+    hostname = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
+    server_cert, server_key = make_server_tls(target, hostname)
     config = {
         "agent_ca_cert_file": str(ca_cert),
         "agent_ca_key_file": str(ca_key),

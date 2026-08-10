@@ -54,12 +54,31 @@ chmod 600 "$KUBECONFIG_FILE"
 export KUBECONFIG="$KUBECONFIG_FILE"
 
 echo "[smoke] importing image"
-k3d image import "$IMAGE_TAG" -c "$CLUSTER_NAME" >/dev/null
+bash "$REPO_ROOT/scripts/k3d_image_import.sh" "$IMAGE_TAG" "$CLUSTER_NAME"
+
+# The address the cluster reaches the host on.
+#
+# The agent used to be pointed at `host.k3d.internal` and resolve it through
+# CoreDNS. k3d injects that alias into the CoreDNS `NodeHosts` ConfigMap,
+# and k3s re-applies its own coredns manifest — so the entry can be present
+# when the script checks and gone when the pod looks it up. That is the
+# `no such host` failure, and no amount of waiting fixes a value that
+# disappears after the wait.
+#
+# Docker knows the gateway without asking Kubernetes anything, so the test
+# uses the address directly and the DNS race stops existing.
+HOST_GATEWAY_IP="$(docker network inspect "k3d-${CLUSTER_NAME}" \
+  --format '{{ (index .IPAM.Config 0).Gateway }}' 2>/dev/null || true)"
+if [ -z "$HOST_GATEWAY_IP" ]; then
+  echo "FAIL: could not resolve the k3d network gateway for ${CLUSTER_NAME}" >&2
+  exit 1
+fi
+echo "[smoke] cluster reaches the host at ${HOST_GATEWAY_IP}"
 
 echo "[smoke] TLS material + internal listener (host)"
-(cd "$REPO_ROOT" && uv run python scripts/e2e_agent_tls.py "$SMOKE_DIR") >/dev/null
-# The listener binds all interfaces so the k3d network can reach it via
-# host.k3d.internal — a LOCAL, disposable test only.
+(cd "$REPO_ROOT" && uv run python scripts/e2e_agent_tls.py "$SMOKE_DIR" "$HOST_GATEWAY_IP") >/dev/null
+# The listener binds all interfaces so the k3d network can reach it at the
+# gateway address — a LOCAL, disposable test only.
 # exec (not a subshell chain) so $API_PID is the listener itself and the
 # cleanup trap really kills it — an orphan would hold pipes open forever.
 (cd "$REPO_ROOT" && exec env DRAKE_ENV=local \
@@ -156,58 +175,12 @@ kubectl -n "$NAMESPACE" create secret generic drake-agent-server-ca \
 kubectl -n "$NAMESPACE" create secret generic drake-agent-enrollment \
   --from-literal=token="$TOKEN" >/dev/null
 
-# Egress target: the REAL IP the cluster resolves for host.k3d.internal
-# (k3d writes it into CoreDNS NodeHosts; on Docker Desktop it is the
-# host-gateway address, NOT the bridge subnet).
-#
-# k3d injects that entry ASYNCHRONOUSLY, shortly after the cluster reports
-# ready — reading the ConfigMap once races the injection. Poll on a bounded
-# budget instead: no fixed sleep, no infinite retry, no fallback IP, and
-# the NetworkPolicy target stays the real /32 address either way.
-NODEHOSTS_ATTEMPTS=30
-NODEHOSTS_INTERVAL=1
-NODEHOSTS_BUDGET_SECONDS=$((NODEHOSTS_ATTEMPTS * NODEHOSTS_INTERVAL))
+# The agent reaches the host listener by ADDRESS, resolved from Docker
+# above. The CoreDNS `host.k3d.internal` alias this used to wait for is
+# injected asynchronously and can be dropped again when k3s re-applies its
+# coredns manifest — so waiting for it proved nothing about whether the pod
+# would still resolve it a minute later. It no longer participates.
 
-read_host_alias_ip() {
-  # Every failure here is "not yet", not "broken": the ConfigMap may not
-  # exist, kubectl may error transiently, or NodeHosts may not carry the
-  # alias so far. Each case returns EMPTY with status 0, so a first-attempt
-  # miss cannot kill the script under `set -euo pipefail`.
-  local node_hosts=""
-  if ! node_hosts="$(kubectl -n kube-system get configmap coredns \
-    -o jsonpath='{.data.NodeHosts}' 2>/dev/null)"; then
-    return 0
-  fi
-  printf '%s\n' "$node_hosts" \
-    | awk '{ for (i = 2; i <= NF; i++) if ($i == "host.k3d.internal") { print $1; exit } }'
-  return 0
-}
-
-echo "[smoke] waiting for the k3d host alias in CoreDNS (<= ${NODEHOSTS_BUDGET_SECONDS}s)"
-HOST_ALIAS_IP=""
-for attempt in $(seq 1 "$NODEHOSTS_ATTEMPTS"); do
-  HOST_ALIAS_IP="$(read_host_alias_ip)"
-  if [ -n "$HOST_ALIAS_IP" ]; then
-    break
-  fi
-  if [ "$attempt" -lt "$NODEHOSTS_ATTEMPTS" ]; then
-    sleep "$NODEHOSTS_INTERVAL"
-  fi
-done
-
-if [ -z "$HOST_ALIAS_IP" ]; then
-  {
-    echo "FAIL: host.k3d.internal never appeared in the CoreDNS NodeHosts"
-    echo "      (waited ${NODEHOSTS_ATTEMPTS} attempts x ${NODEHOSTS_INTERVAL}s" \
-      "= ${NODEHOSTS_BUDGET_SECONDS}s)"
-    echo "--- diagnostic: CoreDNS NodeHosts (host entries only) ---"
-    kubectl -n kube-system get configmap coredns \
-      -o jsonpath='{.data.NodeHosts}' 2>&1 || echo "(CoreDNS ConfigMap unreadable)"
-    echo
-  } >&2
-  exit 1
-fi
-echo "[smoke] host.k3d.internal resolves to ${HOST_ALIAS_IP} in-cluster"
 # Egress policies match the POST-DNAT destination: the Kubernetes API rule
 # must therefore target the real apiserver ENDPOINT (node ip:6443), not
 # the 10.43.0.1 service VIP.
@@ -232,13 +205,13 @@ render_chart() {
     --set clusterId="$CLUSTER_ID" \
     --set clusterName=cluster-a \
     --set persistence.enabled=false \
-    --set apiBaseUrl="https://host.k3d.internal:${INTERNAL_PORT}" \
+    --set apiBaseUrl="https://${HOST_GATEWAY_IP}:${INTERNAL_PORT}" \
     --set image.repository=drake-cluster-agent \
     --set image.devTag=smoke \
     --set image.pullPolicy=Never \
     --set serverCA.existingSecret=drake-agent-server-ca \
     --set enrollmentToken.existingSecret=drake-agent-enrollment \
-    --set networkPolicy.apiEndpointCIDR="${HOST_ALIAS_IP}/32" \
+    --set networkPolicy.apiEndpointCIDR="${HOST_GATEWAY_IP}/32" \
     --set networkPolicy.apiEndpointPort="$INTERNAL_PORT" \
     --set networkPolicy.kubernetesApiCIDR="${KUBE_API_IP}/32" \
     --set networkPolicy.kubernetesApiPort="${KUBE_API_PORT}" \
