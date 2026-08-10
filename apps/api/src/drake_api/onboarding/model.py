@@ -44,6 +44,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from drake_api.catalog.external_runtime import dependency_metadata as dependency_metadata_for
+
 
 class SessionState(StrEnum):
     DRAFT = "draft"
@@ -86,6 +88,10 @@ class EntityKind(StrEnum):
     # `detail`, which made two different decisions read as one and put the
     # handler registry's key at odds with what it dispatched on.
     WORKLOAD_BINDING = "workload_binding"
+    #: A dependency the project has and Drake does not run. Its own kind
+    #: because it is neither a service (no workload) nor an in-cluster
+    #: datastore Drake operates.
+    DEPENDENCY = "dependency"
 
 
 # Actions that stop an apply. `unmapped` is included on purpose: a manifest
@@ -131,6 +137,11 @@ REASON_TEXT: dict[str, str] = {
         "operator-registered infrastructure; a manifest cannot create one."
     ),
     "owner_team_unknown": "The manifest references an owning team Drake does not have.",
+    "metric_profile_not_configured": (
+        "This service declares no metrics profile, so Drake collects no application "
+        "metrics for it. Health reports not_configured rather than a profile nothing "
+        "would honour."
+    ),
     "metric_profile_unknown": (
         "The manifest references a metric profile that is not in the curated registry."
     ),
@@ -207,6 +218,16 @@ IMMUTABLE_ENVIRONMENT_FIELDS: frozenset[str] = frozenset(
     {"environment_key", "runtime", "cluster_ref", "namespace", "hosting_provider"}
 )
 IMMUTABLE_SERVICE_FIELDS: frozenset[str] = frozenset({"service_key"})
+# Class and engine are what a dependency IS; changing either is a different
+# dependency wearing the same name, which is a conflict for a person.
+# Provider and verification are what we currently believe about it, and both
+# are auditable metadata updates.
+MUTABLE_DEPENDENCY_FIELDS: frozenset[str] = frozenset(
+    {"display_name", "provider", "verification", "store_scope"}
+)
+IMMUTABLE_DEPENDENCY_FIELDS: frozenset[str] = frozenset(
+    {"dependency_key", "dependency_class", "engine"}
+)
 
 # Kubernetes kinds Drake can bind a service to. Mirrors the CHECK on
 # `service_workload_bindings.workload_kind`.
@@ -257,6 +278,17 @@ PAYLOAD_ALLOWLIST: dict[str, frozenset[str]] = {
             "metrics_profile",
             "workload_selector",
             "health",
+        }
+    ),
+    str(EntityKind.DEPENDENCY): frozenset(
+        {
+            "dependency_key",
+            "display_name",
+            "dependency_class",
+            "engine",
+            "store_scope",
+            "provider",
+            "verification",
         }
     ),
     str(EntityKind.SLO_PROFILE): frozenset(
@@ -545,6 +577,10 @@ class CatalogSnapshot:
     environments: dict[tuple[str, str], str] = field(default_factory=dict)
     #: (project_key, service_key) -> service id
     services: dict[tuple[str, str], str] = field(default_factory=dict)
+    #: (project_key, dependency_key) -> dependency id
+    dependencies: dict[tuple[str, str], str] = field(default_factory=dict)
+    #: (project_key, dependency_key) -> what the catalog currently records
+    dependency_metadata: dict[tuple[str, str], dict[str, str]] = field(default_factory=dict)
     #: cluster_ref -> cluster id
     clusters: dict[str, str] = field(default_factory=dict)
     #: owner team key -> team id
@@ -976,17 +1012,79 @@ def build_plan(
             )
 
         profile = str(service.get("metricsProfile") or "")
-        known_profile = profile in snapshot.metric_profiles
+        # Three states, not two. An ABSENT profile is now a legal, deliberate
+        # answer — the schema only requires one where the project has a
+        # Kubernetes environment — and it means `not_configured`. Treating it
+        # as `unmapped` blocked the apply, so an external project could pass
+        # validation and then never be importable at all.
+        #
+        # A profile that is DECLARED but unknown stays `unmapped`: that is
+        # somebody naming a registry key Drake does not have, which is still
+        # a decision for a person.
+        if not profile:
+            action = str(Action.NO_CHANGE)
+            reason = "metric_profile_not_configured"
+        elif profile in snapshot.metric_profiles:
+            action = str(Action.NO_CHANGE)
+            reason = "applied_with_parent"
+        else:
+            action = str(Action.UNMAPPED)
+            reason = "metric_profile_unknown"
         items.append(
             PlanItem(
                 entity_kind=str(EntityKind.METRIC_PROFILE),
-                action=str(Action.NO_CHANGE) if known_profile else str(Action.UNMAPPED),
+                action=action,
                 item_key=f"metric_profile:{service_key}",
                 proposed_name=profile,
-                reason_code="applied_with_parent" if known_profile else "metric_profile_unknown",
-                detail={"parent": f"service:{service_key}"} if known_profile else {},
+                reason_code=reason,
+                detail=(
+                    {"parent": f"service:{service_key}"} if action == str(Action.NO_CHANGE) else {}
+                ),
             )
         )
+
+    # --- dependencies -------------------------------------------------------
+    #
+    # No workload binding, no expected workload, no namespace. A dependency
+    # Drake does not run has nothing to bind to, and inventing a binding was
+    # exactly what made a managed database report as a missing Deployment.
+    for store in spec.get("dataStores") or []:
+        dependency_key = str(store.get("name") or "")
+        if not dependency_key:
+            continue
+        proposed = dependency_metadata_for(store)
+        existing_id = snapshot.dependencies.get((project_key, dependency_key))
+        detail = {
+            "dependency_class": proposed["dependency_class"],
+            "provider": proposed["provider"] or "unknown",
+            "verification": proposed["verification"],
+            "workload_applicability": "not_applicable",
+        }
+        if existing_id is None:
+            items.append(
+                PlanItem(
+                    entity_kind=str(EntityKind.DEPENDENCY),
+                    action=str(Action.CREATE),
+                    item_key=f"dependency:{dependency_key}",
+                    proposed_name=dependency_key,
+                    detail=detail,
+                    payload=build_payload(str(EntityKind.DEPENDENCY), proposed),
+                )
+            )
+        else:
+            items.append(
+                _row_item(
+                    entity_kind=str(EntityKind.DEPENDENCY),
+                    item_key=f"dependency:{dependency_key}",
+                    name=dependency_key,
+                    existing_id=existing_id,
+                    existing=snapshot.dependency_metadata.get((project_key, dependency_key), {}),
+                    proposed=proposed,
+                    mutable=MUTABLE_DEPENDENCY_FIELDS,
+                    immutable=IMMUTABLE_DEPENDENCY_FIELDS,
+                    detail=detail,
+                )
+            )
 
     # --- services the catalog has and the manifest does not -----------------
     for service_key in snapshot.catalog_only_services:

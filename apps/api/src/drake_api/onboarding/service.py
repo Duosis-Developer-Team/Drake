@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.alerting.contracts import default_burn_profile, indicator_template
 from drake_api.audit.service import AuditEventData, record_audit_event_in
+from drake_api.catalog.external_runtime import clamp_verification_for_import
 from drake_api.catalog.service import CatalogService
 from drake_api.github_app import catalog as repo_catalog
 from drake_api.github_app import manifest as manifest_module
@@ -801,7 +802,7 @@ async def load_snapshot(
             await connection.execute(
                 text(
                     "SELECT e.environment_key, e.id, e.branch, e.criticality, e.runtime, "
-                    "e.namespace, c.cluster_ref FROM environments e "
+                    "e.namespace, c.cluster_ref, e.hosting_provider FROM environments e "
                     "LEFT JOIN clusters c ON c.id = e.cluster_id WHERE e.project_id = :p"
                 ),
                 {"p": project_id},
@@ -815,6 +816,10 @@ async def load_snapshot(
                 "runtime": str(entry[4] or ""),
                 "namespace": str(entry[5] or ""),
                 "cluster_ref": str(entry[6] or ""),
+                # Immutable, so it MUST be loaded here. Comparing a proposed
+                # provider against a missing existing one made every
+                # re-import of an external project conflict with itself.
+                "hosting_provider": str(entry[7] or ""),
             }
         for entry in (
             await connection.execute(
@@ -859,6 +864,31 @@ async def load_snapshot(
             if str(entry[0]) not in manifest_services:
                 catalog_only.append(str(entry[0]))
 
+    dependencies: dict[tuple[str, str], str] = {}
+    dependency_metadata: dict[tuple[str, str], dict[str, str]] = {}
+    if project_id is not None:
+        for entry in (
+            await connection.execute(
+                text(
+                    "SELECT dependency_key, id, display_name, dependency_class, engine, "
+                    "store_scope, provider, verification "
+                    "FROM project_dependencies WHERE project_id = :p AND lifecycle = 'active'"
+                ),
+                {"p": project_id},
+            )
+        ).all():
+            key = (project_key, str(entry[0]))
+            dependencies[key] = str(entry[1])
+            dependency_metadata[key] = {
+                "dependency_key": str(entry[0]),
+                "display_name": str(entry[2] or ""),
+                "dependency_class": str(entry[3] or ""),
+                "engine": str(entry[4] or ""),
+                "store_scope": str(entry[5] or ""),
+                "provider": str(entry[6] or ""),
+                "verification": str(entry[7] or ""),
+            }
+
     clusters = {
         str(entry[0]): str(entry[1])
         for entry in (await connection.execute(text("SELECT cluster_ref, id FROM clusters"))).all()
@@ -898,6 +928,8 @@ async def load_snapshot(
         project_metadata=project_metadata,
         environment_metadata=environment_metadata,
         service_metadata=service_metadata,
+        dependencies=dependencies,
+        dependency_metadata=dependency_metadata,
         slo_definitions=slo_definitions,
         observed_workloads=observed,
         existing_bindings=existing_bindings,
@@ -2293,6 +2325,51 @@ async def _write_slo(context: _ApplyContext, item: dict[str, Any], *, update: bo
 
 # The registry. An actionable plan item with no entry here stops the apply
 # before any mutation — see `PlanNotApplicableError`.
+async def _apply_dependency_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    payload = item["payload"]
+    assert context.project_id is not None
+    await context.catalog.create_dependency(
+        context.project_id,
+        str(payload["dependency_key"]),
+        display_name=str(payload.get("display_name") or ""),
+        dependency_class=str(payload["dependency_class"]),
+        engine=str(payload["engine"]),
+        store_scope=str(payload["store_scope"]),
+        provider=str(payload.get("provider") or "") or None,
+        # Already clamped when the plan was built; clamped again here so the
+        # invariant does not depend on which path produced the payload.
+        verification=str(clamp_verification_for_import(payload.get("verification"))),
+        source_ref=context.source_ref,
+        source_revision=context.commit_sha,
+    )
+    context.counters.created += 1
+
+
+async def _apply_dependency_link(context: _ApplyContext, item: dict[str, Any]) -> None:
+    """An existing dependency the manifest still declares, unchanged.
+
+    Nothing to write. It needs a handler anyway because `link` is an
+    actionable action, and an actionable action with no handler makes the
+    whole plan unappliable — which is how a second import of an unchanged
+    dependency blocked the entire re-import.
+    """
+    context.counters.linked += 1
+
+
+async def _apply_dependency_update(context: _ApplyContext, item: dict[str, Any]) -> None:
+    payload = item["payload"]
+    await context.catalog.update_dependency(
+        uuid.UUID(str(item["existing_entity_id"])),
+        display_name=str(payload.get("display_name") or ""),
+        store_scope=str(payload["store_scope"]),
+        provider=str(payload.get("provider") or "") or None,
+        verification=str(clamp_verification_for_import(payload.get("verification"))),
+        source_ref=context.source_ref,
+        source_revision=context.commit_sha,
+    )
+    context.counters.metadata_updated += 1
+
+
 _HANDLERS: dict[tuple[str, str], Any] = {
     (str(EntityKind.PROJECT), str(Action.CREATE)): _apply_project_create,
     (str(EntityKind.PROJECT), str(Action.LINK)): _apply_project_link,
@@ -2303,6 +2380,9 @@ _HANDLERS: dict[tuple[str, str], Any] = {
     (str(EntityKind.SERVICE), str(Action.CREATE)): _apply_service_create,
     (str(EntityKind.SERVICE), str(Action.LINK)): _apply_service_link,
     (str(EntityKind.SERVICE), str(Action.UPDATE_METADATA)): _apply_service_update,
+    (str(EntityKind.DEPENDENCY), str(Action.CREATE)): _apply_dependency_create,
+    (str(EntityKind.DEPENDENCY), str(Action.LINK)): _apply_dependency_link,
+    (str(EntityKind.DEPENDENCY), str(Action.UPDATE_METADATA)): _apply_dependency_update,
     (str(EntityKind.WORKLOAD_BINDING), str(Action.CREATE)): _apply_binding_create,
     (str(EntityKind.REPOSITORY), str(Action.LINK)): _apply_repository_link,
     (str(EntityKind.SLO_PROFILE), str(Action.CREATE)): _apply_slo_create,

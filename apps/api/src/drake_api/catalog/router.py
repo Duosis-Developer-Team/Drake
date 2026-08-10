@@ -22,6 +22,7 @@ from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.catalog.authz import escape_like, visible_scope_ids
 from drake_api.catalog.external_runtime import (
     EXTERNAL_NOT_APPLICABLE,
+    Availability,
     HealthSourceStatus,
     RuntimeKind,
     evaluate_external_health,
@@ -180,6 +181,44 @@ async def _project_payload(
         },
         "as_of": _as_of(),
     }
+
+    # Dependencies are visible exactly when their PROJECT is — this function
+    # is only reached for a project the principal can already see, so no
+    # second scope check is needed and none is invented. `include_details`
+    # keeps the list off the collection endpoint.
+    if include_details:
+        payload["dependencies"] = [
+            {
+                "id": str(dep[0]),
+                "dependency_key": dep[1],
+                "display_name": dep[2],
+                "dependency_class": dep[3],
+                "engine": dep[4],
+                "scope": dep[5],
+                # `unknown` rather than null: a provider nobody recorded is a
+                # real answer, and the closed vocabulary has a word for it.
+                "provider": dep[6] or "unknown",
+                "verification": dep[7],
+                # A dependency Drake does not run has no workload to bind, no
+                # replicas and nothing to restart.
+                "workload_applicability": str(Availability.NOT_APPLICABLE),
+                "health": evaluate_external_health(
+                    source=HealthSourceStatus.NOT_CONFIGURED
+                ).as_dict(),
+            }
+            for dep in (
+                await connection.execute(
+                    text(
+                        "SELECT id, dependency_key, display_name, dependency_class, engine, "
+                        "store_scope, provider, verification FROM project_dependencies "
+                        "WHERE project_id = :pid AND lifecycle = 'active' "
+                        "ORDER BY dependency_key"
+                    ),
+                    {"pid": project_id},
+                )
+            ).all()
+        ]
+
     if include_details:
         owners = (
             await connection.execute(

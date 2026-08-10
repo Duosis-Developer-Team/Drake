@@ -211,6 +211,94 @@ class CatalogService:
         )
         return CreatedEntity(environment_id, scope.id)
 
+    # ------------------------------------------------------------- dependency
+
+    async def create_dependency(
+        self,
+        project_id: uuid.UUID,
+        dependency_key: str,
+        *,
+        dependency_class: str,
+        engine: str,
+        store_scope: str,
+        display_name: str = "",
+        provider: str | None = None,
+        verification: str = "repository_intent",
+        source_ref: str = "",
+        source_revision: str = "",
+    ) -> uuid.UUID:
+        """A dependency the project has and Drake does not necessarily run.
+
+        No scope row of its own: a dependency is visible exactly when its
+        PROJECT is, which is the boundary the manifest already draws. Giving
+        it a separate scope would invent an authority nobody granted.
+        """
+        return await self._insert(
+            """
+            INSERT INTO project_dependencies
+                (project_id, dependency_key, display_name, dependency_class, engine,
+                 store_scope, provider, verification, catalog_source_kind,
+                 catalog_source_ref, source_revision)
+            VALUES (:project_id, :key, :display_name, :dependency_class, :engine,
+                    :store_scope, :provider, :verification, :kind, :source_ref, :revision)
+            RETURNING id
+            """,
+            {
+                "project_id": project_id,
+                "key": dependency_key,
+                "display_name": display_name or dependency_key,
+                "dependency_class": dependency_class,
+                "engine": engine,
+                "store_scope": store_scope,
+                # A check constraint refuses a provider on an in-cluster row.
+                "provider": provider or None,
+                "verification": verification,
+                "kind": self._source_kind,
+                "source_ref": source_ref,
+                "revision": source_revision,
+            },
+        )
+
+    async def update_dependency(
+        self,
+        dependency_id: uuid.UUID,
+        *,
+        store_scope: str,
+        display_name: str = "",
+        provider: str | None = None,
+        verification: str = "repository_intent",
+        source_ref: str = "",
+        source_revision: str = "",
+    ) -> None:
+        """Only the mutable fields. Class and engine are what the dependency
+        IS; changing either is a different dependency wearing the same name,
+        which the planner reports as a conflict rather than applying."""
+        await self._connection.execute(
+            text(
+                """
+                UPDATE project_dependencies
+                   SET display_name = :display_name,
+                       store_scope = :store_scope,
+                       provider = :provider,
+                       verification = :verification,
+                       catalog_source_ref = :source_ref,
+                       source_revision = :revision,
+                       version = version + 1,
+                       updated_at = now()
+                 WHERE id = :id
+                """
+            ),
+            {
+                "id": dependency_id,
+                "display_name": display_name,
+                "store_scope": store_scope,
+                "provider": provider or None,
+                "verification": verification,
+                "source_ref": source_ref,
+                "revision": source_revision,
+            },
+        )
+
     # ---------------------------------------------------------------- service
     async def create_service_definition(
         self,

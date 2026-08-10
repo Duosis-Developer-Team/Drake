@@ -25,6 +25,7 @@ is how a project comes to be reported healthy on the strength of a
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -236,3 +237,40 @@ def dependency_is_workload(dependency_class: str | None) -> bool:
     restart.
     """
     return (dependency_class or DependencyClass.IN_CLUSTER) == DependencyClass.IN_CLUSTER
+
+
+def clamp_verification_for_import(declared: str | None) -> Verification:
+    """An import may only ever record `repository_intent`.
+
+    The three levels are three different claims, and only the first can be
+    established by reading a repository. A manifest asserting
+    `provider_observed` would be a repository claiming that Drake observed
+    something — which is not evidence that Drake observed anything, and is
+    exactly the promotion this function exists to refuse.
+
+    The column accepts the higher values so an out-of-band confirmation or a
+    real observation can set them later. Nothing on the import path can.
+    """
+    return Verification.REPOSITORY_INTENT
+
+
+def dependency_metadata(store: Mapping[str, Any]) -> dict[str, Any]:
+    """Manifest dataStore -> the shape `project_dependencies` stores.
+
+    Deliberately drops `connectionSecretRef`. It is only a reference name and
+    the schema forbids a value there, but nothing downstream needs it, and a
+    field nobody reads is a field that can only ever leak.
+    """
+    dependency_class = str(store.get("dependencyClass") or DependencyClass.IN_CLUSTER)
+    provider = str(store.get("provider") or "")
+    return {
+        "dependency_key": str(store.get("name") or ""),
+        "display_name": str(store.get("name") or ""),
+        "dependency_class": dependency_class,
+        "engine": str(store.get("engine") or ""),
+        "store_scope": str(store.get("scope") or ""),
+        # A provider on an in-cluster store would claim something about
+        # infrastructure Drake runs itself; the database refuses it too.
+        "provider": provider if provider and dependency_class != DependencyClass.IN_CLUSTER else "",
+        "verification": str(clamp_verification_for_import(store.get("verification"))),
+    }
