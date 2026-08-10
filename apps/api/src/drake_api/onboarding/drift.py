@@ -53,6 +53,11 @@ class DriftKind(StrEnum):
     #: More than one observed workload matches one service's selector.
     #: Choosing would attribute the wrong workload's identity to a service.
     AMBIGUOUS = "ambiguous"
+    #: A declared dataStore accounts for this workload. Separate from
+    #: MATCHED because a datastore is not a service: it gets no
+    #: service→workload binding, and conflating the two would inflate the
+    #: binding count with things that were never bindings.
+    DATASTORE_MATCHED = "datastore_matched"
 
 
 #: Stable, human-readable causes. Server-owned, like ReasonCode in the
@@ -71,6 +76,9 @@ REASON_TEXT: dict[DriftKind, str] = {
     ),
     DriftKind.AMBIGUOUS: (
         "More than one observed workload matches this service, so Drake will not choose one."
+    ),
+    DriftKind.DATASTORE_MATCHED: (
+        "The manifest declares this as a dataStore and inventory has seen a workload for it."
     ),
 }
 
@@ -143,7 +151,9 @@ class DriftReport:
         evidence, and reporting it as agreement is the failure this module
         exists to prevent.
         """
-        return all(item.kind is DriftKind.MATCHED for item in self.items)
+        return all(
+            item.kind in (DriftKind.MATCHED, DriftKind.DATASTORE_MATCHED) for item in self.items
+        )
 
     def as_dict(self) -> dict[str, Any]:
         counts: dict[str, int] = {}
@@ -205,10 +215,49 @@ def expected_workloads_from_manifest(document: Mapping[str, Any]) -> tuple[Expec
     return tuple(expected)
 
 
+def expected_datastores_from_manifest(
+    document: Mapping[str, Any],
+) -> tuple[ExpectedWorkload, ...]:
+    """Declared dataStores, per Kubernetes environment.
+
+    Matched by NAME rather than by selector, because the schema gives a
+    dataStore no `workloadSelector` — it is a named resource, and inventing
+    a selector field to hold a guess would be worse than matching the name
+    the manifest already had to state.
+
+    A datastore whose workload is named something else simply will not match
+    and is reported as expected-and-not-observed, which is honest: Drake
+    cannot tell "named differently" from "absent" without being told.
+    """
+    spec = document.get("spec") or {}
+    environments = spec.get("environments") or []
+    datastores = spec.get("dataStores") or []
+
+    expected: list[ExpectedWorkload] = []
+    for environment in environments:
+        if str(environment.get("runtime") or "") != "kubernetes":
+            continue
+        namespace = str(environment.get("namespace") or "")
+        if not namespace:
+            continue
+        env_name = str(environment.get("name") or "")
+        for store in datastores:
+            name = str(store.get("name") or "")
+            if not name:
+                continue
+            expected.append(
+                ExpectedWorkload(
+                    environment=env_name, namespace=namespace, service=name, selector={}
+                )
+            )
+    return tuple(expected)
+
+
 def evaluate_drift(
     expected: Iterable[ExpectedWorkload],
     observed: Iterable[ObservedWorkload],
     observed_namespaces: Iterable[str],
+    expected_datastores: Iterable[ExpectedWorkload] = (),
 ) -> DriftReport:
     """Compare intent with inventory.
 
@@ -217,6 +266,12 @@ def evaluate_drift(
     and different answer from a namespace inventory has never seen, and
     inferring the namespace list from the workloads would make those two
     indistinguishable.
+
+    `expected_datastores` accounts for workloads that are state rather than
+    service — a database StatefulSet is declared, runs, and must not be
+    reported as an undeclared surprise on every run. It is a separate input
+    because a datastore earns no service→workload binding, and folding it
+    into `expected` would inflate the binding count with non-bindings.
     """
     expected_list = list(expected)
     observed_list = list(observed)
@@ -279,13 +334,56 @@ def evaluate_drift(
             )
             claimed.add((found.namespace, found.kind, found.name))
 
+    # --- declared datastores ----------------------------------------------
+    for store in expected_datastores:
+        if store.namespace not in known_namespaces:
+            items.append(
+                DriftItem(
+                    kind=DriftKind.NAMESPACE_NOT_OBSERVED,
+                    environment=store.environment,
+                    namespace=store.namespace,
+                    service=store.service,
+                )
+            )
+            continue
+        store_workload: ObservedWorkload | None = next(
+            (
+                candidate
+                for candidate in observed_list
+                if candidate.namespace == store.namespace and candidate.name == store.service
+            ),
+            None,
+        )
+        if store_workload is None:
+            items.append(
+                DriftItem(
+                    kind=DriftKind.EXPECTED_NOT_OBSERVED,
+                    environment=store.environment,
+                    namespace=store.namespace,
+                    service=store.service,
+                )
+            )
+        else:
+            items.append(
+                DriftItem(
+                    kind=DriftKind.DATASTORE_MATCHED,
+                    environment=store.environment,
+                    namespace=store.namespace,
+                    service=store.service,
+                    workload_kind=store_workload.kind,
+                    workload_name=store_workload.name,
+                )
+            )
+            claimed.add((store_workload.namespace, store_workload.kind, store_workload.name))
+
     # --- observations nothing claimed -------------------------------------
     #
     # Only within namespaces the manifest declares. A workload in some other
     # namespace is somebody else's, and reporting it here would turn every
     # project's drift view into a cluster-wide inventory dump.
-    declared_namespaces = {want.namespace for want in expected_list}
-    environment_of = {want.namespace: want.environment for want in expected_list}
+    all_expected = expected_list + list(expected_datastores)
+    declared_namespaces = {want.namespace for want in all_expected}
+    environment_of = {want.namespace: want.environment for want in all_expected}
 
     for found in observed_list:
         if found.namespace not in declared_namespaces:

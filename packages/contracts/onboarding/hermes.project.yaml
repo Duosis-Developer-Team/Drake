@@ -1,0 +1,134 @@
+# Hermes → Drake onboarding manifest.
+#
+# Every value was read from the Hermes repository or observed read-only on
+# the cluster; the evidence is in docs/onboarding/HERMES.md. Nothing here
+# was deployed, changed or restarted.
+#
+# Two environments, deliberately. There is a third `hermes` namespace on the
+# same cluster and it is NOT an environment of this project: see the doc for
+# what it actually contains and why including it would corrupt dev and test
+# health rather than add to it.
+#
+# Sources:
+#   repository   github.com/Duosis-Developer-Team/Hermes @ dev
+#   k8s intent   k8s/*.yaml (dev) and k8s/test/*.yaml (test) — plain manifests
+#   runtime      namespaces hermes-dev and hermes-test, observed 2026-08-10
+#   prior scope  drake_cto_pack_v1.0/09_project_onboarding/HERMES_INTEGRATION.md
+
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+
+metadata:
+  name: hermes
+  displayName: Hermes
+
+spec:
+  repository:
+    provider: github
+    owner: Duosis-Developer-Team
+    name: Hermes
+    defaultBranch: dev
+
+  # UNVERIFIED, exactly as for LogiSlot: the repository has no CODEOWNERS
+  # and no team is named in the integration pack. Drake's owner-team catalog
+  # is authoritative, so this resolves to an `unmapped` plan item — a person
+  # decides, rather than a manifest asserting ownership nobody confirmed.
+  owners:
+    - team: hermes
+      role: primary
+
+  # dev and test are separate environments and must stay separate. They run
+  # the same five services from the same image digest, so a single combined
+  # view would be indistinguishable from either one being broken.
+  environments:
+    - name: dev
+      runtime: kubernetes
+      branch: dev
+      clusterRef: duosis-prod-1
+      namespace: hermes-dev
+      criticality: medium
+    - name: test
+      runtime: kubernetes
+      branch: dev
+      clusterRef: duosis-prod-1
+      namespace: hermes-test
+      criticality: low
+
+  # Five services, in both environments: ten service→workload bindings.
+  # The two databases are dataStores below rather than services — they are
+  # state, they get no service binding, and counting them here would report
+  # fourteen bindings for a system that has ten.
+  #
+  # Workload labels are plain `app: <name>` in both namespaces, verified.
+  services:
+    - name: auth-service
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector: {app: auth-service}
+      health: {livePath: /health, readyPath: /health}
+
+    - name: core-service
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector: {app: core-service}
+      health: {livePath: /health, readyPath: /health}
+
+    - name: reporting-service
+      component: api
+      runtime: fastapi
+      metricsProfile: fastapi-v1
+      workloadSelector: {app: reporting-service}
+      health: {livePath: /health, readyPath: /health}
+
+    # Vite/React served by nginx, so `fastapi-v1` would promise application
+    # metrics that do not exist. `kubernetes-service-v1` says what Drake can
+    # actually see: workload-level signals from inventory.
+    - name: frontend
+      component: web
+      runtime: react
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app: frontend}
+      health: {livePath: /, readyPath: /}
+
+    # The MCP server. Its only upstream is core-service's PUBLIC API over
+    # HTTP — `HERMES_PUBLIC_API_BASE=http://core-service/api/public/v1` — and
+    # the deployment carries no database URL, no auth-service URL, no
+    # service-to-service credential, and `automountServiceAccountToken:
+    # false`. It is therefore NOT given a datastore dependency here: adding
+    # one would model a boundary the code deliberately does not cross.
+    #
+    # The framework behind it is not evidenced in the manifests, so this
+    # claims Kubernetes-level metrics rather than a FastAPI profile.
+    - name: hermes-mcp
+      component: mcp
+      runtime: python
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app: hermes-mcp}
+      health: {livePath: /health, readyPath: /health}
+
+  # `none`, from two independent sources: hermes_rbac_design.md ("Hermes has
+  # no tenant/facility dimension — roles attach directly to users") and the
+  # CTO integration pack. The Azure tenant id in auth configuration is an
+  # identity-provider setting, not a business tenant, and is deliberately
+  # not modelled as one. No tenant data was read to establish this.
+  tenantModel:
+    mode: none
+
+  # Two databases per environment, matched by name against the observed
+  # StatefulSets. `core-db` runs TimescaleDB, which is PostgreSQL with an
+  # extension — `postgresql` is the accurate engine, not `other`.
+  #
+  # `postgres-v1` is not in Drake's metric catalog and will surface as an
+  # `unmapped` plan item, the same decision LogiSlot left open. The
+  # databases are real and belong here regardless.
+  dataStores:
+    - name: auth-db
+      engine: postgresql
+      scope: environment
+      measurementProfile: postgres-v1
+    - name: core-db
+      engine: postgresql
+      scope: environment
+      measurementProfile: postgres-v1
