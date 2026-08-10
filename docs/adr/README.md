@@ -31,3 +31,5 @@ or operational details.
 | [ADR-0023](ADR-0023-incident-lifecycle.md) | Incident lifecycle driven by consecutive trustworthy health verdicts |
 | [ADR-0024](ADR-0024-notification-delivery.md) | Notification routing and reliable, deduplicated delivery |
 | [ADR-0025](ADR-0025-authoritative-onboarding-and-plan-apply-parity.md) | One authoritative onboarding path; the approved plan is the instruction set |
+| [ADR-0026](ADR-0026-production-agent-listener-and-identity-persistence.md) | Two listeners for the agent bootstrap asymmetry; identity on a claim, not in memory |
+| [ADR-0027](ADR-0027-external-runtime-and-managed-dependencies.md) | Runtimes Drake does not run, and dependencies it does not manage |
