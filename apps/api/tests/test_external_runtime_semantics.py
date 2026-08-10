@@ -8,19 +8,21 @@ about what must NOT be equal.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import yaml
 from drake_api.catalog.external_runtime import (
+    DEFAULT_STALE_AFTER,
+    EXTERNAL_NOT_APPLICABLE,
     Availability,
     DependencyClass,
+    Freshness,
+    HealthSourceStatus,
     HostingProvider,
-    RuntimeKind,
     Verification,
     dependency_is_workload,
-    field_availability,
-    health_for_external,
+    evaluate_external_health,
     metrics_profile_state,
 )
 
@@ -34,18 +36,18 @@ OBSERVED_AT = datetime(2026, 8, 11, 9, 0, tzinfo=UTC)
 
 @pytest.mark.parametrize("field", ["cluster", "namespace", "agent", "workload_binding"])
 def test_kubernetes_only_fields_are_not_applicable_for_external(field: str) -> None:
-    assert field_availability(RuntimeKind.EXTERNAL, field) is Availability.NOT_APPLICABLE
+    # Asserted against the constant the API actually serialises, rather than
+    # a helper nothing called — the first version of this tested a function
+    # with zero production call sites, which proves the helper works and
+    # nothing about what the API returns.
+    assert field in EXTERNAL_NOT_APPLICABLE
 
 
-@pytest.mark.parametrize("field", ["cluster", "namespace", "agent", "workload_binding"])
-def test_the_same_fields_do_apply_to_kubernetes(field: str) -> None:
-    # None means "the question applies" — so a Kubernetes environment with no
-    # cluster is a real gap, not an inapplicable field.
-    assert field_availability(RuntimeKind.KUBERNETES, field) is None
-
-
-def test_a_field_that_applies_everywhere_is_never_not_applicable() -> None:
-    assert field_availability(RuntimeKind.EXTERNAL, "branch") is None
+def test_fields_that_apply_to_kubernetes_are_not_in_the_list() -> None:
+    # A Kubernetes environment with no cluster is a real gap, and the list
+    # is only consulted for external runtimes.
+    assert "branch" not in EXTERNAL_NOT_APPLICABLE
+    assert "criticality" not in EXTERNAL_NOT_APPLICABLE
 
 
 def test_not_applicable_is_distinct_from_unknown_and_unavailable() -> None:
@@ -55,70 +57,155 @@ def test_not_applicable_is_distinct_from_unknown_and_unavailable() -> None:
 
 
 # --------------------------------------------------------------------------
-# health and freshness
+# health and freshness — the full truth table
+#
+# Health and freshness are INDEPENDENT axes. The table below is the contract:
+# every row is a state the system can actually be in, and none of them may
+# be reachable from another by accident.
 # --------------------------------------------------------------------------
 
-
-def test_no_health_source_is_not_configured_and_never_healthy() -> None:
-    verdict = health_for_external(health_source_configured=False, last_observed_at=None)
-    assert verdict.status == "not_configured"
-    assert verdict.availability is Availability.UNKNOWN
-    assert verdict.status != "healthy"
+WITHIN = OBSERVED_AT + DEFAULT_STALE_AFTER - timedelta(minutes=1)
+BEYOND = OBSERVED_AT + DEFAULT_STALE_AFTER + timedelta(minutes=1)
 
 
-def test_a_configured_source_with_no_observation_is_unavailable_not_stale() -> None:
-    # `stale` says an answer aged. `unavailable` says there was never an
-    # answer. Rendering the first for the second inherits the visual
-    # language of data that merely went old.
-    verdict = health_for_external(health_source_configured=True, last_observed_at=None)
-    assert verdict.freshness == str(Availability.UNAVAILABLE)
-    assert verdict.freshness != "stale"
+@pytest.mark.parametrize(
+    ("source", "observed", "observed_health", "now", "health", "freshness"),
+    [
+        (HealthSourceStatus.NOT_CONFIGURED, None, None, None, "unknown", Freshness.UNAVAILABLE),
+        (HealthSourceStatus.CONFIGURED, None, None, None, "unknown", Freshness.UNAVAILABLE),
+        (HealthSourceStatus.CONFIGURED, OBSERVED_AT, "healthy", WITHIN, "healthy", Freshness.FRESH),
+        (
+            HealthSourceStatus.CONFIGURED,
+            OBSERVED_AT,
+            "unhealthy",
+            WITHIN,
+            "unhealthy",
+            Freshness.FRESH,
+        ),
+        (HealthSourceStatus.CONFIGURED, OBSERVED_AT, "healthy", BEYOND, "healthy", Freshness.STALE),
+        (
+            HealthSourceStatus.CONFIGURED,
+            OBSERVED_AT,
+            "unhealthy",
+            BEYOND,
+            "unhealthy",
+            Freshness.STALE,
+        ),
+    ],
+)
+def test_health_truth_table(
+    source: HealthSourceStatus,
+    observed: datetime | None,
+    observed_health: str | None,
+    now: datetime | None,
+    health: str,
+    freshness: Freshness,
+) -> None:
+    verdict = evaluate_external_health(
+        source=source,
+        observed_health=observed_health,
+        last_observed_at=observed,
+        now=now,
+    )
+    assert verdict.status == health
+    assert verdict.freshness is freshness
+
+
+def test_health_and_freshness_are_independent_axes() -> None:
+    # The pair that proves they are not one field: unhealthy+fresh exists,
+    # and so does healthy+stale.
+    unhealthy_fresh = evaluate_external_health(
+        source=HealthSourceStatus.CONFIGURED,
+        observed_health="unhealthy",
+        last_observed_at=OBSERVED_AT,
+        now=WITHIN,
+    )
+    healthy_stale = evaluate_external_health(
+        source=HealthSourceStatus.CONFIGURED,
+        observed_health="healthy",
+        last_observed_at=OBSERVED_AT,
+        now=BEYOND,
+    )
+    assert (unhealthy_fresh.status, unhealthy_fresh.freshness) == ("unhealthy", Freshness.FRESH)
+    assert (healthy_stale.status, healthy_stale.freshness) == ("healthy", Freshness.STALE)
+
+
+def test_an_aged_observation_keeps_its_verdict() -> None:
+    # Discarding the result on age would hide the one thing worth acting on.
+    verdict = evaluate_external_health(
+        source=HealthSourceStatus.CONFIGURED,
+        observed_health="unhealthy",
+        last_observed_at=OBSERVED_AT,
+        now=BEYOND,
+    )
+    assert verdict.status == "unhealthy"
+    assert verdict.freshness is Freshness.STALE
+
+
+def test_source_configuration_is_a_separate_field_from_the_verdict() -> None:
+    # "Nobody is watching" is a fact about Drake's configuration, not about
+    # the system's health. The first version reported not_configured AS the
+    # health status, which read as a property of the application.
+    verdict = evaluate_external_health(source=HealthSourceStatus.NOT_CONFIGURED)
+    assert verdict.source.status is HealthSourceStatus.NOT_CONFIGURED
     assert verdict.status == "unknown"
+    assert verdict.status != "not_configured"
 
 
-def test_freshness_becomes_meaningful_only_after_an_observation() -> None:
-    verdict = health_for_external(health_source_configured=True, last_observed_at=OBSERVED_AT)
-    assert verdict.freshness == "fresh"
-    assert verdict.last_observed_at == OBSERVED_AT
+def test_no_source_and_configured_without_observation_differ_only_in_source() -> None:
+    absent = evaluate_external_health(source=HealthSourceStatus.NOT_CONFIGURED)
+    configured = evaluate_external_health(source=HealthSourceStatus.CONFIGURED)
+    assert absent.status == configured.status == "unknown"
+    assert absent.freshness is configured.freshness is Freshness.UNAVAILABLE
+    assert absent.source.status is not configured.source.status
+
+
+def test_unavailable_is_never_stale() -> None:
+    verdict = evaluate_external_health(source=HealthSourceStatus.CONFIGURED)
+    assert verdict.freshness is Freshness.UNAVAILABLE
+    assert verdict.freshness is not Freshness.STALE
+
+
+def test_staleness_boundary_is_explicit_and_inclusive_of_the_threshold() -> None:
+    exactly = evaluate_external_health(
+        source=HealthSourceStatus.CONFIGURED,
+        observed_health="healthy",
+        last_observed_at=OBSERVED_AT,
+        now=OBSERVED_AT + DEFAULT_STALE_AFTER,
+    )
+    assert exactly.freshness is Freshness.FRESH, "at the threshold is not yet past it"
 
 
 def test_last_observed_at_is_never_derived_from_a_manifest_import() -> None:
-    # There is no import-time input to this function at all, which is the
-    # point: a manifest being read is not an observation of a runtime.
-    verdict = health_for_external(health_source_configured=True, last_observed_at=None)
+    # There is no import-time parameter on this function at all.
+    verdict = evaluate_external_health(source=HealthSourceStatus.CONFIGURED)
     assert verdict.last_observed_at is None
     assert verdict.as_dict()["last_observed_at"] is None
 
 
 def test_unknown_is_not_unhealthy() -> None:
-    verdict = health_for_external(health_source_configured=True, last_observed_at=None)
+    verdict = evaluate_external_health(source=HealthSourceStatus.CONFIGURED)
     assert verdict.status not in {"unhealthy", "critical", "degraded"}
 
 
-# --------------------------------------------------------------------------
-# verification: intent is not observation
-# --------------------------------------------------------------------------
-
-
 def test_verification_defaults_to_repository_intent() -> None:
-    verdict = health_for_external(health_source_configured=False, last_observed_at=None)
-    assert verdict.verification is Verification.REPOSITORY_INTENT
+    assert (
+        evaluate_external_health(source=HealthSourceStatus.NOT_CONFIGURED).verification
+        is Verification.REPOSITORY_INTENT
+    )
 
 
 def test_the_three_verification_levels_are_distinct() -> None:
     assert len({str(v) for v in Verification}) == 3
-    assert Verification.REPOSITORY_INTENT != Verification.OWNER_CONFIRMED
-    assert Verification.OWNER_CONFIRMED != Verification.PROVIDER_OBSERVED
 
 
 def test_repository_intent_does_not_imply_health() -> None:
-    verdict = health_for_external(
-        health_source_configured=False,
-        last_observed_at=None,
+    verdict = evaluate_external_health(
+        source=HealthSourceStatus.NOT_CONFIGURED,
         verification=Verification.REPOSITORY_INTENT,
     )
     assert verdict.status != "healthy"
-    assert verdict.freshness == str(Availability.UNAVAILABLE)
+    assert verdict.freshness is Freshness.UNAVAILABLE
 
 
 # --------------------------------------------------------------------------
@@ -229,3 +316,113 @@ def test_external_fixture_carries_no_endpoint_or_credential() -> None:
     )
     for pattern in forbidden:
         assert not re.search(pattern, text), f"fixture matches {pattern!r}"
+
+
+# --------------------------------------------------------------------------
+# Mixed runtime: the case that made dependency_is_workload dead code matter
+#
+# A project with BOTH a Kubernetes environment and an external one, plus a
+# provider-managed datastore. Before the review fix, the datastore became an
+# expected workload in the Kubernetes namespace and then reported as missing
+# — Drake claiming a managed database was an absent Deployment, permanently,
+# with no action anyone could take.
+# --------------------------------------------------------------------------
+
+MIXED_MANIFEST = {
+    "spec": {
+        "environments": [
+            {
+                "name": "dev",
+                "runtime": "kubernetes",
+                "branch": "main",
+                "criticality": "medium",
+                "clusterRef": "cluster-a",
+                "namespace": "mixed-dev",
+            },
+            {"name": "prod", "runtime": "external", "branch": "main", "criticality": "medium"},
+        ],
+        "services": [
+            {
+                "name": "api",
+                "component": "api",
+                "runtime": "fastapi",
+                "metricsProfile": "fastapi-v1",
+                "workloadSelector": {"app": "api"},
+            }
+        ],
+        "dataStores": [
+            {
+                "name": "app-db",
+                "engine": "postgresql",
+                "scope": "project",
+                "dependencyClass": "managed_data_platform",
+                "provider": "supabase",
+                "verification": "repository_intent",
+            },
+            {
+                "name": "cache",
+                "engine": "redis",
+                "scope": "environment",
+                "measurementProfile": "postgres-v1",
+            },
+        ],
+    }
+}
+
+
+def test_a_managed_dependency_is_never_an_expected_workload() -> None:
+    from drake_api.onboarding.drift import expected_datastores_from_manifest
+
+    expected = expected_datastores_from_manifest(MIXED_MANIFEST)
+    names = {w.service for w in expected}
+    assert "app-db" not in names, "a provider-managed platform became an expected workload"
+    # The in-cluster one still is, and defaults to in_cluster without saying so.
+    assert "cache" in names
+
+
+def test_a_managed_dependency_produces_no_missing_workload_drift() -> None:
+    from drake_api.onboarding.drift import (
+        DriftKind,
+        evaluate_drift,
+        expected_datastores_from_manifest,
+        expected_workloads_from_manifest,
+    )
+
+    report = evaluate_drift(
+        expected_workloads_from_manifest(MIXED_MANIFEST),
+        [],  # nothing observed at all
+        observed_namespaces=["mixed-dev"],
+        expected_datastores=expected_datastores_from_manifest(MIXED_MANIFEST),
+    )
+    missing = {i.service for i in report.of_kind(DriftKind.EXPECTED_NOT_OBSERVED)}
+    assert "app-db" not in missing, "a managed database was reported as a missing workload"
+
+
+def test_the_external_environment_gains_no_workload_expectation() -> None:
+    from drake_api.onboarding.drift import (
+        expected_datastores_from_manifest,
+        expected_workloads_from_manifest,
+    )
+
+    services = expected_workloads_from_manifest(MIXED_MANIFEST)
+    stores = expected_datastores_from_manifest(MIXED_MANIFEST)
+    assert {w.environment for w in services} == {"dev"}
+    assert {w.environment for w in stores} == {"dev"}
+
+
+def test_dependency_metadata_survives_manifest_parsing() -> None:
+    # provider and verification are not lost on the way in. Persistence and
+    # API round-trip are NOT claimed here — see the delivery report; this
+    # asserts only what the code actually does today.
+    store = MIXED_MANIFEST["spec"]["dataStores"][0]
+    assert store["provider"] == "supabase"
+    assert store["verification"] == str(Verification.REPOSITORY_INTENT)
+    assert dependency_is_workload(store["dependencyClass"]) is False
+
+
+def test_an_in_cluster_datastore_is_unaffected_by_the_new_field() -> None:
+    # Backward compatibility: the second store omits dependencyClass and
+    # must behave exactly as before.
+    store = MIXED_MANIFEST["spec"]["dataStores"][1]
+    assert "dependencyClass" not in store
+    assert dependency_is_workload(store.get("dependencyClass")) is True

@@ -198,3 +198,99 @@ not one, and there is no import-time input to the function that computes it.
 **Still out of scope, and unchanged by this:** no probe worker, no provider
 adapter, no provider credential, no background polling. The SSRF contract
 above governs an implementation that does not exist yet.
+
+---
+
+## Review corrections (follow-up to the first implementation)
+
+Six findings from CTO review, all fixable, all fixed. Recorded because
+several of them were claims the first delivery made that were not true.
+
+### Compatibility is a tightening, not purely additive
+
+The first report said "v1alpha1 unchanged because additive". That was wrong
+in one specific way and is corrected here: **an external environment may no
+longer carry `clusterRef` or `namespace`**, which were previously merely
+optional. A document of that exact shape used to validate and no longer
+does. That is validation tightening.
+
+`packages/contracts/test/external-runtime-contract.test.ts` demonstrates it
+directly rather than describing it, so the incompatibility cannot be lost.
+
+`v1alpha1` is retained, on two grounds recorded here so the decision can be
+challenged: no manifest of that shape exists anywhere in the repository or
+in any accepted catalog record (production holds zero projects), and
+`v1alpha1` is by name an alpha contract whose compatibility policy permits
+tightening. Had an accepted document been affected, this would have needed a
+version bump instead.
+
+### The service/environment invariant, stated
+
+`metricsProfile` requiredness is keyed on "does the project have a
+Kubernetes environment", which forces every service in a MIXED project to
+declare one. That follows from the invariant the code actually holds:
+
+> **Every service is expected in every Kubernetes environment.**
+
+`expected_workloads_from_manifest` implements it, and both onboarded
+projects depend on it — Hermes is 5 services × 2 environments = 10
+bindings. Under that invariant a service in a mixed project genuinely does
+have a Kubernetes deployment, so requiring a profile is not a false claim.
+
+The alternative invariant — a service scoped to a subset of environments —
+would need a schema field that does not exist. It is a coherent future
+change and deliberately not made here; until it exists, a project that
+wants a genuinely external-only service should be a separate project.
+Mixed-runtime contract tests pin both directions.
+
+### Migration reversibility is conditional
+
+"Reversible" was too strong. Precisely:
+
+| path | result |
+| --- | --- |
+| upgrade | additive; every existing row preserved |
+| downgrade, no NULL metrics profile | succeeds |
+| downgrade, any NULL metrics profile | **intentionally refused** |
+
+Both paths are proven against a real PostgreSQL in
+`test_migrations_audit_integration.py`, including that a refused downgrade
+moves nothing — no revision change, no lost row.
+
+### Managed dependencies now decide something
+
+`dependency_is_workload()` was called only by its own test, while
+`expected_datastores_from_manifest()` turned **every** datastore into an
+expected Kubernetes workload regardless of class. In a project with a
+Kubernetes environment, a `managed_data_platform` therefore became a
+missing workload — permanently, and unfixable by anyone reading it. The
+drift path now uses the typed decision, and a mixed-runtime regression test
+fails without the fix.
+
+### Health is two axes, and the source is a third field
+
+The first model reported `not_configured` as the health STATUS, which reads
+as a property of the application rather than of Drake's configuration; and
+freshness had no threshold, so any observation was `fresh` forever and
+`stale` was unreachable. Now:
+
+- `health.source.status` — is anything configured to look
+- `health.status` — the observed verdict, which survives ageing
+- `freshness` — `fresh` / `stale` against an explicit `stale_after`, or
+  `unavailable` when there has been no observation at all
+
+Health and freshness are independent: unhealthy+fresh and healthy+stale are
+both reachable, and both are asserted. The API serves this computed verdict
+and the web renders it; both previously hard-coded the strings.
+
+### What is NOT implemented
+
+Recorded rather than glossed:
+
+- **Managed dependency persistence and API round-trip.** `dataStores` are
+  still manifest-and-drift only: no table, no plan item, no API field.
+  `provider` and `verification` survive parsing and drift, and nothing
+  further. This is `FOUNDATION_ONLY`, not implemented.
+- **Health observation.** No probe worker, no provider adapter, no polling.
+  The state machine is real and wired; nothing produces an observation, so
+  every external record honestly reports `unknown` / `unavailable`.

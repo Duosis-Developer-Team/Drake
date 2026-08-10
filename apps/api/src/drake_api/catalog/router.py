@@ -22,7 +22,9 @@ from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.catalog.authz import escape_like, visible_scope_ids
 from drake_api.catalog.external_runtime import (
     EXTERNAL_NOT_APPLICABLE,
+    HealthSourceStatus,
     RuntimeKind,
+    evaluate_external_health,
     metrics_profile_state,
 )
 from drake_api.db import get_engine
@@ -309,6 +311,16 @@ def _environment_payload(row: Any, project_key: str) -> dict[str, Any]:
         # "nobody recorded one". Conflating those is what makes an external
         # application look like a Kubernetes one that lost its cluster.
         "not_applicable": sorted(EXTERNAL_NOT_APPLICABLE) if row[2] == RuntimeKind.EXTERNAL else [],
+        # Computed by the domain state machine, not asserted by the UI. No
+        # observation system exists for an external runtime yet, so this is
+        # honestly unknown/unavailable — but it is unknown because the
+        # function said so, and the day a source appears the same call
+        # starts returning a real verdict without the UI changing.
+        **(
+            {"health": evaluate_external_health(source=HealthSourceStatus.NOT_CONFIGURED).as_dict()}
+            if row[2] == RuntimeKind.EXTERNAL
+            else {}
+        ),
         "version": row[11],
         "scope": {"type": "environment", "ref": f"{project_key}/{row[1]}"},
         "source": {

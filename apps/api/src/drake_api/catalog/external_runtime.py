@@ -26,7 +26,7 @@ is how a project comes to be reported healthy on the strength of a
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -98,46 +98,66 @@ REASON_TEXT: dict[Availability, str] = {
 }
 
 
-def field_availability(runtime: str, field: str) -> Availability | None:
-    """`not_applicable` for Kubernetes-only fields on an external runtime.
+class HealthSourceStatus(StrEnum):
+    """Whether anything is configured to observe this at all.
 
-    Returns None when the field genuinely applies, so callers can tell
-    "answer it" from "do not ask".
+    Separate from the verdict on purpose. "Nobody is watching" and "we
+    looked and it is fine" are different facts, and the first version of
+    this collapsed them: no source produced `not_configured` as the HEALTH
+    status, which reads as a property of the system rather than of Drake's
+    configuration.
     """
-    if runtime == RuntimeKind.EXTERNAL and field in EXTERNAL_NOT_APPLICABLE:
-        return Availability.NOT_APPLICABLE
-    return None
+
+    NOT_CONFIGURED = "not_configured"
+    CONFIGURED = "configured"
+
+
+class Freshness(StrEnum):
+    FRESH = "fresh"
+    STALE = "stale"
+    #: No observation has ever been recorded. Not the same as `stale`, which
+    #: is a statement about an answer that aged.
+    UNAVAILABLE = "unavailable"
+
+
+#: How old an observation may be before it stops being trusted. Explicit,
+#: because "fresh" without a threshold silently meant "any observation ever
+#: recorded", so nothing could ever go stale.
+DEFAULT_STALE_AFTER = timedelta(minutes=15)
+
+
+@dataclass(frozen=True, slots=True)
+class HealthSource:
+    """What is configured to observe an external runtime, if anything."""
+
+    status: HealthSourceStatus = HealthSourceStatus.NOT_CONFIGURED
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"status": str(self.status)}
 
 
 @dataclass(frozen=True, slots=True)
 class HealthVerdict:
-    """What Drake is prepared to say, and why.
+    """Health and freshness as INDEPENDENT axes.
 
-    `status` reuses the service-health vocabulary rather than inventing a
-    parallel one; `availability` explains an absence when there is one.
+    A record can be unhealthy and fresh (we just looked, it is broken) or
+    healthy and stale (it was fine, but that was hours ago). Folding them
+    into one field loses whichever of the two the reader needed.
     """
 
     status: str
+    freshness: Freshness
+    source: HealthSource
     availability: Availability | None = None
     verification: Verification | None = None
     last_observed_at: datetime | None = None
 
-    @property
-    def freshness(self) -> str:
-        """Freshness only means something after an observation.
-
-        Without one it is `unavailable` — which is not `stale`. Stale is a
-        statement about an answer that has aged; unavailable is the absence
-        of any answer at all, and treating them alike would let a project
-        that has never been observed inherit the visual language of one
-        whose data merely went old.
-        """
-        if self.last_observed_at is None:
-            return str(Availability.UNAVAILABLE)
-        return "fresh"
-
     def as_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"status": self.status, "freshness": self.freshness}
+        payload: dict[str, Any] = {
+            "status": self.status,
+            "freshness": str(self.freshness),
+            "source": self.source.as_dict(),
+        }
         if self.availability is not None:
             payload["availability"] = str(self.availability)
             payload["reason"] = REASON_TEXT[self.availability]
@@ -149,35 +169,48 @@ class HealthVerdict:
         return payload
 
 
-def health_for_external(
+def evaluate_external_health(
     *,
-    health_source_configured: bool,
-    last_observed_at: datetime | None,
+    source: HealthSourceStatus = HealthSourceStatus.NOT_CONFIGURED,
+    observed_health: str | None = None,
+    last_observed_at: datetime | None = None,
+    now: datetime | None = None,
+    stale_after: timedelta = DEFAULT_STALE_AFTER,
     verification: Verification = Verification.REPOSITORY_INTENT,
 ) -> HealthVerdict:
-    """Health for a runtime with no agent.
+    """The whole external health state machine, in one pure function.
 
-    Three inputs, and none of them is a manifest import. A manifest being
-    read tells you a file exists; `last_observed_at` may only be set by an
-    actual observation, or the field means nothing.
+    `now` is passed in rather than read from the clock, so the same inputs
+    always give the same verdict and a staleness boundary can actually be
+    tested. `last_observed_at` may only be set by a real observation — there
+    is deliberately no parameter here that a manifest import could fill.
     """
-    if not health_source_configured:
-        return HealthVerdict(
-            status="not_configured",
-            availability=Availability.UNKNOWN,
-            verification=verification,
-            last_observed_at=None,
-        )
     if last_observed_at is None:
+        # No observation: health is unknown regardless of whether something
+        # is configured to look. The SOURCE carries that distinction.
         return HealthVerdict(
             status="unknown",
-            availability=Availability.UNAVAILABLE,
+            freshness=Freshness.UNAVAILABLE,
+            source=HealthSource(source),
+            availability=(
+                Availability.UNKNOWN
+                if source is HealthSourceStatus.NOT_CONFIGURED
+                else Availability.UNAVAILABLE
+            ),
             verification=verification,
             last_observed_at=None,
         )
+
+    moment = now or last_observed_at
+    aged = (moment - last_observed_at) > stale_after
+    # The observed verdict SURVIVES ageing. A stale unhealthy record is
+    # still unhealthy; discarding the result on age would hide the one
+    # thing worth acting on.
     return HealthVerdict(
-        status="unknown",
-        availability=None,
+        status=observed_health or "unknown",
+        freshness=Freshness.STALE if aged else Freshness.FRESH,
+        source=HealthSource(source),
+        availability=None if observed_health else Availability.UNKNOWN,
         verification=verification,
         last_observed_at=last_observed_at,
     )

@@ -359,3 +359,112 @@ def test_there_is_exactly_one_head() -> None:
 
     config = alembic_config(require_database_url())
     assert len(ScriptDirectory.from_config(config).get_heads()) == 1
+
+
+def _seed_service_without_metrics_profile(database_url: str) -> None:
+    """A service row with NO metrics profile — legal under 0021, and exactly
+    what 0020's NOT NULL column cannot represent.
+
+    Column lists come from the live schema rather than from memory: the first
+    attempt at this guessed `scopes.scope_ref`, which does not exist.
+    """
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            project_scope = connection.execute(
+                text(
+                    "INSERT INTO scopes (scope_type, external_ref, display_name) "
+                    "VALUES ('project', 'g10probe', 'probe') RETURNING id"
+                )
+            ).scalar_one()
+            project = connection.execute(
+                text(
+                    "INSERT INTO projects (project_key, display_name, repo_provider, repo_owner, "
+                    "repo_name, default_branch, criticality, tenant_model, catalog_source_kind, "
+                    "catalog_source_ref, source_revision, scope_id) "
+                    "VALUES ('g10probe', 'probe', 'github', 'o', 'r', 'main', 'low', 'none', "
+                    "'fixture', 'test', 'rev', :s) RETURNING id"
+                ),
+                {"s": project_scope},
+            ).scalar_one()
+            # `service_definitions` carries no scope_id — services are scoped
+            # through their environment binding, not directly.
+            connection.execute(
+                text(
+                    "INSERT INTO service_definitions (project_id, service_key, display_name, "
+                    "component, runtime, metrics_profile, catalog_source_kind, catalog_source_ref, "
+                    "source_revision) "
+                    "VALUES (:p, 'web', 'web', 'web', 'nextjs', NULL, 'fixture', 'test', 'rev')"
+                ),
+                {"p": project},
+            )
+    finally:
+        engine.dispose()
+
+
+def test_0021_downgrade_succeeds_when_every_service_has_a_profile() -> None:
+    """The reversible half. No NULL rows, so 0020's NOT NULL can be restored."""
+    database_url = require_database_url()
+    config = alembic_config(database_url)
+    command.upgrade(config, "head")
+    _wipe(database_url)
+
+    command.downgrade(config, "0020")
+    assert _revision(database_url) == "0020"
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            nullable = connection.execute(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns "
+                    "WHERE table_name = 'service_definitions' AND column_name = 'metrics_profile'"
+                )
+            ).scalar_one()
+            columns = connection.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns "
+                    "WHERE table_name = 'environments' AND column_name = 'hosting_provider'"
+                )
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    assert nullable == "NO", "0020 restores the NOT NULL constraint"
+    assert columns == 0, "0020 has no hosting_provider column"
+
+    command.upgrade(config, "head")
+    assert _revision(database_url) == "0021"
+    _wipe(database_url)
+
+
+def test_0021_downgrade_refuses_rather_than_inventing_a_metrics_profile() -> None:
+    """The irreversible half, and why it is deliberate.
+
+    A service with no metrics source is exactly what 0021 exists to allow.
+    Downgrading would have to put SOMETHING in that column, and any value
+    asserts a scrape target that does not exist — recreating the false claim
+    silently, in the direction nobody watches. So it refuses, and says which
+    rows to settle first.
+    """
+    database_url = require_database_url()
+    config = alembic_config(database_url)
+    command.upgrade(config, "head")
+    _wipe(database_url)
+    _seed_service_without_metrics_profile(database_url)
+
+    with pytest.raises(Exception) as raised:
+        command.downgrade(config, "0020")
+    assert "metrics profile" in str(raised.value).lower()
+
+    # Nothing moved: the refusal is total, not partial.
+    assert _revision(database_url) == "0021"
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            survived = connection.execute(
+                text("SELECT count(*) FROM service_definitions WHERE metrics_profile IS NULL")
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    assert survived == 1, "no row may be lost to a refused downgrade"
+    _wipe(database_url)

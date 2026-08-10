@@ -100,14 +100,32 @@ export default function EnvironmentDetailPage() {
                       <MetaRow label="Agent">
                         <span className="text-xs italic text-ink-muted">Not applicable</span>
                       </MetaRow>
+                      <MetaRow label="Health source">
+                        <span className="font-mono text-xs">
+                          {data.health?.source.status ?? "not_configured"}
+                        </span>
+                      </MetaRow>
                       <MetaRow label="Health">
-                        {/* No agent and no probe: nothing has observed this.
-                            Never rendered as a healthy state. */}
-                        <span className="text-xs italic text-ink-muted">Unknown</span>
+                        {/* From the API's domain verdict, not hard-coded here.
+                            These were literal "Unknown"/"Unavailable" strings,
+                            so the day an observation existed the page would
+                            still have claimed nothing was known. */}
+                        <span className="font-mono text-xs">
+                          {data.health?.status ?? "unknown"}
+                        </span>
                       </MetaRow>
                       <MetaRow label="Freshness">
-                        <span className="text-xs italic text-ink-muted">Unavailable</span>
+                        <span className="font-mono text-xs">
+                          {data.health?.freshness ?? "unavailable"}
+                        </span>
                       </MetaRow>
+                      {data.health?.last_observed_at ? (
+                        <MetaRow label="Last observed">
+                          <span className="font-mono text-xs">
+                            {data.health.last_observed_at}
+                          </span>
+                        </MetaRow>
+                      ) : null}
                     </>
                   ) : null}
                   <MetaRow label="Catalog version">
