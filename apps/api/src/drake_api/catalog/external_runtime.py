@@ -25,6 +25,7 @@ is how a project comes to be reported healthy on the strength of a
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -73,6 +74,23 @@ class Verification(StrEnum):
     REPOSITORY_INTENT = "repository_intent"
     OWNER_CONFIRMED = "owner_confirmed"
     PROVIDER_OBSERVED = "provider_observed"
+
+
+#: Weakest to strongest. Used to answer "is this a promotion?" without
+#: string comparisons that would silently reorder if a level is added.
+_VERIFICATION_RANK: dict[str, int] = {
+    Verification.REPOSITORY_INTENT: 0,
+    Verification.OWNER_CONFIRMED: 1,
+    Verification.PROVIDER_OBSERVED: 2,
+}
+
+
+def verification_rank(value: str | None) -> int:
+    return _VERIFICATION_RANK.get(str(value or Verification.REPOSITORY_INTENT), 0)
+
+
+def is_above_repository_intent(value: str | None) -> bool:
+    return verification_rank(value) > 0
 
 
 class Availability(StrEnum):
@@ -228,6 +246,27 @@ def metrics_profile_state(metrics_profile: str | None) -> tuple[str, Availabilit
     return "not_configured", Availability.UNKNOWN
 
 
+class WorkloadApplicability(StrEnum):
+    """Whether workload semantics mean anything for a dependency.
+
+    Its own vocabulary rather than borrowing `Availability`: that enum says
+    why a VALUE is absent, and this says whether a QUESTION applies. An
+    in-cluster datastore is a workload with replicas and a rollout, so
+    labelling it `not_applicable` — which the first version did for every
+    dependency — was wrong about the domain, not merely about wording.
+    """
+
+    APPLICABLE = "applicable"
+    NOT_APPLICABLE = "not_applicable"
+
+
+def workload_applicability(dependency_class: str | None) -> WorkloadApplicability:
+    """Drake runs an in-cluster dependency; it does not run the others."""
+    if dependency_is_workload(dependency_class):
+        return WorkloadApplicability.APPLICABLE
+    return WorkloadApplicability.NOT_APPLICABLE
+
+
 def dependency_is_workload(dependency_class: str | None) -> bool:
     """Only an in-cluster dependency is a workload.
 
@@ -236,3 +275,63 @@ def dependency_is_workload(dependency_class: str | None) -> bool:
     restart.
     """
     return (dependency_class or DependencyClass.IN_CLUSTER) == DependencyClass.IN_CLUSTER
+
+
+def resolve_verification_for_import(
+    declared: str | None,
+    existing: str | None = None,
+) -> Verification:
+    """What an import may record, given what is already known.
+
+    Two failure modes, in opposite directions, and this refuses both:
+
+    **Promotion.** A manifest asserting `provider_observed` is a repository
+    claiming Drake observed something, which is not evidence that Drake
+    observed anything. What the manifest declares is therefore ignored
+    entirely — it is not an input to the answer.
+
+    **Erasure.** The first version returned `repository_intent`
+    unconditionally, and `verification` is a mutable field, so a re-import
+    overwrote an `owner_confirmed` or `provider_observed` that somebody had
+    established out of band. Refusing to raise evidence is correct; deleting
+    it is not, and it is worse because the destroyed value came from the one
+    process that could actually establish it.
+
+    So: preserve whatever exists, and default to `repository_intent` when
+    nothing does. Raising a level stays an out-of-band action.
+    """
+    if existing and existing in _VERIFICATION_RANK:
+        return Verification(existing)
+    return Verification.REPOSITORY_INTENT
+
+
+def dependency_metadata(
+    store: Mapping[str, Any],
+    existing: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Manifest dataStore -> the shape `project_dependencies` stores.
+
+    Deliberately drops `connectionSecretRef`. It is only a reference name and
+    the schema forbids a value there, but nothing downstream needs it, and a
+    field nobody reads is a field that can only ever leak.
+    """
+    dependency_class = str(store.get("dependencyClass") or DependencyClass.IN_CLUSTER)
+    provider = str(store.get("provider") or "")
+    return {
+        "dependency_key": str(store.get("name") or ""),
+        "display_name": str(store.get("name") or ""),
+        "dependency_class": dependency_class,
+        "engine": str(store.get("engine") or ""),
+        "store_scope": str(store.get("scope") or ""),
+        # A provider on an in-cluster store would claim something about
+        # infrastructure Drake runs itself; the database refuses it too.
+        "provider": provider if provider and dependency_class != DependencyClass.IN_CLUSTER else "",
+        # Preserved from the catalog when it exists; never raised by a
+        # manifest, never lowered by a re-import.
+        "verification": str(
+            resolve_verification_for_import(
+                store.get("verification"),
+                (existing or {}).get("verification"),
+            )
+        ),
+    }

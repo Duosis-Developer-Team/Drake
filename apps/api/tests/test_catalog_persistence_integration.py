@@ -118,6 +118,10 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         for table in (
             "integrations",
             "environment_services",
+            # Deleted before projects: the FK is RESTRICT, so a leftover dependency
+            # row blocks the whole reset with a foreign-key violation and every
+            # test in the file errors at setup.
+            "project_dependencies",
             "service_definitions",
             "environments",
             "project_owners",

@@ -34,6 +34,30 @@ export interface Project {
   as_of: string;
   owners?: { team: string; role: string }[];
   operational?: Record<string, OperationalState>;
+  /** Present on the project detail response; absent on the collection. */
+  dependencies?: ProjectDependency[];
+}
+
+/** A dependency the project has and Drake does not necessarily run. */
+export interface ProjectDependency {
+  id: string;
+  dependency_key: string;
+  display_name: string;
+  dependency_class: "in_cluster" | "managed_data_platform" | "external_service";
+  engine: string;
+  scope: string;
+  /** Typed and closed; `unknown` when nobody recorded one. */
+  provider: string;
+  verification: "repository_intent" | "owner_confirmed" | "provider_observed";
+  /** `applicable` for in-cluster; `not_applicable` for what a provider runs. */
+  workload_applicability: "applicable" | "not_applicable";
+  /** Absent for in-cluster: its health comes from the workload path. */
+  health?: {
+    status: string;
+    freshness: "fresh" | "stale" | "unavailable";
+    source: { status: "configured" | "not_configured" };
+    last_observed_at: string | null;
+  };
 }
 
 export interface Environment {

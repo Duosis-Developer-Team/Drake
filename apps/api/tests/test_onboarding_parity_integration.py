@@ -84,6 +84,36 @@ def test_every_registered_handler_is_reachable_from_some_plan() -> None:
             }
         ]
     )
+    # Same manifest plus a dependency, so the dependency create/link/update
+    # paths are reachable. Every registered handler must be reachable from
+    # SOME plan, or a plan can propose an action nothing knows how to apply.
+    with_dependency = manifest_document(
+        dataStores=[
+            {
+                "name": "datalake-db",
+                "engine": "postgresql",
+                "scope": "project",
+                "dependencyClass": "managed_data_platform",
+                "provider": "supabase",
+                "verification": "repository_intent",
+            }
+        ]
+    )
+    dependency_rows = {"dependencies": {("datalake", "datalake-db"): "d1"}}
+    stale_dependency = {
+        "dependency_metadata": {
+            ("datalake", "datalake-db"): {
+                "dependency_key": "datalake-db",
+                "display_name": "datalake-db",
+                "dependency_class": "managed_data_platform",
+                "engine": "postgresql",
+                "store_scope": "environment",
+                "provider": "supabase",
+                "verification": "repository_intent",
+            }
+        }
+    }
+
     ids = {
         "projects": {"datalake": "p1"},
         "project_repository": {"datalake": "repo-1"},
@@ -147,6 +177,12 @@ def test_every_registered_handler_is_reachable_from_some_plan() -> None:
                 }
             ),
         ),
+        # a dependency the catalog does not have → dependency create
+        (with_dependency, snapshot()),
+        # the same dependency already recorded, unchanged → dependency link
+        (with_dependency, snapshot(**dependency_rows)),
+        # recorded with different mutable metadata → dependency update
+        (with_dependency, snapshot(**dependency_rows, **stale_dependency)),
         # rows exist and differ → update paths
         (
             with_slo,

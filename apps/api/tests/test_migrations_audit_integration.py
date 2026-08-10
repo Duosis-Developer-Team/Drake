@@ -123,6 +123,14 @@ async def test_upgrade_audit_appendonly_downgrade_upgrade() -> None:
 # ===========================================================================
 
 
+def _head_revision(config: Config) -> str:
+    """Alembic's own head, so a new migration does not break these tests for
+    a reason unrelated to what they guard."""
+    from alembic.script import ScriptDirectory
+
+    return ScriptDirectory.from_config(config).get_current_head() or ""
+
+
 def _revision(database_url: str) -> str:
     engine = create_engine(database_url)
     try:
@@ -408,6 +416,17 @@ def test_0021_downgrade_succeeds_when_every_service_has_a_profile() -> None:
     config = alembic_config(database_url)
     command.upgrade(config, "head")
     _wipe(database_url)
+    # State this test's precondition rather than assuming it: a NULL profile
+    # left by any other run is exactly what 0021 refuses on, and the failure
+    # would look like a defect in this test's subject.
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM service_definitions WHERE metrics_profile IS NULL")
+            )
+    finally:
+        engine.dispose()
 
     command.downgrade(config, "0020")
     assert _revision(database_url) == "0020"
@@ -433,7 +452,7 @@ def test_0021_downgrade_succeeds_when_every_service_has_a_profile() -> None:
     assert columns == 0, "0020 has no hosting_provider column"
 
     command.upgrade(config, "head")
-    assert _revision(database_url) == "0021"
+    assert _revision(database_url) == _head_revision(config)
     _wipe(database_url)
 
 
@@ -452,12 +471,18 @@ def test_0021_downgrade_refuses_rather_than_inventing_a_metrics_profile() -> Non
     _wipe(database_url)
     _seed_service_without_metrics_profile(database_url)
 
+    revision_before = _revision(database_url)
+    # Downgrading to 0020 walks 0022 and then 0021, which refuses. PostgreSQL
+    # has transactional DDL, so alembic rolls the WHOLE chain back — the
+    # refusal is total rather than leaving the schema part-way down.
     with pytest.raises(Exception) as raised:
         command.downgrade(config, "0020")
     assert "metrics profile" in str(raised.value).lower()
 
-    # Nothing moved: the refusal is total, not partial.
-    assert _revision(database_url) == "0021"
+    # Nothing moved at all — not even the migration ahead of the one that
+    # refused. Compared against the revision captured before the attempt so
+    # a future migration cannot break this for an unrelated reason.
+    assert _revision(database_url) == revision_before
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
@@ -467,4 +492,17 @@ def test_0021_downgrade_refuses_rather_than_inventing_a_metrics_profile() -> Non
     finally:
         engine.dispose()
     assert survived == 1, "no row may be lost to a refused downgrade"
+
+    # _wipe does not know about these rows, and a leftover NULL profile makes
+    # the sibling downgrade test fail for a reason it is not testing.
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM service_definitions WHERE service_key = 'web'"))
+            connection.execute(text("DELETE FROM projects WHERE project_key = 'g10probe'"))
+            connection.execute(
+                text("DELETE FROM scopes WHERE external_ref IN ('g10probe', 'g10probe/web')")
+            )
+    finally:
+        engine.dispose()
     _wipe(database_url)

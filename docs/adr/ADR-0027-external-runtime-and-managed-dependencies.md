@@ -294,3 +294,105 @@ Recorded rather than glossed:
 - **Health observation.** No probe worker, no provider adapter, no polling.
   The state machine is real and wired; nothing produces an observation, so
   every external record honestly reports `unknown` / `unavailable`.
+
+---
+
+## Sprint 13F.2 — dependencies reach the catalog
+
+The previous section labelled managed-dependency persistence
+`FOUNDATION_ONLY`. It no longer is: `dataStores` now travel manifest →
+validation → plan → transactional apply → `project_dependencies` → API →
+project view.
+
+**Its own table.** A managed data platform is not a service (no workload,
+no replicas, nothing to restart) and not an in-cluster datastore Drake
+operates. Either host table would have meant a nullable discriminator plus
+every reader remembering to check it.
+
+**Identity is `(project, dependency_key)`**, so a repeated import reconciles
+and the same name under another project is a different thing. Class and
+engine are immutable — a change there is a different dependency wearing the
+same name, which is a conflict for a person. Display name, provider,
+verification and scope are mutable and audited like any other metadata
+update.
+
+**An import may only ever record `repository_intent`.** The column accepts
+the higher levels so an out-of-band confirmation or a real observation can
+set them, but `clamp_verification_for_import` refuses promotion on the
+import path. A manifest asserting `provider_observed` is a repository
+claiming Drake observed something, which is not evidence that Drake
+observed anything. Proven end-to-end: the fixture manifest asks for
+`provider_observed` and the row reads `repository_intent`.
+
+**No credential material**, and `connectionSecretRef` is dropped rather than
+stored. It is only a reference name and the schema already forbids a value
+there, but nothing downstream needs it, and a field nobody reads can only
+ever leak.
+
+Four defects surfaced while wiring it, each of which had made the chain
+silently incomplete:
+
+- an absent `metricsProfile` planned as `unmapped`, which BLOCKS an apply —
+  so an external project could pass validation and never be importable at
+  all. Absent is now `not_configured`; a declared-but-unknown profile is
+  still `unmapped`, because that is somebody naming a key Drake does not
+  have.
+- `hosting_provider` was added to the immutable environment fields and to
+  the proposed metadata but not to the metadata loaded FROM the database,
+  so every re-import of an external project conflicted with itself.
+- `dependency` was missing from the plan-item entity vocabulary, so the
+  INSERT failed inside the apply transaction and rolled the whole import
+  back on a constraint no reviewer could see in the plan.
+- `link` had no handler, so a second import of an UNCHANGED dependency made
+  the entire plan unappliable.
+
+**Migration 0022** is additive on the way up. Its downgrade **drops
+dependency rows, and that is data loss** — "re-derivable from the manifest"
+holds only while the source manifest is still reachable and unchanged,
+neither of which is guaranteed. It refuses when plan items record a
+dependency decision, because deleting somebody's record of a decision to fit
+a narrower constraint is worse than refusing; that refusal protects the plan
+history, not the dependency rows.
+
+    upgrade                                additive
+    downgrade, no dependency plan history  lossy but allowed
+    downgrade, dependency plan history     refused atomically
+
+Still out of scope and unchanged: no probe worker, no provider adapter, no
+credential, no polling. Health for a dependency is `unknown` and freshness
+`unavailable` because nothing observes it, and importing a manifest is not
+an observation.
+
+### Review corrections (second round)
+
+Three defects, all found by reading the code rather than by a test:
+
+**An import erased evidence it could not create.** `verification` is a
+mutable field and the resolver returned `repository_intent`
+unconditionally, so a re-import overwrote an `owner_confirmed` or
+`provider_observed` established out of band. Refusing to RAISE a level is
+correct; deleting one is worse than either, because the destroyed value came
+from the only process that could establish it. The resolver now preserves
+what exists and defaults to `repository_intent` when nothing does — a
+manifest's own claim is not an input at all.
+
+A provider change over held evidence is now a **blocking conflict**
+(`dependency_provider_change_resets_verification`) rather than a silent
+reset: evidence obtained for one provider does not travel to another, and
+whether the confirmation still holds is a person's call.
+
+**Workload applicability was not class-aware.** Every dependency reported
+`not_applicable`, including `in_cluster` — which Drake runs, with replicas
+and a rollout. That contradicted the domain definition the same ADR states.
+`WorkloadApplicability` is now its own vocabulary rather than borrowing
+`Availability`: that enum says why a VALUE is absent, this says whether a
+QUESTION applies. The external health evaluator no longer speaks for
+in-cluster rows either, and the UI separates "In-cluster datastores" from
+"Managed dependencies".
+
+**A dependency removed from a manifest produced no plan item at all** — the
+row stayed active and kept appearing in the API with nothing reporting the
+divergence. It now emits `unmapped` / `catalog_only`, the same policy
+services already had: reported, never removed, and blocking. An unchanged
+re-import produces no false positive, and another project's dependency of
+the same name is not this project's business.

@@ -426,3 +426,96 @@ def test_an_in_cluster_datastore_is_unaffected_by_the_new_field() -> None:
     store = MIXED_MANIFEST["spec"]["dataStores"][1]
     assert "dependencyClass" not in store
     assert dependency_is_workload(store.get("dependencyClass")) is True
+
+
+# --------------------------------------------------------------------------
+# Verification: an import may not raise it, and must not erase it
+#
+# The first version returned repository_intent unconditionally on a mutable
+# field, so a re-import DELETED an owner_confirmed or provider_observed that
+# somebody had established out of band. Refusing to raise evidence is
+# correct; destroying it is worse than either, because the value came from
+# the one process that could actually establish it.
+# --------------------------------------------------------------------------
+
+
+def test_a_new_dependency_records_repository_intent() -> None:
+    from drake_api.catalog.external_runtime import resolve_verification_for_import
+
+    assert resolve_verification_for_import(None, None) is Verification.REPOSITORY_INTENT
+
+
+@pytest.mark.parametrize("claim", ["owner_confirmed", "provider_observed"])
+def test_a_manifest_cannot_promote_itself(claim: str) -> None:
+    from drake_api.catalog.external_runtime import resolve_verification_for_import
+
+    # A repository asserting Drake observed something is not evidence that
+    # Drake observed anything. The declared value is not an input at all.
+    assert resolve_verification_for_import(claim, None) is Verification.REPOSITORY_INTENT
+
+
+@pytest.mark.parametrize("held", ["owner_confirmed", "provider_observed"])
+def test_a_reimport_preserves_higher_verification(held: str) -> None:
+    from drake_api.catalog.external_runtime import resolve_verification_for_import
+
+    assert str(resolve_verification_for_import("repository_intent", held)) == held
+    # And a manifest claiming something else still cannot change it.
+    assert str(resolve_verification_for_import("provider_observed", held)) == held
+
+
+def test_repository_intent_stays_repository_intent() -> None:
+    from drake_api.catalog.external_runtime import resolve_verification_for_import
+
+    assert (
+        resolve_verification_for_import("provider_observed", "repository_intent")
+        is Verification.REPOSITORY_INTENT
+    )
+
+
+def test_verification_levels_are_ordered_not_compared_as_strings() -> None:
+    from drake_api.catalog.external_runtime import (
+        is_above_repository_intent,
+        verification_rank,
+    )
+
+    assert verification_rank("repository_intent") == 0
+    assert verification_rank("owner_confirmed") < verification_rank("provider_observed")
+    assert is_above_repository_intent("owner_confirmed") is True
+    assert is_above_repository_intent("repository_intent") is False
+    assert is_above_repository_intent(None) is False
+
+
+# --------------------------------------------------------------------------
+# Workload applicability is class-aware
+# --------------------------------------------------------------------------
+
+
+def test_an_in_cluster_dependency_has_workload_semantics() -> None:
+    from drake_api.catalog.external_runtime import (
+        WorkloadApplicability,
+        workload_applicability,
+    )
+
+    # Drake runs it: it has replicas and a rollout. Telling an operator its
+    # workload is "not applicable" is false about the domain.
+    assert workload_applicability("in_cluster") is WorkloadApplicability.APPLICABLE
+    assert workload_applicability(None) is WorkloadApplicability.APPLICABLE
+
+
+@pytest.mark.parametrize("dependency_class", ["managed_data_platform", "external_service"])
+def test_a_provider_run_dependency_has_no_workload(dependency_class: str) -> None:
+    from drake_api.catalog.external_runtime import (
+        WorkloadApplicability,
+        workload_applicability,
+    )
+
+    assert workload_applicability(dependency_class) is WorkloadApplicability.NOT_APPLICABLE
+
+
+def test_workload_applicability_is_its_own_vocabulary() -> None:
+    from drake_api.catalog.external_runtime import Availability, WorkloadApplicability
+
+    # `Availability` says why a VALUE is absent; this says whether a QUESTION
+    # applies. Borrowing the first for the second is what produced
+    # "Workload: Not applicable" on a datastore Drake runs.
+    assert str(WorkloadApplicability.APPLICABLE) not in {str(a) for a in Availability}

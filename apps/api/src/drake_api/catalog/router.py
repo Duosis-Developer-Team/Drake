@@ -24,8 +24,10 @@ from drake_api.catalog.external_runtime import (
     EXTERNAL_NOT_APPLICABLE,
     HealthSourceStatus,
     RuntimeKind,
+    dependency_is_workload,
     evaluate_external_health,
     metrics_profile_state,
+    workload_applicability,
 )
 from drake_api.db import get_engine
 from drake_api.settings import Settings
@@ -180,6 +182,54 @@ async def _project_payload(
         },
         "as_of": _as_of(),
     }
+
+    # Dependencies are visible exactly when their PROJECT is — this function
+    # is only reached for a project the principal can already see, so no
+    # second scope check is needed and none is invented. `include_details`
+    # keeps the list off the collection endpoint.
+    if include_details:
+        payload["dependencies"] = [
+            {
+                "id": str(dep[0]),
+                "dependency_key": dep[1],
+                "display_name": dep[2],
+                "dependency_class": dep[3],
+                "engine": dep[4],
+                "scope": dep[5],
+                # `unknown` rather than null: a provider nobody recorded is a
+                # real answer, and the closed vocabulary has a word for it.
+                "provider": dep[6] or "unknown",
+                "verification": dep[7],
+                # Class-aware, and the same value the plan reports. An
+                # in-cluster datastore IS a workload; only what a provider
+                # runs is not_applicable.
+                "workload_applicability": str(workload_applicability(dep[3])),
+                # The external evaluator answers for things Drake does not
+                # run. An in-cluster datastore's health comes from the
+                # existing workload path, so this does not speak for it.
+                **(
+                    {
+                        "health": evaluate_external_health(
+                            source=HealthSourceStatus.NOT_CONFIGURED
+                        ).as_dict()
+                    }
+                    if not dependency_is_workload(dep[3])
+                    else {}
+                ),
+            }
+            for dep in (
+                await connection.execute(
+                    text(
+                        "SELECT id, dependency_key, display_name, dependency_class, engine, "
+                        "store_scope, provider, verification FROM project_dependencies "
+                        "WHERE project_id = :pid AND lifecycle = 'active' "
+                        "ORDER BY dependency_key"
+                    ),
+                    {"pid": project_id},
+                )
+            ).all()
+        ]
+
     if include_details:
         owners = (
             await connection.execute(
