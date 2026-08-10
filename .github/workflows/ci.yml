@@ -238,6 +238,9 @@ jobs:
       # its database effects are reset for the browser suite.
       - name: chart smoke (disposable k3d)
         run: bash scripts/chart_smoke_k3d.sh
+        env:
+          DRAKE_SMOKE_DATABASE_URL: ${{ env.E2E_DB_URL }}
+          DRAKE_SMOKE_REDIS_URL: ${{ env.E2E_REDIS_URL }}
 
       # Do the internal agent listeners actually START?
       #
@@ -251,9 +254,6 @@ jobs:
       # cluster, and then talks to both listeners over TLS.
       - name: internal listener runtime smoke (disposable k3d)
         run: bash scripts/listener_runtime_smoke_k3d.sh
-        env:
-          DRAKE_SMOKE_DATABASE_URL: ${{ env.E2E_DB_URL }}
-          DRAKE_SMOKE_REDIS_URL: ${{ env.E2E_REDIS_URL }}
       # Fixture Prometheus (digest-pinned) backing the metrics E2E scenarios.
       - name: start fixture prometheus
         run: docker compose -f deploy/local/docker-compose.yml up -d --wait prometheus
