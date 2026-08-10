@@ -13,6 +13,7 @@ not enough to become a copy of the repository.
 
 import base64
 import binascii
+import re
 import uuid
 from typing import Any
 
@@ -241,6 +242,10 @@ async def list_sessions(
 #: Why a repository cannot be started, in the order they are evaluated.
 #: The order is the point: a gated repository reports the gate even when it
 #: is also archived, because the gate is the fact an operator must act on.
+#: What may appear in a composed GitHub URL. Owner and repository names come
+#: from Drake's projection, but they still end up in a link a person clicks.
+_URL_SEGMENT = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
 STARTABLE_BLOCKERS = (
     "security_gate_open",
     "repository_unavailable",
@@ -630,6 +635,22 @@ async def session_plan(
     }
 
 
+def pull_request_url(owner: str, name: str, number: Any) -> str | None:
+    """A link built from values Drake already holds, never from the provider.
+
+    GitHub returns an `html_url`, and following it would mean the browser
+    navigates wherever a provider response says. This composes the address
+    from the repository projection and the pull-request NUMBER — three
+    values Drake owns — and refuses anything that does not look like them,
+    so the worst a bad response can do is produce no link.
+    """
+    if not isinstance(number, int) or number <= 0:
+        return None
+    if not _URL_SEGMENT.fullmatch(owner) or not _URL_SEGMENT.fullmatch(name):
+        return None
+    return f"https://github.com/{owner}/{name}/pull/{number}"
+
+
 async def session_gitops(
     connection: AsyncConnection, principal: Principal, session_id: uuid.UUID
 ) -> list[dict[str, Any]]:
@@ -638,9 +659,11 @@ async def session_gitops(
     rows = (
         await connection.execute(
             text(
-                "SELECT id, state, branch_name, file_path, base_commit_sha, "
-                "provider_pr_number, error_code, created_at, version "
-                "FROM gitops_requests WHERE session_id = :id ORDER BY created_at DESC LIMIT 20"
+                "SELECT g.id, g.state, g.branch_name, g.file_path, g.base_commit_sha, "
+                "g.provider_pr_number, g.error_code, g.created_at, g.version, "
+                "r.owner_login, r.name "
+                "FROM gitops_requests g JOIN github_repositories r ON r.id = g.repository_id "
+                "WHERE g.session_id = :id ORDER BY g.created_at DESC LIMIT 20"
             ),
             {"id": session_id},
         )
@@ -658,6 +681,7 @@ async def session_gitops(
             "error_code": row[6],
             "created_at": row[7].isoformat(),
             "version": row[8],
+            "pull_request_url": pull_request_url(str(row[9]), str(row[10]), row[5]),
         }
         for row in rows
     ]

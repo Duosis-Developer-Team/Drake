@@ -80,6 +80,10 @@ spec:
               value: {{ .Values.github.clientId | quote }}
             {{- end }}
             {{- end }}
+            - name: DRAKE_GITHUB_GITOPS_PR_ENABLED
+              value: {{ .Values.github.gitopsPrEnabled | quote }}
+            - name: DRAKE_GITOPS_WORKER_ENABLED
+              value: {{ .Values.github.workerEnabled | quote }}
           envFrom:
             # Secret REFERENCES only; no value is ever rendered here.
             - secretRef:

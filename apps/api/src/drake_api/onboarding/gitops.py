@@ -395,6 +395,32 @@ async def process_pending(
             # Cancelled, superseded, or the session moved while this request
             # waited its turn. Nothing is sent and nothing is rewritten.
             continue
+
+        # The content this worker is about to propose has to be the content
+        # the request was audited for.
+        #
+        # The draft is REGENERATED at claim time rather than stored, which is
+        # what keeps Drake from holding a copy of a repository file — but it
+        # also means the generator, the repository projection, or the
+        # analysis could have moved since the request was made. Then the
+        # persisted digest describes one document and a different one goes to
+        # GitHub under its idempotency key.
+        #
+        # So the bytes are hashed and compared to `content_digest` here, at
+        # the last moment before anything leaves: no token is minted, the
+        # provider is not called, and nothing is created.
+        digest = hashlib.sha256(str(item["content"]).encode("utf-8")).hexdigest()
+        if digest != item["content_digest"]:
+            logger.warning("gitops: refusing a request whose draft no longer matches its digest")
+            # Terminal. A re-analysis produces a new request for what the
+            # repository actually looks like now; silently proposing the new
+            # content under the old request's audited intent would not.
+            await _finish(
+                engine, item, state="failed", number=None, error="content_digest_mismatch"
+            )
+            processed += 1
+            continue
+
         try:
             context_row = item["context"]
             # The bound the lease depends on. Without it a slow provider
@@ -553,7 +579,8 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                     """
                     SELECT g.id, g.session_id, g.branch_name, g.base_commit_sha, g.attempts,
                            r.owner_login, r.name, r.default_branch, r.external_id,
-                           i.external_id, r.security_gate, s.state, r.full_name, g.version
+                           i.external_id, r.security_gate, s.state, r.full_name, g.version,
+                           g.content_digest
                     FROM gitops_requests g
                     JOIN github_repositories r ON r.id = g.repository_id
                     JOIN github_installations i ON i.id = r.installation_id
@@ -636,6 +663,9 @@ async def _claim(engine: AsyncEngine, limit: int) -> list[dict[str, Any]]:
                     "attempts": int(row[4]) + 1,
                     "full_name": str(row[12]),
                     "version": int(row[13]),
+                    # What the request was AUDITED for. Re-checked against
+                    # the regenerated draft immediately before dispatch.
+                    "content_digest": str(row[14]),
                     "context": {
                         "owner": str(row[5]),
                         "name": str(row[6]),

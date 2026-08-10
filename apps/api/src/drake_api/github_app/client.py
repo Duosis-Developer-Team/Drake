@@ -28,7 +28,42 @@ from drake_api.settings import Settings
 API_VERSION = "2022-11-28"
 # A full 40-hex commit sha. Used to refuse any read that is not pinned.
 _COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
+#: What may appear in a URL path segment Drake composes.
+#:
+#: Owner and repository names come from Drake's own projection, not from a
+#: request — but they are still interpolated into a URL, and a name carrying
+#: `/` or `..` would address a different resource than the one meant.
+_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+#: The branch names Drake is allowed to create. The prefix is server-owned;
+#: this is the shape check that keeps it that way at the HTTP boundary.
+_BRANCH_NAME = re.compile(r"drake/[a-z0-9][a-z0-9/-]{0,80}")
+
+#: The one file Drake may write.
+_ALLOWED_WRITE_PATH = ".drake/project.yaml"
+
+#: How large a body Drake will send. The manifest draft is a few kilobytes;
+#: anything approaching this is a bug or an attack, and either way it should
+#: not leave the process.
+_MAX_REQUEST_BYTES = 128 * 1024
+
+#: The only GitHub API origins a production deployment may talk to.
+#:
+#: `github_api_base_url` is configurable for the local fake server, and a
+#: configurable API origin plus a write credential is an exfiltration
+#: primitive: point it somewhere else and Drake pushes a repository's
+#: manifest, and its installation token, to whoever is listening.
+_PRODUCTION_API_ORIGINS = ("https://api.github.com",)
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+#: A `Retry-After` is a hint from a peer, so it is clamped before it can
+#: become a wait.
+_MAX_RETRY_AFTER_SECONDS = 300
+#: How much of a branch comparison Drake will look at. A Drake proposal is
+#: one commit touching one file; anything larger is not something to inspect
+#: more thoroughly, it is something to refuse.
+_MAX_COMPARE_COMMITS = 16
+_MAX_COMPARE_FILES = 32
 _MAX_ATTEMPTS = 3
 _MAX_PAGES = 20
 _PER_PAGE = 100
@@ -68,6 +103,30 @@ class GitHubContractError(GitHubError):
     """The response was not what the documented contract promises."""
 
     code = "github_contract"
+
+
+class GitHubWriteConflictError(GitHubError):
+    """A write GitHub refused because the world already says otherwise.
+
+    409 or 422 on a mutation: the ref exists, the blob sha is stale, the
+    pull request is already open. Unlike an ambiguous write, the outcome is
+    known — nothing was applied by THIS request — but what is already there
+    has to be read before deciding whether it is ours.
+    """
+
+    code = "github_write_conflict"
+
+
+class GitHubAmbiguousWriteError(GitHubError):
+    """A write whose outcome is unknown.
+
+    The request left the process and no response came back, so it may or may
+    not have been applied. Retrying it is the one thing a caller must not
+    do — that is how one intent becomes two branches or two pull requests.
+    The only safe resolution is to read the world back and reconcile.
+    """
+
+    code = "github_write_ambiguous"
 
 
 @dataclass(frozen=True)
@@ -116,16 +175,42 @@ class GitHubClient:
         }
 
     @staticmethod
-    def _classify(response: httpx.Response) -> None:
+    def _retry_after(response: httpx.Response) -> int | None:
+        """`Retry-After`, in seconds, bounded — or nothing.
+
+        Only the integer-seconds form is read. The HTTP-date form would need
+        the client to trust the peer's clock, and a hint is not worth that.
+        Bounded because the value is a caller-controlled number that ends up
+        in a wait.
+        """
+        raw = (response.headers.get("retry-after") or "").strip()
+        if not raw.isdigit():
+            return None
+        return min(int(raw), _MAX_RETRY_AFTER_SECONDS)
+
+    @classmethod
+    def _classify(cls, response: httpx.Response) -> None:
         status = response.status_code
         if status < 400:
             return
         remaining = response.headers.get("x-ratelimit-remaining")
-        if status in (403, 429) and remaining == "0":
-            retry_after = response.headers.get("retry-after")
+        has_retry_after = cls._retry_after(response) is not None
+        if status == 429:
+            # ALWAYS rate limiting. It used to require `x-ratelimit-remaining:
+            # 0`, so a 429 carrying only `Retry-After` — or no headers at all,
+            # which is what a proxy or a secondary limit answers with — fell
+            # through to the contract branch and became terminal. Drake then
+            # gave up on work that would have succeeded a minute later.
             raise GitHubRateLimitedError(
-                "github rate limit exhausted",
-                retry_after_seconds=int(retry_after) if (retry_after or "").isdigit() else None,
+                "github rate limit exhausted", retry_after_seconds=cls._retry_after(response)
+            )
+        if status == 403 and (remaining == "0" or has_retry_after):
+            # 403 is ambiguous: GitHub uses it both for "you may not" and for
+            # some rate limiting. Only explicit evidence in the HEADERS moves
+            # it to retryable — the body is deliberately not consulted, since
+            # it is provider prose and must not steer Drake's behaviour.
+            raise GitHubRateLimitedError(
+                "github rate limit exhausted", retry_after_seconds=cls._retry_after(response)
             )
         if status == 401:
             raise GitHubForbiddenError("github refused the credential")
@@ -394,6 +479,281 @@ class GitHubClient:
         if not isinstance(sha, str) or not _COMMIT_SHA.fullmatch(sha):
             raise GitHubContractError("commit response carried no usable sha")
         return sha
+
+    # --- mutations -------------------------------------------------------
+    #
+    # Deliberately separate from `_request`. That method retries on
+    # transport failure, which is right for a GET and wrong for anything
+    # that changes state: a POST that timed out may have been applied, and
+    # re-sending it blindly is how one intent becomes two branches or two
+    # pull requests.
+    #
+    # A write that ends ambiguously raises, and the provider resolves it by
+    # READING the world back — create-or-reuse, not create-again.
+
+    def _assert_write_origin(self) -> None:
+        """A production write may only go to GitHub itself."""
+        if not self._settings.is_production_like:
+            return
+        base = self._settings.github_api_base_url.rstrip("/")
+        if base not in _PRODUCTION_API_ORIGINS:
+            raise GitHubContractError(
+                "github write refused: the configured API origin is not github.com"
+            )
+
+    @staticmethod
+    def _segment(value: str, what: str) -> str:
+        if not _PATH_SEGMENT.fullmatch(value):
+            raise GitHubContractError(f"unsafe {what} in a composed github url")
+        return value
+
+    async def _mutate(
+        self,
+        method: str,
+        path: str,
+        credential: str,
+        *,
+        json_body: dict[str, Any],
+    ) -> GitHubResponse:
+        """One attempt. No retry, ever.
+
+        Everything else `_request` does — response size budget, no
+        redirects, status classification — applies; the difference is that a
+        failure here is reported rather than repeated.
+        """
+        self._assert_write_origin()
+        encoded = json.dumps(json_body).encode()
+        if len(encoded) > _MAX_REQUEST_BYTES:
+            raise GitHubContractError("github request body exceeded the size budget")
+
+        oversized = False
+        try:
+            async with self._client() as client:
+                request = client.build_request(
+                    method, path, headers=self._headers(credential), json=json_body
+                )
+                response = await client.send(request, stream=True)
+                try:
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > _MAX_RESPONSE_BYTES:
+                            oversized = True
+                            break
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
+                finally:
+                    await response.aclose()
+        except httpx.HTTPError as error:
+            # AMBIGUOUS: the request may or may not have been applied. The
+            # caller must reconcile by reading, never by retrying.
+            raise GitHubAmbiguousWriteError("github write outcome is unknown") from error
+
+        if oversized:
+            raise GitHubContractError("github response exceeded the size budget")
+        try:
+            self._classify(response)
+        except GitHubContractError as error:
+            if response.status_code in (409, 422):
+                # A refused write, not a broken contract: the ref already
+                # exists, the blob sha is stale, the pull request is already
+                # open. The caller has to READ what is there before deciding
+                # whether it is its own work — which is different from both
+                # "it failed" and "it might have applied".
+                raise GitHubWriteConflictError("github refused the write as conflicting") from error
+            raise
+        payload: Any = None
+        if body:
+            try:
+                payload = json.loads(body)
+            except ValueError as error:
+                raise GitHubContractError("github response was not JSON") from error
+        return GitHubResponse(
+            status_code=response.status_code,
+            payload=payload,
+            headers={key.lower(): value for key, value in response.headers.items()},
+        )
+
+    async def get_branch_head(
+        self, token: InstallationToken, owner: str, repo: str, branch: str
+    ) -> str | None:
+        """The commit a branch points at, or `None` if it does not exist."""
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        try:
+            response = await self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/git/ref/heads/{branch}",
+                token.token,
+            )
+        except GitHubNotFoundError:
+            return None
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise GitHubContractError("ref response was not an object")
+        sha = (payload.get("object") or {}).get("sha")
+        if not isinstance(sha, str) or not _COMMIT_SHA.fullmatch(sha):
+            raise GitHubContractError("ref response carried no commit sha")
+        return sha
+
+    async def compare_commits(
+        self, token: InstallationToken, owner: str, repo: str, *, base: str, head: str
+    ) -> dict[str, Any]:
+        """What does `head` add on top of `base` — commits and changed files?
+
+        A READ, and the one that makes "this branch is Drake's proposal and
+        nothing else" checkable rather than assumed. Both ends are pinned to
+        commit shas: comparing branch names would compare whatever they point
+        at by the time the request lands.
+
+        Bounded on both axes. A Drake proposal is one commit touching one
+        file, so a comparison larger than the budget is refused rather than
+        summarised — a partial answer here would read as "nothing else
+        changed", which is exactly the conclusion that must be earned.
+        """
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        if not _COMMIT_SHA.fullmatch(base) or not _COMMIT_SHA.fullmatch(head):
+            raise GitHubContractError("commit comparisons must be pinned to commit shas")
+        response = await self._request(
+            "GET",
+            f"/repos/{owner}/{repo}/compare/{base}...{head}",
+            token.token,
+            params={"per_page": _PER_PAGE},
+        )
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise GitHubContractError("comparison response was not an object")
+        commits = payload.get("commits")
+        files = payload.get("files")
+        if not isinstance(commits, list) or not isinstance(files, list):
+            raise GitHubContractError("comparison response was incomplete")
+        if len(commits) > _MAX_COMPARE_COMMITS or len(files) > _MAX_COMPARE_FILES:
+            raise GitHubContractError("comparison exceeded the inspection budget")
+        return payload
+
+    async def create_branch(
+        self, token: InstallationToken, owner: str, repo: str, branch: str, sha: str
+    ) -> None:
+        """Create a ref. Never update, never force, never delete.
+
+        `POST /git/refs` cannot move an existing ref — that needs PATCH with
+        `force`, which Drake does not call. So a branch that already exists
+        makes this fail rather than silently rewrite somebody's work.
+        """
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        if not _BRANCH_NAME.fullmatch(branch):
+            raise GitHubContractError("refusing to create a branch outside Drake's prefix")
+        if not _COMMIT_SHA.fullmatch(sha):
+            raise GitHubContractError("a branch must be created from a full commit sha")
+        await self._mutate(
+            "POST",
+            f"/repos/{owner}/{repo}/git/refs",
+            token.token,
+            json_body={"ref": f"refs/heads/{branch}", "sha": sha},
+        )
+
+    async def put_file(
+        self,
+        token: InstallationToken,
+        owner: str,
+        repo: str,
+        *,
+        path: str,
+        branch: str,
+        message: str,
+        content_base64: str,
+        expected_sha: str | None = None,
+    ) -> dict[str, Any]:
+        """Write ONE allowlisted file, on a Drake-owned branch."""
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        if path != _ALLOWED_WRITE_PATH:
+            raise GitHubContractError("refusing to write outside the allowlisted manifest path")
+        if not _BRANCH_NAME.fullmatch(branch):
+            raise GitHubContractError("refusing to commit outside Drake's branch prefix")
+        body: dict[str, Any] = {
+            "message": message,
+            "content": content_base64,
+            "branch": branch,
+        }
+        if expected_sha is not None:
+            # Optimistic concurrency: updating a file requires the blob sha
+            # it is replacing, so a concurrent change fails instead of being
+            # overwritten.
+            body["sha"] = expected_sha
+        response = await self._mutate(
+            "PUT", f"/repos/{owner}/{repo}/contents/{path}", token.token, json_body=body
+        )
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise GitHubContractError("content write response was not an object")
+        return payload
+
+    async def find_pull_request(
+        self, token: InstallationToken, owner: str, repo: str, *, head: str, base: str
+    ) -> dict[str, Any] | None:
+        """The open pull request for an EXACT head/base pair, if there is one."""
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        response = await self._request(
+            "GET",
+            f"/repos/{owner}/{repo}/pulls",
+            token.token,
+            params={"head": f"{owner}:{head}", "base": base, "state": "open", "per_page": 10},
+        )
+        payload = response.payload
+        if not isinstance(payload, list):
+            raise GitHubContractError("pull request list response was not a list")
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            # GitHub filters server-side, but the match is re-checked here:
+            # reusing "some open pull request" instead of THE one for this
+            # proposal would attach Drake's result to somebody else's work.
+            entry_head = (entry.get("head") or {}).get("ref") or ""
+            entry_base = (entry.get("base") or {}).get("ref") or ""
+            if entry_head == head and entry_base == base:
+                return entry
+        return None
+
+    async def create_pull_request(
+        self,
+        token: InstallationToken,
+        owner: str,
+        repo: str,
+        *,
+        head: str,
+        base: str,
+        title: str,
+        body: str,
+    ) -> dict[str, Any]:
+        """Open a DRAFT pull request. Never merge, never close, never update."""
+        owner = self._segment(owner, "owner")
+        repo = self._segment(repo, "repository")
+        if not _BRANCH_NAME.fullmatch(head):
+            raise GitHubContractError("refusing to open a pull request from a foreign branch")
+        response = await self._mutate(
+            "POST",
+            f"/repos/{owner}/{repo}/pulls",
+            token.token,
+            json_body={
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+                # Always a draft. The manifest Drake generates has operator
+                # fields it deliberately does not guess, so a review-ready
+                # pull request would be a claim that it is finished.
+                "draft": True,
+            },
+        )
+        payload = response.payload
+        if not isinstance(payload, dict):
+            raise GitHubContractError("pull request response was not an object")
+        return payload
 
     async def get_content(
         self, token: InstallationToken, owner: str, repo: str, path: str, ref: str

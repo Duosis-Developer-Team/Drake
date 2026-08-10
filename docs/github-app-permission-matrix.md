@@ -85,16 +85,38 @@ Not requested, not used, and rejected in review if proposed:
 
 - **Administration: write** — would allow changing branch protection or
   rulesets. Drake evaluates; it does not remediate.
-- **Contents: write** — would allow committing to a repository. Sprint
-  12A.2a deliberately did NOT add it: the operator commits the generated
-  manifest themselves, from
-  `GET /v1/onboarding/sessions/{id}/manifest-draft`. Whether Drake ever
-  writes a branch is Sprint 12B's decision to make on its own evidence.
-- **Pull requests: write** — same reasoning. `github_gitops_pr_enabled`
-  is off, the provider behind it is a recording fake, and the flag stays
-  off in this slice.
 - **Workflows / Actions: write** — would let Drake change what a
   repository executes. Never.
+- **Deployments: write**, **Checks / Statuses: write** — Drake reports on
+  what a pipeline did; it does not participate in one.
+- **Secrets / Variables / Environments: write** — never.
+- Branch protection mutation, merge, force-push and branch delete are not
+  permissions but capabilities, and none of them exists in Drake's client.
+  There is no method that could perform one.
+
+## Sprint 12B addition: Contents (write), Pull requests (write)
+
+Requested **only** to activate the GitOps provider, and only when an
+operator decides to. Both flags default off and a production process
+refuses to start with them on unless a real GitHub App is configured.
+
+| Permission | Level | Used for |
+|---|---|---|
+| Contents | write | create a `drake/onboarding/…` branch from the analysed commit, write one file (`.drake/project.yaml`), and READ back the branch, that file, and a bounded commit comparison to prove the branch carries only that change |
+| Pull requests | write | open ONE draft pull request from that branch, and read the open pull request for its exact head/base pair |
+
+What the write path can do, exhaustively: create a branch that does not
+exist, write one allowlisted path on it, and open a draft pull request.
+The client exposes ref CREATE — which cannot move an existing ref — a
+single-file contents write restricted to `.drake/project.yaml` on a
+`drake/`-prefixed branch, and pull-request create. Nothing merges,
+force-pushes, deletes a branch, or commits to a default branch, because no
+such method exists.
+
+The installation token is minted for the exact repository id and asks for
+exactly `metadata: read`, `contents: write`, `pull_requests: write`. A
+narrower grant is a terminal `github_permission_missing` — Drake refuses
+rather than proceeding with a partial write.
 
 ## Sprint 5B addition: Contents (read)
 

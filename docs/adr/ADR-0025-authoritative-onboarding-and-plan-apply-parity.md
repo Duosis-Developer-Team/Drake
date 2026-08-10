@@ -423,3 +423,132 @@ real provider AND a separate CTO decision. The flags alone now refuse.
 Unchanged by this slice, and deliberately: no real GitHub write exists,
 `github_gitops_pr_enabled` is off, the Datalake `manual_env_review` gate is
 open, no migration was added (head stays `0020`), and nothing was deployed.
+
+## Sprint 12B — a real provider, still switched off
+
+`GitHubPullRequestProvider` is the real implementation. Production now gets
+it instead of nothing when a GitHub App is configured, and never gets the
+recording double. The flags stay off: shipping the code and turning it on
+are separate decisions, and this slice only makes the first.
+
+**The contract is one sentence.** The same session, at the same base
+commit, with the same content, produces at most one branch, one commit and
+one pull request — however many times it is attempted and whatever the
+network does in between.
+
+That is not a retry policy, it is why every step reads before it writes. A
+POST that timed out may have been applied, so re-sending it is how one
+intent becomes two pull requests. `GitHubAmbiguousWriteError` says "unknown
+outcome" and the next attempt RECONCILES: is the branch there, is the file
+already exactly right, does the pull request already exist. The same
+property makes an attempt interrupted anywhere safe to resume.
+
+Mutations do not go through the read client's retry loop. `_request`
+retries on transport failure, which is right for a GET and wrong for
+anything that changes state, so writes use `_mutate`: one attempt, same
+response-size budget, same redirect refusal, and a failure that is reported
+rather than repeated.
+
+**What the write path can do, exhaustively.** Create a branch that does not
+exist, write `.drake/project.yaml` on it, open a draft pull request. The
+client exposes ref CREATE — which cannot move an existing ref — a
+single-file write restricted to that path on a `drake/`-prefixed branch,
+and pull-request create. Merge, force-push, branch delete and
+default-branch commit are not refused by a check; there is no method that
+could perform one.
+
+**Refusals that write nothing at all**: a base branch that moved since the
+plan was reviewed, a repository whose numeric id no longer matches the
+projection, an archived repository, a `drake/` branch carrying content that
+is not this proposal, and a token granted less than
+`contents: write` + `pull_requests: write`. The last is terminal, because
+retrying cannot grant a permission.
+
+**The pull request is always a draft.** The manifest Drake generates leaves
+operator decisions as explicit `REPLACE_ME` fields, and a review-ready pull
+request would claim it is finished. The body names the fields a person must
+fill in and says plainly that merging it imports nothing — it puts the
+manifest in the repository, and the import still happens through analyse →
+review → approve → apply in Drake.
+
+The draft is re-checked immediately before it leaves, and the check
+**parses**. A line-by-line scan accepted a document with duplicate keys — a
+reviewer sees one value and the parser uses another — and a document that is
+not a mapping at all. Parsing reuses `manifest.parse_strict`: the same
+SafeLoader subclass, duplicate-key refusal and shape bounds the import
+boundary already applies, extracted rather than copied, because a second
+implementation of "safe to parse" is a second place for it to be relaxed by
+accident.
+
+On top of the parse: exact `apiVersion` and `kind`, a github repository
+provider, owner / name / defaultBranch exactly matching the repository being
+written to, the base commit the draft states matching the commit being
+proposed onto, exactly the expected `REPLACE_ME` paths — neither missing nor
+extra — and the manifest content policy. A missing placeholder means a
+decision a person was supposed to make arrived already answered; an extra one
+means the generator changed and this provider was not re-reviewed.
+
+It deliberately does not apply the completed-manifest JSON Schema. A draft is
+incomplete by design, so forcing it through that schema would mean either
+failing every draft or weakening the schema that guards imports.
+
+**The pull-request link is composed, not followed.** GitHub returns an
+`html_url`; using it would mean the browser navigates wherever a provider
+response says. The URL is built from the repository projection and the pull
+request number — three values Drake already holds — and anything that does
+not look like them produces no link at all.
+
+**Activation.** `github.gitopsPrEnabled` and `github.workerEnabled` are one
+decision: the chart and the API both refuse half of it, because one alone
+accepts requests nothing delivers or runs a worker nothing can reach.
+Turning them on also requires a configured App, its mounted credential
+references, and `https://api.github.com` — a configurable API origin plus a
+write credential is an exfiltration primitive.
+
+Nothing in this slice contacted GitHub. Every provider behaviour above is
+proved against a stateful fake that records which mutations were applied,
+including the ones where the response is dropped after the write landed.
+
+### Sprint 12B — final corrections
+
+**The content proposed is the content that was audited.** The draft is
+regenerated at claim time rather than stored, which is what keeps Drake from
+holding a copy of a repository file — but it also means the generator, the
+projection or the analysis can move underneath a pending request, and then
+`content_digest` describes one document while a different one would go to
+GitHub under its audited intent. The persisted digest is now carried into the
+claim and compared, byte for byte, immediately before the provider is called.
+A mismatch is terminal (`content_digest_mismatch`) with no token minted and
+no HTTP request made: a re-analysis produces a request describing what the
+repository actually looks like now, and silently proposing new content under
+an old request's audited intent does not.
+
+**Matching content is not provenance.** Reuse used to mean "a `drake/` branch
+whose `.drake/project.yaml` matches", which a branch can satisfy while also
+carrying somebody else's commit — or a second file in the same commit — and
+an open pull request over it does not make that Drake's work. The invariant is
+now stated on the diff: the pull request Drake creates or reuses carries
+exactly one change on top of the reviewed base, `.drake/project.yaml`, with
+exactly the proposed content. Establishing it needs a bounded `compare` read,
+pinned to commit shas, and it happens BEFORE the pull-request search is
+allowed to answer. Anything else is `branch_conflict` with zero mutations — a
+comparison larger than the inspection budget included, because a partial
+answer would read as "nothing else changed", which is the one conclusion this
+check exists to earn.
+
+**A refused write is reconciled in the context of the endpoint that refused
+it.** 409 and 422 on a mutation are now `GitHubWriteConflictError` rather than
+a generic contract failure: a branch create re-reads the ref, a file write
+re-reads the file, a pull-request create searches again for the exact
+head/base pair, and each continues only if what is there is this proposal.
+Nothing is ever re-sent. Two providers racing the same proposal — genuinely
+interleaved, held at a rendezvous until both have done their reads — still
+produce one branch, one commit and one pull request.
+
+**A 429 is rate limiting.** Classification required `x-ratelimit-remaining: 0`
+to say so, which made a bare 429 — what a proxy or a secondary limit answers
+with — terminal, so Drake abandoned work that would have succeeded a minute
+later. Every 429 is now retryable; a 403 becomes retryable only on explicit
+rate-limit evidence in the HEADERS, never from the body, which is provider
+prose and must not steer Drake's behaviour. `Retry-After` is read only in its
+integer-seconds form and clamped before it can become a wait.
