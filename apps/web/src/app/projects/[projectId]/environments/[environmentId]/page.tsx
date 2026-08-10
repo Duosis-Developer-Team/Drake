@@ -80,12 +80,36 @@ export default function EnvironmentDetailPage() {
                       <span className="font-mono text-xs">
                         {data.cluster.ref} / {data.namespace}
                       </span>
+                    ) : data.not_applicable?.includes("cluster") ? (
+                      // The runtime has no such concept. This used to render
+                      // for ANY environment without a cluster, so a Kubernetes
+                      // environment that had genuinely lost its cluster was
+                      // described as "external runtime" and looked fine.
+                      <span className="text-xs italic text-ink-muted">Not applicable</span>
                     ) : (
-                      <span className="text-xs italic text-ink-muted">
-                        external runtime — no cluster binding
-                      </span>
+                      <span className="text-xs italic text-ink-muted">Not recorded</span>
                     )}
                   </MetaRow>
+                  {data.runtime === "external" ? (
+                    <>
+                      <MetaRow label="Hosting provider">
+                        <span className="font-mono text-xs">
+                          {data.hosting_provider ?? "unknown"}
+                        </span>
+                      </MetaRow>
+                      <MetaRow label="Agent">
+                        <span className="text-xs italic text-ink-muted">Not applicable</span>
+                      </MetaRow>
+                      <MetaRow label="Health">
+                        {/* No agent and no probe: nothing has observed this.
+                            Never rendered as a healthy state. */}
+                        <span className="text-xs italic text-ink-muted">Unknown</span>
+                      </MetaRow>
+                      <MetaRow label="Freshness">
+                        <span className="text-xs italic text-ink-muted">Unavailable</span>
+                      </MetaRow>
+                    </>
+                  ) : null}
                   <MetaRow label="Catalog version">
                     <span className="font-mono text-xs">v{data.version}</span>
                   </MetaRow>

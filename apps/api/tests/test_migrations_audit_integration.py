@@ -296,6 +296,7 @@ def test_0019_refuses_to_downgrade_rather_than_delete_an_approved_plan() -> None
     _wipe(database_url)
     plan_id, before = _seed_plan_with(database_url, "workload_binding")
 
+    revision_before = _revision(database_url)
     with pytest.raises(Exception) as raised:
         command.downgrade(config, "0018")
     assert "workload_binding" in str(raised.value)
@@ -326,8 +327,12 @@ def test_0019_refuses_to_downgrade_rather_than_delete_an_approved_plan() -> None
 
     assert after == before, "no row may be lost to a refused downgrade"
     assert kinds == {"project", "workload_binding"}
-    # Revision, schema and data all still agree.
-    assert _revision(database_url) == "0020"
+    # Revision, schema and data all still agree. Compared against the
+    # revision recorded BEFORE the attempt rather than a hard-coded number:
+    # the point is that a refused downgrade moved nothing, and hard-coding
+    # head means every future migration fails this test for a reason that
+    # has nothing to do with what it guards.
+    assert _revision(database_url) == revision_before
     _wipe(database_url)
 
 

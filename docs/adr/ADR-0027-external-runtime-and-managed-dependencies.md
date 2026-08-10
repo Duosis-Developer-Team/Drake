@@ -145,3 +145,56 @@ domain change with migration and backward-compatibility impact, so it is its
 own piece of work, not a rider on an onboarding sprint. Until it lands, the
 honest states are `deferred`, `unknown` and `not applicable`, and this ADR
 exists so that using them is a recorded decision rather than an omission.
+
+---
+
+## Implementation note (G10, migration 0021)
+
+The decision above is unchanged. This records the exact contract that
+implements it, because the ADR named concepts and the code had to name
+fields.
+
+**Manifest schema.** `environment.hostingProvider` is a closed enum, allowed
+only on an external environment. An external environment may no longer
+carry `clusterRef` or `namespace` at all — previously optional, now
+**refused**, so it cannot quietly acquire Kubernetes identity.
+`dataStore` gains `dependencyClass` (`in_cluster` default),
+`provider` and `verification` (`repository_intent` default), and
+`measurementProfile` is required only for `in_cluster`.
+
+**`metricsProfile` is required exactly when the project has a Kubernetes
+environment.** A document-level conditional, not a per-service one: services
+are project-level in this schema, so requiredness could not key off an
+environment's runtime directly. Kubernetes projects therefore keep every
+requirement they had, and a project with no Kubernetes environment may omit
+the field. Absent means `not_configured`; it is never rendered as a profile.
+
+**Persistence.** `environments.hosting_provider` is nullable with two check
+constraints — a closed vocabulary, and provider-only-on-external.
+`service_definitions.metrics_profile` becomes nullable, where NULL means "no
+metrics source". `hosting_provider` joins the immutable environment fields:
+changing where something runs is a relocation, and a relocation is a
+conflict for a person, not a silent metadata update.
+
+**API.** `not_applicable` is an additive list on the environment payload
+rather than a new type for `cluster`/`namespace`. Older clients keep reading
+those fields exactly as before; a newer client can tell "this runtime has no
+such concept" from "nobody recorded one". Conflating those two is what made
+an external application render as a Kubernetes one that had lost its
+cluster — which the environment page did, for any environment without a
+cluster, until this change.
+
+**Truth table.**
+
+| health source | last observation | status | freshness |
+| --- | --- | --- | --- |
+| none | — | `not_configured` | `unavailable` |
+| configured | none | `unknown` | `unavailable` |
+| configured | present | as observed | `fresh` |
+
+`last_observed_at` is set only by an observation. Importing a manifest is
+not one, and there is no import-time input to the function that computes it.
+
+**Still out of scope, and unchanged by this:** no probe worker, no provider
+adapter, no provider credential, no background polling. The SSRF contract
+above governs an implementation that does not exist yet.

@@ -4,33 +4,73 @@
   "title": "Drake Project Manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
   "properties": {
-    "apiVersion": {"const": "drake.duosis.com/v1alpha1"},
-    "kind": {"const": "ProjectObservability"},
+    "apiVersion": {
+      "const": "drake.duosis.com/v1alpha1"
+    },
+    "kind": {
+      "const": "ProjectObservability"
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63},
-        "displayName": {"type": "string", "minLength": 1, "maxLength": 120}
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "maxLength": 63
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
       }
     },
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "owners", "environments", "services", "tenantModel"],
+      "required": [
+        "repository",
+        "owners",
+        "environments",
+        "services",
+        "tenantModel"
+      ],
       "properties": {
         "repository": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["provider", "owner", "name"],
+          "required": [
+            "provider",
+            "owner",
+            "name"
+          ],
           "properties": {
-            "provider": {"const": "github"},
-            "owner": {"type": "string", "minLength": 1},
-            "name": {"type": "string", "minLength": 1},
-            "defaultBranch": {"type": "string", "minLength": 1}
+            "provider": {
+              "const": "github"
+            },
+            "owner": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "defaultBranch": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "owners": {
@@ -39,31 +79,65 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["team"],
+            "required": [
+              "team"
+            ],
             "properties": {
-              "team": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-              "role": {"enum": ["primary", "secondary"]}
+              "team": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "role": {
+                "enum": [
+                  "primary",
+                  "secondary"
+                ]
+              }
             }
           }
         },
         "environments": {
           "type": "array",
           "minItems": 1,
-          "items": {"$ref": "#/$defs/environment"}
+          "items": {
+            "$ref": "#/$defs/environment"
+          }
         },
         "services": {
           "type": "array",
           "minItems": 1,
-          "items": {"$ref": "#/$defs/service"}
+          "items": {
+            "$ref": "#/$defs/service"
+          }
         },
-        "tenantModel": {"$ref": "#/$defs/tenantModel"},
-        "dataStores": {"type": "array", "items": {"$ref": "#/$defs/dataStore"}},
-        "backup": {"type": "array", "items": {"$ref": "#/$defs/backupPolicy"}},
-        "slos": {"type": "array", "items": {"$ref": "#/$defs/slo"}},
+        "tenantModel": {
+          "$ref": "#/$defs/tenantModel"
+        },
+        "dataStores": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dataStore"
+          }
+        },
+        "backup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/backupPolicy"
+          }
+        },
+        "slos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/slo"
+          }
+        },
         "dashboards": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$"}
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]*$"
+          }
         }
       }
     }
@@ -72,40 +146,174 @@
     "environment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "runtime", "branch", "criticality"],
+      "required": [
+        "name",
+        "runtime",
+        "branch",
+        "criticality"
+      ],
       "properties": {
-        "name": {"enum": ["local", "dev", "test", "staging", "prod"]},
-        "runtime": {"enum": ["kubernetes", "external"]},
-        "branch": {"type": "string", "minLength": 1},
-        "clusterRef": {"type": "string"},
-        "namespace": {"type": "string"},
-        "criticality": {"enum": ["low", "medium", "high", "critical"]},
-        "active": {"type": "boolean", "default": true}
+        "name": {
+          "enum": [
+            "local",
+            "dev",
+            "test",
+            "staging",
+            "prod"
+          ]
+        },
+        "runtime": {
+          "enum": [
+            "kubernetes",
+            "external"
+          ]
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clusterRef": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "criticality": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "active": {
+          "type": "boolean",
+          "default": true
+        },
+        "hostingProvider": {
+          "enum": [
+            "vercel",
+            "netlify",
+            "cloudflare",
+            "aws",
+            "gcp",
+            "azure",
+            "fly",
+            "render",
+            "heroku",
+            "supabase",
+            "self-managed",
+            "other",
+            "unknown"
+          ],
+          "description": "Typed so provider identity cannot become an unbounded free-text label. Omit when unknown; `unknown` is also explicit and honest."
+        }
       },
       "allOf": [
         {
-          "if": {"properties": {"runtime": {"const": "kubernetes"}}},
-          "then": {"required": ["clusterRef", "namespace"]}
+          "if": {
+            "properties": {
+              "runtime": {
+                "const": "kubernetes"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "clusterRef",
+              "namespace"
+            ]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "required": [
+              "runtime"
+            ],
+            "properties": {
+              "runtime": {
+                "const": "external"
+              }
+            }
+          },
+          "then": {
+            "type": "object",
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "clusterRef"
+                  ]
+                },
+                {
+                  "required": [
+                    "namespace"
+                  ]
+                }
+              ]
+            }
+          }
         }
       ]
     },
     "service": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "component", "runtime", "metricsProfile"],
+      "required": [
+        "name",
+        "component",
+        "runtime"
+      ],
       "properties": {
-        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-        "component": {"enum": ["web", "api", "worker", "agent", "database", "cache", "job", "mcp", "other"]},
-        "runtime": {"type": "string", "minLength": 1},
-        "workloadSelector": {"type": "object", "additionalProperties": {"type": "string"}},
-        "metricsProfile": {"type": "string", "minLength": 1},
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "component": {
+          "enum": [
+            "web",
+            "api",
+            "worker",
+            "agent",
+            "database",
+            "cache",
+            "job",
+            "mcp",
+            "other"
+          ]
+        },
+        "runtime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workloadSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "metricsProfile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A key into Drake's curated metric registry. Required whenever the project has a Kubernetes environment. Omit only when nothing scrapes the service; health then reports not_configured rather than a profile nothing honours."
+        },
         "health": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "livePath": {"type": "string", "pattern": "^/"},
-            "readyPath": {"type": "string", "pattern": "^/"},
-            "metricsPath": {"type": "string", "pattern": "^/"}
+            "livePath": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "readyPath": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "metricsPath": {
+              "type": "string",
+              "pattern": "^/"
+            }
           }
         }
       }
@@ -113,50 +321,248 @@
     "tenantModel": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
-        "mode": {"enum": ["none", "shared_table", "schema_per_tenant", "database_per_tenant", "external"]},
-        "adapter": {"type": "string"},
-        "snapshotFreshnessSeconds": {"type": "integer", "minimum": 60, "maximum": 86400}
+        "mode": {
+          "enum": [
+            "none",
+            "shared_table",
+            "schema_per_tenant",
+            "database_per_tenant",
+            "external"
+          ]
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "snapshotFreshnessSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
       }
     },
     "dataStore": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "engine", "scope", "measurementProfile"],
+      "required": [
+        "name",
+        "engine",
+        "scope"
+      ],
       "properties": {
-        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-        "engine": {"enum": ["postgresql", "redis", "object-storage", "other"]},
-        "scope": {"enum": ["project", "environment", "tenant"]},
-        "measurementProfile": {"type": "string"},
-        "connectionSecretRef": {"type": "string", "description": "Reference name only; never a credential value"}
-      }
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "engine": {
+          "enum": [
+            "postgresql",
+            "redis",
+            "object-storage",
+            "other"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "project",
+            "environment",
+            "tenant"
+          ]
+        },
+        "measurementProfile": {
+          "type": "string"
+        },
+        "connectionSecretRef": {
+          "type": "string",
+          "description": "Reference name only; never a credential value"
+        },
+        "dependencyClass": {
+          "enum": [
+            "in_cluster",
+            "managed_data_platform",
+            "external_service"
+          ],
+          "default": "in_cluster",
+          "description": "Who operates this. `in_cluster` is the historical meaning and stays the default, so existing manifests keep it without being edited."
+        },
+        "provider": {
+          "enum": [
+            "vercel",
+            "netlify",
+            "cloudflare",
+            "aws",
+            "gcp",
+            "azure",
+            "fly",
+            "render",
+            "heroku",
+            "supabase",
+            "self-managed",
+            "other",
+            "unknown"
+          ]
+        },
+        "verification": {
+          "enum": [
+            "repository_intent",
+            "owner_confirmed",
+            "provider_observed"
+          ],
+          "default": "repository_intent",
+          "description": "How the claim is known. A repository using a provider is intent; it is not evidence the connection is healthy or even active."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "not": {
+              "properties": {
+                "dependencyClass": {
+                  "const": "in_cluster"
+                }
+              }
+            }
+          },
+          "then": {
+            "type": "object"
+          },
+          "else": {
+            "type": "object",
+            "required": [
+              "measurementProfile"
+            ]
+          }
+        }
+      ]
     },
     "backupPolicy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "dataStoreRef", "rpoSeconds", "rtoSeconds", "reporter"],
+      "required": [
+        "name",
+        "dataStoreRef",
+        "rpoSeconds",
+        "rtoSeconds",
+        "reporter"
+      ],
       "properties": {
-        "name": {"type": "string"},
-        "dataStoreRef": {"type": "string"},
-        "rpoSeconds": {"type": "integer", "minimum": 60},
-        "rtoSeconds": {"type": "integer", "minimum": 60},
-        "reporter": {"type": "string"},
-        "offsiteRequired": {"type": "boolean"},
-        "restoreDrillMaxAgeDays": {"type": "integer", "minimum": 1}
+        "name": {
+          "type": "string"
+        },
+        "dataStoreRef": {
+          "type": "string"
+        },
+        "rpoSeconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "rtoSeconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "reporter": {
+          "type": "string"
+        },
+        "offsiteRequired": {
+          "type": "boolean"
+        },
+        "restoreDrillMaxAgeDays": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "slo": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "serviceRef", "indicator", "objective", "windowDays"],
+      "required": [
+        "name",
+        "serviceRef",
+        "indicator",
+        "objective",
+        "windowDays"
+      ],
       "properties": {
-        "name": {"type": "string"},
-        "serviceRef": {"type": "string"},
-        "indicator": {"enum": ["availability", "latency"]},
-        "objective": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
-        "windowDays": {"type": "integer", "minimum": 1, "maximum": 90}
+        "name": {
+          "type": "string"
+        },
+        "serviceRef": {
+          "type": "string"
+        },
+        "indicator": {
+          "enum": [
+            "availability",
+            "latency"
+          ]
+        },
+        "objective": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "windowDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90
+        }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "required": [
+          "spec"
+        ],
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "environments": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "runtime"
+                  ],
+                  "properties": {
+                    "runtime": {
+                      "const": "kubernetes"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "services": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "component",
+                    "runtime",
+                    "metricsProfile"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

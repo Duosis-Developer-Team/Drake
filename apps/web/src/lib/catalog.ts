@@ -45,6 +45,15 @@ export interface Environment {
   namespace: string | null;
   lifecycle: string;
   cluster: { ref: string; display_name: string } | null;
+  /** Typed provider identity for an external runtime; null for Kubernetes. */
+  hosting_provider: string | null;
+  /**
+   * Concepts this runtime does not have. Distinct from a field that is
+   * simply unset: an external application has no namespace, whereas a
+   * Kubernetes environment without one is a real gap. Additive, so older
+   * clients keep reading `cluster` and `namespace` as before.
+   */
+  not_applicable?: string[];
   version: number;
   scope: ScopeRef;
   source: Provenance;

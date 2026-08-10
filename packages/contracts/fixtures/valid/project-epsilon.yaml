@@ -1,0 +1,44 @@
+# Fictional example: an application Drake does not run.
+#
+# Hosted on a platform-as-a-service with a provider-managed data platform
+# behind it. It exists to prove the schema can describe such a system
+# WITHOUT inventing Kubernetes facts — no cluster, no namespace, no workload
+# selector, and no metrics profile, because nothing scrapes it.
+#
+# This is a fixture. It is not an onboarding record for any real project.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata:
+  name: epsilon
+  displayName: Epsilon
+spec:
+  repository: {provider: github, owner: example-org, name: epsilon, defaultBranch: main}
+  # Ownership is deliberately left to resolve as unmapped: no team is
+  # asserted that nobody confirmed.
+  owners: [{team: unknown-team, role: primary}]
+  environments:
+    # No clusterRef and no namespace — and the schema now REFUSES them here,
+    # so an external environment cannot quietly acquire Kubernetes identity.
+    - name: prod
+      runtime: external
+      branch: main
+      criticality: medium
+      hostingProvider: vercel
+  services:
+    # No metricsProfile. There is no metrics source, and naming one would
+    # assert a scrape target that does not exist.
+    - name: epsilon-web
+      component: web
+      runtime: nextjs
+  tenantModel: {mode: shared_table}
+  dataStores:
+    # A provider operates this. Drake does not run it, cannot restart it, and
+    # must not list it as a workload. `verification: repository_intent` says
+    # exactly how this is known: the repository uses the provider. That is
+    # not evidence the connection is healthy, or even active.
+    - name: epsilon-db
+      engine: postgresql
+      scope: project
+      dependencyClass: managed_data_platform
+      provider: supabase
+      verification: repository_intent

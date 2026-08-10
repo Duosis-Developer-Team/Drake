@@ -1935,6 +1935,7 @@ async def _apply_environment_create(context: _ApplyContext, item: dict[str, Any]
         criticality=str(payload["criticality"]),
         cluster_id=cluster_id,
         namespace=payload.get("namespace"),
+        hosting_provider=payload.get("hosting_provider") or None,
         source_ref=context.source_ref,
         source_revision=context.commit_sha,
     )
@@ -2029,7 +2030,11 @@ async def _apply_service_create(context: _ApplyContext, item: dict[str, Any]) ->
         key,
         component=str(payload["component"]),
         runtime=str(payload["runtime"]),
-        metrics_profile=str(payload["metrics_profile"]),
+        # Absent means no metrics source. Stored as NULL rather than as a
+        # profile nothing scrapes.
+        metrics_profile=(str(payload["metrics_profile"]) or None)
+        if payload.get("metrics_profile")
+        else None,
         workload_selector=payload.get("workload_selector") or {},
         health=payload.get("health") or {},
         source_ref=context.source_ref,
