@@ -5,6 +5,7 @@ what would install. A chart that renders something plausible from a
 missing value is how an edge ends up without TLS.
 """
 
+import json
 import re
 import shutil
 import subprocess
@@ -1736,3 +1737,129 @@ def test_the_legacy_script_delegates_rather_than_duplicating() -> None:
     assert "from drake_api.agents.run_internal_listener import main" in text
     for reimplemented in ("argparse", "uvicorn.run", "CERT_REQUIRED", "ssl."):
         assert reimplemented not in text, reimplemented
+
+
+# --- the production runtime-security contract, per workload ---------------
+#
+# `Settings.validate_runtime_security()` is a property of the APPLICATION.
+# Any workload built from the API image has to satisfy it — including the
+# internal listeners, which nothing outside the cluster can reach.
+#
+# A production upgrade failed exactly here: the listener carried its own CA
+# and surface settings and not these, raised on startup, crash-looped both
+# containers, and `--atomic` rolled the release back. `helm template`
+# succeeded the whole time, because a missing environment variable is not a
+# render error.
+
+#: What the validator REQUIRES and the defaults do not satisfy.
+#:
+#: `trusted_proxy_count` defaults to 0 and the check demands ≥ 1;
+#: `allowed_web_origins` defaults to two localhost URLs and the check demands
+#: nothing but the canonical origin. Everything else it inspects is already
+#: production-safe by default, which is why this list is two entries and not
+#: a copy of the API's environment.
+_RUNTIME_SECURITY_ENV = ("DRAKE_TRUSTED_PROXY_COUNT", "DRAKE_ALLOWED_WEB_ORIGINS")
+
+
+def _env_of(docs: list[dict[str, Any]], workload: str, container: str) -> dict[str, Any]:
+    deployment = next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == workload)
+    spec = next(
+        c for c in deployment["spec"]["template"]["spec"]["containers"] if c["name"] == container
+    )
+    return {e["name"]: e for e in spec.get("env", [])}
+
+
+@pytest.mark.parametrize(
+    ("workload", "container"),
+    [
+        ("drake-api", "api"),
+        ("drake-agent-gateway", "enroll"),
+        ("drake-agent-gateway", "ingest"),
+    ],
+)
+def test_every_application_workload_carries_the_runtime_security_env(
+    workload: str, container: str
+) -> None:
+    """Rendered, per container — not "the helper exists"."""
+    docs = render_listener()
+    env = _env_of(docs, workload, container)
+    origin = "https://drake-84-247-180-172.sslip.io:30773"
+
+    for name in _RUNTIME_SECURITY_ENV:
+        assert name in env, f"{workload}/{container} is missing {name}"
+        # A literal value, resolved by the chart — not a Secret reference
+        # that could be absent, and not a value the process must discover.
+        assert "value" in env[name], f"{workload}/{container}: {name} is not a plain value"
+
+    assert env["DRAKE_TRUSTED_PROXY_COUNT"]["value"] == "1"
+    # Derived from the deployment's own public origin, so the listener and
+    # the API cannot disagree about what the canonical origin is.
+    assert env["DRAKE_ALLOWED_WEB_ORIGINS"]["value"] == f'["{origin}"]'
+
+
+def test_the_listener_env_actually_satisfies_the_production_validator() -> None:
+    """The check that would have caught it.
+
+    The chart contract above proves the variables are rendered. This proves
+    what they are rendered FOR: a `Settings` built from exactly the
+    listener's environment passes the validator that killed the containers.
+
+    Nothing is mocked. Bypassing the validator to make a test pass would be
+    testing that the test passes.
+    """
+    from drake_api.settings import Settings
+
+    docs = render_listener()
+    origin = "https://drake-84-247-180-172.sslip.io:30773"
+
+    for container in ("enroll", "ingest"):
+        env = {
+            name: entry["value"]
+            for name, entry in _env_of(docs, "drake-agent-gateway", container).items()
+            if "value" in entry
+        }
+        settings = Settings(
+            env="production",
+            public_origin=env["DRAKE_PUBLIC_ORIGIN"],
+            auth_mode=env["DRAKE_AUTH_MODE"],
+            trusted_proxy_count=int(env["DRAKE_TRUSTED_PROXY_COUNT"]),
+            allowed_web_origins=json.loads(env["DRAKE_ALLOWED_WEB_ORIGINS"]),
+            internal_agent_api_enabled=env["DRAKE_INTERNAL_AGENT_API_ENABLED"] == "true",
+            agent_ca_cert_file=env["DRAKE_AGENT_CA_CERT_FILE"],
+            agent_ca_key_file=env["DRAKE_AGENT_CA_KEY_FILE"],
+        )
+        # Raises if the listener would refuse to start.
+        settings.validate_runtime_security()
+        assert str(settings.resolved_public_origin()) == origin, container
+
+
+@pytest.mark.parametrize("dropped", _RUNTIME_SECURITY_ENV)
+def test_dropping_either_variable_reproduces_the_production_failure(dropped: str) -> None:
+    """Proof that the test above is load-bearing.
+
+    Remove one of them and the validator refuses, with the same class of
+    error the production containers died on.
+    """
+    from drake_api.settings import Settings
+
+    origin = "https://drake-84-247-180-172.sslip.io:30773"
+    complete = {
+        "env": "production",
+        "public_origin": origin,
+        "auth_mode": "local",
+        "trusted_proxy_count": 1,
+        "allowed_web_origins": [origin],
+        "internal_agent_api_enabled": True,
+        "agent_ca_cert_file": "/etc/drake/agent-ca/ca.crt",
+        "agent_ca_key_file": "/etc/drake/agent-ca/ca.key",
+    }
+    # Dropping the variable means falling back to the field's default, which
+    # is what an unset environment actually produces.
+    field = {
+        "DRAKE_TRUSTED_PROXY_COUNT": "trusted_proxy_count",
+        "DRAKE_ALLOWED_WEB_ORIGINS": "allowed_web_origins",
+    }[dropped]
+    del complete[field]
+
+    with pytest.raises(RuntimeError):
+        Settings(**complete).validate_runtime_security()

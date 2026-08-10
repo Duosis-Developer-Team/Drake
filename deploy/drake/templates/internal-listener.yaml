@@ -89,6 +89,11 @@ spec:
               value: {{ include "drake.publicOrigin" $ | quote }}
             - name: DRAKE_AUTH_MODE
               value: {{ $.Values.auth.mode | quote }}
+            # The same production runtime-security contract the public API
+            # satisfies. `validate_runtime_security()` belongs to the
+            # application, so a workload that runs the application has to
+            # meet it — even one nothing outside the cluster can reach.
+            {{- include "drake.productionSecurityEnv" $ | nindent 12 }}
           envFrom:
             # Database and Redis, from the same out-of-band Secret the API
             # reads. This listener creates no Secret of its own.
