@@ -67,6 +67,8 @@ jobs:
       run_e2e: ${{ steps.impact.outputs.run_e2e }}
       full_suite: ${{ steps.impact.outputs.full_suite }}
       docs_only: ${{ steps.impact.outputs.docs_only }}
+      integration_selection: ${{ steps.impact.outputs.integration_selection }}
+      integration_groups: ${{ steps.impact.outputs.integration_groups }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -74,29 +76,67 @@ jobs:
           fetch-depth: 0
       - name: classify the change
         id: impact
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "event=${{ github.event_name }} -> full suite"
-            python3 scripts/ci_impact.py --force-full --github-output
-          else
-            python3 scripts/ci_impact.py \
-              --base "${{ github.event.pull_request.base.sha }}" \
-              --head "${{ github.event.pull_request.head.sha }}" \
-              --github-output
-          fi
+          case "${{ github.event_name }}" in
+            pull_request)
+              python3 scripts/ci_impact.py \
+                --base "${{ github.event.pull_request.base.sha }}" \
+                --head "${{ github.event.pull_request.head.sha }}" \
+                --github-output
+              ;;
+            push)
+              # main is classified like anything else. A docs-only merge
+              # used to trigger a seven-minute full suite, which gave back
+              # most of what the per-PR narrowing had just won.
+              #
+              # Full regression is preserved where it earns its cost: the
+              # nightly schedule, manual dispatch, and every high-risk
+              # classification (security, shared contract, migration,
+              # lockfile, CI infrastructure, unknown) — those return
+              # full_suite from the classifier itself.
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "no usable before-SHA (new branch or force push) -> full suite"
+                python3 scripts/ci_impact.py --force-full --github-output
+              elif ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+                echo "before-SHA $PUSH_BEFORE is not in this checkout -> full suite"
+                python3 scripts/ci_impact.py --force-full --github-output
+              else
+                python3 scripts/ci_impact.py \
+                  --base "$PUSH_BEFORE" --head "${{ github.sha }}" --github-output
+              fi
+              ;;
+            *)
+              echo "event=${{ github.event_name }} -> full suite"
+              python3 scripts/ci_impact.py --force-full --github-output
+              ;;
+          esac
       - name: summary
         run: |
           {
             echo "### Change impact"
-            echo '```json'
-            if [ "${{ github.event_name }}" != "pull_request" ]; then
-              python3 scripts/ci_impact.py --force-full
-            else
-              python3 scripts/ci_impact.py \
-                --base "${{ github.event.pull_request.base.sha }}" \
-                --head "${{ github.event.pull_request.head.sha }}"
-            fi
-            echo '```'
+            echo ""
+            echo "| gate | selected |"
+            echo "| --- | --- |"
+            for gate in contracts web python integration chart k3d_runtime e2e; do
+              case "$gate" in
+                contracts) v="${{ steps.impact.outputs.run_contracts }}" ;;
+                web) v="${{ steps.impact.outputs.run_web }}" ;;
+                python) v="${{ steps.impact.outputs.run_python }}" ;;
+                integration) v="${{ steps.impact.outputs.run_integration }}" ;;
+                chart) v="${{ steps.impact.outputs.run_chart }}" ;;
+                k3d_runtime) v="${{ steps.impact.outputs.run_k3d_runtime }}" ;;
+                e2e) v="${{ steps.impact.outputs.run_e2e }}" ;;
+              esac
+              echo "| $gate | $v |"
+            done
+            echo "| secret scan | true (never selectable) |"
+            echo "| dependency scan | true (never selectable) |"
+            echo ""
+            echo "full suite: ${{ steps.impact.outputs.full_suite }}"
+            echo ""
+            echo "integration groups: ${{ steps.impact.outputs.integration_groups }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   contracts:
@@ -111,10 +151,8 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @drake/contracts lint
-      - run: pnpm --filter @drake/contracts typecheck
-      - run: pnpm --filter @drake/contracts test
+      # Same entrypoint a developer runs: scripts/ci_job.sh contracts
+      - run: bash scripts/ci_job.sh contracts
 
   web:
     name: web (lint + typecheck + tests + build + provider guard)
@@ -128,12 +166,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @drake/web lint
-      - run: pnpm --filter @drake/web typecheck
-      # Includes the static browser provider-access guard test.
-      - run: pnpm --filter @drake/web test
-      - run: pnpm --filter @drake/web build
+      - run: bash scripts/ci_job.sh web
 
   python:
     name: python (format + lint + typecheck + unit tests)
@@ -145,37 +178,7 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-      - run: uv sync --all-packages
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run mypy apps/api/src apps/worker/src
-      # The chart contract tests are deselected here because they belong to
-      # the `chart` job, which is selected by chart changes. Leaving them in
-      # both ran 149 helm renders twice on every full suite and never at all
-      # on a chart-only change. They still run: `settings.py` is classified
-      # security-sensitive, so a backend change that could break the
-      # rendered-env assertions takes the full suite and the chart job with
-      # it.
-      - run: uv run pytest -m "not integration" -q --ignore=apps/api/tests/test_production_chart_unit.py
-      # Does the production image contain the code the chart tells it to run?
-      #
-      # It did not, once: the internal listener was started with a module
-      # that lived at the repository root, which the API image does not
-      # copy. Both containers exited on start and a production upgrade
-      # rolled back. The chart tests were checking the arguments and the TLS
-      # test ran the runner from the working tree — nothing asked the image.
-      #
-      # An explicit step rather than a pytest with a docker guard: a guarded
-      # test that silently skips is how this gets missed a second time.
-      - name: production image runs the chart's entrypoint
-        run: bash scripts/api_image_entrypoint_smoke.sh
-      # Child-process lifecycle. The smoke scripts start servers, clusters
-      # and port-forwards; this proves they take them down again on success,
-      # on failure, on timeout and on Ctrl+C — including grandchildren,
-      # which is the case that actually leaked (a `pnpm` wrapper whose
-      # `next-server` held a port for two days).
-      - name: process lifecycle regression
-        run: bash scripts/process_lifecycle_regression.sh
+      - run: bash scripts/ci_job.sh python
 
   integration:
     name: integration (migrations + audit append-only + queue)
@@ -210,14 +213,12 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-      - run: uv sync --all-packages
-      # Local fixture Prometheus (digest-pinned) for the real query smoke;
-      # only the prometheus + fixture-exporter services start (55432/56379
-      # stay free for the job's own service containers).
-      - name: start fixture prometheus
-        run: bash scripts/start_fixture_prometheus.sh
-      - run: uv run pytest -m integration -q
+      # The suites this diff can actually affect. Empty selection means
+      # every suite — which is what a shared, security-sensitive, migration,
+      # lockfile, CI-infrastructure or unrecognised change produces.
+      - run: bash scripts/ci_job.sh integration
         env:
+          DRAKE_INTEGRATION_SELECTION: ${{ needs.changes.outputs.integration_selection }}
           DRAKE_IT_DATABASE_URL: ${{ env.CI_DB_URL }}
           DRAKE_IT_REDIS_URL: ${{ env.CI_REDIS_URL }}
           DRAKE_IT_PROMETHEUS_URL: http://127.0.0.1:59090
@@ -232,29 +233,16 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-      - run: uv sync --all-packages
-      # These moved out of `integration`, where they ran on every backend
-      # change and never on a chart-only change — the wrong way round. They
-      # need no cluster and no database.
-      - name: helm validation (main chart)
-        run: bash deploy/drake/validate.sh
-      - name: helm validation (cluster agent chart)
-        run: bash deploy/agent/validate.sh
-      - name: helm validation (dev observability package)
-        run: bash deploy/dev/observability/validate.sh
-      # Rendered-manifest contract tests: securityContext, secret volume
-      # modes, image digests, exposure, runtime-security env.
-      - name: production chart unit tests
-        run: uv run --directory apps/api pytest tests/test_production_chart_unit.py -q
+      # Helm lint/template/policy for all three charts plus the
+      # rendered-manifest contract tests. These moved out of `integration`,
+      # where they ran on every backend change and never on a chart-only one.
+      - run: bash scripts/ci_job.sh chart
 
   go-agent:
     name: go agent (fmt + vet + build + tests)
     needs: changes
     if: needs.changes.outputs.run_go == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/cluster-agent
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -263,10 +251,7 @@ jobs:
           # Keyed on the module graph, so a lockfile change misses the cache
           # instead of silently reusing the previous resolution.
           cache-dependency-path: apps/cluster-agent/go.sum
-      - run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
-      - run: go build ./...
-      - run: go test -race ./...
+      - run: bash scripts/ci_job.sh go-agent
 
   secret-scan:
     name: secret scan (gitleaks)
