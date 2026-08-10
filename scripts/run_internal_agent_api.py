@@ -1,20 +1,26 @@
-"""Run the internal agent API listener (local/test/CI).
+"""Run an internal agent API listener. Never the public app.
 
-Serves ONLY the internal agent app over TLS:
-- server certificate for the listener,
-- CERT_REQUIRED client verification against the Drake Agent CA
-  (real mTLS handshake; enrollment being pre-certificate uses the same
-  listener in local/test where CERT_OPTIONAL is configured explicitly).
+Production runs this TWICE, from one image, with different surfaces:
 
-Production runs this behind the dedicated internal gateway per ADR-0016;
-this script never serves the public app.
+    --surface enrollment   server-authenticated TLS, no client certificate
+                           asked for, serving only POST /enroll
+    --surface ingest       CERT_REQUIRED mutual TLS against the Agent CA,
+                           serving heartbeat, inventory and renewal
+
+The split is the honest answer to a real asymmetry: an agent enrolling for
+the first time has no certificate, and everything after that must present
+one. One listener cannot be both, and a listener that merely tolerates a
+missing certificate would move the guarantee into application code — which
+on this stack cannot even see the peer certificate.
+
+`--surface all` keeps a single listener for local, test and CI.
 """
 
 import argparse
 import ssl
 
 import uvicorn
-from drake_api.agents.internal_app import create_internal_agent_app
+from drake_api.agents.internal_app import SURFACES, create_internal_agent_app
 
 
 def main() -> None:
@@ -29,11 +35,20 @@ def main() -> None:
         action="store_true",
         help="CERT_OPTIONAL (local/test: lets enrollment happen pre-certificate)",
     )
+    parser.add_argument("--surface", default="all", choices=SURFACES)
     args = parser.parse_args()
 
-    cert_reqs = ssl.CERT_OPTIONAL if args.client_cert_optional else ssl.CERT_REQUIRED
+    if args.surface == "enrollment":
+        # No client certificate exists yet, so asking for one would refuse
+        # every first enrollment. This listener is why the ingest listener
+        # can demand one without exception.
+        cert_reqs = ssl.CERT_NONE
+    elif args.client_cert_optional:
+        cert_reqs = ssl.CERT_OPTIONAL
+    else:
+        cert_reqs = ssl.CERT_REQUIRED
     uvicorn.run(
-        create_internal_agent_app(),
+        create_internal_agent_app(surface=args.surface),
         host=args.host,
         port=args.port,
         ssl_certfile=args.tls_cert,

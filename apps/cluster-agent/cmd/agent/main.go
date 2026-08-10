@@ -207,7 +207,7 @@ func loadOrEnroll(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 	token := strings.TrimSpace(string(raw))
 	id, err := enrollment.Exchange(
-		ctx, cfg.APIBaseURL, cfg.ServerCAFile, token, cfg.ClusterID, agentVersion, cfg.StateDir,
+		ctx, cfg.EnrollmentBaseURL, cfg.ServerCAFile, token, cfg.ClusterID, agentVersion, cfg.StateDir,
 	)
 	if err != nil {
 		return nil, err

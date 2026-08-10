@@ -44,6 +44,8 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: DRAKE_AGENT_ENROLLMENT_BASE_URL
+              value: {{ .Values.enrollmentBaseUrl | default .Values.apiBaseUrl | quote }}
             - name: DRAKE_AGENT_API_BASE_URL
               value: {{ required "apiBaseUrl is required" .Values.apiBaseUrl | quote }}
             - name: DRAKE_AGENT_CLUSTER_ID
@@ -89,12 +91,29 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
-        # Identity state: emptyDir keeps the private key node-local and
-        # ephemeral; a restart re-enrolls only if the pod is rescheduled
-        # (one-time tokens make that an explicit operator action).
+        # Identity state — the agent's private key and certificate.
+        #
+        # This used to be a memory-backed emptyDir, which meant every pod
+        # restart destroyed the identity and needed a NEW one-time
+        # enrollment token. That turns an ordinary node drain into an
+        # operator task, and an operator task that mints credentials is one
+        # people automate badly.
+        #
+        # A PersistentVolumeClaim keeps the key on one node's disk, which is
+        # where a node-scoped identity belongs. The agent writes it 0600 and
+        # nothing else mounts the claim. The alternative — having the agent
+        # write its key into a Kubernetes Secret — would require giving a
+        # read-only agent write access to Secrets, which is exactly the
+        # permission this design refuses to have.
         - name: state
+{{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-state" (include "drake-agent.name" .)) }}
+{{- else }}
+          # Local and test only: identity is disposable there.
           emptyDir:
             medium: Memory
+{{- end }}
         - name: tmp
           emptyDir:
             medium: Memory

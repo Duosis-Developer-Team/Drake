@@ -25,7 +25,20 @@ from drake_api.audit import AuditEventData, record_audit_event
 from drake_api.db import get_engine
 from drake_api.settings import Settings
 
-router = APIRouter(prefix="/internal/v1/agent", tags=["agent-internal"])
+#: The enrollment surface. It is the ONE internal endpoint an agent can
+#: reach before it holds a client certificate, so in production it is served
+#: by its own listener — server-authenticated TLS, no client certificate
+#: asked for — and that listener carries nothing else.
+enrollment_router = APIRouter(prefix="/internal/v1/agent", tags=["agent-enrollment"])
+
+#: Everything an ENROLLED agent does. In production this is served only by
+#: the mutual-TLS listener, so "no client certificate" is refused during the
+#: handshake rather than by a check some future edit could forget.
+certificate_router = APIRouter(prefix="/internal/v1/agent", tags=["agent-internal"])
+
+#: Both surfaces on one router, for local, test and CI where a single
+#: listener is simpler and the transport is not the thing under test.
+router = APIRouter()
 
 
 def _ca(request: Request) -> AgentCertificateAuthority:
@@ -65,7 +78,7 @@ def _enrollment_refused() -> HTTPException:
     return HTTPException(status_code=403, detail="enrollment refused")
 
 
-@router.post("/enroll", status_code=201)
+@enrollment_router.post("/enroll", status_code=201)
 async def enroll(request: Request, body: EnrollmentRequest) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
@@ -157,7 +170,7 @@ async def enroll(request: Request, body: EnrollmentRequest) -> dict[str, Any]:
     }
 
 
-@router.post("/certificates/renew")
+@certificate_router.post("/certificates/renew")
 async def renew_certificate(
     request: Request,
     body: RenewalRequest,
@@ -258,7 +271,7 @@ def _renewal_response(
     }
 
 
-@router.post("/certificates/activate")
+@certificate_router.post("/certificates/activate")
 async def activate_certificate(request: Request, body: ActivationRequest) -> dict[str, Any]:
     """ACTIVATE phase: proof of possession of the NEW key promotes it.
 
@@ -342,3 +355,7 @@ def _header_agent_id(request: Request) -> uuid.UUID:
 
 def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
+
+
+router.include_router(enrollment_router)
+router.include_router(certificate_router)

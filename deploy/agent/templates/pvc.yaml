@@ -1,0 +1,28 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+{{/*
+The agent's identity survives a restart because it lives here.
+
+One claim, one replica, ReadWriteOnce: the private key is node-scoped by
+design, and nothing else in the release mounts this volume. Deleting the
+claim is the deliberate way to force a re-enrolment — which is why the
+chart never sets a reclaim policy that would do it by accident.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "drake-agent.name" . }}-state
+  labels:
+    {{- include "drake-agent.labels" . | nindent 4 }}
+  annotations:
+    # Survives `helm uninstall`. An identity that vanished with the release
+    # would make an uninstall/reinstall cycle silently mint a new agent.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+{{- end }}

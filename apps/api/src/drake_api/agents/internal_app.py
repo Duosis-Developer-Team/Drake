@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from drake_api.agents.ca import AgentCertificateAuthority
 from drake_api.agents.router_ingest import router as agent_ingest_router
+from drake_api.agents.router_internal import certificate_router, enrollment_router
 from drake_api.agents.router_internal import router as agent_internal_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.errors import register_error_handlers
@@ -92,7 +93,31 @@ class BodySizeLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
-def create_internal_agent_app(settings: Settings | None = None) -> FastAPI:
+#: Which internal endpoints a listener serves.
+#:
+#: The split exists because of one unavoidable asymmetry: an agent enrolling
+#: for the first time has no client certificate yet, and every request after
+#: that must present one. Serving both from a single mutual-TLS listener is
+#: impossible; serving both from a listener that merely *accepts* a missing
+#: certificate would put the whole guarantee in application code — and this
+#: stack cannot even see the peer certificate there (uvicorn does not expose
+#: it to the ASGI app), so the check could not be written honestly.
+#:
+#: So production runs two listeners over the same app factory:
+#:
+#:   "enrollment" — server-authenticated TLS, no client certificate asked
+#:                  for, and NOTHING but `POST /enroll` on it.
+#:   "ingest"     — CERT_REQUIRED mutual TLS. Heartbeat, inventory and
+#:                  certificate renewal. A caller without a valid client
+#:                  certificate is refused during the handshake, before any
+#:                  request exists.
+#:
+#: "all" keeps one listener for local, test and CI, where the transport is
+#: not what is under test.
+SURFACES = ("all", "enrollment", "ingest")
+
+
+def create_internal_agent_app(settings: Settings | None = None, *, surface: str = "all") -> FastAPI:
     settings = settings or get_settings()
     settings.validate_runtime_security()
     app = FastAPI(title="Drake Agent Internal API", docs_url=None, redoc_url=None)
@@ -101,6 +126,18 @@ def create_internal_agent_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(BodySizeLimitMiddleware)
     register_error_handlers(app)
-    app.include_router(agent_internal_router)
-    app.include_router(agent_ingest_router)
+    if surface not in SURFACES:
+        raise ValueError(f"unknown internal listener surface: {surface!r}")
+    if surface == "enrollment":
+        # Deliberately nothing else. An enrolled agent's endpoints must not
+        # be reachable on the listener that does not ask for a certificate.
+        app.include_router(enrollment_router)
+    elif surface == "ingest":
+        # Deliberately NOT the enrollment route: a one-time token must not
+        # be exchangeable on a listener a certificate already opened.
+        app.include_router(certificate_router)
+        app.include_router(agent_ingest_router)
+    else:
+        app.include_router(agent_internal_router)
+        app.include_router(agent_ingest_router)
     return app

@@ -213,3 +213,34 @@ github:
   # requests: write.
   gitopsPrEnabled: false
   workerEnabled: false
+
+# The internal agent API: the only surface a cluster agent talks to.
+#
+# A separate workload from the public API, because it holds the Agent CA
+# private key and speaks mutual TLS to machines — neither belongs in the
+# process that answers browsers. Off by default: shipping the listener and
+# turning it on are separate decisions.
+#
+# It is never published. There is no ingress, node port or load balancer
+# option here, and the Service type is not configurable.
+internalAgentApi:
+  enabled: false
+  # Server-authenticated TLS, no client certificate asked for. Only the
+  # enrolment endpoint is served here.
+  enrollPort: 8144
+  # CERT_REQUIRED mutual TLS. Everything an enrolled agent does.
+  ingestPort: 8143
+  # Created out of band. The chart creates no Secret.
+  #   tlsSecret: kubernetes.io/tls — the listener's own server certificate
+  #   caSecret:  ca.crt + ca.key   — the CA that signs agent identities
+  tlsSecret: ""
+  caSecret: ""
+  # Where the agent runs. Used ONLY to narrow the NetworkPolicy: it selects
+  # a namespace and a pod label, which is a network boundary, not an
+  # identity. Authentication is mutual TLS plus proof-of-possession.
+  agentNamespace: drake-agent
+  agentPodSelector:
+    app.kubernetes.io/name: drake-cluster-agent
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
