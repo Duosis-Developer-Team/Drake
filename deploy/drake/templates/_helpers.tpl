@@ -367,3 +367,25 @@ value is no longer watching by then.
   {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/* The production runtime-security contract, for every workload that runs
+     the Drake application.
+
+     `Settings.validate_runtime_security()` is a property of the APPLICATION,
+     not of the public API deployment — so any workload built from the API
+     image has to satisfy it, including the internal agent listeners, which
+     nothing outside the cluster can even reach.
+
+     That is exactly how a production upgrade failed: the listener carried
+     its own CA and surface settings but not these two, so it raised on
+     startup, both containers crash-looped, and `--atomic` rolled back.
+
+     Deliberately only the fields the validator REQUIRES. This is not "give
+     the listener the API's environment": session, OIDC callback, GitHub and
+     exposure settings stay on the workload that actually serves browsers. */}}
+{{- define "drake.productionSecurityEnv" -}}
+- name: DRAKE_TRUSTED_PROXY_COUNT
+  value: "1"
+- name: DRAKE_ALLOWED_WEB_ORIGINS
+  value: {{ printf "[%q]" (include "drake.publicOrigin" .) | quote }}
+{{- end -}}

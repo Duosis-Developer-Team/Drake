@@ -53,10 +53,7 @@ spec:
               value: {{ (.Values.auth).mode | default "oidc" | quote }}
             # Exactly one proxy hop: the ingress controller. Forwarded
             # headers from anywhere else are not trusted.
-            - name: DRAKE_TRUSTED_PROXY_COUNT
-              value: "1"
-            - name: DRAKE_ALLOWED_WEB_ORIGINS
-              value: {{ printf "[%q]" (include "drake.publicOrigin" .) | quote }}
+            {{- include "drake.productionSecurityEnv" . | nindent 12 }}
             - name: DRAKE_OIDC_REDIRECT_URL
               value: {{ printf "%s/v1/auth/callback" (include "drake.publicOrigin" .) | quote }}
             - name: DRAKE_API_HOST
