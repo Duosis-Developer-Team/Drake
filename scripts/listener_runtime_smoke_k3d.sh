@@ -57,6 +57,52 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 ok() { echo "  OK   $*"; }
 
+# Does a running container's imageID trace back to an image we imported?
+#
+# Three different identities are in play and they are NOT the same thing:
+#
+#   docker image id      the image CONFIG digest
+#   containerd digest    the MANIFEST digest for the reference
+#   imageID              whichever of those the runtime reports, sometimes
+#                        wrapped as `docker.io/library/x@sha256:...`
+#
+# So the comparison pulls every full sha256 out of the imageID and requires
+# one of them to equal a known identity EXACTLY. No prefix matching, no
+# trimming a value until two strings look alike — that would turn "these
+# are the same image" into "these share some characters".
+image_identity_matches() {
+  local image_id="$1" known="$2" found
+  [ -n "$image_id" ] || return 1
+  found="$(printf '%s' "$image_id" | grep -oE '[0-9a-f]{64}' || true)"
+  [ -n "$found" ] || return 1
+  local candidate wanted
+  for candidate in $found; do
+    for wanted in $(printf '%s' "$known" | grep -oE '[0-9a-f]{64}'); do
+      [ "$candidate" = "$wanted" ] && return 0
+    done
+  done
+  return 1
+}
+
+# The comparator is the whole evidence, so prove it can say no. Fixed
+# inputs, no cluster: if this ever passes something it should not, the
+# image identity assertions below are decoration.
+self_test_comparator() {
+  local a="1111111111111111111111111111111111111111111111111111111111111111"
+  local b="2222222222222222222222222222222222222222222222222222222222222222"
+  image_identity_matches "docker.io/library/x@sha256:$a" "sha256:$a" \
+    || { fail "comparator rejected a genuine match"; return; }
+  image_identity_matches "sha256:$a" "sha256:$b sha256:$a" \
+    || { fail "comparator rejected a match against a second known identity"; return; }
+  image_identity_matches "docker.io/library/x@sha256:$b" "sha256:$a" \
+    && { fail "comparator accepted a DIFFERENT image"; return; }
+  image_identity_matches "" "sha256:$a" \
+    && { fail "comparator accepted an empty imageID"; return; }
+  image_identity_matches "sha256:${a:0:32}" "sha256:$a" \
+    && { fail "comparator accepted a truncated digest"; return; }
+  ok "image identity comparator rejects mismatches, empties and prefixes"
+}
+
 diagnose() {
   echo "--- diagnostics ---------------------------------------------" >&2
   kubectl -n "$NAMESPACE" get pods -o wide 2>&1 | tail -5 >&2 || true
@@ -85,6 +131,9 @@ trap cleanup EXIT
 rm -rf "$WORK_DIR"; mkdir -p "$WORK_DIR"; chmod 700 "$WORK_DIR"
 umask 077
 
+echo "[listener-smoke] image identity comparator self-test"
+self_test_comparator
+
 echo "[listener-smoke] building the production API image"
 docker build -q -f "$REPO_ROOT/apps/api/Dockerfile" -t "$IMAGE_TAG" "$REPO_ROOT" >/dev/null
 
@@ -93,7 +142,16 @@ k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
 k3d cluster create "$CLUSTER_NAME" --no-lb --wait --timeout 180s \
   --k3s-arg "--disable=traefik@server:0" >/dev/null
 kubectl config use-context "k3d-$CLUSTER_NAME" >/dev/null
-bash "$REPO_ROOT/scripts/k3d_image_import.sh" "$IMAGE_TAG" "$CLUSTER_NAME"
+IDENTITY_FILE="$WORK_DIR/import-identity.env"
+K3D_IMPORT_IDENTITY_FILE="$IDENTITY_FILE" \
+  bash "$REPO_ROOT/scripts/k3d_image_import.sh" "$IMAGE_TAG" "$CLUSTER_NAME"
+# shellcheck source=/dev/null
+[ -s "$IDENTITY_FILE" ] || { echo "FAIL: the import recorded no image identity" >&2; exit 1; }
+. "$IDENTITY_FILE"
+KNOWN_IDENTITIES="$local_config_id $node_digests"
+echo "[listener-smoke] imported $reference"
+echo "                 config id: $local_config_id"
+echo "                 node digests: ${node_digests:-<none reported>}"
 
 echo "[listener-smoke] ephemeral test PKI"
 # Generated per run, inside a 0700 directory, deleted by the trap. Never
@@ -205,6 +263,28 @@ fi
 POD="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/component=agent-gateway \
   -o jsonpath='{.items[0].metadata.name}')"
 ok "both listeners reached Ready"
+
+echo "[listener-smoke] the containers Kubernetes is actually running"
+# Ready proves a process answered a probe. It does not prove WHICH image
+# that process came from — a stale image in the node store would pass every
+# other check in this file. Containers are selected by NAME; the array
+# order is not a contract.
+for c in enroll ingest; do
+  RUNNING_IMAGE="$(kubectl -n "$NAMESPACE" get pod "$POD" \
+    -o jsonpath="{.status.containerStatuses[?(@.name=='$c')].image}")"
+  RUNNING_ID="$(kubectl -n "$NAMESPACE" get pod "$POD" \
+    -o jsonpath="{.status.containerStatuses[?(@.name=='$c')].imageID}")"
+  [ "$RUNNING_IMAGE" = "$IMAGE_TAG" ] \
+    && ok "$c running image reference is $RUNNING_IMAGE" \
+    || fail "$c running image reference is '$RUNNING_IMAGE', expected '$IMAGE_TAG'"
+  if [ -z "$RUNNING_ID" ]; then
+    fail "$c reported no imageID; identity cannot be established"
+  elif image_identity_matches "$RUNNING_ID" "$KNOWN_IDENTITIES"; then
+    ok "$c running imageID resolves to the imported image"
+  else
+    fail "$c imageID '$RUNNING_ID' does not match the imported image ($KNOWN_IDENTITIES)"
+  fi
+done
 
 echo "[listener-smoke] runtime identity and mounted file modes"
 for c in enroll ingest; do
