@@ -218,11 +218,20 @@ KUBE_API_PORT="$(kubectl get endpoints kubernetes \
 [ -n "$KUBE_API_IP" ] || { echo "FAIL: kubernetes endpoint unresolved" >&2; exit 1; }
 echo "[smoke] kubernetes API endpoint is ${KUBE_API_IP}:${KUBE_API_PORT}"
 
+# `persistence.enabled=false`: this is a disposable cluster that exists for
+# one run, so there is no agent identity here worth surviving anything — the
+# chart's default claim would only add a volume for this smoke to wait on,
+# and waiting on storage is not what this test was written to prove.
+#
+# Persistence is proved where it means something: the chart's own default,
+# the production render contract, the agent validator's claim check, and
+# TestIdentitySurvivesProcessRestart.
 render_chart() {
   helm template smoke "$REPO_ROOT/deploy/agent" \
     --namespace "$NAMESPACE" \
     --set clusterId="$CLUSTER_ID" \
     --set clusterName=cluster-a \
+    --set persistence.enabled=false \
     --set apiBaseUrl="https://host.k3d.internal:${INTERNAL_PORT}" \
     --set image.repository=drake-cluster-agent \
     --set image.devTag=smoke \
