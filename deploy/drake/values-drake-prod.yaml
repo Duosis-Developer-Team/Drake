@@ -4,8 +4,8 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@a374937
-# (run 31264086090). Both were built from that one commit, so the API, the
+# Images are pinned to real digests published from main@c36f43f by publish
+# run 31344622026. Both were built from that one commit, so the API, the
 # web app and the migration cannot drift apart.
 #
 # Nothing is left blank: the datastores are selected by label rather than
@@ -15,57 +15,51 @@
 
 deploymentMode: production
 
-# The first deployment publishes NO public route.
+# The first rollout publishes NO public route.
 #
 # Drake is proven to start, migrate, pass its probes and serve on its
 # ClusterIP Services before a hostname, a certificate and an identity
 # provider are attached to it. Those are a separate integration task, and
 # coupling them to "does the application run at all" is how a failure in
 # one gets diagnosed as the other.
+#
+# This is a change from the earlier draft of this file, which shipped a
+# dedicated ingress controller and a NodePort. Publishing an origin is a
+# decision about DNS, certificates and an identity provider's redirect
+# allowlist; none of those exist yet, and a route that answers before they
+# do is a route serving a name nobody owns.
 edge:
-  mode: ingress
-  # Drake's own controller. The shared ones already serve other
-  # applications, and one publishes a hostless catch-all Ingress, so Drake
-  # cannot add rules there without competing for `/`.
+  mode: internal
+  # Drake's own controller, for when a route IS published: the shared ones
+  # already serve other applications, and one publishes a hostless
+  # catch-all Ingress, so Drake cannot add rules there without competing
+  # for `/`. Off here — internal mode renders no controller at all.
   dedicatedController:
-    enabled: true
-    ingressClassName: drake-nginx
-    controllerClass: k8s.io/drake-nginx
-    replicas: 1
-    # The only port Drake publishes. HTTPS only; verified free cluster-wide
-    # and from outside before it was chosen.
-    httpsNodePort: 30773
-    image:
-      repository: registry.k8s.io/ingress-nginx/controller
-      # Same build the cluster's existing controllers run, pinned.
-      digest: "sha256:f95a79b85fb93ac3de752c71a5c27d5ceae10a18b61904dec224c1c6a4581e47"
+    enabled: false
 
+# No Ingress, no IngressClass, no NodePort, no LoadBalancer. The only way
+# in is a port-forward to a ClusterIP Service, which is deliberate: it
+# means an internal smoke test cannot be mistaken for public availability.
 ingress:
-  enabled: true
-  className: drake-nginx
-  host: drake-84-247-180-172.sslip.io
-  tls:
-    enabled: true
-    # The controller's own default certificate, exactly as the other
-    # applications on this cluster are served today. It is self-signed:
-    # browsers will warn. Accepted for now, and stated rather than hidden.
-    mode: controller-default
+  enabled: false
 
 # REQUIRED even though nothing is published yet.
 #
-# Writing this hostname creates NO DNS record, NO certificate and NO
-# Ingress. edge.mode stays `internal`; this is only the origin Drake will
-# answer on once a route is added.
+# Writing this hostname creates NO DNS record, NO certificate, NO Ingress
+# and NO route of any kind. `edge.mode` is `internal`; this is only the
+# origin Drake will answer on once a route is added.
 #
 # This is the deployment's identity, not merely its address: the session
 # cookie, the CSRF origin comparison and the OIDC redirect URL all derive
 # from it, and the API refuses to start in production without a valid
-# https origin. Declaring it now means flipping edge.mode to `ingress`
-# later changes the route and nothing about identity.
+# https origin. Declaring it now means that publishing a route later
+# changes the route and nothing about identity — cookies minted today stay
+# valid, and the OIDC redirect registered against this origin keeps
+# matching.
 #
-# The operator supplies the real hostname. It is deliberately not guessed
-# here — an invented hostname would render, deploy, and then mint cookies
-# and callbacks for a name nobody owns.
+# The port is part of that future identity because the route, when it
+# exists, is expected to be a NodePort on this host. Nothing listens on it
+# today.
 publicOrigin: https://drake-84-247-180-172.sslip.io:30773
 
 # Drake's GHCR packages are private. Without this every pod stops at
@@ -78,11 +72,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit a3749374924e1bb888f73382e3bdbebdfc4a3246
+    # Source commit c36f43fdf4c35096568e1623b36c1b4252aa8eb9
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:5e134648329b5c477220c5bb06092603049b6bd54465619a9a7d33af671083e5"
+    digest: "sha256:8c40146793ac1f8d44c25c242c61a07e0c24dfec1b4b120fb9610ae15430706c"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -94,8 +88,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit a3749374924e1bb888f73382e3bdbebdfc4a3246
-    digest: "sha256:f97f3f728bdc5f4302f398412e66da01795a4afcf0c9e1e9c5792767009c2ffe"
+    # Source commit c36f43fdf4c35096568e1623b36c1b4252aa8eb9
+    digest: "sha256:5f6113ea63ab17f1640ba162c0b63b6face42eb884532e5229202b61c0c90076"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -106,7 +100,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:5e134648329b5c477220c5bb06092603049b6bd54465619a9a7d33af671083e5"
+    digest: "sha256:8c40146793ac1f8d44c25c242c61a07e0c24dfec1b4b120fb9610ae15430706c"
   backoffLimit: 0
 
 networkPolicy:
@@ -151,5 +145,16 @@ auth:
 
 # Drake deploys before the GitHub App exists. The integration UI reports
 # NOT_CONFIGURED, no token is minted, and no provider call is made.
+#
+# All three are stated explicitly rather than left to the chart's defaults.
+# A default is a fact about the chart; this file is the record of what this
+# deployment decided, and "the repository-write path is off" is exactly the
+# kind of decision that should be readable here without opening values.yaml.
+#
+# `gitopsPrEnabled` and `workerEnabled` are one decision and the chart
+# refuses half of it: one alone would either accept proposals nothing
+# delivers, or run a worker nothing can reach.
 github:
   enabled: false
+  gitopsPrEnabled: false
+  workerEnabled: false
