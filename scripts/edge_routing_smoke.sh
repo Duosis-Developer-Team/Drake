@@ -19,13 +19,13 @@ API_PORT="${DRAKE_EDGE_API_PORT:-18000}"
 WEB_PORT="${DRAKE_EDGE_WEB_PORT:-13100}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-cleanup() {
-  for pid in "${API_PID:-}" "${WEB_PID:-}" "${PROXY_PID:-}"; do
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-  done
-  wait 2>/dev/null || true
-}
-trap cleanup EXIT
+# Child lifecycle is shared, because getting it wrong here is what left a
+# Next production server holding port 13100 for two days: this script used
+# to `kill "$WEB_PID"`, where WEB_PID was the SUBSHELL around `pnpm`, and
+# `next-server` — pnpm's own child — survived and re-parented to init.
+# lifecycle_kill_tree signals the whole tree, TERM then KILL.
+. "$REPO_ROOT/scripts/lib/process_lifecycle.sh"
+lifecycle_install_traps
 
 cd "$REPO_ROOT"
 
@@ -36,10 +36,14 @@ DRAKE_REDIS_URL="${DRAKE_IT_REDIS_URL:-redis://127.0.0.1:56379/0}" \
   uv run uvicorn drake_api.main:create_app --factory \
   --host 127.0.0.1 --port "$API_PORT" --log-level warning &
 API_PID=$!
+lifecycle_track "$API_PID" "api"
 
 echo "[edge-smoke] starting the web app"
 (cd apps/web && DRAKE_DEPLOYMENT_MODE=production pnpm -s start --port "$WEB_PORT" >/dev/null 2>&1) &
 WEB_PID=$!
+# The tracked pid is the subshell; pnpm and its next-server grandchild are
+# found by walking the tree at cleanup time, not assumed to be this pid.
+lifecycle_track "$WEB_PID" "web"
 
 echo "[edge-smoke] starting the edge proxy (the chart's Ingress rules)"
 DRAKE_EDGE_PROXY_PORT="$PROXY_PORT" \
@@ -47,6 +51,7 @@ DRAKE_EDGE_API_PORT="$API_PORT" \
 DRAKE_EDGE_WEB_PORT="$WEB_PORT" \
   uv run python scripts/edge_proxy.py &
 PROXY_PID=$!
+lifecycle_track "$PROXY_PID" "edge-proxy"
 
 echo "[edge-smoke] waiting for the edge"
 for _ in $(seq 1 60); do

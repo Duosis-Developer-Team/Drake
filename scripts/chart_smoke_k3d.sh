@@ -29,16 +29,13 @@ command -v helm >/dev/null || { echo "helm is required" >&2; exit 2; }
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
 API_PID=""
-cleanup() {
-  if [ -n "$API_PID" ]; then
-    pkill -P "$API_PID" >/dev/null 2>&1 || true
-    kill "$API_PID" >/dev/null 2>&1 || true
-  fi
-  k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
-  docker image rm "$IMAGE_TAG" >/dev/null 2>&1 || true
-  rm -rf "$SMOKE_DIR"
-}
-trap cleanup EXIT
+# `pkill -P` reaches one generation. A listener started through a wrapper
+# keeps its grandchildren, and those hold the port the next run needs.
+. "$REPO_ROOT/scripts/lib/process_lifecycle.sh"
+lifecycle_on_cleanup 'if ! k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1; then echo "WARNING: could not delete the disposable cluster $CLUSTER_NAME" >&2; fi'
+lifecycle_on_cleanup 'docker image rm "$IMAGE_TAG" >/dev/null 2>&1 || true'
+lifecycle_on_cleanup 'rm -rf "$SMOKE_DIR"'
+lifecycle_install_traps
 
 echo "[smoke] building agent image"
 docker build -t "$IMAGE_TAG" "$REPO_ROOT/apps/cluster-agent" 2>&1 | tail -2
@@ -92,6 +89,7 @@ echo "[smoke] TLS material + internal listener (host)"
     --client-ca "$SMOKE_DIR/ca/agent-ca.pem" \
     --client-cert-optional >"$SMOKE_DIR/listener.log" 2>&1) &
 API_PID=$!
+lifecycle_track "$API_PID" "chart-smoke-listener"
 echo "[smoke] waiting for the internal listener"
 LISTENER_UP=""
 for attempt in $(seq 1 60); do

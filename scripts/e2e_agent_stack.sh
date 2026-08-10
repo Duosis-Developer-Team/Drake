@@ -12,10 +12,24 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STACK_DIR="$REPO_ROOT/.e2e-agent"
 CLUSTER_NAME="${DRAKE_E2E_K3D_CLUSTER:-drake-s4-e2e}"
 
+UP_COMPLETED=""
+
 command_up() {
   command -v k3d >/dev/null || { echo "k3d is required" >&2; exit 2; }
   command -v kubectl >/dev/null || { echo "kubectl is required" >&2; exit 2; }
   command -v go >/dev/null || { echo "go is required" >&2; exit 2; }
+
+  # `up` leaves a cluster running on purpose — the E2E scenario uses it and
+  # `down` removes it. So cleanup must fire only when up did NOT finish:
+  # before this, a failure in the TLS step or the go build (or a Ctrl+C)
+  # left a full k3d cluster running with nothing left to delete it.
+  . "$REPO_ROOT/scripts/lib/process_lifecycle.sh"
+  lifecycle_on_cleanup '[ -n "$UP_COMPLETED" ] || {
+      echo "[e2e-agent] up did not complete; removing the partial stack" >&2
+      k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
+      rm -rf "$STACK_DIR"
+    }'
+  lifecycle_install_traps
 
   mkdir -p "$STACK_DIR"
 
@@ -43,6 +57,7 @@ command_up() {
     --from-literal=canary="drake-e2e-secret-canary-value" \
     --dry-run=client -o yaml | KUBECONFIG="$STACK_DIR/kubeconfig" kubectl apply -f - >/dev/null
 
+  UP_COMPLETED=1
   echo "[e2e-agent] stack ready: $STACK_DIR"
 }
 

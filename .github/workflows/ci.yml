@@ -1,9 +1,25 @@
-# Drake CI — quality and security gates.
+# Drake CI — quality and security gates, run against what actually changed.
 #
 # - Every action is pinned to an immutable commit SHA (version noted inline).
 # - Scanner images are pinned by digest.
 # - No secrets are used anywhere: safe for a public repository and fork PRs.
 # - Workflow permissions are read-only.
+#
+# Two rules govern the conditional structure below, and neither is
+# negotiable:
+#
+#   1. The SECURITY gates are not selectable. Secret scanning and dependency
+#      scanning run on every change, including a one-word docs edit, because
+#      "this diff is only docs" is a claim the diff makes about itself.
+#   2. An unrecognised path runs EVERYTHING. scripts/ci_impact.py classifies
+#      by allowlist; anything it does not recognise sets `unknown`, which
+#      turns the full suite back on. Same for pushes to main, the nightly
+#      run and manual dispatch.
+#
+# `ci gate` at the bottom is the single required check. It aggregates every
+# other job and treats skipped as pass, failure/cancelled as fail — so
+# adding or conditioning a job never silently drops a gate, and branch
+# protection does not have to be edited every time the matrix changes.
 
 name: ci
 
@@ -11,9 +27,25 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Nightly full regression: catches anything the per-PR narrowing missed,
+    # on a schedule rather than on someone noticing.
+    - cron: "0 3 * * *"
 
 permissions:
   contents: read
+
+concurrency:
+  # Superseded PR runs are cancelled — pushing three commits in a minute
+  # should not leave three full suites burning runners.
+  #
+  # main is deliberately NOT cancelled: every merged commit gets its own
+  # verification, and the post-merge full regression is the safety net for
+  # everything the PR narrowed away. Cancelling it would quietly remove the
+  # thing that makes narrowing acceptable.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Local-only credentials for disposable CI service containers.
@@ -21,8 +53,56 @@ env:
   CI_REDIS_URL: redis://127.0.0.1:6379/0
 
 jobs:
+  changes:
+    name: change impact
+    runs-on: ubuntu-latest
+    outputs:
+      run_contracts: ${{ steps.impact.outputs.run_contracts }}
+      run_web: ${{ steps.impact.outputs.run_web }}
+      run_python: ${{ steps.impact.outputs.run_python }}
+      run_go: ${{ steps.impact.outputs.run_go }}
+      run_integration: ${{ steps.impact.outputs.run_integration }}
+      run_chart: ${{ steps.impact.outputs.run_chart }}
+      run_k3d_runtime: ${{ steps.impact.outputs.run_k3d_runtime }}
+      run_e2e: ${{ steps.impact.outputs.run_e2e }}
+      full_suite: ${{ steps.impact.outputs.full_suite }}
+      docs_only: ${{ steps.impact.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The classifier diffs base...head, so it needs both of them.
+          fetch-depth: 0
+      - name: classify the change
+        id: impact
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "event=${{ github.event_name }} -> full suite"
+            python3 scripts/ci_impact.py --force-full --github-output
+          else
+            python3 scripts/ci_impact.py \
+              --base "${{ github.event.pull_request.base.sha }}" \
+              --head "${{ github.event.pull_request.head.sha }}" \
+              --github-output
+          fi
+      - name: summary
+        run: |
+          {
+            echo "### Change impact"
+            echo '```json'
+            if [ "${{ github.event_name }}" != "pull_request" ]; then
+              python3 scripts/ci_impact.py --force-full
+            else
+              python3 scripts/ci_impact.py \
+                --base "${{ github.event.pull_request.base.sha }}" \
+                --head "${{ github.event.pull_request.head.sha }}"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   contracts:
     name: contracts (schema + fixtures + CLI)
+    needs: changes
+    if: needs.changes.outputs.run_contracts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -38,6 +118,8 @@ jobs:
 
   web:
     name: web (lint + typecheck + tests + build + provider guard)
+    needs: changes
+    if: needs.changes.outputs.run_web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -55,6 +137,8 @@ jobs:
 
   python:
     name: python (format + lint + typecheck + unit tests)
+    needs: changes
+    if: needs.changes.outputs.run_python == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -65,7 +149,14 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy apps/api/src apps/worker/src
-      - run: uv run pytest -m "not integration" -q
+      # The chart contract tests are deselected here because they belong to
+      # the `chart` job, which is selected by chart changes. Leaving them in
+      # both ran 149 helm renders twice on every full suite and never at all
+      # on a chart-only change. They still run: `settings.py` is classified
+      # security-sensitive, so a backend change that could break the
+      # rendered-env assertions takes the full suite and the chart job with
+      # it.
+      - run: uv run pytest -m "not integration" -q --ignore=apps/api/tests/test_production_chart_unit.py
       # Does the production image contain the code the chart tells it to run?
       #
       # It did not, once: the internal listener was started with a module
@@ -78,9 +169,18 @@ jobs:
       # test that silently skips is how this gets missed a second time.
       - name: production image runs the chart's entrypoint
         run: bash scripts/api_image_entrypoint_smoke.sh
+      # Child-process lifecycle. The smoke scripts start servers, clusters
+      # and port-forwards; this proves they take them down again on success,
+      # on failure, on timeout and on Ctrl+C — including grandchildren,
+      # which is the case that actually leaked (a `pnpm` wrapper whose
+      # `next-server` held a port for two days).
+      - name: process lifecycle regression
+        run: bash scripts/process_lifecycle_regression.sh
 
   integration:
     name: integration (migrations + audit append-only + queue)
+    needs: changes
+    if: needs.changes.outputs.run_integration == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -121,17 +221,36 @@ jobs:
           DRAKE_IT_DATABASE_URL: ${{ env.CI_DB_URL }}
           DRAKE_IT_REDIS_URL: ${{ env.CI_REDIS_URL }}
           DRAKE_IT_PROMETHEUS_URL: http://127.0.0.1:59090
-      # Dev observability package: helm lint + template + rendered-manifest
-      # policy checks (no cluster access, no install).
-      - name: helm validation (dev observability package)
-        run: bash deploy/dev/observability/validate.sh
-      # Cluster agent chart: rendered-manifest policy checks (exact
-      # get/list/watch RBAC, hardened pod, no Service/Secret material).
+
+  chart:
+    name: chart (lint + template + rendered-manifest policy)
+    needs: changes
+    if: needs.changes.outputs.run_chart == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      # These moved out of `integration`, where they ran on every backend
+      # change and never on a chart-only change — the wrong way round. They
+      # need no cluster and no database.
+      - name: helm validation (main chart)
+        run: bash deploy/drake/validate.sh
       - name: helm validation (cluster agent chart)
         run: bash deploy/agent/validate.sh
+      - name: helm validation (dev observability package)
+        run: bash deploy/dev/observability/validate.sh
+      # Rendered-manifest contract tests: securityContext, secret volume
+      # modes, image digests, exposure, runtime-security env.
+      - name: production chart unit tests
+        run: uv run --directory apps/api pytest tests/test_production_chart_unit.py -q
 
   go-agent:
     name: go agent (fmt + vet + build + tests)
+    needs: changes
+    if: needs.changes.outputs.run_go == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -141,6 +260,9 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: apps/cluster-agent/go.mod
+          # Keyed on the module graph, so a lockfile change misses the cache
+          # instead of silently reusing the previous resolution.
+          cache-dependency-path: apps/cluster-agent/go.sum
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go build ./...
@@ -148,6 +270,8 @@ jobs:
 
   secret-scan:
     name: secret scan (gitleaks)
+    # No `if:` and no `needs:` — a security gate that can be conditioned
+    # away is not a gate. It runs on every event, for every change.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -161,6 +285,7 @@ jobs:
 
   dependency-scan:
     name: dependency scan (osv-scanner)
+    # Unconditional for the same reason as the secret scan.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -170,8 +295,85 @@ jobs:
           ghcr.io/google/osv-scanner@sha256:385ff9dd9d50a573766fc226f24da1d61cd5843542ff7e04c563561bbd918e30
           scan source -r /src
 
+  k3d-runtime:
+    name: k3d runtime (agent RBAC + chart + listener smokes)
+    needs: changes
+    if: needs.changes.outputs.run_k3d_runtime == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # postgres:16 pinned by digest
+        image: postgres@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+        env:
+          POSTGRES_USER: drake
+          POSTGRES_PASSWORD: ci_local_only
+          POSTGRES_DB: drake
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drake -d drake"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        # redis:7 pinned by digest
+        image: redis@sha256:e9b2e45ecd47fbb69b877cf8d045d5cccaaaed52524b6e098b4abe8212994f73
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      E2E_DB_URL: postgresql+psycopg://drake:ci_local_only@127.0.0.1:5432/drake
+      E2E_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: apps/cluster-agent/go.mod
+          cache-dependency-path: apps/cluster-agent/go.sum
+      # k3d pinned by version AND sha256 (kubectl + helm ship with the
+      # runner image). The k3d clusters are disposable and job-local.
+      - name: install k3d (pinned)
+        run: |
+          curl -fsSLo /tmp/k3d https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64
+          echo "dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e  /tmp/k3d" | sha256sum -c -
+          sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
+      # RBAC surface proof on a disposable cluster: every allowlisted read
+      # YES, every forbidden operation NO (kubectl auth can-i matrix).
+      - name: agent RBAC acceptance (disposable k3d)
+        run: bash scripts/k3d_agent_acceptance.sh
+      # Deployable-chart proof: image build + full rendered chart on a
+      # disposable k3d cluster, incl. liveness subcommand and NetworkPolicy
+      # positive/negative paths.
+      - name: chart smoke (disposable k3d)
+        run: bash scripts/chart_smoke_k3d.sh
+        env:
+          DRAKE_SMOKE_DATABASE_URL: ${{ env.E2E_DB_URL }}
+          DRAKE_SMOKE_REDIS_URL: ${{ env.E2E_REDIS_URL }}
+      # Do the internal agent listeners actually START?
+      #
+      # Three production rollouts failed on that question — a module missing
+      # from the image, environment the runtime-security validator demands,
+      # and a Secret mounted 0400 to a process running as uid 65532. All
+      # three rendered cleanly; `helm template` cannot see any of them.
+      #
+      # This runs them for real: real image, real Secret volumes, the same
+      # securityContext and modes production installs, on a disposable
+      # cluster, and then talks to both listeners over TLS.
+      - name: internal listener runtime smoke (disposable k3d)
+        run: bash scripts/listener_runtime_smoke_k3d.sh
+
   e2e:
     name: e2e (browser acceptance, OIDC + RBAC)
+    needs: changes
+    if: needs.changes.outputs.run_e2e == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -213,47 +415,34 @@ jobs:
           enable-cache: true
       - run: uv sync --all-packages
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @drake/web exec playwright install --with-deps chromium
+      # Browser binaries are large and version-locked to the Playwright in
+      # the lockfile, so the key is the lockfile hash: a Playwright bump
+      # misses the cache and reinstalls instead of running the new client
+      # against old browsers.
+      - name: cache playwright browsers
+        id: playwright-cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: install playwright chromium
+        run: pnpm --filter @drake/web exec playwright install --with-deps chromium
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: apps/cluster-agent/go.mod
-      # k3d pinned by version AND sha256 (kubectl + helm ship with the
-      # runner image). The k3d cluster is disposable and job-local.
+          cache-dependency-path: apps/cluster-agent/go.sum
       - name: install k3d (pinned)
         run: |
           curl -fsSLo /tmp/k3d https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64
           echo "dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e  /tmp/k3d" | sha256sum -c -
           sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
-      # RBAC surface proof on a disposable cluster: every allowlisted read
-      # YES, every forbidden operation NO (kubectl auth can-i matrix).
-      - name: agent RBAC acceptance (disposable k3d)
-        run: bash scripts/k3d_agent_acceptance.sh
-      # Full-chain agent stack: disposable k3d + ephemeral TLS + agent
-      # binary for the inventory E2E scenario.
+      # The inventory and inventory-a11y specs need this stack and SKIP
+      # without it. It therefore stays in this job rather than moving to
+      # k3d-runtime: separating them would produce a green browser suite
+      # with its cluster scenarios silently skipped. The specs themselves
+      # now fail loudly when the stack is missing under CI.
       - name: agent E2E stack up
         run: bash scripts/e2e_agent_stack.sh up
-      # Deployable-chart proof: image build + full rendered chart on a
-      # SECOND disposable k3d cluster, incl. liveness subcommand and
-      # NetworkPolicy positive/negative paths. Runs before e2e-setup so
-      # its database effects are reset for the browser suite.
-      - name: chart smoke (disposable k3d)
-        run: bash scripts/chart_smoke_k3d.sh
-        env:
-          DRAKE_SMOKE_DATABASE_URL: ${{ env.E2E_DB_URL }}
-          DRAKE_SMOKE_REDIS_URL: ${{ env.E2E_REDIS_URL }}
-
-      # Do the internal agent listeners actually START?
-      #
-      # Three production rollouts failed on that question — a module missing
-      # from the image, environment the runtime-security validator demands,
-      # and a Secret mounted 0400 to a process running as uid 65532. All
-      # three rendered cleanly; `helm template` cannot see any of them.
-      #
-      # This runs them for real: real image, real Secret volumes, the same
-      # securityContext and modes production installs, on a disposable
-      # cluster, and then talks to both listeners over TLS.
-      - name: internal listener runtime smoke (disposable k3d)
-        run: bash scripts/listener_runtime_smoke_k3d.sh
       # Fixture Prometheus (digest-pinned) backing the metrics E2E scenarios.
       - name: start fixture prometheus
         run: docker compose -f deploy/local/docker-compose.yml up -d --wait prometheus
@@ -268,6 +457,59 @@ jobs:
       # cookies, so they are deliberately not exported).
       - run: pnpm --filter @drake/web exec playwright test
         env:
+          CI: "true"
           DRAKE_E2E_DATABASE_URL: ${{ env.E2E_DB_URL }}
           DRAKE_E2E_REDIS_URL: ${{ env.E2E_REDIS_URL }}
           DRAKE_E2E_REDIS_PORT: "6379"
+
+  ci-gate:
+    name: ci gate
+    # The single required check. `always()` so it reports even when jobs
+    # upstream were skipped or failed — a gate that only runs on success
+    # cannot fail a pull request.
+    if: always()
+    needs:
+      - changes
+      - contracts
+      - web
+      - python
+      - integration
+      - chart
+      - go-agent
+      - secret-scan
+      - dependency-scan
+      - k3d-runtime
+      - e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: every required job passed or was legitimately skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+
+          needs = json.loads(os.environ["NEEDS"])
+
+          # `skipped` is a pass: the change classifier decided that job was
+          # not relevant, and that decision is itself tested
+          # (apps/api/tests/test_ci_impact.py). `cancelled` is NOT a pass —
+          # it means the run was superseded or timed out, and treating it as
+          # success is how a red main goes unnoticed.
+          allowed = {"success", "skipped"}
+          bad = {name: data["result"] for name, data in sorted(needs.items())
+                 if data["result"] not in allowed}
+
+          for name, data in sorted(needs.items()):
+              print(f"  {data['result']:<10} {name}")
+
+          # The security gates must have actually RUN, not been skipped.
+          for gate in ("secret-scan", "dependency-scan"):
+              if needs.get(gate, {}).get("result") != "success":
+                  bad[gate] = f"security gate did not succeed ({needs.get(gate, {}).get('result')})"
+
+          if bad:
+              print("\nFAILED:", json.dumps(bad, indent=2))
+              sys.exit(1)
+          print("\nci gate: all required jobs passed or were not applicable")
+          PY

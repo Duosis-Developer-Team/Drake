@@ -27,6 +27,13 @@ const STACK_DIR = path.resolve(__dirname, "../../../.e2e-agent");
 const stackReady =
   existsSync(path.join(STACK_DIR, "kubeconfig")) &&
   existsSync(path.join(STACK_DIR, "tls.json"));
+
+// Same rule as inventory.spec.ts: skip locally, fail in CI.
+if (process.env.CI && !stackReady) {
+  throw new Error(
+    "agent E2E stack missing under CI: refusing to skip the inventory a11y scenarios.",
+  );
+}
 test.beforeAll(() => {
   test.skip(!stackReady, "agent E2E stack missing — run scripts/e2e_agent_stack.sh up");
 });

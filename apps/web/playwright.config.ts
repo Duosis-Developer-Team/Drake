@@ -16,6 +16,12 @@ const redisUrl = process.env.DRAKE_E2E_REDIS_URL ?? "redis://127.0.0.1:56379/0";
  * session cookie is issued same-origin — exactly like a real deployment
  * behind one host.
  */
+// `reuseExistingServer` is deliberately CI-aware. Locally, reusing a server
+// you already have running is the difference between a 10-second and a
+// 3-minute iteration. In CI it is a correctness hazard: a server left over
+// from an earlier step would be silently reused, and for the Next entry
+// that means serving a build produced from DIFFERENT source than the commit
+// under test. CI always starts its own.
 export default defineConfig({
   testDir: "./e2e",
   // Dev-mode servers cold-compile routes on first hit; timeouts are sized
@@ -34,7 +40,7 @@ export default defineConfig({
       command: "uv run python apps/api/tests/fake_oidc.py --port 9556",
       cwd: "../..",
       url: "http://127.0.0.1:9556/.well-known/openid-configuration",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
     {
@@ -43,7 +49,7 @@ export default defineConfig({
       command: "uv run python scripts/e2e_flaky_prometheus.py",
       cwd: "../..",
       url: "http://127.0.0.1:59191/__health",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
     {
@@ -51,7 +57,7 @@ export default defineConfig({
       command: "uv run python scripts/e2e_fake_github.py",
       cwd: "../..",
       url: "http://127.0.0.1:59097/__health",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
     {
@@ -59,7 +65,7 @@ export default defineConfig({
         "uv run uvicorn drake_api.main:create_app --factory --host 127.0.0.1 --port 8123",
       cwd: "../..",
       url: "http://127.0.0.1:8123/health/live",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 30_000,
       env: {
         DRAKE_ENV: "local",
@@ -92,7 +98,7 @@ export default defineConfig({
       // stalls, and closer to real deployment behavior.
       command: "pnpm build && pnpm start --port 3456",
       url: "http://127.0.0.1:3456",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 180_000,
       env: {
         DRAKE_API_URL: "http://127.0.0.1:8123",
