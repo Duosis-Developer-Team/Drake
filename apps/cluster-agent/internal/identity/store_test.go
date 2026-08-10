@@ -2,6 +2,7 @@ package identity
 
 import (
 	"bytes"
+	"crypto/x509"
 	"os"
 	"path/filepath"
 	"testing"
@@ -170,5 +171,63 @@ func TestSequenceStoreRoundTripAndCorruptionSafety(t *testing.T) {
 	}
 	if got := LoadSequence(dir); got != 0 {
 		t.Fatalf("corrupt sequence must fail closed to 0, got %d", got)
+	}
+}
+
+// TestIdentitySurvivesProcessRestart is the property the PersistentVolume
+// exists for.
+//
+// The chart used to back /var/lib/drake-agent with a memory emptyDir, which
+// meant an ordinary pod restart destroyed the agent's key and certificate
+// and the next start demanded a fresh one-time enrolment token. That turns
+// a node drain into an operator task, and an operator task that mints
+// credentials is one people automate badly.
+//
+// A restart is a NEW PROCESS READING THE SAME DIRECTORY. That is exactly
+// what this test does: it never reuses an in-memory handle.
+func TestIdentitySurvivesProcessRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	notAfter := time.Now().Add(24 * time.Hour)
+	first, err := Save(dir, "11111111-2222-3333-4444-555555555555", key,
+		selfSignedPEM(t, key, notAfter), "ca", notAfter)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// The "restart": nothing from the first run is carried over.
+	reloaded, err := LoadCurrent(dir)
+	if err != nil {
+		t.Fatalf("a restarted agent could not load its identity: %v", err)
+	}
+	if reloaded.AgentID != first.AgentID {
+		t.Fatalf("agent id changed across restart: %q -> %q", first.AgentID, reloaded.AgentID)
+	}
+	firstKey, err := x509.MarshalPKCS8PrivateKey(first.Key())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	reloadedKey, err := x509.MarshalPKCS8PrivateKey(reloaded.Key())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(firstKey, reloadedKey) {
+		t.Fatal("the private key was not reused; the agent would need a new certificate")
+	}
+
+	// And the material is not world-readable, on a volume other pods must
+	// never mount.
+	for _, name := range []string{"agent-key.pem", "agent.pem", "agent-id"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			t.Fatalf("%s is readable beyond its owner: %v", name, mode)
+		}
 	}
 }

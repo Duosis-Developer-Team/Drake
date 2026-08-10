@@ -463,3 +463,190 @@ async def test_real_tls_handshake_cert_required(engine: AsyncEngine, tmp_path: P
         process.terminate()
         process.wait(timeout=10)
     del harness
+
+
+@pytest.mark.anyio
+async def test_two_listeners_separate_the_pre_certificate_surface(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The bootstrap asymmetry, settled at the transport.
+
+    An agent enrolling for the first time has no client certificate, and
+    every call afterwards must present one. One listener cannot be both,
+    and a listener that merely *tolerated* a missing certificate would put
+    the guarantee in application code — which on this stack could not even
+    be written honestly: uvicorn never gives the ASGI app the peer
+    certificate.
+
+    So production runs two, from one image:
+
+        enroll (CERT_NONE)     only POST /enroll
+        ingest (CERT_REQUIRED) everything an enrolled agent does
+
+    This starts both, for real, and asks each of them the questions the
+    other is supposed to answer.
+    """
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    settings = ca_settings(tmp_path)
+    cluster_id = str(world["cluster_a"].id)
+    token = (await create_token(harness, engine, cluster_id))["token"]
+    server_cert, server_key = make_server_tls(tmp_path / "server")
+
+    import os
+    import secrets
+    import socket
+
+    def free_port() -> int:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            return int(probe.getsockname()[1])
+
+    enroll_port, ingest_port = free_port(), free_port()
+    runner = API_ROOT.parent.parent / "scripts" / "run_internal_agent_api.py"
+    env = {
+        **os.environ,
+        "DRAKE_ENV": "test",
+        "DRAKE_DATABASE_URL": settings.database_url,
+        "DRAKE_REDIS_URL": settings.redis_url,
+        "DRAKE_AGENT_CA_CERT_FILE": settings.agent_ca_cert_file,
+        "DRAKE_AGENT_CA_KEY_FILE": settings.agent_ca_key_file,
+    }
+
+    def spawn(port: int, surface: str) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(  # noqa: S603 - fixed argv, resolved interpreter
+            [
+                sys.executable,
+                str(runner),
+                "--port",
+                str(port),
+                "--surface",
+                surface,
+                "--tls-cert",
+                str(server_cert),
+                "--tls-key",
+                str(server_key),
+                "--client-ca",
+                settings.agent_ca_cert_file,
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    server_ctx = ssl.create_default_context(cafile=str(server_cert))
+    server_ctx.check_hostname = False  # ephemeral self-signed test cert
+
+    enroll_proc = spawn(enroll_port, "enrollment")
+    ingest_proc = spawn(ingest_port, "ingest")
+    try:
+        # --- the enrollment listener, with NO client certificate ---------
+        enroll_url = f"https://127.0.0.1:{enroll_port}/internal/v1/agent"
+        key = generate_keypair()
+        enrolled = None
+        for _ in range(80):
+            try:
+                async with httpx.AsyncClient(verify=server_ctx) as bare:
+                    enrolled = await bare.post(
+                        f"{enroll_url}/enroll",
+                        json=enrollment_body(token, cluster_id, make_csr(key)),
+                    )
+                break
+            except httpx.HTTPError:
+                await asyncio.sleep(0.25)
+        else:  # pragma: no cover - only on a broken environment
+            pytest.fail("enrollment listener did not come up")
+        assert enrolled is not None
+        # Valid unused token + no client certificate → accepted.
+        assert enrolled.status_code == 201, enrolled.text
+
+        async with httpx.AsyncClient(verify=server_ctx) as bare:
+            # A well-formed token that was never issued. Shaped like a real
+            # one on purpose: a short string would be refused by schema
+            # validation and prove nothing about the token check.
+            refused = await bare.post(
+                f"{enroll_url}/enroll",
+                json=enrollment_body(
+                    secrets.token_urlsafe(32), cluster_id, make_csr(generate_keypair())
+                ),
+            )
+            assert refused.status_code == 403, refused.text
+
+            # The enrollment listener serves NOTHING else. A certificate
+            # renewal here is not "unauthorized" — the route does not exist,
+            # so a stolen token cannot reach an enrolled agent's surface.
+            stray = await bare.post(
+                f"{enroll_url}/certificates/renew",
+                json={"csr_pem": make_csr(generate_keypair())},
+            )
+            assert stray.status_code == 404, stray.text
+            heartbeat = await bare.post(f"{enroll_url}/heartbeat", json={})
+            assert heartbeat.status_code == 404, heartbeat.text
+
+        # --- the ingest listener, which demands a certificate ------------
+        ingest_url = f"https://127.0.0.1:{ingest_port}/internal/v1/agent"
+        client_cert, client_key = write_client_identity(
+            tmp_path / "identity2", enrolled.json()["certificate_pem"], key
+        )
+        mtls_ctx = ssl.create_default_context(cafile=str(server_cert))
+        mtls_ctx.check_hostname = False
+        mtls_ctx.load_cert_chain(str(client_cert), str(client_key))
+
+        for _ in range(80):
+            try:
+                async with httpx.AsyncClient(verify=mtls_ctx) as ok_client:
+                    with_cert = await ok_client.post(f"{ingest_url}/heartbeat", json={})
+                break
+            except httpx.HTTPError:
+                await asyncio.sleep(0.25)
+        else:  # pragma: no cover
+            pytest.fail("ingest listener did not come up")
+
+        # The handshake succeeded; the application still demands
+        # proof-of-possession, which this request does not carry.
+        assert with_cert.status_code == 403, with_cert.text
+
+        # No client certificate → refused during the HANDSHAKE. There is no
+        # status code here, and that is the point: the request never became
+        # a request.
+        with pytest.raises(httpx.HTTPError):
+            async with httpx.AsyncClient(verify=server_ctx) as bare:
+                await bare.post(f"{ingest_url}/heartbeat", json={})
+
+        # A certificate from a CA this listener does not trust: same.
+        rogue_dir = tmp_path / "rogue2"
+        rogue_ca_cert, rogue_ca_key = generate_ephemeral_ca(rogue_dir)
+        from drake_api.agents.ca import AgentCertificateAuthority, load_csr
+
+        rogue_key = generate_keypair()
+        rogue_issued = AgentCertificateAuthority(
+            settings.model_copy(
+                update={
+                    "agent_ca_cert_file": str(rogue_ca_cert),
+                    "agent_ca_key_file": str(rogue_ca_key),
+                }
+            )
+        ).sign(load_csr(make_csr(rogue_key)), world["cluster_a"].id, uuidlib.uuid4())
+        rogue_cert_path, rogue_key_path = write_client_identity(
+            rogue_dir / "identity", rogue_issued.certificate_pem, rogue_key
+        )
+        rogue_ctx = ssl.create_default_context(cafile=str(server_cert))
+        rogue_ctx.check_hostname = False
+        rogue_ctx.load_cert_chain(str(rogue_cert_path), str(rogue_key_path))
+        with pytest.raises(httpx.HTTPError):
+            async with httpx.AsyncClient(verify=rogue_ctx) as rogue_client:
+                await rogue_client.post(f"{ingest_url}/heartbeat", json={})
+
+        # And the one-time token cannot be spent on the certificate-bearing
+        # listener either: enrolment is not served there.
+        async with httpx.AsyncClient(verify=mtls_ctx) as ok_client:
+            no_enroll = await ok_client.post(
+                f"{ingest_url}/enroll",
+                json=enrollment_body(token, cluster_id, make_csr(generate_keypair())),
+            )
+        assert no_enroll.status_code == 404, no_enroll.text
+    finally:
+        for process in (enroll_proc, ingest_proc):
+            process.terminate()
+            process.wait(timeout=10)
+    del harness

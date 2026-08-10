@@ -180,6 +180,33 @@ if secrets:
 if "BEGIN PRIVATE KEY" in rendered or "BEGIN EC PRIVATE KEY" in rendered:
     fail("private key material in rendered output")
 
+# --- identity persistence ------------------------------------------------
+#
+# The agent's key and certificate used to live in a memory-backed emptyDir,
+# so every pod restart destroyed the identity and demanded a NEW one-time
+# enrolment token. A node drain became an operator task that mints
+# credentials, which is the kind of task people automate badly.
+#
+# The claim is what makes a restart ordinary. It is checked here rather than
+# described in a runbook, because a chart that quietly went back to an
+# emptyDir would still render, install and pass every other check.
+claims = [doc for doc in documents if doc.get("kind") == "PersistentVolumeClaim"]
+if len(claims) != 1:
+    fail(f"expected exactly one identity claim, found {len(claims)}")
+else:
+    claim = claims[0]
+    if claim["spec"]["accessModes"] != ["ReadWriteOnce"]:
+        fail("the identity claim must be ReadWriteOnce; the key is node-scoped")
+    keep = (claim["metadata"].get("annotations") or {}).get("helm.sh/resource-policy")
+    if keep != "keep":
+        fail("the identity claim must survive `helm uninstall`, or a reinstall re-enrols")
+
+for deployment in deployments:
+    volumes = {v["name"]: v for v in deployment["spec"]["template"]["spec"].get("volumes", [])}
+    state = volumes.get("state")
+    if state is None or "persistentVolumeClaim" not in state:
+        fail("the agent identity directory must be backed by a claim, not an emptyDir")
+
 if failures:
     for failure in failures:
         print(f"POLICY VIOLATION: {failure}", file=sys.stderr)

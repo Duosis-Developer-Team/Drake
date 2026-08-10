@@ -1,0 +1,232 @@
+{{- if .Values.internalAgentApi.enabled }}
+{{/*
+The internal agent API — the only surface a cluster agent ever talks to.
+
+It is a SEPARATE workload from the public API on purpose. The public API
+serves browsers with cookies, CSRF and sessions; this serves machines with
+mutual TLS and proof-of-possession, and it holds the Agent CA private key.
+Running both in one process would mean the key that signs agent identities
+sits in the process that answers the internet.
+
+Two listeners, one image, one pod:
+
+  enroll  server-authenticated TLS, CERT_NONE, serving only POST /enroll.
+          An agent enrolling for the first time has no client certificate;
+          demanding one here would refuse every first enrolment.
+
+  ingest  CERT_REQUIRED mutual TLS. Heartbeat, inventory, renewal. A caller
+          with no client certificate is refused during the handshake —
+          before a request exists for application code to mishandle.
+
+The split is not a preference. uvicorn does not expose the peer certificate
+to the ASGI application at all, so "accept a missing certificate at the
+transport and check it in the app" is not something that could be written
+honestly on this stack. The transport is where the guarantee lives.
+
+NOTHING here is published: no Ingress, no NodePort, no LoadBalancer, no
+hostNetwork, no hostPort. The Service is ClusterIP and a NetworkPolicy
+admits exactly one peer.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "drake.name" . }}-agent-gateway
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-gateway
+spec:
+  # One replica. The two listeners share the Agent CA key mount, and a
+  # second copy of that key buys nothing.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: agent-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "drake.name" . }}
+        app.kubernetes.io/component: agent-gateway
+    spec:
+      {{- include "drake.imagePullSecrets" . | nindent 6 }}
+      # Same reason as the API: a Service named `drake-api` would arrive as
+      # the setting `api_port` and kill the process on startup.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        {{- range $surface := (list "enroll" "ingest") }}
+        {{- $isIngest := eq $surface "ingest" }}
+        - name: {{ $surface }}
+          image: {{ include "drake.image" (dict "ctx" $ "image" $.Values.api.image "name" "api") | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "scripts.run_internal_agent_api"]
+          args:
+            - "--host=0.0.0.0"
+            - "--port={{ if $isIngest }}{{ $.Values.internalAgentApi.ingestPort }}{{ else }}{{ $.Values.internalAgentApi.enrollPort }}{{ end }}"
+            - "--surface={{ if $isIngest }}ingest{{ else }}enrollment{{ end }}"
+            - "--tls-cert=/etc/drake/agent-tls/tls.crt"
+            - "--tls-key=/etc/drake/agent-tls/tls.key"
+            - "--client-ca=/etc/drake/agent-ca/ca.crt"
+          ports:
+            - name: {{ $surface }}
+              containerPort: {{ if $isIngest }}{{ $.Values.internalAgentApi.ingestPort }}{{ else }}{{ $.Values.internalAgentApi.enrollPort }}{{ end }}
+          env:
+            - name: DRAKE_ENV
+              value: production
+            - name: DRAKE_INTERNAL_AGENT_API_ENABLED
+              value: "true"
+            # The CA that signs agent certificates. Mounted ONLY here — not
+            # on the API, the web app or the edge.
+            - name: DRAKE_AGENT_CA_CERT_FILE
+              value: /etc/drake/agent-ca/ca.crt
+            - name: DRAKE_AGENT_CA_KEY_FILE
+              value: /etc/drake/agent-ca/ca.key
+            - name: DRAKE_PUBLIC_ORIGIN
+              value: {{ include "drake.publicOrigin" $ | quote }}
+            - name: DRAKE_AUTH_MODE
+              value: {{ $.Values.auth.mode | quote }}
+          envFrom:
+            # Database and Redis, from the same out-of-band Secret the API
+            # reads. This listener creates no Secret of its own.
+            - secretRef:
+                name: {{ $.Values.api.existingSecret | default (printf "%s-api" (include "drake.name" $)) }}
+          volumeMounts:
+            - name: agent-tls
+              mountPath: /etc/drake/agent-tls
+              readOnly: true
+            - name: agent-ca
+              mountPath: /etc/drake/agent-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          # A TLS listener cannot be probed with a plain HTTP GET, and a
+          # probe that presents no client certificate would fail the ingest
+          # handshake by design. So liveness is the process holding the
+          # port open, which is what a TCP probe asks.
+          readinessProbe:
+            tcpSocket:
+              port: {{ if $isIngest }}{{ $.Values.internalAgentApi.ingestPort }}{{ else }}{{ $.Values.internalAgentApi.enrollPort }}{{ end }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ if $isIngest }}{{ $.Values.internalAgentApi.ingestPort }}{{ else }}{{ $.Values.internalAgentApi.enrollPort }}{{ end }}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $.Values.internalAgentApi.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: agent-tls
+          secret:
+            secretName: {{ required "internalAgentApi.tlsSecret is required" .Values.internalAgentApi.tlsSecret }}
+        - name: agent-ca
+          secret:
+            secretName: {{ required "internalAgentApi.caSecret is required" .Values.internalAgentApi.caSecret }}
+            defaultMode: 0400
+        - name: tmp
+          emptyDir:
+            medium: Memory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "drake.name" . }}-agent-gateway
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-gateway
+spec:
+  # ClusterIP, always. This Service has no `type` value to set: publishing
+  # the enrolment surface is not a configuration option.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "drake.name" . }}
+    app.kubernetes.io/component: agent-gateway
+  ports:
+    - name: enroll
+      port: {{ .Values.internalAgentApi.enrollPort }}
+      targetPort: enroll
+    - name: ingest
+      port: {{ .Values.internalAgentApi.ingestPort }}
+      targetPort: ingest
+{{- if .Values.networkPolicy.enabled }}
+---
+{{/*
+What may reach the agent gateway, and what it may reach.
+
+Read this as a NETWORK boundary and nothing more. A vanilla Kubernetes
+NetworkPolicy cannot verify a ServiceAccount: it selects namespaces and
+pods by label, and a label is an assertion by whoever created the pod. So
+this policy narrows *where a connection may come from*; it does not
+establish *who is calling*.
+
+Identity is the other layer, and it is the one that actually authenticates:
+mutual TLS with a certificate this deployment's own CA issued, carrying the
+agent's SPIFFE URI, plus a per-request proof-of-possession signature bound
+to the method, path, body hash, timestamp and a single-use nonce. That is
+what decides whether a request is a particular agent of a particular
+cluster. The policy below only means "nothing outside the agent namespace
+even gets to try".
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-agent-gateway-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: agent-gateway
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # The standard label every namespace carries, set by the API
+              # server rather than by whoever wrote the manifest.
+              kubernetes.io/metadata.name: {{ .Values.internalAgentApi.agentNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.internalAgentApi.agentPodSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.internalAgentApi.enrollPort }}
+        - protocol: TCP
+          port: {{ .Values.internalAgentApi.ingestPort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-agent-gateway-egress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: agent-gateway
+  policyTypes: ["Egress"]
+  egress:
+    # The datastores this listener genuinely uses: PostgreSQL for agent and
+    # inventory state, Redis for the nonce replay window.
+    {{- include "drake.datastoreEgress" (dict "peer" .Values.networkPolicy.database) | nindent 4 }}
+    {{- include "drake.datastoreEgress" (dict "peer" .Values.networkPolicy.redis) | nindent 4 }}
+    {{- include "drake.dnsEgress" . | nindent 4 }}
+    # No Kubernetes API egress. The listener never talks to an apiserver —
+    # the AGENT reads the cluster and reports; nothing here reads back.
+{{- end }}
+{{- end }}

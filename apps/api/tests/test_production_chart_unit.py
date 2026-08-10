@@ -1492,3 +1492,181 @@ def test_the_chart_renders_a_fully_specified_write_path() -> None:
     rendered = yaml.safe_dump(docs)
     for forbidden in ("BEGIN RSA", "BEGIN PRIVATE", "ghs_", "ghp_"):
         assert forbidden not in rendered, forbidden
+
+
+# --- the internal agent listener (Sprint 13B) ----------------------------
+#
+# It is the one surface a cluster agent talks to, and the one place the
+# Agent CA private key is mounted. Everything below is about keeping it
+# unreachable from outside the cluster.
+
+_LISTENER_ON: tuple[str, ...] = (
+    "--set",
+    "internalAgentApi.enabled=true",
+    "--set",
+    "internalAgentApi.tlsSecret=drake-agent-tls",
+    "--set",
+    "internalAgentApi.caSecret=drake-agent-ca",
+)
+
+
+def render_listener(*overrides: str) -> list[dict[str, Any]]:
+    return render_prod(*_LISTENER_ON, *overrides)
+
+
+def test_the_listener_is_off_unless_it_is_switched_on() -> None:
+    """Shipping a listener and running one are separate decisions."""
+    names = {d["metadata"]["name"] for d in render_prod()}
+    assert not [n for n in names if "agent-gateway" in n]
+
+
+def test_the_listener_is_two_processes_with_separate_surfaces() -> None:
+    """The bootstrap asymmetry, expressed as two containers.
+
+    An agent enrolling for the first time has no client certificate; every
+    call afterwards must present one. One listener cannot be both, so there
+    are two — and the enrolment one carries nothing else.
+    """
+    gateway = next(
+        d
+        for d in by_kind(render_listener(), "Deployment")
+        if d["metadata"]["name"] == "drake-agent-gateway"
+    )
+    containers = {c["name"]: c for c in gateway["spec"]["template"]["spec"]["containers"]}
+    assert sorted(containers) == ["enroll", "ingest"]
+
+    enroll_args = " ".join(containers["enroll"]["args"])
+    ingest_args = " ".join(containers["ingest"]["args"])
+    assert "--surface=enrollment" in enroll_args
+    assert "--surface=ingest" in ingest_args
+    assert "--port=8144" in enroll_args
+    assert "--port=8143" in ingest_args
+    # One image for both: the surfaces differ by argument, not by build.
+    assert containers["enroll"]["image"] == containers["ingest"]["image"]
+    assert "@sha256:" in containers["enroll"]["image"]
+    # One replica: a second copy of the CA key mount buys nothing.
+    assert gateway["spec"]["replicas"] == 1
+
+
+def test_the_listener_is_reachable_only_inside_the_cluster() -> None:
+    """No Ingress, no node port, no load balancer, no host networking.
+
+    Publishing the enrolment surface is not a configuration option, so
+    there is no value to set wrong.
+    """
+    docs = render_listener()
+    service = next(
+        s for s in by_kind(docs, "Service") if s["metadata"]["name"] == "drake-agent-gateway"
+    )
+    assert service["spec"]["type"] == "ClusterIP"
+    assert not [p for p in service["spec"]["ports"] if p.get("nodePort")]
+    assert {p["name"] for p in service["spec"]["ports"]} == {"enroll", "ingest"}
+
+    for ingress in by_kind(docs, "Ingress"):
+        backends = {
+            p["backend"]["service"]["name"]
+            for rule in ingress["spec"]["rules"]
+            for p in rule["http"]["paths"]
+        }
+        assert "drake-agent-gateway" not in backends, "the agent surface must not be published"
+
+    pod = next(
+        d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-agent-gateway"
+    )["spec"]["template"]["spec"]
+    assert not pod.get("hostNetwork")
+    for container in pod["containers"]:
+        for port in container.get("ports", []):
+            assert "hostPort" not in port
+
+
+def test_the_public_edge_is_untouched_by_the_listener() -> None:
+    """Turning the agent surface on must not move the front door."""
+    published = {
+        (s["metadata"]["name"], port["nodePort"])
+        for s in by_kind(render_listener(), "Service")
+        for port in s["spec"]["ports"]
+        if port.get("nodePort")
+    }
+    assert published == {("drake-edge", 30773)}
+
+
+def test_the_ca_private_key_is_mounted_only_on_the_listener() -> None:
+    """The key that signs agent identities must not sit in the process that
+    answers the internet."""
+    docs = render_listener()
+    for doc in by_kind(docs, "Deployment") + by_kind(docs, "Job"):
+        for container in doc["spec"]["template"]["spec"]["containers"]:
+            env = {e["name"] for e in container.get("env", [])}
+            mounts = {m["mountPath"] for m in container.get("volumeMounts", [])}
+            on_gateway = doc["metadata"]["name"] == "drake-agent-gateway"
+            assert ("DRAKE_AGENT_CA_KEY_FILE" in env) is on_gateway, doc["metadata"]["name"]
+            assert ("/etc/drake/agent-ca" in mounts) is on_gateway, doc["metadata"]["name"]
+
+
+def test_the_listener_pod_is_hardened() -> None:
+    gateway = next(
+        d
+        for d in by_kind(render_listener(), "Deployment")
+        if d["metadata"]["name"] == "drake-agent-gateway"
+    )
+    pod = gateway["spec"]["template"]["spec"]
+    assert pod["securityContext"]["runAsNonRoot"] is True
+    assert pod["securityContext"]["seccompProfile"]["type"] == "RuntimeDefault"
+    assert pod["enableServiceLinks"] is False
+    for container in pod["containers"]:
+        security = container["securityContext"]
+        assert security["allowPrivilegeEscalation"] is False
+        assert security["readOnlyRootFilesystem"] is True
+        assert security["capabilities"]["drop"] == ["ALL"]
+        assert container["resources"]["requests"] and container["resources"]["limits"]
+
+
+def test_the_listener_admits_one_peer_and_reaches_only_its_datastores() -> None:
+    """A network boundary — and only that.
+
+    A vanilla NetworkPolicy selects namespaces and pods by label; a label
+    is an assertion by whoever created the pod, so this narrows WHERE a
+    connection may come from and never establishes WHO is calling. Identity
+    is mutual TLS plus proof-of-possession, and it is asserted elsewhere.
+    """
+    policies = {p["metadata"]["name"]: p for p in by_kind(render_listener(), "NetworkPolicy")}
+    ingress = policies["drake-agent-gateway-ingress"]
+    assert ingress["spec"]["policyTypes"] == ["Ingress"]
+    peers = ingress["spec"]["ingress"][0]["from"]
+    assert peers == [
+        {
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "drake-agent"}},
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "drake-cluster-agent"}},
+        }
+    ]
+    assert {p["port"] for p in ingress["spec"]["ingress"][0]["ports"]} == {8143, 8144}
+
+    egress = policies["drake-agent-gateway-egress"]
+    assert egress["spec"]["policyTypes"] == ["Egress"]
+    reachable = {
+        (peer["podSelector"]["matchLabels"].get("app.kubernetes.io/name"), rule["ports"][0]["port"])
+        for rule in egress["spec"]["egress"]
+        for peer in rule["to"]
+        if "podSelector" in peer
+    }
+    assert ("drake-postgres", 5432) in reachable
+    assert ("drake-redis", 6379) in reachable
+    # No Kubernetes API egress: the AGENT reads the cluster, not this.
+    assert not [
+        rule for rule in egress["spec"]["egress"] if any(p["port"] == 6443 for p in rule["ports"])
+    ]
+
+
+def test_a_listener_without_its_secrets_refuses_to_render() -> None:
+    """Fail closed: a missing CA reference must not become a listener that
+    silently serves without one."""
+    assert refuses_prod("--set", "internalAgentApi.enabled=true")
+    assert refuses_prod(
+        "--set", "internalAgentApi.enabled=true", "--set", "internalAgentApi.tlsSecret=t"
+    )
+
+
+def test_the_listener_still_owns_no_datastore_or_secret() -> None:
+    docs = render_listener()
+    for forbidden in ("Secret", "PersistentVolumeClaim", "StatefulSet"):
+        assert forbidden not in {d["kind"] for d in docs}

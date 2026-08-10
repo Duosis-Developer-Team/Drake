@@ -17,9 +17,20 @@ import (
 
 // Config is the complete agent configuration.
 type Config struct {
-	// APIBaseURL is the outbound Drake API endpoint. HTTPS is required;
+	// APIBaseURL is the outbound Drake API endpoint for an ENROLLED agent:
+	// heartbeat, inventory and certificate renewal. HTTPS is required;
 	// plaintext is tolerated only for loopback development targets.
+	//
+	// In production this is the mutual-TLS listener, and every call to it
+	// presents this agent's client certificate.
 	APIBaseURL string
+	// EnrollmentBaseURL is where the ONE pre-certificate call goes.
+	//
+	// It exists because an agent enrolling for the first time has no client
+	// certificate, and the listener that serves everything else demands one
+	// during the handshake. Defaults to APIBaseURL, which is what a single
+	// combined listener (local, test, CI) wants.
+	EnrollmentBaseURL string
 	// ClusterName identifies this cluster in Drake (DNS-safe label).
 	ClusterName string
 	// HealthListenAddr serves the liveness probe. Loopback-only by default;
@@ -50,6 +61,7 @@ var clusterNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?
 func FromEnv() Config {
 	cfg := Config{
 		APIBaseURL:          os.Getenv("DRAKE_AGENT_API_BASE_URL"),
+		EnrollmentBaseURL:   os.Getenv("DRAKE_AGENT_ENROLLMENT_BASE_URL"),
 		ClusterName:         os.Getenv("DRAKE_AGENT_CLUSTER_NAME"),
 		HealthListenAddr:    os.Getenv("DRAKE_AGENT_HEALTH_LISTEN_ADDR"),
 		LogLevel:            os.Getenv("DRAKE_AGENT_LOG_LEVEL"),
@@ -64,6 +76,10 @@ func FromEnv() Config {
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
+	}
+	if cfg.EnrollmentBaseURL == "" {
+		// One listener serves both surfaces unless told otherwise.
+		cfg.EnrollmentBaseURL = cfg.APIBaseURL
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = "/var/lib/drake-agent"

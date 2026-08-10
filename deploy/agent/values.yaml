@@ -16,6 +16,21 @@ image:
   pullPolicy: IfNotPresent
 
 # Drake cluster identity (UUID from the Drake catalog).
+# Where the ONE pre-certificate call goes. Empty means "the same listener
+# as apiBaseUrl", which is what local, test and CI want. Production points
+# it at the enrollment listener, because the ingest listener refuses a
+# connection that presents no client certificate.
+enrollmentBaseUrl: ""
+
+# The agent's identity must survive a restart, or every node drain needs a
+# new one-time enrollment token.
+persistence:
+  enabled: true
+  # Leave empty to let the chart create the claim.
+  existingClaim: ""
+  storageClass: ""
+  size: 64Mi
+
 clusterId: ""
 clusterName: ""
 

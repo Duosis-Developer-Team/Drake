@@ -36,8 +36,17 @@ jobs:
         include:
           - component: api
             dockerfile: apps/api/Dockerfile
+            context: .
           - component: web
             dockerfile: apps/web/Dockerfile
+            context: .
+          # The cluster agent. Same pipeline as the other two on purpose:
+          # a deployable artifact Drake asks operators to install in THEIR
+          # cluster should be built, tagged and pinned exactly like the
+          # ones Drake runs itself.
+          - component: cluster-agent
+            dockerfile: apps/cluster-agent/Dockerfile
+            context: apps/cluster-agent
     steps:
       - name: refuse without explicit confirmation
         if: inputs.confirm != 'publish'
@@ -70,7 +79,7 @@ jobs:
         id: build
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           # One platform, deliberately: the clusters Drake targets are
           # amd64, and a multi-arch manifest would make the digest recorded
