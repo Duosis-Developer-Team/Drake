@@ -215,7 +215,7 @@ jobs:
       # only the prometheus + fixture-exporter services start (55432/56379
       # stay free for the job's own service containers).
       - name: start fixture prometheus
-        run: docker compose -f deploy/local/docker-compose.yml up -d --wait prometheus
+        run: bash scripts/start_fixture_prometheus.sh
       - run: uv run pytest -m integration -q
         env:
           DRAKE_IT_DATABASE_URL: ${{ env.CI_DB_URL }}
@@ -445,7 +445,7 @@ jobs:
         run: bash scripts/e2e_agent_stack.sh up
       # Fixture Prometheus (digest-pinned) backing the metrics E2E scenarios.
       - name: start fixture prometheus
-        run: docker compose -f deploy/local/docker-compose.yml up -d --wait prometheus
+        run: bash scripts/start_fixture_prometheus.sh
       # Migrations + catalog seed + first Platform Owner for the fake user.
       - run: bash scripts/e2e-setup.sh
         env:
