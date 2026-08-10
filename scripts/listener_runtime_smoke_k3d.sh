@@ -84,6 +84,25 @@ image_identity_matches() {
   return 1
 }
 
+# Kubernetes reports the CANONICAL form of a reference: a bare
+# `drake-api:listener-smoke` comes back as
+# `docker.io/library/drake-api:listener-smoke`, because Docker Hub's
+# implicit namespace is explicit once the runtime has resolved it. Both
+# sides are normalised to the same form and then compared exactly — this is
+# a defined canonicalisation, not trimming until two strings agree.
+canonical_reference() {
+  local ref="$1"
+  ref="${ref#docker.io/library/}"
+  ref="${ref#docker.io/}"
+  ref="${ref#index.docker.io/library/}"
+  printf '%s' "$ref"
+}
+
+image_reference_matches() {
+  [ -n "$1" ] || return 1
+  [ "$(canonical_reference "$1")" = "$(canonical_reference "$2")" ]
+}
+
 # The comparator is the whole evidence, so prove it can say no. Fixed
 # inputs, no cluster: if this ever passes something it should not, the
 # image identity assertions below are decoration.
@@ -100,6 +119,12 @@ self_test_comparator() {
     && { fail "comparator accepted an empty imageID"; return; }
   image_identity_matches "sha256:${a:0:32}" "sha256:$a" \
     && { fail "comparator accepted a truncated digest"; return; }
+  image_reference_matches "docker.io/library/drake-api:listener-smoke" "drake-api:listener-smoke" \
+    || { fail "reference comparator rejected the runtime's canonical form"; return; }
+  image_reference_matches "docker.io/library/drake-api:other" "drake-api:listener-smoke" \
+    && { fail "reference comparator accepted a DIFFERENT tag"; return; }
+  image_reference_matches "" "drake-api:listener-smoke" \
+    && { fail "reference comparator accepted an empty reference"; return; }
   ok "image identity comparator rejects mismatches, empties and prefixes"
 }
 
@@ -274,9 +299,11 @@ for c in enroll ingest; do
     -o jsonpath="{.status.containerStatuses[?(@.name=='$c')].image}")"
   RUNNING_ID="$(kubectl -n "$NAMESPACE" get pod "$POD" \
     -o jsonpath="{.status.containerStatuses[?(@.name=='$c')].imageID}")"
-  [ "$RUNNING_IMAGE" = "$IMAGE_TAG" ] \
-    && ok "$c running image reference is $RUNNING_IMAGE" \
-    || fail "$c running image reference is '$RUNNING_IMAGE', expected '$IMAGE_TAG'"
+  if image_reference_matches "$RUNNING_IMAGE" "$IMAGE_TAG"; then
+    ok "$c running image reference is $RUNNING_IMAGE"
+  else
+    fail "$c running image reference is '$RUNNING_IMAGE', expected '$IMAGE_TAG'"
+  fi
   if [ -z "$RUNNING_ID" ]; then
     fail "$c reported no imageID; identity cannot be established"
   elif image_identity_matches "$RUNNING_ID" "$KNOWN_IDENTITIES"; then
