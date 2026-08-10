@@ -24,7 +24,18 @@ __DRAKE_LIFECYCLE_LOADED=1
 
 __DRAKE_TRACKED_PIDS=""
 __DRAKE_TRACKED_LABELS=""
-__DRAKE_CLEANUP_HOOKS=""
+# An ARRAY, not a newline-joined string. The string version split multi-line
+# hooks on newlines and eval'd each fragment separately, so a hook written as
+#
+#     [ -n "$UP_COMPLETED" ] || {
+#       k3d cluster delete "$CLUSTER_NAME"
+#       rm -rf "$STACK_DIR"
+#     }
+#
+# lost its guard to a syntax error and then ran the delete and the rm
+# UNCONDITIONALLY. It destroyed the thing it was meant to preserve, and
+# reported the eval failure as an ignorable warning while doing it.
+__DRAKE_CLEANUP_HOOKS=()
 __DRAKE_CLEANUP_DONE=""
 # Seconds to wait for a TERM to be honoured before escalating. Bounded on
 # purpose: an unbounded wait in a cleanup path turns a failing test into a
@@ -43,7 +54,7 @@ lifecycle_track() {
 # dir). Runs after the tracked processes are gone, in registration order.
 lifecycle_on_cleanup() {
   [ -n "${1:-}" ] || return 0
-  __DRAKE_CLEANUP_HOOKS="${__DRAKE_CLEANUP_HOOKS}${1}"$'\n'
+  __DRAKE_CLEANUP_HOOKS+=("$1")
 }
 
 __lifecycle_descendants() {
@@ -104,13 +115,14 @@ lifecycle_cleanup() {
 
   # Hook failures must never overwrite the test's own exit status: a
   # cleanup that cannot delete a cluster is a warning, not a test result.
-  if [ -n "$__DRAKE_CLEANUP_HOOKS" ]; then
-    local hook
-    while IFS= read -r hook; do
-      [ -n "$hook" ] || continue
-      eval "$hook" || echo "[lifecycle] cleanup hook failed (ignored): $hook" >&2
-    done <<< "$__DRAKE_CLEANUP_HOOKS"
-  fi
+  local hook
+  # `${a[@]+...}` so an empty array is not an unbound-variable error under
+  # `set -u`, which every caller uses.
+  for hook in ${__DRAKE_CLEANUP_HOOKS[@]+"${__DRAKE_CLEANUP_HOOKS[@]}"}; do
+    [ -n "$hook" ] || continue
+    # Each hook is eval'd WHOLE, so a multi-line hook keeps its control flow.
+    eval "$hook" || echo "[lifecycle] cleanup hook failed (ignored): ${hook%%$'\n'*}" >&2
+  done
   return 0
 }
 

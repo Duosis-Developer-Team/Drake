@@ -150,7 +150,36 @@ ok "$([ "$IDEM" = "7" ] && echo 0 || echo 1)" "a failing cleanup hook does not o
 ok "$([ -f "$WORK/hook.out" ] && echo 0 || echo 1)" "a later hook still runs after an earlier hook fails"
 ok "$([ "$(grep -c 'hook-ran' "$WORK/hook.out" 2>/dev/null || echo 0)" = "1" ] && echo 0 || echo 1)" "three cleanup calls run the hooks exactly once"
 
-echo "### 7. re-sourcing the library does not discard a live registry"
+echo "### 7. a MULTI-LINE hook keeps its control flow"
+# This is not hypothetical. Hooks used to be stored newline-joined and
+# eval'd one line at a time, so a guarded hook lost its guard to a syntax
+# error and then ran the delete underneath it unconditionally — cleanup
+# destroying exactly what the guard existed to protect, while reporting
+# only an "ignored" warning. The condition below is FALSE, so the guarded
+# body must not run.
+cat > "$WORK/multiline.sh" <<EOS
+#!/usr/bin/env bash
+set -uo pipefail
+. "$LIB"
+COMPLETED=1
+lifecycle_on_cleanup '[ -n "\$COMPLETED" ] || {
+    echo ran > "$WORK/guarded.out"
+    echo also-ran >> "$WORK/guarded.out"
+  }'
+lifecycle_on_cleanup 'echo second-hook > "$WORK/second.out"'
+lifecycle_cleanup
+EOS
+chmod +x "$WORK/multiline.sh"
+rm -f "$WORK/guarded.out" "$WORK/second.out"
+"$WORK/multiline.sh" >"$WORK/multiline.log" 2>&1
+ok "$([ ! -f "$WORK/guarded.out" ] && echo 0 || echo 1)" "a false guard in a multi-line hook suppresses its whole body"
+ok "$([ -f "$WORK/second.out" ] && echo 0 || echo 1)" "a later hook still runs after a multi-line hook"
+# `grep -c` already prints 0 when it matches nothing AND exits 1, so a
+# `|| echo 0` fallback appends a SECOND zero and the comparison never holds.
+# Ask grep the yes/no question instead of counting.
+ok "$(grep -q 'syntax error' "$WORK/multiline.log" && echo 1 || echo 0)" "a multi-line hook does not produce a syntax error"
+
+echo "### 8. re-sourcing the library does not discard a live registry"
 cat > "$WORK/resource.sh" <<EOS
 #!/usr/bin/env bash
 set -uo pipefail
