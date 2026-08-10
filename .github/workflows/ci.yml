@@ -238,6 +238,19 @@ jobs:
       # its database effects are reset for the browser suite.
       - name: chart smoke (disposable k3d)
         run: bash scripts/chart_smoke_k3d.sh
+
+      # Do the internal agent listeners actually START?
+      #
+      # Three production rollouts failed on that question — a module missing
+      # from the image, environment the runtime-security validator demands,
+      # and a Secret mounted 0400 to a process running as uid 65532. All
+      # three rendered cleanly; `helm template` cannot see any of them.
+      #
+      # This runs them for real: real image, real Secret volumes, the same
+      # securityContext and modes production installs, on a disposable
+      # cluster, and then talks to both listeners over TLS.
+      - name: internal listener runtime smoke (disposable k3d)
+        run: bash scripts/listener_runtime_smoke_k3d.sh
         env:
           DRAKE_SMOKE_DATABASE_URL: ${{ env.E2E_DB_URL }}
           DRAKE_SMOKE_REDIS_URL: ${{ env.E2E_REDIS_URL }}

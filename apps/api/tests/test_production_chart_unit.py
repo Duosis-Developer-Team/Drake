@@ -1863,3 +1863,92 @@ def test_dropping_either_variable_reproduces_the_production_failure(dropped: str
 
     with pytest.raises(RuntimeError):
         Settings(**complete).validate_runtime_security()
+
+
+# --- the listener's runtime file access (Sprint 13B-B5) ------------------
+#
+# The third production rollout died on `PermissionError: /etc/drake/
+# agent-ca/ca.crt`. Secret volume files are owned by root; the chart mounted
+# them 0400 and the process runs as uid 65532, so it could not read the CA
+# it had just been handed.
+#
+# 0444 would have "fixed" it by putting the Agent CA PRIVATE KEY — in the
+# same directory — within reach of any uid in the pod. A root initContainer
+# running chmod would have traded a permission problem for a privileged one.
+# An fsGroup makes 0440 readable by the process and by nothing else.
+
+#: Kubernetes renders volume modes as decimal. 0440 == 288.
+_MODE_0440 = 288
+
+
+def _gateway(docs: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(
+        d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-agent-gateway"
+    )
+
+
+def test_the_listener_can_read_its_own_secrets_without_being_root() -> None:
+    pod = _gateway(render_listener())["spec"]["template"]["spec"]
+    security = pod["securityContext"]
+    assert security["runAsNonRoot"] is True
+    assert security["runAsUser"] == 65532
+    assert security["runAsGroup"] == 65532
+    # Without this the process cannot read a root-owned Secret file at any
+    # mode short of world-readable.
+    assert security["fsGroup"] == 65532
+
+
+def test_no_private_key_is_world_readable() -> None:
+    """Both mounts hold a private key: the listener's server key, and the
+    Agent CA signing key."""
+    pod = _gateway(render_listener())["spec"]["template"]["spec"]
+    modes = {v["name"]: v["secret"]["defaultMode"] for v in pod["volumes"] if "secret" in v}
+    assert set(modes) == {"agent-tls", "agent-ca"}
+    for name, mode in modes.items():
+        assert mode == _MODE_0440, f"{name} is {oct(mode)}, expected 0440"
+        # The bits that would matter if this were ever loosened.
+        assert mode & 0o007 == 0, f"{name} is world-accessible"
+        assert mode & 0o111 == 0, f"{name} is executable"
+
+
+def test_the_container_is_still_hardened_after_the_permission_fix() -> None:
+    """A fix for a file mode must not become a fix for the security context."""
+    gateway = _gateway(render_listener())
+    pod = gateway["spec"]["template"]["spec"]
+    assert not pod.get("hostNetwork") and not pod.get("hostPID") and not pod.get("hostIPC")
+    assert not [v for v in pod["volumes"] if "hostPath" in v]
+    for container in pod["containers"]:
+        security = container["securityContext"]
+        assert security["allowPrivilegeEscalation"] is False
+        assert security["readOnlyRootFilesystem"] is True
+        assert security["capabilities"]["drop"] == ["ALL"]
+        assert not security.get("privileged")
+        # Read-only mounts: the listener reads its material and writes none.
+        for mount in container["volumeMounts"]:
+            if mount["name"] in ("agent-tls", "agent-ca"):
+                assert mount.get("readOnly") is True, mount["name"]
+
+
+def test_both_listeners_mount_the_ca_because_both_of_them_sign() -> None:
+    """Not an oversight, and not something to narrow.
+
+    The enrolment surface signs an agent's first certificate; the ingest
+    surface signs its renewals. Renewal has to stay behind mutual TLS, so it
+    cannot move to the listener that asks for no certificate — mounting the
+    key on only one of them would break renewal rather than tighten
+    anything.
+    """
+    from drake_api.agents import router_internal
+
+    source = Path(router_internal.__file__).read_text()
+    enrolment = source.index("@enrollment_router.post")
+    renewal = source.index('@certificate_router.post("/certificates/renew")')
+    activation = source.index('@certificate_router.post("/certificates/activate")')
+    # Each of these regions calls the CA.
+    assert "_ca(request).sign" in source[enrolment:renewal]
+    assert "_ca(request)" in source[renewal:activation]
+
+    pod = _gateway(render_listener())["spec"]["template"]["spec"]
+    for container in pod["containers"]:
+        mounts = {m["name"] for m in container["volumeMounts"]}
+        assert "agent-ca" in mounts, container["name"]
