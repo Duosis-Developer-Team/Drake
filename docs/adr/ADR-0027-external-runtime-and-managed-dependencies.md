@@ -346,12 +346,53 @@ silently incomplete:
 - `link` had no handler, so a second import of an UNCHANGED dependency made
   the entire plan unappliable.
 
-**Migration 0022** is additive. Its downgrade drops the table — safe
-because every row is re-derivable by re-applying the manifest that created
-it — but it refuses when plan items record a dependency decision, rather
-than deleting somebody's plan history to fit a narrower constraint.
+**Migration 0022** is additive on the way up. Its downgrade **drops
+dependency rows, and that is data loss** — "re-derivable from the manifest"
+holds only while the source manifest is still reachable and unchanged,
+neither of which is guaranteed. It refuses when plan items record a
+dependency decision, because deleting somebody's record of a decision to fit
+a narrower constraint is worse than refusing; that refusal protects the plan
+history, not the dependency rows.
+
+    upgrade                                additive
+    downgrade, no dependency plan history  lossy but allowed
+    downgrade, dependency plan history     refused atomically
 
 Still out of scope and unchanged: no probe worker, no provider adapter, no
 credential, no polling. Health for a dependency is `unknown` and freshness
 `unavailable` because nothing observes it, and importing a manifest is not
 an observation.
+
+### Review corrections (second round)
+
+Three defects, all found by reading the code rather than by a test:
+
+**An import erased evidence it could not create.** `verification` is a
+mutable field and the resolver returned `repository_intent`
+unconditionally, so a re-import overwrote an `owner_confirmed` or
+`provider_observed` established out of band. Refusing to RAISE a level is
+correct; deleting one is worse than either, because the destroyed value came
+from the only process that could establish it. The resolver now preserves
+what exists and defaults to `repository_intent` when nothing does — a
+manifest's own claim is not an input at all.
+
+A provider change over held evidence is now a **blocking conflict**
+(`dependency_provider_change_resets_verification`) rather than a silent
+reset: evidence obtained for one provider does not travel to another, and
+whether the confirmation still holds is a person's call.
+
+**Workload applicability was not class-aware.** Every dependency reported
+`not_applicable`, including `in_cluster` — which Drake runs, with replicas
+and a rollout. That contradicted the domain definition the same ADR states.
+`WorkloadApplicability` is now its own vocabulary rather than borrowing
+`Availability`: that enum says why a VALUE is absent, this says whether a
+QUESTION applies. The external health evaluator no longer speaks for
+in-cluster rows either, and the UI separates "In-cluster datastores" from
+"Managed dependencies".
+
+**A dependency removed from a manifest produced no plan item at all** — the
+row stayed active and kept appearing in the API with nothing reporting the
+divergence. It now emits `unmapped` / `catalog_only`, the same policy
+services already had: reported, never removed, and blocking. An unchanged
+re-import produces no false positive, and another project's dependency of
+the same name is not this project's business.

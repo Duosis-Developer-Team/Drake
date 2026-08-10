@@ -49,9 +49,10 @@ export interface ProjectDependency {
   /** Typed and closed; `unknown` when nobody recorded one. */
   provider: string;
   verification: "repository_intent" | "owner_confirmed" | "provider_observed";
-  /** Always `not_applicable` for something Drake does not run. */
-  workload_applicability: string;
-  health: {
+  /** `applicable` for in-cluster; `not_applicable` for what a provider runs. */
+  workload_applicability: "applicable" | "not_applicable";
+  /** Absent for in-cluster: its health comes from the workload path. */
+  health?: {
     status: string;
     freshness: "fresh" | "stale" | "unavailable";
     source: { status: "configured" | "not_configured" };

@@ -87,14 +87,16 @@ export default function ProjectOverviewPage() {
                 </dl>
               </Card>
 
-              {data.dependencies && data.dependencies.length > 0 ? (
+              {data.dependencies?.some((d) => d.dependency_class !== "in_cluster") ? (
                 <Card title="Managed dependencies">
                   {/* Deliberately its OWN section, not the workload list. A
                       provider-managed platform has no Deployment, no replicas
                       and nothing to restart, and putting it among workloads
                       invites somebody to ask why it will not restart. */}
                   <ul className="divide-y divide-border" data-testid="dependency-list">
-                    {data.dependencies.map((dependency) => (
+                    {data.dependencies
+                      .filter((d) => d.dependency_class !== "in_cluster")
+                      .map((dependency) => (
                       <li key={dependency.id} className="px-1 py-2.5">
                         <span className="block text-sm font-medium text-ink">
                           {dependency.display_name}
@@ -125,17 +127,46 @@ export default function ProjectOverviewPage() {
                           </MetaRow>
                           <MetaRow label="Health">
                             <span className="font-mono text-xs">
-                              {dependency.health.status}
+                              {dependency.health?.status ?? "unknown"}
                             </span>
                           </MetaRow>
                           <MetaRow label="Freshness">
                             <span className="font-mono text-xs">
-                              {dependency.health.freshness}
+                              {dependency.health?.freshness ?? "unavailable"}
                             </span>
                           </MetaRow>
                         </dl>
                       </li>
                     ))}
+                  </ul>
+                </Card>
+              ) : null}
+
+              {data.dependencies?.some((d) => d.dependency_class === "in_cluster") ? (
+                <Card title="In-cluster datastores">
+                  {/* Drake runs these. They keep workload semantics and are
+                      deliberately NOT listed as managed dependencies — the
+                      first version put every dependency under one heading and
+                      told an in-cluster datastore its workload was "not
+                      applicable", which is false. */}
+                  <ul className="divide-y divide-border" data-testid="in-cluster-dependency-list">
+                    {data.dependencies
+                      .filter((d) => d.dependency_class === "in_cluster")
+                      .map((dependency) => (
+                        <li key={dependency.id} className="px-1 py-2.5">
+                          <span className="block text-sm font-medium text-ink">
+                            {dependency.display_name}
+                          </span>
+                          <dl className="mt-1">
+                            <MetaRow label="Engine">
+                              <span className="font-mono text-xs">{dependency.engine}</span>
+                            </MetaRow>
+                            <MetaRow label="Scope">
+                              <span className="font-mono text-xs">{dependency.scope}</span>
+                            </MetaRow>
+                          </dl>
+                        </li>
+                      ))}
                   </ul>
                 </Card>
               ) : null}

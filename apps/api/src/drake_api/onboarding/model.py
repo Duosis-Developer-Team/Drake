@@ -44,7 +44,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from drake_api.catalog.external_runtime import dependency_metadata as dependency_metadata_for
+from drake_api.catalog.external_runtime import (
+    dependency_metadata as dependency_metadata_for,
+)
+from drake_api.catalog.external_runtime import (
+    is_above_repository_intent,
+    workload_applicability,
+)
 
 
 class SessionState(StrEnum):
@@ -137,6 +143,12 @@ REASON_TEXT: dict[str, str] = {
         "operator-registered infrastructure; a manifest cannot create one."
     ),
     "owner_team_unknown": "The manifest references an owning team Drake does not have.",
+    "dependency_provider_change_resets_verification": (
+        "This dependency's provider changed while its verification is above "
+        "repository_intent. Evidence obtained for the old provider does not carry over, "
+        "and an import will not silently reset it — re-confirm or lower the level "
+        "deliberately."
+    ),
     "metric_profile_not_configured": (
         "This service declares no metrics profile, so Drake collects no application "
         "metrics for it. Health reports not_configured rather than a profile nothing "
@@ -1045,20 +1057,25 @@ def build_plan(
 
     # --- dependencies -------------------------------------------------------
     #
-    # No workload binding, no expected workload, no namespace. A dependency
-    # Drake does not run has nothing to bind to, and inventing a binding was
-    # exactly what made a managed database report as a missing Deployment.
+    # No workload binding, no expected workload, no namespace for anything a
+    # provider runs. `in_cluster` keeps workload semantics: Drake runs it.
+    manifest_dependencies: set[str] = set()
     for store in spec.get("dataStores") or []:
         dependency_key = str(store.get("name") or "")
         if not dependency_key:
             continue
-        proposed = dependency_metadata_for(store)
+        manifest_dependencies.add(dependency_key)
         existing_id = snapshot.dependencies.get((project_key, dependency_key))
+        existing_row = snapshot.dependency_metadata.get((project_key, dependency_key), {})
+        proposed = dependency_metadata_for(store, existing_row)
         detail = {
             "dependency_class": proposed["dependency_class"],
             "provider": proposed["provider"] or "unknown",
             "verification": proposed["verification"],
-            "workload_applicability": "not_applicable",
+            # Class-aware: an in-cluster datastore IS a workload, with
+            # replicas and a rollout. Reporting it as not_applicable was
+            # wrong about the domain, not just about wording.
+            "workload_applicability": str(workload_applicability(proposed["dependency_class"])),
         }
         if existing_id is None:
             items.append(
@@ -1071,20 +1088,67 @@ def build_plan(
                     payload=build_payload(str(EntityKind.DEPENDENCY), proposed),
                 )
             )
-        else:
+            continue
+
+        # Evidence obtained out of band does not travel to a new provider,
+        # and an import must not silently reset it either. A human decides
+        # whether the confirmation still holds.
+        provider_changed = (existing_row.get("provider") or "") != (proposed["provider"] or "")
+        if provider_changed and is_above_repository_intent(existing_row.get("verification")):
             items.append(
-                _row_item(
+                PlanItem(
                     entity_kind=str(EntityKind.DEPENDENCY),
+                    action=str(Action.CONFLICT),
                     item_key=f"dependency:{dependency_key}",
-                    name=dependency_key,
-                    existing_id=existing_id,
-                    existing=snapshot.dependency_metadata.get((project_key, dependency_key), {}),
-                    proposed=proposed,
-                    mutable=MUTABLE_DEPENDENCY_FIELDS,
-                    immutable=IMMUTABLE_DEPENDENCY_FIELDS,
-                    detail=detail,
+                    proposed_name=dependency_key,
+                    existing_entity_id=existing_id,
+                    existing_name=dependency_key,
+                    reason_code="dependency_provider_change_resets_verification",
+                    detail={
+                        **detail,
+                        "existing_provider": existing_row.get("provider") or "unknown",
+                        "existing_verification": existing_row.get("verification") or "",
+                    },
                 )
             )
+            continue
+
+        items.append(
+            _row_item(
+                entity_kind=str(EntityKind.DEPENDENCY),
+                item_key=f"dependency:{dependency_key}",
+                name=dependency_key,
+                existing_id=existing_id,
+                existing=existing_row,
+                proposed=proposed,
+                mutable=MUTABLE_DEPENDENCY_FIELDS,
+                immutable=IMMUTABLE_DEPENDENCY_FIELDS,
+                detail=detail,
+            )
+        )
+
+    # --- dependencies the catalog has and the manifest does not -------------
+    #
+    # Same policy as services: reported, never removed. A manifest edit is
+    # not evidence that a database stopped existing, and a catalog that
+    # deletes on a diff will one day delete on a mistake.
+    for existing_project, dependency_key in sorted(snapshot.dependencies):
+        # Another project's dependency of the same name is not this
+        # project's business.
+        if existing_project != project_key:
+            continue
+        if dependency_key in manifest_dependencies:
+            continue
+        items.append(
+            PlanItem(
+                entity_kind=str(EntityKind.DEPENDENCY),
+                action=str(Action.UNMAPPED),
+                item_key=f"dependency_catalog_only:{dependency_key}",
+                existing_name=dependency_key,
+                existing_entity_id=snapshot.dependencies[(existing_project, dependency_key)],
+                reason_code="catalog_only",
+            )
+        )
 
     # --- services the catalog has and the manifest does not -----------------
     for service_key in snapshot.catalog_only_services:

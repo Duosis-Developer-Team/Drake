@@ -33,10 +33,23 @@ Existing in-cluster datastores are not backfilled from anywhere, because
 nothing was persisted before this — there is no history to reinterpret and
 no provider to guess.
 
-The downgrade drops the table, which is lossy by definition. It is safe
-exactly when nothing depends on those rows: they are re-derivable by
-re-applying the manifest that created them, which is why this one may drop
-rather than refuse.
+The downgrade DROPS the table, and that is data loss. The earlier wording —
+"rows are re-derivable" — was too comfortable: it is true only while the
+source manifest still exists at a reachable commit and is still importable.
+Neither is guaranteed. A repository can be rewritten, made private, or
+deleted, and a manifest can change so that re-import no longer reproduces
+the rows that were there.
+
+So the honest classification is:
+
+    upgrade                                  additive, existing rows untouched
+    downgrade, no dependency plan history    LOSSY BUT ALLOWED
+    downgrade, dependency plan history       refused atomically
+
+The refusal covers plan history because deleting somebody's record of a
+decision to make a constraint fit is worse than refusing. It does not
+protect the dependency rows themselves — those go, and whoever runs the
+downgrade should have a reason and a copy.
 """
 
 from collections.abc import Sequence
@@ -168,10 +181,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Safe to drop: every row is re-derivable by re-applying the manifest
-    # that produced it, and nothing else references this table. That is why
-    # this downgrade may drop where 0021's had to refuse — there, the data
-    # could not be reconstructed from anything.
+    # This DROPS dependency rows. Re-import can often reconstruct them, but
+    # only while the source manifest is still reachable and unchanged — so
+    # treat this as data loss, not as a reversible step.
     # Narrow the plan-item vocabulary back first. Rows recording a
     # `dependency` decision would violate it, so this refuses rather than
     # deleting somebody's plan history to make a constraint fit.

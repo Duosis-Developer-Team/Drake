@@ -22,11 +22,12 @@ from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.catalog.authz import escape_like, visible_scope_ids
 from drake_api.catalog.external_runtime import (
     EXTERNAL_NOT_APPLICABLE,
-    Availability,
     HealthSourceStatus,
     RuntimeKind,
+    dependency_is_workload,
     evaluate_external_health,
     metrics_profile_state,
+    workload_applicability,
 )
 from drake_api.db import get_engine
 from drake_api.settings import Settings
@@ -199,12 +200,22 @@ async def _project_payload(
                 # real answer, and the closed vocabulary has a word for it.
                 "provider": dep[6] or "unknown",
                 "verification": dep[7],
-                # A dependency Drake does not run has no workload to bind, no
-                # replicas and nothing to restart.
-                "workload_applicability": str(Availability.NOT_APPLICABLE),
-                "health": evaluate_external_health(
-                    source=HealthSourceStatus.NOT_CONFIGURED
-                ).as_dict(),
+                # Class-aware, and the same value the plan reports. An
+                # in-cluster datastore IS a workload; only what a provider
+                # runs is not_applicable.
+                "workload_applicability": str(workload_applicability(dep[3])),
+                # The external evaluator answers for things Drake does not
+                # run. An in-cluster datastore's health comes from the
+                # existing workload path, so this does not speak for it.
+                **(
+                    {
+                        "health": evaluate_external_health(
+                            source=HealthSourceStatus.NOT_CONFIGURED
+                        ).as_dict()
+                    }
+                    if not dependency_is_workload(dep[3])
+                    else {}
+                ),
             }
             for dep in (
                 await connection.execute(

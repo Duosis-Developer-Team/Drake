@@ -49,7 +49,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.alerting.contracts import default_burn_profile, indicator_template
 from drake_api.audit.service import AuditEventData, record_audit_event_in
-from drake_api.catalog.external_runtime import clamp_verification_for_import
 from drake_api.catalog.service import CatalogService
 from drake_api.github_app import catalog as repo_catalog
 from drake_api.github_app import manifest as manifest_module
@@ -2336,9 +2335,10 @@ async def _apply_dependency_create(context: _ApplyContext, item: dict[str, Any])
         engine=str(payload["engine"]),
         store_scope=str(payload["store_scope"]),
         provider=str(payload.get("provider") or "") or None,
-        # Already clamped when the plan was built; clamped again here so the
-        # invariant does not depend on which path produced the payload.
-        verification=str(clamp_verification_for_import(payload.get("verification"))),
+        # The plan resolved this against what the catalog already held, and
+        # the approval covers that exact value. Re-deriving it here would
+        # ignore the approval and could differ from what was reviewed.
+        verification=str(payload.get("verification") or "repository_intent"),
         source_ref=context.source_ref,
         source_revision=context.commit_sha,
     )
@@ -2363,7 +2363,7 @@ async def _apply_dependency_update(context: _ApplyContext, item: dict[str, Any])
         display_name=str(payload.get("display_name") or ""),
         store_scope=str(payload["store_scope"]),
         provider=str(payload.get("provider") or "") or None,
-        verification=str(clamp_verification_for_import(payload.get("verification"))),
+        verification=str(payload.get("verification") or "repository_intent"),
         source_ref=context.source_ref,
         source_revision=context.commit_sha,
     )
