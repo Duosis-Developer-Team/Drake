@@ -21,6 +21,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 IMAGE="drake-api:entrypoint-smoke"
+
+# The image was removed only on the success path, so every one of the six
+# failure exits below left a full API image on the machine — and the
+# failure path is the one that runs when someone is iterating.
+. "$(cd "$(dirname "$0")" && pwd)/lib/process_lifecycle.sh"
+lifecycle_on_cleanup 'docker image rm -f "$IMAGE" >/dev/null 2>&1 || true'
+lifecycle_install_traps
 # The platform the release is published for. Pinned because the image has to
 # be asked the question on the architecture it will actually run on — and
 # because `cryptography` aborts with SIGILL in an arm64 container on some
@@ -76,5 +83,4 @@ if ! docker run --rm --network none --platform "$PLATFORM" --entrypoint python "
   exit 1
 fi
 
-docker image rm -f "$IMAGE" >/dev/null 2>&1 || true
 echo "[image-smoke] OK: the image runs the command the chart gives it"

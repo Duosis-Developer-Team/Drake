@@ -39,6 +39,18 @@ const INTERNAL_BASE = `https://127.0.0.1:${INTERNAL_PORT}`;
 
 const stackReady = existsSync(KUBECONFIG) && existsSync(join(STACK_DIR, "tls.json"));
 
+// Locally, a missing stack is a skip: not every developer has k3d, and
+// blocking them on it would be hostile. In CI it is a FAILURE. These
+// scenarios are the only browser coverage of the cluster-agent path, and a
+// silent skip there is a green run that proved nothing — which is exactly
+// the risk created by splitting the k3d smokes into their own job.
+if (process.env.CI && !stackReady) {
+  throw new Error(
+    "agent E2E stack missing under CI: scripts/e2e_agent_stack.sh up must run " +
+      "before the browser suite. Refusing to skip the inventory scenarios.",
+  );
+}
+
 const databaseUrl =
   process.env.DRAKE_E2E_DATABASE_URL ??
   "postgresql+psycopg://drake:drake_local_only_dev@127.0.0.1:55432/drake";

@@ -17,10 +17,13 @@ command -v k3d >/dev/null || { echo "k3d is required" >&2; exit 2; }
 command -v kubectl >/dev/null || { echo "kubectl is required" >&2; exit 2; }
 command -v helm >/dev/null || { echo "helm is required" >&2; exit 2; }
 
-cleanup() {
-  k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/process_lifecycle.sh"
+lifecycle_on_cleanup 'if ! k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1; then echo "WARNING: could not delete the disposable cluster $CLUSTER_NAME" >&2; fi'
+# The kubeconfig this script writes carries cluster credentials and used to
+# be an mktemp file that nothing ever deleted — one per run, left behind at
+# the default mode. It is removed here and created 0600 below.
+lifecycle_on_cleanup 'rm -f "${KUBECONFIG_FILE:-}"'
+lifecycle_install_traps
 
 echo "[k3d] creating disposable cluster ${CLUSTER_NAME}"
 k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
@@ -28,6 +31,7 @@ k3d cluster create "$CLUSTER_NAME" --no-lb --wait --timeout 120s \
   --k3s-arg "--disable=traefik@server:0" >/dev/null
 
 KUBECONFIG_FILE="$(mktemp)"
+chmod 600 "$KUBECONFIG_FILE"
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG_FILE"
 export KUBECONFIG="$KUBECONFIG_FILE"
 

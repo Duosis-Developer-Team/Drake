@@ -140,18 +140,16 @@ diagnose() {
   done
 }
 
-cleanup() {
-  [ -n "$PF_PID" ] && kill "$PF_PID" >/dev/null 2>&1 || true
-  # A cleanup that fails silently leaves a cluster and a private key behind.
-  if ! k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1; then
-    echo "WARNING: could not delete the disposable cluster $CLUSTER_NAME" >&2
-  fi
-  docker image rm -f "$IMAGE_TAG" >/dev/null 2>&1 || true
-  if ! rm -rf "$WORK_DIR"; then
-    echo "WARNING: ephemeral PKI was not removed from $WORK_DIR" >&2
-  fi
-}
-trap cleanup EXIT
+# Shared lifecycle: the port-forward is killed as a TREE (kubectl spawns a
+# helper that keeps the local port bound if only the parent is signalled),
+# and the traps cover INT/TERM so an interrupted run does not strand a
+# cluster holding an ephemeral CA private key.
+. "$REPO_ROOT/scripts/lib/process_lifecycle.sh"
+# A cleanup that fails silently leaves a cluster and a private key behind.
+lifecycle_on_cleanup 'if ! k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1; then echo "WARNING: could not delete the disposable cluster $CLUSTER_NAME" >&2; fi'
+lifecycle_on_cleanup 'docker image rm -f "$IMAGE_TAG" >/dev/null 2>&1 || true'
+lifecycle_on_cleanup 'if ! rm -rf "$WORK_DIR"; then echo "WARNING: ephemeral PKI was not removed from $WORK_DIR" >&2; fi'
+lifecycle_install_traps
 
 rm -rf "$WORK_DIR"; mkdir -p "$WORK_DIR"; chmod 700 "$WORK_DIR"
 umask 077
@@ -362,6 +360,7 @@ EXTERNAL="$(kubectl -n "$NAMESPACE" get svc drake-agent-gateway -o jsonpath='{.s
 echo "[listener-smoke] TLS behaviour, over the wire"
 kubectl -n "$NAMESPACE" port-forward "pod/$POD" "$ENROLL_PORT:$ENROLL_PORT" "$INGEST_PORT:$INGEST_PORT" >/dev/null 2>&1 &
 PF_PID=$!
+lifecycle_track "$PF_PID" "port-forward"
 for _ in $(seq 1 40); do
   openssl s_client -connect "127.0.0.1:$ENROLL_PORT" -CAfile "$WORK_DIR/server-ca.crt" \
     </dev/null >/dev/null 2>&1 && break
