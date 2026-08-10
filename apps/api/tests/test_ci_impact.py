@@ -222,3 +222,142 @@ def test_every_declared_category_is_reported() -> None:
 def test_glob_matches_a_directory_and_its_descendants() -> None:
     assert classify(["deploy/drake/values.yaml"])["helm_chart"] is True
     assert classify(["deploy/drake/templates/deep/nested.yaml"])["helm_chart"] is True
+
+
+# --------------------------------------------------------------------------
+# Integration group selection
+#
+# The load-bearing test here is the coverage one: if a new integration suite
+# is added and not placed in a group, it would silently stop running on every
+# narrow backend PR. That must fail loudly instead.
+# --------------------------------------------------------------------------
+
+
+def _collected_integration_files() -> set[str]:
+    """Every file pytest collects under `-m integration`, asked of pytest itself.
+
+    Deliberately not a glob over `*_integration.py`: the question is what CI
+    actually runs, and a suite could be marked without matching a filename
+    convention. An empty result is a FAILURE rather than a skip — this test
+    exists to notice a suite dropping out, so "I collected nothing" must not
+    be the quiet path.
+    """
+    import shutil
+    import subprocess
+
+    uv = shutil.which("uv")
+    if uv is None:  # pragma: no cover - developer machine only
+        pytest.skip("uv unavailable")
+
+    proc = subprocess.run(  # noqa: S603
+        [uv, "run", "pytest", "-m", "integration", "--collect-only", "-q"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    files = {
+        line.split("::", 1)[0].rsplit("/", 1)[-1]
+        for line in proc.stdout.splitlines()
+        if "::" in line and "tests/" in line
+    }
+    assert files, (
+        "pytest collected no integration tests, so this guard proves nothing. "
+        f"rc={proc.returncode}\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
+    )
+    return files
+
+
+def test_every_integration_suite_belongs_to_exactly_one_group() -> None:
+    collected = _collected_integration_files()
+    mapped: dict[str, list[str]] = {}
+    for group, files in ci_impact.INTEGRATION_GROUPS.items():
+        for path in files:
+            mapped.setdefault(path.rsplit("/", 1)[-1], []).append(group)
+
+    unmapped = sorted(collected - set(mapped))
+    assert not unmapped, (
+        "these integration suites are in no group, so a narrow backend PR "
+        f"would silently skip them: {unmapped}"
+    )
+
+    duplicated = {name: groups for name, groups in mapped.items() if len(groups) > 1}
+    assert not duplicated, f"suites mapped to more than one group: {duplicated}"
+
+    stale = sorted(set(mapped) - collected)
+    assert not stale, f"groups reference files pytest does not collect: {stale}"
+
+
+def test_narrow_backend_change_selects_only_its_group() -> None:
+    result = classify(["apps/api/src/drake_api/telemetry/query.py"])
+    assert result["integration_is_narrow"] is True
+    assert result["integration_groups"] == "telemetry"
+    selection = str(result["integration_selection"]).split()
+    assert selection, "a narrow change must still run its own integration suites"
+    assert all(p.startswith("apps/api/tests/") for p in selection)
+    assert any("telemetry" in p for p in selection)
+    assert not any("github" in p for p in selection)
+
+
+def test_catalog_change_selects_catalog_and_cluster_groups() -> None:
+    result = classify(["apps/api/src/drake_api/catalog/router_clusters.py"])
+    assert set(str(result["integration_groups"]).split()) == {
+        "projects_catalog",
+        "clusters_inventory",
+    }
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "apps/api/src/drake_api/db.py",
+        "apps/api/src/drake_api/main.py",
+        "apps/api/src/drake_api/correlation.py",
+        "apps/api/src/drake_api/some_new_module/thing.py",
+    ],
+)
+def test_unmapped_backend_path_runs_every_integration_suite(path: str) -> None:
+    # A module nobody mapped is a module nobody reasoned about.
+    result = classify([path])
+    assert result["integration_is_narrow"] is False
+    assert result["integration_selection"] == ""
+
+
+def test_full_suite_never_narrows_integration() -> None:
+    for path in ["uv.lock", ".github/workflows/ci.yml", "apps/api/src/drake_api/settings.py"]:
+        result = classify([path])
+        assert result["full_suite"] is True
+        assert result["integration_selection"] == "", path
+
+
+def test_editing_one_integration_suite_selects_only_its_group() -> None:
+    result = classify(["apps/api/tests/test_rbac_integration.py"])
+    assert result["integration_is_narrow"] is True
+    assert result["integration_groups"] == "auth_rbac"
+
+
+def test_docs_change_selects_no_integration_at_all() -> None:
+    result = classify(["README.md"])
+    assert result["run_integration"] is False
+    assert result["integration_selection"] == ""
+    assert result["integration_groups"] == ""
+
+
+def test_mixed_backend_paths_union_their_groups() -> None:
+    result = classify(
+        [
+            "apps/api/src/drake_api/telemetry/query.py",
+            "apps/api/src/drake_api/github_app/client.py",
+        ]
+    )
+    assert set(str(result["integration_groups"]).split()) == {"telemetry", "integrations"}
+
+
+def test_one_unmapped_path_defeats_an_otherwise_narrow_diff() -> None:
+    result = classify(
+        [
+            "apps/api/src/drake_api/telemetry/query.py",
+            "apps/api/src/drake_api/db.py",
+        ]
+    )
+    assert result["integration_is_narrow"] is False
+    assert result["integration_selection"] == ""
