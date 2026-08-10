@@ -278,14 +278,16 @@ fi
 # "did a request get a response" is the question that matters anyway.
 NO_CERT="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
   -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/heartbeat" -d '{}' \
-  -H 'content-type: application/json' --max-time 15 || echo 000)"
+  -H 'content-type: application/json' --max-time 15 || true)"
+# `000` is curl's code for "there was no HTTP response at all", which is
+# what a refused mutual-TLS connection looks like from the client side.
 [ "$NO_CERT" = "000" ] && ok "ingest 8143: no client certificate gets no response" \
   || fail "ingest 8143 answered $NO_CERT without a client certificate"
 
 ROGUE="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
   --cert "$WORK_DIR/rogue.crt" --key "$WORK_DIR/rogue.key" \
   -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/heartbeat" -d '{}' \
-  -H 'content-type: application/json' --max-time 15 || echo 000)"
+  -H 'content-type: application/json' --max-time 15 || true)"
 [ "$ROGUE" = "000" ] && ok "ingest 8143: a certificate from an untrusted CA gets no response" \
   || fail "ingest 8143 answered $ROGUE for a certificate from an untrusted CA"
 
@@ -295,7 +297,7 @@ ROGUE="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.cr
 GOOD="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
   --cert "$WORK_DIR/good.crt" --key "$WORK_DIR/good.key" \
   -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/heartbeat" -d '{}' \
-  -H 'content-type: application/json' --max-time 15 || echo 000)"
+  -H 'content-type: application/json' --max-time 15 || true)"
 [ "$GOOD" != "000" ] && ok "ingest 8143: the Agent CA's certificate reaches the application ($GOOD)" \
   || fail "ingest 8143 refused a certificate its own CA issued"
 
@@ -304,13 +306,13 @@ echo "[listener-smoke] surface isolation, over the wire"
 # routes must not exist on the enrolment listener.
 ENROLL_STRAY="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
   -X POST "https://127.0.0.1:$ENROLL_PORT/internal/v1/agent/heartbeat" -d '{}' \
-  -H 'content-type: application/json' --max-time 15 || echo 000)"
+  -H 'content-type: application/json' --max-time 15 || true)"
 [ "$ENROLL_STRAY" = "404" ] && ok "enrollment listener: /heartbeat is 404" || fail "enrollment listener answered $ENROLL_STRAY on /heartbeat"
 
 INGEST_STRAY="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$WORK_DIR/server-ca.crt" \
   --cert "$WORK_DIR/good.crt" --key "$WORK_DIR/good.key" \
   -X POST "https://127.0.0.1:$INGEST_PORT/internal/v1/agent/enroll" -d '{}' \
-  -H 'content-type: application/json' --max-time 15 || echo 000)"
+  -H 'content-type: application/json' --max-time 15 || true)"
 [ "$INGEST_STRAY" = "404" ] && ok "ingest listener: /enroll is 404" || fail "ingest listener answered $INGEST_STRAY on /enroll"
 
 if [ "$FAILED" -ne 0 ]; then
