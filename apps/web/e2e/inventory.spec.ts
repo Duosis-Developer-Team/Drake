@@ -145,7 +145,16 @@ function startAgent(): ChildProcess {
       DRAKE_AGENT_STATE_DIR: STATE_DIR,
       DRAKE_AGENT_KUBECONFIG: KUBECONFIG,
       DRAKE_AGENT_LOG_LEVEL: "info",
-      DRAKE_AGENT_HEALTH_LISTEN_ADDR: "127.0.0.1:58090",
+      // Port 0, not a fixed one. A hard-coded 58090 collided with any
+      // leftover agent — from an earlier test in this file, or an earlier
+      // run on the same runner — and the collision is FATAL rather than
+      // cosmetic: cmd/agent/main.go calls stop() when the probe fails, so
+      // the context is cancelled and enrolment dies with
+      // "context canceled". That surfaced as two inventory tests failing
+      // on `not_configured/not_configured`, which reads like a product
+      // bug and is not one. Nothing here asserts on the probe port, so the
+      // OS can choose it.
+      DRAKE_AGENT_HEALTH_LISTEN_ADDR: "127.0.0.1:0",
       // Match the API's 6s heartbeat-stale E2E window: beat every 2s so
       // "connected" is continuously observable, not a 6s-per-30s lottery.
       DRAKE_AGENT_HEARTBEAT_SECONDS: "2",
