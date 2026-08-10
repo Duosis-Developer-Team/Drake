@@ -23,6 +23,8 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "[import] FAIL: $IMAGE does not exist locally; nothing to import" >&2
   exit 1
 fi
+# The image's CONFIG digest — what `docker image inspect .Id` returns, and
+# one of the two identities a running container can be traced back to.
 LOCAL_ID="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
 echo "[import] $IMAGE ($LOCAL_ID) -> cluster $CLUSTER"
 
@@ -47,16 +49,41 @@ present_everywhere() {
   [ "$found" -eq 1 ]
 }
 
+# What a caller needs to prove a RUNNING container came from this import.
+#
+# Two different identities are involved and they are not interchangeable:
+# the image CONFIG digest (docker's image id) and the MANIFEST digest
+# containerd records for the reference. Kubernetes reports one or the other
+# in `status.containerStatuses[].imageID` depending on runtime and how the
+# image arrived, so both are published and the caller matches against
+# either — as a full digest, never a prefix.
+emit_identity() {
+  [ -n "${K3D_IMPORT_IDENTITY_FILE:-}" ] || return 0
+  local node digests=""
+  for node in $(nodes); do
+    digests="$digests $(docker exec "$node" ctr -n k8s.io images ls 2>/dev/null |
+      awk -v ref="$IMAGE" '$1 ~ ref { print $3 }' | grep -oE 'sha256:[0-9a-f]{64}' | sort -u | tr '\n' ' ')"
+  done
+  {
+    echo "reference=$IMAGE"
+    echo "local_config_id=$LOCAL_ID"
+    echo "node_digests=$(echo "$digests" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  } > "$K3D_IMPORT_IDENTITY_FILE"
+  echo "[import] identity recorded for the caller"
+}
+
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
   # Already there — an earlier attempt that reported failure may still have
   # worked, and re-importing would be pointless rather than harmful.
   if present_everywhere; then
     echo "[import] verified on: $(nodes | tr '\n' ' ')"
+    emit_identity
     exit 0
   fi
   OUTPUT="$(k3d image import "$IMAGE" -c "$CLUSTER" 2>&1)" && STATUS=0 || STATUS=$?
   if present_everywhere; then
     echo "[import] verified on: $(nodes | tr '\n' ' ') (attempt $attempt)"
+    emit_identity
     exit 0
   fi
   echo "[import] attempt $attempt/$MAX_ATTEMPTS did not land the image (exit $STATUS)" >&2
