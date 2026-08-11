@@ -216,7 +216,9 @@ def verify(rgba: np.ndarray, source: np.ndarray, background: tuple[int, int, int
     }
 
 
-def round_trip(shipped: Image.Image, expected: Image.Image, background: tuple[int, int, int]) -> dict:
+def round_trip(
+    shipped: Image.Image, expected: Image.Image, background: tuple[int, int, int]
+) -> dict:
     """Decode what will actually be served and diff it against the intent."""
     bg = np.array(background, float)
 
@@ -255,9 +257,7 @@ def square(rgba: np.ndarray, size: int, path: Path) -> dict:
     height, width = rgba.shape[:2]
     scale = (size * 0.92) / max(width, height)
     target = (max(1, round(width * scale)), max(1, round(height * scale)))
-    mark = Image.fromarray(np.round(rgba).astype(np.uint8), "RGBA").resize(
-        target, Image.LANCZOS
-    )
+    mark = Image.fromarray(np.round(rgba).astype(np.uint8), "RGBA").resize(target, Image.LANCZOS)
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     canvas.paste(mark, ((size - target[0]) // 2, (size - target[1]) // 2))
     canvas.save(path, optimize=True)
@@ -286,7 +286,7 @@ def main() -> int:
 
         report["masters"][master.theme] = {
             "file": master.name,
-            "background": "#%02x%02x%02x" % master.background,
+            "background": "#{:02x}{:02x}{:02x}".format(*master.background),
             "content_box": [x0, y0, x1, y1],
             "lockup_split_x": split,
             "measured_noise_floor": round(floor, 5),
