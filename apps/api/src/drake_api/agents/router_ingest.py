@@ -25,6 +25,7 @@ from drake_api.agents.health_rules import derive_health
 from drake_api.agents.identity import AgentPrincipal, authenticate_agent
 from drake_api.agents.maintenance import run_inventory_maintenance
 from drake_api.db import get_engine
+from drake_api.service_health.bindings import resolve_pending_bindings
 from drake_api.settings import Settings
 
 router = APIRouter(prefix="/internal/v1/agent", tags=["agent-ingest"])
@@ -869,6 +870,12 @@ async def _apply_snapshot(
         text("DELETE FROM inventory_staging_resources WHERE snapshot_id = :id"),
         {"id": snapshot_id},
     )
+    # A snapshot is the other half of binding resolution. A binding created
+    # before its workload was deployed would otherwise stay unresolved
+    # forever — charts empty while the workload runs — because nothing ever
+    # looked again. Same transaction as the snapshot it learned from.
+    await resolve_pending_bindings(connection, principal.cluster_id)
+
     await connection.execute(
         text(
             "UPDATE cluster_agents SET inventory_state = 'fresh', "
