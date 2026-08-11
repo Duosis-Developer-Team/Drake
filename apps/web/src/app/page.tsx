@@ -52,11 +52,16 @@ export default function CommandCenterPage() {
   // One fetch, two readers: the badge and the fleet card answer the same
   // question, and asking twice would let them disagree on screen.
   const [clusters, retry] = useApi<{ clusters: Cluster[] }>("/v1/clusters");
-  // `ok` is the operational vocabulary's word for a live agent and a
-  // current inventory; `stale` and `degraded` deliberately do not count.
+  // Both halves, in the API's own words: an agent that answers and an
+  // inventory that is current. `stale` deliberately does not count — the
+  // badge claims someone is looking now, not that someone once looked.
   const connected =
     clusters.state === "ready" &&
-    clusters.data.clusters.some((cluster) => cluster.operational?.inventory === "ok");
+    clusters.data.clusters.some(
+      (cluster) =>
+        cluster.operational?.agent === "connected" &&
+        cluster.operational?.inventory === "fresh",
+    );
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
