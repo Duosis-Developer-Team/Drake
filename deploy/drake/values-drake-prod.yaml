@@ -4,8 +4,8 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@e17cfe2 by publish
-# run 31482696935. All three — API, web and migration — were built from
+# Images are pinned to real digests published from main@6848606 by publish
+# run 31517960078. All three — API, web and migration — were built from
 # that one commit, so they cannot drift apart.
 #
 # The digests these replaced (API `8c401467…706c`, web `5f6113ea…0076`)
@@ -97,11 +97,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8
+    # Source commit 68486066f345b1673cab895a04f2a916a5b8d1ce
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:a01951ec5136c6060a1d66dac422dcb00c6d86dc156fa90c890d5ac3be0be68a"
+    digest: "sha256:97457d940cca4dbdf95e86fd8265bf3b0fc5ba7fea9f8d7b995535b54d8d760e"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -113,8 +113,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8
-    digest: "sha256:ed99ce0d96302d16c13bbb86dbf6320599b572a9eff94c9576e9488a6f98d540"
+    # Source commit 68486066f345b1673cab895a04f2a916a5b8d1ce
+    digest: "sha256:e253d9b3f38c0f0b09fe20375a31f28d70a8b218291088575de506d5d419711a"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -125,7 +125,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:a01951ec5136c6060a1d66dac422dcb00c6d86dc156fa90c890d5ac3be0be68a"
+    digest: "sha256:97457d940cca4dbdf95e86fd8265bf3b0fc5ba7fea9f8d7b995535b54d8d760e"
   backoffLimit: 0
 
 networkPolicy:
@@ -158,9 +158,10 @@ networkPolicy:
       matchLabels:
         k8s-app: kube-dns
     port: 53
-  # Drake calls no third party in this deployment: telemetry connectors are
-  # unset and the GitHub integration is disabled. Add narrow entries here
-  # when either is switched on.
+  # Still empty, and now for a narrower reason than "Drake calls nobody":
+  # GitHub is reached over the public internet, which needs no rule here
+  # because this policy governs egress the cluster can express — and the
+  # metrics backend it does need is in-cluster, so it belongs below.
   apiExternalEgress: []
 
   # Prometheus, by namespace and pod labels rather than by the ClusterIP the
