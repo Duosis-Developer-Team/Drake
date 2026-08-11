@@ -38,27 +38,28 @@ spec:
     name: Fikir-Sepeti
     defaultBranch: main
 
-  # UNEVIDENCED, and deliberately not guessed.
+  # OWNER-CONFIRMED, and by that route only.
   #
-  # The repository has no CODEOWNERS at any of the three locations GitHub
-  # honours, names no owning team in its documentation, and exposes no team
-  # assignment Drake can read. So there is no evidence for ANY team key,
-  # and inventing `fikir-sepeti` or `technical-team` would manufacture the
-  # one thing this whole model exists to avoid: a claim with no source.
+  # The repository establishes nothing about ownership: there is no
+  # CODEOWNERS at any of the three locations GitHub honours, no owning team
+  # named in its documentation, and no team assignment Drake can read. This
+  # value therefore does not come from the repository at all — it is an
+  # explicit operator decision, recorded as such in
+  # docs/onboarding/FIKIR_SEPETI.md.
   #
-  # `unknown-team` is a placeholder that reads as what it is. It follows the
-  # convention already used by packages/contracts/fixtures/valid/project-epsilon.yaml
-  # for exactly this case. The schema requires at least one owner, so the
-  # choice is between a visible non-claim and a plausible-looking fiction.
+  # The earlier `unknown-team` placeholder is gone. It was not the visible
+  # non-claim it looked like: apply turns whatever is written here into a
+  # real `project_owners` row, so it would have asserted ownership in the
+  # catalog under a name nobody owns.
   #
-  # IMPORTANT, and verified rather than assumed: this does NOT block the
-  # plan. Drake treats an owner team key as a bounded label that grants no
-  # permission, so the plan item is `no_change`, not `unmapped`. Ownership
-  # is therefore an OPERATOR GATE on this manifest, not a planner gate —
-  # see docs/onboarding/FIKIR_SEPETI.md. Do not apply this to the
-  # production catalog until a real team is named here.
+  # What this is NOT: not a CODEOWNERS file, not GitHub team membership,
+  # not a Drake RBAC grant, not a provider observation, and not a
+  # production health observation. An ownership row is bounded catalog
+  # metadata that grants no permission — authority comes from RBAC grants,
+  # which no manifest can reach. It stays at owner-confirmed and is never
+  # promoted to `provider_observed`.
   owners:
-    - team: unknown-team
+    - team: fikir-sepeti
       role: primary
 
   environments:

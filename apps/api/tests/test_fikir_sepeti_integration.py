@@ -158,6 +158,29 @@ async def test_the_apply_persists_an_external_environment_with_its_provider(
     assert [tuple(r) for r in rows] == [("prod", "external", "vercel")]
 
 
+async def test_the_apply_records_exactly_one_operator_confirmed_owner(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """`fikir-sepeti` / `primary`, once, and nothing else.
+
+    The value is an operator decision rather than a repository fact — there
+    is no CODEOWNERS — so what matters is that exactly what was decided is
+    what got recorded.
+    """
+    await _imported(engine, tmp_path, "fs-apply-owner")
+    async with engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT o.team_key, o.owner_role FROM project_owners o "
+                    "JOIN projects p ON p.id = o.project_id WHERE p.project_key = :k"
+                ),
+                {"k": PROJECT_KEY},
+            )
+        ).all()
+    assert [tuple(r) for r in rows] == [("fikir-sepeti", "primary")]
+
+
 async def test_the_apply_creates_no_kubernetes_binding(engine: AsyncEngine, tmp_path: Path) -> None:
     """The check constraints would not have caught this — there is nothing
     invalid about a binding row, or about a cluster reference. Only their
@@ -283,6 +306,15 @@ async def test_a_second_import_of_the_same_manifest_duplicates_nothing(
         assert (
             await count(
                 "SELECT count(*) FROM environments e JOIN projects p ON p.id = e.project_id "
+                "WHERE p.project_key = :k"
+            )
+            == 1
+        )
+        # The owner is now planned as a real add on an existing project, so
+        # a second import is exactly where a duplicate would appear.
+        assert (
+            await count(
+                "SELECT count(*) FROM project_owners o JOIN projects p ON p.id = o.project_id "
                 "WHERE p.project_key = :k"
             )
             == 1

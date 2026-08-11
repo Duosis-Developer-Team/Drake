@@ -161,37 +161,96 @@ def test_the_dependency_plan_item_marks_workload_semantics_inapplicable() -> Non
     assert item.detail["workload_applicability"] == str(WorkloadApplicability.NOT_APPLICABLE)
 
 
-def test_nothing_in_this_manifest_blocks_the_plan() -> None:
-    """Including ownership — which is the finding, not the reassurance.
+def test_the_manifest_names_the_operator_confirmed_owner() -> None:
+    """`fikir-sepeti`, and no placeholder anywhere.
 
-    The manifest names `unknown-team` because no CODEOWNERS, no catalog row
-    and no documentation evidences an owner. That does NOT make the plan
-    blocking: an owner team key is a bounded label that grants no
-    permission, so it plans as `no_change` and apply CREATES the owner row
-    from whatever the manifest said.
-
-    This test pins that behaviour so the gap cannot be misread as safety.
-    Ownership is an operator gate on this manifest, enforced by withholding
-    production apply, and NOT a guard the planner provides.
+    The value does not come from the repository — there is no CODEOWNERS
+    and no team named in documentation — it comes from an explicit operator
+    decision, recorded in docs/onboarding/FIKIR_SEPETI.md. The earlier
+    `unknown-team` was not the visible non-claim it looked like: apply turns
+    whatever is written here into a real `project_owners` row.
     """
+    (owner,) = manifest()["spec"]["owners"]
+    assert owner == {"team": "fikir-sepeti", "role": "primary"}
+    text = MANIFEST.read_text()
+    for placeholder in ("unknown-team", "REPLACE_ME", "TODO", "TBD"):
+        assert placeholder not in text.replace("`unknown-team` placeholder is gone", "")
+
+
+def test_nothing_in_this_manifest_blocks_the_plan() -> None:
     assert [i.item_key for i in plan().items if i.action in BLOCKING_ACTIONS] == []
+
+
+def test_a_new_project_records_its_owner_with_the_project() -> None:
+    """One transaction, and the plan says so rather than implying it."""
     (owner,) = [i for i in plan().items if i.entity_kind == str(EntityKind.OWNER_TEAM)]
     assert owner.action == "no_change"
+    assert owner.reason_code == "applied_with_parent"
+    assert owner.proposed_name == "fikir-sepeti"
+    assert owner.detail["role"] == "primary"
+    # The one thing an ownership row must never be mistaken for.
     assert owner.detail["grants_no_permissions"] is True
 
 
-def test_an_unrecognised_owner_team_plans_identically_to_a_known_one() -> None:
-    """The catalog's knowledge of the team changes nothing.
+def test_an_existing_project_missing_this_owner_plans_a_real_add() -> None:
+    """The latent defect this sprint fixed.
 
-    Stated as its own test because the difference is what somebody would
-    reasonably expect to exist, and it does not.
+    Every owner used to plan `no_change` / `applied_with_parent`, which is
+    only true while the project is being created. For a project that already
+    exists `_apply_project` never runs, so the plan said "nothing to do" and
+    the owner was silently dropped.
     """
-    known = CatalogSnapshot(owner_teams={"unknown-team": "some-team-id"})
-    unknown_action = [i.action for i in plan().items if i.entity_kind == str(EntityKind.OWNER_TEAM)]
-    known_action = [
-        i.action for i in plan(known).items if i.entity_kind == str(EntityKind.OWNER_TEAM)
-    ]
-    assert unknown_action == known_action == ["no_change"]
+    existing = CatalogSnapshot(
+        projects={"fikir-sepeti": "p-1"},
+        project_repository={"fikir-sepeti": REPOSITORY_ROW_ID},
+    )
+    (owner,) = [i for i in plan(existing).items if i.entity_kind == str(EntityKind.OWNER_TEAM)]
+    assert owner.action == "create"
+    assert owner.payload == {"role": "primary", "team": "fikir-sepeti"}
+
+
+def test_an_existing_project_that_already_records_this_owner_changes_nothing() -> None:
+    existing = CatalogSnapshot(
+        projects={"fikir-sepeti": "p-1"},
+        project_repository={"fikir-sepeti": REPOSITORY_ROW_ID},
+        project_owners=frozenset({("fikir-sepeti", "fikir-sepeti", "primary")}),
+    )
+    (owner,) = [i for i in plan(existing).items if i.entity_kind == str(EntityKind.OWNER_TEAM)]
+    assert owner.action == "no_change"
+    assert owner.reason_code == "owner_team_already_recorded"
+    assert owner.payload == {}
+
+
+def test_another_project_owning_the_same_team_name_is_not_this_project_owning_it() -> None:
+    """The precise bug in the old snapshot.
+
+    `owner_teams` is a GLOBAL set of team keys, so any other project using
+    the name made this project's missing owner look settled.
+    """
+    elsewhere = CatalogSnapshot(
+        projects={"fikir-sepeti": "p-1"},
+        project_repository={"fikir-sepeti": REPOSITORY_ROW_ID},
+        owner_teams={"fikir-sepeti": "fikir-sepeti"},
+        project_owners=frozenset({("some-other-project", "fikir-sepeti", "primary")}),
+    )
+    (owner,) = [i for i in plan(elsewhere).items if i.entity_kind == str(EntityKind.OWNER_TEAM)]
+    assert owner.action == "create"
+
+
+def test_the_same_team_in_a_different_role_is_a_different_association() -> None:
+    """Identity is (project, team, role) — the unique constraint's own key.
+
+    So this plans an ADD rather than a conflict, and the recorded secondary
+    row is left alone: an import does not reassign somebody's decision.
+    """
+    secondary = CatalogSnapshot(
+        projects={"fikir-sepeti": "p-1"},
+        project_repository={"fikir-sepeti": REPOSITORY_ROW_ID},
+        project_owners=frozenset({("fikir-sepeti", "fikir-sepeti", "secondary")}),
+    )
+    (owner,) = [i for i in plan(secondary).items if i.entity_kind == str(EntityKind.OWNER_TEAM)]
+    assert owner.action == "create"
+    assert owner.payload["role"] == "primary"
 
 
 def test_re_planning_against_the_applied_catalog_creates_nothing_twice() -> None:
@@ -206,6 +265,7 @@ def test_re_planning_against_the_applied_catalog_creates_nothing_twice() -> None
         environments={("fikir-sepeti", "prod"): "e-1"},
         services={("fikir-sepeti", "fikir-sepeti-web"): "s-1"},
         dependencies={("fikir-sepeti", "fikir-sepeti-db"): "d-1"},
+        project_owners=frozenset({("fikir-sepeti", "fikir-sepeti", "primary")}),
         dependency_metadata={
             ("fikir-sepeti", "fikir-sepeti-db"): {
                 "dependency_key": "fikir-sepeti-db",
@@ -246,6 +306,7 @@ def test_re_planning_against_the_applied_catalog_creates_nothing_twice() -> None
     actions = {item.item_key: item.action for item in plan(applied).items}
     assert actions["project:fikir-sepeti"] != "create"
     assert actions["environment:prod"] != "create"
+    assert actions["owner_team:fikir-sepeti"] != "create"
     assert actions["service:fikir-sepeti-web"] != "create"
     assert actions["dependency:fikir-sepeti-db"] != "create"
 

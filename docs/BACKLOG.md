@@ -67,37 +67,39 @@ recorded above so the next person does not have to re-derive it.
 
 ---
 
-## Onboarding: `owner_team_unknown` is a reason code nothing emits
+## ~~Onboarding: `owner_team_unknown` is a reason code nothing emits~~ — RESOLVED
 
 **Recorded** 2026-08-11 (Sprint 13F.3), found while preparing the Fikir
-Sepeti admission pack.
+Sepeti admission pack. **Resolved the same sprint**, by CTO direction, in
+the 13F.3 review fixes. Kept here because the reasoning is worth not
+re-deriving.
 
-`ONBOARDING_REASONS` defines:
+`REASON_TEXT` defined `owner_team_unknown` and nothing emitted it, so it
+read as a guarantee that an unrecognised owning team would be refused —
+and two manifests plus three documents described that guarantee in prose.
+None of it was true.
 
-```
-"owner_team_unknown": "The manifest references an owning team Drake does not have."
-```
+**The underlying behaviour was correct and stays.** Drake has no
+independent owner-team catalog; a team key is bounded metadata that grants
+no permission, and if unknown teams blocked, the first project any team
+owns would be permanently unonboardable. Authority comes from RBAC grants,
+which no manifest can reach.
 
-Nothing emits it. `build_plan` plans every owner team as `no_change` /
-`applied_with_parent` whether or not the catalog knows the key, and
-`_apply_project` creates the `project_owners` row from whatever the
-manifest named.
+**What was actually broken was narrower and worse.** Every owner planned
+`no_change` / `applied_with_parent`, which is true only while the project is
+created in the same transaction. On an existing project nothing wrote
+`project_owners` at all, so adding an owner planned "nothing to do" and did
+nothing — plan and apply agreeing with each other, both wrong.
 
-**This is deliberate**, and the reasoning in `model.py` is sound: an owner
-team key is a bounded label that grants no permission, and if unknown teams
-blocked, the first project any team owns would be permanently
-unonboardable. Authority comes from RBAC grants, which no manifest can
-touch.
+Resolution: dead reason code deleted; per-project ownership added to the
+snapshot keyed like `uq_project_owner`; three cases distinguished (created
+with a new project / already recorded / a real `create` on an existing one);
+an apply handler added for the third; false prose corrected in
+`logislot.project.yaml`, `project-epsilon.yaml`, `LOGISLOT.md`, `HERMES.md`
+and `PROJECT_ONBOARDING.md`; twelve regression tests in
+`test_owner_team_apply_integration.py`.
 
-**But it was documented as if it did block.** Comments in
-`logislot.project.yaml` and `project-epsilon.yaml` claimed an unknown team
-"resolves to an `unmapped` plan item". Both were wrong and are corrected;
-`test_fikir_sepeti_admission.py` now pins the real behaviour.
-
-**The open question is a product decision, not a bug fix:** should naming
-an unevidenced owner be blocked, warned about, or left alone? Today it is
-left alone, ownership is an operator gate on the manifest rather than a
-planner gate, and Fikir Sepeti's admission is held on exactly that gate —
-see `docs/onboarding/FIKIR_SEPETI.md`. Either wire the reason code up or
-delete it; a defined-and-never-emitted reason code reads as a guarantee
-that does not exist.
+**Still deliberately not done:** Drake does not refuse an unevidenced owner.
+Confirming ownership is an operator decision on the manifest. If that should
+ever change it is a product decision about onboarding policy, not a bug
+fix — and it would need a real answer for the first-project-per-team case.

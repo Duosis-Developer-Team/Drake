@@ -910,6 +910,21 @@ async def load_snapshot(
             await connection.execute(text("SELECT DISTINCT team_key FROM project_owners"))
         ).all()
     }
+    # Which project holds which association, keyed exactly like
+    # `uq_project_owner`. The DISTINCT set above cannot answer that — it
+    # reports a team as known because SOME project uses the name — and
+    # planning ownership from it made a missing owner look settled.
+    project_owners = frozenset(
+        (str(entry[0]), str(entry[1]), str(entry[2]))
+        for entry in (
+            await connection.execute(
+                text(
+                    "SELECT p.project_key, o.team_key, o.owner_role FROM project_owners o "
+                    "JOIN projects p ON p.id = o.project_id"
+                )
+            )
+        ).all()
+    )
 
     observed, existing_bindings = await _binding_evidence(connection, document, project_id)
 
@@ -920,6 +935,7 @@ async def load_snapshot(
         services=services,
         clusters=clusters,
         owner_teams=owner_teams,
+        project_owners=project_owners,
         metric_profiles=_metric_profiles(),
         slo_profiles=frozenset({"availability", "latency"}),
         namespace_bindings=namespace_bindings,
@@ -2324,6 +2340,28 @@ async def _write_slo(context: _ApplyContext, item: dict[str, Any], *, update: bo
 
 # The registry. An actionable plan item with no entry here stops the apply
 # before any mutation — see `PlanNotApplicableError`.
+async def _apply_owner_team_create(context: _ApplyContext, item: dict[str, Any]) -> None:
+    """Add an ownership association to a project that already exists.
+
+    Only reached when the project was NOT created by this apply — a new
+    project records its owners inside `_apply_project_create`, in the same
+    transaction. Before this handler existed, that was the only path that
+    wrote `project_owners`, so adding an owner to an existing project
+    planned as `no_change` and then did nothing at all.
+
+    Additive only. Nothing here removes an owner the manifest omits or
+    reassigns one, and an ownership row grants no permission.
+    """
+    payload = item["payload"]
+    assert context.project_id is not None
+    await context.catalog.add_project_owner(
+        context.project_id,
+        str(payload["team"]),
+        str(payload.get("role") or "primary"),
+    )
+    context.counters.created += 1
+
+
 async def _apply_dependency_create(context: _ApplyContext, item: dict[str, Any]) -> None:
     payload = item["payload"]
     assert context.project_id is not None
@@ -2380,6 +2418,7 @@ _HANDLERS: dict[tuple[str, str], Any] = {
     (str(EntityKind.SERVICE), str(Action.CREATE)): _apply_service_create,
     (str(EntityKind.SERVICE), str(Action.LINK)): _apply_service_link,
     (str(EntityKind.SERVICE), str(Action.UPDATE_METADATA)): _apply_service_update,
+    (str(EntityKind.OWNER_TEAM), str(Action.CREATE)): _apply_owner_team_create,
     (str(EntityKind.DEPENDENCY), str(Action.CREATE)): _apply_dependency_create,
     (str(EntityKind.DEPENDENCY), str(Action.LINK)): _apply_dependency_link,
     (str(EntityKind.DEPENDENCY), str(Action.UPDATE_METADATA)): _apply_dependency_update,

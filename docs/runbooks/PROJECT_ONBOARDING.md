@@ -125,10 +125,24 @@ A service the manifest stopped mentioning appears as `unmapped` with
 a running service stopped existing, and a catalog that deletes on a diff
 will one day delete on a mistake.
 
-An owner team Drake has not seen is `create`, not `unmapped`: the first
-project any team owns would otherwise be permanently unonboardable. A team
-key is a bounded label on a project and grants nothing; authority comes
-from RBAC grants, which no manifest can touch.
+An owner team Drake has not seen is never `unmapped`: the first project any
+team owns would otherwise be permanently unonboardable. A team key is a
+bounded label on a project and grants nothing; authority comes from RBAC
+grants, which no manifest can touch.
+
+Which of the two non-blocking outcomes you get depends on the project, and
+the distinction matters because getting it wrong silently dropped owners:
+
+| | |
+|---|---|
+| New project | `no_change` / `applied_with_parent` — the association is created inside the same transaction as the project |
+| Existing project, owner already recorded | `no_change` / `owner_team_already_recorded` |
+| Existing project, owner missing | **`create`** — planned as a real add and applied as one |
+
+Adding is purely additive. An owner the manifest omits is never removed, an
+existing team is never replaced, and a role is never reassigned — a
+manifest edit is not evidence that somebody's recorded ownership decision
+was withdrawn.
 
 Approval names an exact **plan version**, and apply re-checks it, plus the
 commit and the manifest digest. Any drift refuses with `plan_stale`. A

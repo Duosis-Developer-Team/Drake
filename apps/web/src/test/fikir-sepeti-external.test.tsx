@@ -46,6 +46,7 @@ const PROJECT = {
     name: "Fikir-Sepeti",
     default_branch: "main",
   },
+  owners: [{ team: "fikir-sepeti", role: "primary" }],
   version: 1,
   scope: { type: "project", ref: "fikir-sepeti" },
   source: SOURCE,
@@ -126,6 +127,20 @@ describe("Fikir Sepeti — an external runtime in the catalog UI", () => {
     expect(
       screen.getByText(/github:Duosis-Developer-Team\/Fikir-Sepeti @ main/),
     ).toBeInTheDocument();
+  });
+
+  it("shows the owner as plain metadata, with no verified affirmation", async () => {
+    /**
+     * The owner is an operator decision, not an observation. It must read
+     * as a recorded fact and never acquire the visual language of
+     * something Drake checked — the badge next to it would be a claim
+     * nobody made.
+     */
+    mount();
+    await waitFor(() => expect(screen.getByText("Fikir Sepeti")).toBeInTheDocument());
+    expect(screen.getByText("fikir-sepeti (primary)")).toBeInTheDocument();
+    const page = document.body.textContent ?? "";
+    expect(page).not.toContain("unknown-team");
   });
 
   it("shows the managed dependency with its provider and verification", async () => {

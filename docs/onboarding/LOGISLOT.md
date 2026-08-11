@@ -80,10 +80,16 @@ facility-scoped tables). No tenant data was read; this is a shape, not
 content.
 
 **Ownership is unverified.** The repository has no CODEOWNERS and no team is
-named anywhere, so `team: logislot` is intent. Drake's owner-team catalog is
-authoritative, and until a team exists there this resolves to an `unmapped`
-plan item — a decision for a person, which is the correct outcome for an
-ownership claim nobody has confirmed.
+named anywhere, so `team: logislot` is intent.
+
+This previously claimed the value "resolves to an `unmapped` plan item"
+until a team exists in a catalog. That was wrong on both counts, verified
+against `build_plan`: Drake has no independent owner-team catalog, and an
+unrecognised key never blocks — for a new project the association is
+created with it, and for an existing project a missing one plans as
+`create` and is added. An ownership row is bounded metadata that grants no
+permission, so confirming an owner is an operator decision on the manifest,
+never something the planner refuses on your behalf.
 
 **`postgres-v1` is not in Drake's metric catalog** (which holds
 `fastapi-v1`, `nextjs-v1`, `kubernetes-service-v1`, `tenant-snapshot-v1`).

@@ -144,7 +144,10 @@ observed inventory of its own, so the drift figures above are what Drake
 
 Open items carried forward, none of them blocking:
 
-- ownership unverified → `unmapped` until a team exists in Drake's catalog
+- ownership unverified → recorded as declared, and NOT blocking. There is no
+  independent owner-team catalog to resolve against; an unrecognised key
+  plans as `create` on an existing project and is created with a new one.
+  Confirming the owner is an operator decision, not a planner refusal.
 - `postgres-v1` is not in Drake's metric catalog → `unmapped`
 - five CronJobs undeclared → declare as `component: job` or accept as out of model
 - MCP NetworkPolicy present in the repository, absent from both namespaces

@@ -44,7 +44,7 @@ The repository was not modified in any way.
 | Framework | Next.js 16.2.10, React 19.2.4 | `package.json` dependencies | **Repository intent** |
 | Datastore | Supabase PostgreSQL | `@supabase/supabase-js@^2.110.0`; 15 migrations under `supabase/migrations/`; `supabase/config.toml` | **Repository intent** |
 | Tenant model | `shared_table` | `0002_tenants.sql`, `0003_tenant_id.sql`, `0005_rls.sql` | **Repository intent** |
-| Owner team | **Unresolved** | No CODEOWNERS at any of the three locations GitHub honours; no team named in documentation | **Unmapped — blocker** |
+| Owner team | `fikir-sepeti` (primary) | **Explicit operator confirmation** — not the repository | **Owner confirmed** |
 | Workload | Not applicable | No Kubernetes runtime exists to hold one | **Derived** |
 | Health | Unknown | No observer exists, and none was created | **Unavailable** |
 | Freshness | Unavailable | No observation has ever been recorded | **Unavailable** |
@@ -61,12 +61,34 @@ provider observation         Vercel/Supabase reporting it      ← none obtained
 production health observation  something actually probing it   ← none exists
 ```
 
-**Nothing in this pack rises above the first level.** A repository that
-imports a Supabase client and ships Supabase migrations is strong evidence
-about the source code and *no* evidence that a production connection
-exists, works, or points at that provider. Importing this manifest records
-`repository_intent`, and `resolve_verification_for_import` will not raise
-it regardless of what the manifest declares.
+**Every technical claim sits at the first level.** A repository that imports
+a Supabase client and ships Supabase migrations is strong evidence about the
+source code and *no* evidence that a production connection exists, works, or
+points at that provider. Importing this manifest records
+`repository_intent`, and `resolve_verification_for_import` will not raise it
+regardless of what the manifest declares.
+
+**Ownership is the one claim at the second level, and it got there by the
+only route that leads there.** `fikir-sepeti` / `primary` comes from an
+explicit operator decision, recorded here — **not** from the repository,
+which establishes nothing about ownership. It is `owner_confirmed`, and it
+is worth being precise about what that does and does not mean:
+
+| | |
+|---|---|
+| It is | a human naming the owning team, on the record |
+| It is **not** | a CODEOWNERS file — there is none |
+| It is **not** | GitHub team membership — none was read or proven |
+| It is **not** | a Drake RBAC grant — an ownership row grants nothing |
+| It is **not** | a provider observation |
+| It is **not** | a production health observation |
+
+It is never promoted to `provider_observed`. Confirming an owner says who is
+accountable; it says nothing whatsoever about whether the system is running.
+
+The dependency's own `verification` field is unaffected and stays at
+`repository_intent` — the two are different claims about different things,
+and confirming one does not raise the other.
 
 ---
 
@@ -147,57 +169,79 @@ API renders `not_configured`.
 
 ---
 
-## The open blocker: ownership
+## Ownership: resolved, and what resolving it exposed
 
-**No owner team could be evidenced.** There is no CODEOWNERS file at
-`CODEOWNERS`, `.github/CODEOWNERS` or `docs/CODEOWNERS`, no owning team
-named in the repository documentation, and no team assignment Drake can
-read. So there is no evidence for any team key, and inventing
-`fikir-sepeti` or `technical-team` would manufacture exactly the kind of
-sourceless claim this whole model exists to prevent.
+The repository establishes nothing about ownership. There is no CODEOWNERS
+file at `CODEOWNERS`, `.github/CODEOWNERS` or `docs/CODEOWNERS`, no owning
+team named in the documentation, and no team assignment Drake can read.
 
-The manifest therefore names `unknown-team`, following the convention
-already used by `packages/contracts/fixtures/valid/project-epsilon.yaml`.
-The schema requires at least one owner (`minItems: 1`), so the choice is
-between a visible non-claim and a plausible-looking fiction.
-
-### The planner does not block on this — verified
-
-This was checked against `build_plan` rather than assumed, and the result
-contradicts what two comments in this repository previously claimed:
+So the owner did not come from the repository. It came from an operator:
 
 ```
-owner_team  owner_team:unknown-team  action=no_change  reason=applied_with_parent
+OWNER_TEAM_KEY = fikir-sepeti
+OWNER_ROLE     = primary
+OWNER_TYPE     = catalog metadata
+RBAC_GRANT     = none
 ```
 
-An owner team key is a **bounded label that grants no permission**;
-authority comes from RBAC grants, which no manifest can touch. An
-unrecognised key plans identically to a recognised one, and
-`_apply_project` **creates** the `project_owners` row from whatever the
-manifest names. `owner_team_unknown` exists in the reason-code table and is
-never emitted by anything.
+### Why `unknown-team` was wrong
 
-This is deliberate, and the reasoning in `model.py` is sound: if unknown
-teams blocked, the first project any team owns would be permanently
-unonboardable. LogiSlot and Hermes name teams that are equally unevidenced
-and plan the same way.
+The first version of this manifest used `unknown-team` and described it as a
+"visible non-claim". It was not one. Apply turns whatever is written in
+`owners` into a real `project_owners` row, so the placeholder would have
+asserted ownership in the catalog under a name nobody owns — a sourceless
+claim of exactly the kind this model exists to prevent, and one that reads
+as a gap in the data rather than as a decision that was never made.
 
-Two stale comments asserting the opposite have been corrected in this
-change — in `logislot.project.yaml` and `project-epsilon.yaml` — and
-`test_fikir_sepeti_admission.py` now pins the real behaviour so the gap
-cannot be misread as a safety property.
+Withholding production apply was the right call, but it did not make the
+manifest production-ready. The placeholder is gone.
+
+### The planner never blocked on this — verified, and now fixed
+
+Checked against `build_plan` rather than assumed. An owner team key is
+**bounded metadata that grants no permission**; authority comes from RBAC
+grants, which no manifest can reach. Drake has no independent team catalog
+to resolve a key against, so an unrecognised team is never blocking — and
+that is deliberate: if it blocked, the first project any team owns would be
+permanently unonboardable.
+
+`owner_team_unknown` was defined in the reason-code table and emitted by
+nothing, and two manifests documented the guarantee it appeared to offer.
+**The dead reason code has been removed** and the false prose corrected, in
+`logislot.project.yaml`, `project-epsilon.yaml`, `LOGISLOT.md`, `HERMES.md`
+and `PROJECT_ONBOARDING.md`.
+
+### The latent defect this uncovered
+
+Every owner planned as `no_change` / `applied_with_parent`. That is true
+only while the project is being created in the same transaction. For a
+project that **already exists**, `_apply_project_create` never runs, and it
+was the only code that wrote `project_owners` — so a manifest adding an
+owner planned "nothing to do" and then did nothing. The plan and the apply
+agreed with each other and were both wrong, which is why nothing caught it.
+
+Three cases are now told apart:
+
+| Case | Action | Reason |
+|---|---|---|
+| New project | `no_change` | `applied_with_parent` — created in the same transaction |
+| Existing/linked project, owner recorded | `no_change` | `owner_team_already_recorded` |
+| Existing/linked project, owner missing | **`create`** | a real add, planned and applied |
+
+The snapshot gained per-project ownership keyed like `uq_project_owner`
+(project, team, role). The previous `owner_teams` set was a global
+`SELECT DISTINCT team_key`, so **any other project using the same team name
+made this project's missing owner look settled.**
+
+The add is purely additive: an owner the manifest omits is never removed, an
+existing team is never replaced, a role is never reassigned, and no
+identity, role, scope or grant is created. Removing an owner stays a human
+act.
 
 ### What this means for activation
 
-The Fikir Sepeti plan has **zero blocking items**. It is fully applicable
-today. Ownership is therefore an **operator gate on this manifest**,
-enforced by withholding production apply — not a guard the planner
-provides.
-
-**Required operator decision:** name the real owning team before any
-production apply, or decide that `unknown-team` is an acceptable recorded
-owner. There is no third option in which the planner refuses on Drake's
-behalf.
+The Fikir Sepeti plan has zero blocking items and one operator-confirmed
+owner. The ownership question is closed.
 
 ---
 
@@ -214,7 +258,7 @@ Every claim below is a test, not a description.
 - it carries no connection reference and nothing secret-shaped
 
 **Plan and drift** — `apps/api/tests/test_fikir_sepeti_admission.py`
-(19 tests, run against the real manifest on disk)
+(24 tests, run against the real manifest on disk)
 
 - the plan contains no cluster, namespace or workload binding
 - an absent metrics profile plans `no_change` / `metric_profile_not_configured`,
@@ -223,12 +267,32 @@ Every claim below is a test, not a description.
 - an empty cluster produces **no drift items at all**
 - re-planning against the applied catalog creates nothing twice
 - verification is neither raised by the manifest nor lowered by a re-import
-- ownership does not block, and an unrecognised team plans identically to a
-  known one
+- the owner is `fikir-sepeti` / `primary`, with no placeholder anywhere
+- a new project records its owner with the project; an existing project
+  missing it plans a real `create`; one already recorded plans `no_change`
+- another project owning the same team name does not satisfy this one
+- the same team in a different role is an add, not a conflict
+
+**Ownership plan/apply agreement** —
+`apps/api/tests/test_owner_team_apply_integration.py` (12 tests, real
+PostgreSQL)
+
+- an owner added to an existing project is planned as `create` **and lands
+  in the database** — the regression that motivated the fix
+- re-importing the same owners adds nothing
+- an owner the manifest drops is **not** removed
+- another project's ownership is never touched
+- recording an owner creates no identity, role, scope or grant
+- `applied_with_parent` never appears for an owner that is not being created
+  with its project
+- `owner_team_unknown` is gone from the reason vocabulary
 
 **Ephemeral apply, API round-trip** —
-`apps/api/tests/test_fikir_sepeti_integration.py` (11 tests, real
+`apps/api/tests/test_fikir_sepeti_integration.py` (13 tests, real
 PostgreSQL, ephemeral database)
+
+- exactly one `fikir-sepeti` / `primary` ownership row, and a second import
+  does not duplicate it
 
 - the environment persists as `external` / `vercel`
 - `cluster_id` is NULL, `namespace` is empty, `service_workload_bindings` is
@@ -247,9 +311,11 @@ PostgreSQL, ephemeral database)
 - the same dependency key under two projects is two rows, and each project
   sees only its own
 
-**Web** — `apps/web/src/test/fikir-sepeti-external.test.tsx` (9 tests)
+**Web** — `apps/web/src/test/fikir-sepeti-external.test.tsx` (10 tests)
 
 - the managed dependency renders with class, provider and verification
+- the owner renders as plain metadata — `fikir-sepeti (primary)` — with no
+  verified/connected affirmation and no placeholder
 - workload reads "Not applicable"
 - health reads `unknown`, freshness reads `unavailable`, and neither
   `unhealthy` nor `stale` appears
@@ -323,9 +389,15 @@ commit.
 | Workload and drift exclusion proven | ✅ |
 | No fake health or freshness | ✅ |
 | Secret scan clean | ✅ |
-| **Owner team evidenced** | ❌ **blocker** |
+| Owner team confirmed | ✅ `fikir-sepeti` / `primary`, operator-confirmed |
+| Ownership plan/apply agreement proven | ✅ |
 | Production write performed | none, by design |
 
-**Not ready for production activation.** One decision is outstanding, and
-it is not a technical one: who owns Fikir Sepeti. Everything else is
-proven.
+**No open blockers.** Every gate is proven, and the ownership question that
+held this pack is closed by an explicit operator decision.
+
+Activation itself remains a separate, deliberate act: this sprint performed
+no production catalog write, and the pack does not authorise one. What
+changed is that nothing technical is now outstanding — the decision to admit
+Fikir Sepeti into the production catalog is the only remaining step, and it
+belongs to whoever is accountable for the catalog, not to this document.
