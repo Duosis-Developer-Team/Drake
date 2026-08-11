@@ -56,13 +56,15 @@ async function findClusterA(page: Page): Promise<string> {
 }
 
 async function setTheme(page: Page, dark: boolean) {
+  // Three states now — system / light / dark — as radios rather than a
+  // two-state toggle, so "system" can stay a real choice that keeps
+  // following the OS.
   const isDark = () =>
     page.evaluate(() => document.documentElement.classList.contains("dark"));
   if ((await isDark()) === dark) return;
   await page
-    .getByRole("button", {
-      name: dark ? /switch to dark theme/i : /switch to light theme/i,
-    })
+    .getByRole("radio", { name: dark ? /dark/i : /light/i })
+    .first()
     .click();
   await expect.poll(async () => await isDark()).toBe(dark);
 }

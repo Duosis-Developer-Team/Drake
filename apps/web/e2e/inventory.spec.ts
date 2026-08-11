@@ -280,14 +280,17 @@ test("steps 4-6: cluster screens show REAL k3d inventory", async ({ page }) => {
   await page.goto("/clusters");
   const list = page.getByTestId("cluster-list");
   await expect(list).toBeVisible();
-  await expect(list.getByText("connected")).toBeVisible();
-  await expect(list.getByText("fresh", { exact: true })).toBeVisible();
+  // Connection and freshness stay two separate claims. Case-insensitive
+  // because the badge label is sentence case now and the casing is not what
+  // is under test.
+  await expect(list.getByText(/^connected$/i)).toBeVisible();
+  await expect(list.getByText(/^fresh$/i)).toBeVisible();
 
   await page.goto(`/clusters/${clusterId}`);
   await expect(page.getByTestId("agent-card")).toBeVisible();
-  await expect(page.getByTestId("agent-card").getByText("connected")).toBeVisible();
+  await expect(page.getByTestId("agent-card").getByText(/^connected$/i)).toBeVisible();
   await expect(
-    page.getByTestId("freshness-card").getByText("fresh", { exact: true }),
+    page.getByTestId("freshness-card").getByText(/^fresh$/i),
   ).toBeVisible();
 
   // Real k3d content: at least one node, the e2e-workloads namespace,

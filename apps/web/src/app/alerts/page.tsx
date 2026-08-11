@@ -200,6 +200,7 @@ function AlertsInner() {
           />
         ) : (
           <>
+            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-ink-muted">
                 <tr>
@@ -218,6 +219,7 @@ function AlertsInner() {
                 ))}
               </tbody>
             </table>
+            </div>
             {page.data.items.some((alert) => alert.mapping_state !== "mapped") ? (
               <div className="mt-4 space-y-1.5" data-testid="unmapped-note">
                 <p className="text-xs font-medium text-ink">Unmapped alerts</p>

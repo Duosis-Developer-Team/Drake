@@ -208,6 +208,9 @@ function OnboardingInner() {
             description="Nothing in your scope is being onboarded. This is not a statement about which repositories exist."
           />
         ) : (
+          /* Its own scroller, contained: a wide table must scroll itself
+             rather than taking the page sideways with it. */
+          <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-ink-muted">
               <tr>
@@ -224,6 +227,7 @@ function OnboardingInner() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
       </div>

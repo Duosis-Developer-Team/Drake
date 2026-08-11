@@ -160,6 +160,7 @@ function SloInner() {
           />
         ) : (
           <>
+            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-ink-muted">
                 <tr>
@@ -178,6 +179,7 @@ function SloInner() {
                 ))}
               </tbody>
             </table>
+            </div>
 
             {/* Anything that is not a measurement is explained in words, so
                 nobody reads a dash as a zero. */}

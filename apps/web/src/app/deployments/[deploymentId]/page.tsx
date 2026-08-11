@@ -171,6 +171,7 @@ export default function DeploymentDetailPage() {
                     </span>
                   </div>
                   {data.health_comparison.signals ? (
+                    <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
                     <table className="w-full text-left" data-testid="health-comparison">
                       <thead>
                         <tr className="text-caption text-ink-secondary">
@@ -203,6 +204,7 @@ export default function DeploymentDetailPage() {
                         )}
                       </tbody>
                     </table>
+                    </div>
                   ) : null}
                   <p className="text-[11px] text-ink-muted">
                     This is a comparison of two time windows, not a causal claim. Drake does
