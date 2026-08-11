@@ -17,7 +17,7 @@
 
 alertmanager:
   # On now, because Drake is its consumer: the Active incidents card reads
-  # `/v1/webhooks/alertmanager/{key}` deliveries, and with no Alertmanager
+  # `/webhooks/alertmanager/{key}` deliveries, and with no Alertmanager
   # there is nothing to read. It stayed off until there was one.
   enabled: true
 
@@ -57,29 +57,31 @@ alertmanager:
     receivers:
       # In-cluster, to the API Service — a notification is internal traffic
       # and has no reason to leave the cluster and come back through the
-      # public edge. Native Alertmanager signs nothing, so the bearer token
+      # public edge. Which is just as well: this router carries NO `/v1`
+      # prefix, and the edge only routes `/v1` to the API, so the path is
+      # deliberately unreachable from outside the cluster. Native Alertmanager signs nothing, so the bearer token
       # IS the authentication; it is mounted from a Secret, never inline.
       - name: drake-platform
         webhook_configs:
-          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/hermes
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/webhooks/alertmanager/hermes
             send_resolved: true
             http_config:
               authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/hermes}
       - name: drake-hermes
         webhook_configs:
-          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/hermes
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/webhooks/alertmanager/hermes
             send_resolved: true
             http_config:
               authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/hermes}
       - name: drake-logislot
         webhook_configs:
-          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/logislot
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/webhooks/alertmanager/logislot
             send_resolved: true
             http_config:
               authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/logislot}
       - name: drake-fikir-sepeti
         webhook_configs:
-          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/fikir-sepeti
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/webhooks/alertmanager/fikir-sepeti
             send_resolved: true
             http_config:
               authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/fikir-sepeti}

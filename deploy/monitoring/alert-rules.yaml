@@ -100,10 +100,12 @@ groups:
         expr: |
           label_replace(
             label_replace(
+              label_replace(
               (drake:workload:replicas_ready < drake:workload:replicas_desired)
                 and (drake:workload:replicas_desired > 0),
               "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
-            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$"),
+            "project", "drake", "project", "^$")
         for: 15m
         labels: {severity: warning}
         annotations:
@@ -113,10 +115,12 @@ groups:
         expr: |
           label_replace(
             label_replace(
+              label_replace(
               sum by (namespace, workload_name) (
                 increase(drake:workload_pod:restarts_total[15m])) > 3,
               "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
-            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$"),
+            "project", "drake", "project", "^$")
         for: 5m
         labels: {severity: warning}
         annotations:
@@ -128,12 +132,14 @@ groups:
         expr: |
           label_replace(
             label_replace(
+              label_replace(
               (sum by (namespace, workload_name) (
                  rate(drake:workload_pod:cpu_cfs_throttled_periods_total[10m]))
                / clamp_min(sum by (namespace, workload_name) (
                  rate(drake:workload_pod:cpu_cfs_periods_total[10m])), 1)) > 0.25,
               "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
-            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$"),
+            "project", "drake", "project", "^$")
         for: 30m
         labels: {severity: warning}
         annotations:
@@ -143,11 +149,13 @@ groups:
         expr: |
           label_replace(
             label_replace(
+              label_replace(
               (sum by (namespace, workload_name) (drake:workload_pod:memory_working_set_bytes)
                / clamp_min(sum by (namespace, workload_name) (
                  drake:workload_pod:memory_limit_bytes), 1)) > 0.9,
               "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
-            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$"),
+            "project", "drake", "project", "^$")
         for: 20m
         labels: {severity: warning}
         annotations:
