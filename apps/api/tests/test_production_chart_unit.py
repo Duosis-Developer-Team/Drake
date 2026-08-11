@@ -334,6 +334,46 @@ def test_github_key_material_is_mounted_as_files_not_env_vars() -> None:
     assert mount["readOnly"] is True
 
 
+def test_the_github_material_is_readable_by_the_process_that_reads_it() -> None:
+    """Mounting a Secret is not the same as being able to read it.
+
+    Kubernetes gives Secret volume files to root. At 0400 with no fsGroup
+    the API — uid 65532 — gets EACCES on its own App key, and the chart
+    renders, installs and lints perfectly while doing it. This exact defect
+    crash-looped the internal listener on its CA bundle in Sprint 13B.
+
+    0440 with an fsGroup, rather than 0444: an App private key must not be
+    readable by every uid in the pod.
+    """
+    docs = render(
+        "--set",
+        "github.enabled=true",
+        "--set",
+        "github.existingSecret=drake-github-app",
+        "--set",
+        "github.appId=123456",
+    )
+    api = next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-api")
+    pod = api["spec"]["template"]["spec"]
+
+    assert pod["securityContext"]["fsGroup"] == 65532
+    assert pod["securityContext"]["runAsGroup"] == 65532
+    assert pod["securityContext"]["runAsUser"] == 65532
+    volume = next(v for v in pod["volumes"] if v["name"] == "github-app")
+    assert volume["secret"]["defaultMode"] == 0o440
+
+
+def test_no_fsgroup_is_imposed_when_there_is_no_secret_volume() -> None:
+    """An fsGroup relabels every volume in the pod; it is not free décor."""
+    api = next(d for d in by_kind(render(), "Deployment") if d["metadata"]["name"] == "drake-api")
+    assert "fsGroup" not in api["spec"]["template"]["spec"]["securityContext"]
+
+
+def test_enabling_github_without_a_secret_name_is_refused() -> None:
+    """`secretName: ""` renders a volume that can never mount."""
+    assert refuses("--set", "github.enabled=true", "--set", "github.appId=123456")
+
+
 def test_enabling_github_without_an_identifier_is_refused() -> None:
     assert refuses(
         "--set", "github.enabled=true", "--set", "github.existingSecret=drake-github-app"
@@ -1325,7 +1365,24 @@ def test_the_ingress_host_carries_no_port() -> None:
     ingress = by_kind(render_prod(), "Ingress")[0]
     host = ingress["spec"]["rules"][0]["host"]
     assert ":" not in host
-    assert host == "drake-84-247-180-172.sslip.io"
+    assert host == "drake-84-247-180-173.sslip.io"
+
+
+def test_production_serves_a_real_certificate_for_the_host_it_answers_on() -> None:
+    """A self-signed edge is not only a browser warning.
+
+    GitHub refuses to deliver a webhook to an untrusted certificate, and a
+    webhook delivery is the only thing that enqueues repository
+    reconciliation — so the certificate is what decides whether the catalog
+    can be populated at all. The TLS entry has to name the same host the
+    rule serves, or the controller falls back to its own certificate and
+    the deployment looks fine while proving nothing.
+    """
+    ingress = by_kind(render_prod(), "Ingress")[0]
+    tls = ingress["spec"]["tls"]
+    assert len(tls) == 1
+    assert tls[0]["secretName"] == "drake-edge-tls"
+    assert tls[0]["hosts"] == [ingress["spec"]["rules"][0]["host"]]
 
 
 def test_the_public_origin_keeps_its_port() -> None:
@@ -1336,7 +1393,7 @@ def test_the_public_origin_keeps_its_port() -> None:
     env = {
         e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
     }
-    origin = "https://drake-84-247-180-172.sslip.io:30773"
+    origin = "https://drake-84-247-180-173.sslip.io:30773"
     assert env["DRAKE_PUBLIC_ORIGIN"] == origin
     assert env["DRAKE_ALLOWED_WEB_ORIGINS"] == f'["{origin}"]'
     assert env["DRAKE_OIDC_REDIRECT_URL"] == f"{origin}/v1/auth/callback"
@@ -1427,9 +1484,9 @@ def test_a_hostname_origin_with_a_port_is_accepted_but_a_bare_ip_is_not() -> Non
     """The port is legitimate here — the edge is a NodePort, not 443."""
     from drake_api.origin import InvalidOriginError, parse_public_origin
 
-    accepted = parse_public_origin("https://drake-84-247-180-172.sslip.io:30773")
+    accepted = parse_public_origin("https://drake-84-247-180-173.sslip.io:30773")
     assert accepted.port == 30773
-    assert accepted.host == "drake-84-247-180-172.sslip.io"
+    assert accepted.host == "drake-84-247-180-173.sslip.io"
 
     for refused in ("https://84.247.180.172:30773", "http://drake-x.sslip.io:30773"):
         with pytest.raises(InvalidOriginError):
@@ -1824,7 +1881,7 @@ def test_every_application_workload_carries_the_runtime_security_env(
     """Rendered, per container — not "the helper exists"."""
     docs = render_listener()
     env = _env_of(docs, workload, container)
-    origin = "https://drake-84-247-180-172.sslip.io:30773"
+    origin = "https://drake-84-247-180-173.sslip.io:30773"
 
     for name in _RUNTIME_SECURITY_ENV:
         assert name in env, f"{workload}/{container} is missing {name}"
@@ -1851,7 +1908,7 @@ def test_the_listener_env_actually_satisfies_the_production_validator() -> None:
     from drake_api.settings import Settings
 
     docs = render_listener()
-    origin = "https://drake-84-247-180-172.sslip.io:30773"
+    origin = "https://drake-84-247-180-173.sslip.io:30773"
 
     for container in ("enroll", "ingest"):
         env = {
@@ -1883,7 +1940,7 @@ def test_dropping_either_variable_reproduces_the_production_failure(dropped: str
     """
     from drake_api.settings import Settings
 
-    origin = "https://drake-84-247-180-172.sslip.io:30773"
+    origin = "https://drake-84-247-180-173.sslip.io:30773"
     complete = {
         "env": "production",
         "public_origin": origin,

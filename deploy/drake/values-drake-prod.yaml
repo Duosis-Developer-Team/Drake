@@ -53,13 +53,31 @@ edge:
 ingress:
   enabled: true
   className: drake-nginx
-  host: drake-84-247-180-172.sslip.io
+  # node2's sslip.io name, not node1's, and the reason is ACME.
+  #
+  # This deployment has no purchased domain, and a self-signed certificate
+  # is not merely a browser warning: GitHub refuses to deliver a webhook to
+  # one, and repository discovery has no other trigger, so the catalog
+  # cannot be populated at all.
+  #
+  # sslip.io names are real public DNS, so Let's Encrypt can issue for
+  # them — but HTTP-01 has to answer on port 80 of the address the name
+  # resolves to. On node1 both 80 and 443 are already REDIRECTed to
+  # Hermes' NodePorts, and the controller that owns them watches only
+  # `hermes-test`, so solving there would mean writing into another team's
+  # namespace. node2's 80 belongs to the shared `nginx` controller, which
+  # watches every namespace — the solver Ingress lives in drake-prod and
+  # nothing of Hermes' is touched.
+  #
+  # The certificate is bound to the NAME, not the port, so the NodePort
+  # below is unaffected. When a purchased domain arrives, this host and
+  # the Certificate's dnsName change together and nothing else does.
+  host: drake-84-247-180-173.sslip.io
   tls:
     enabled: true
-    # The controller's own default certificate, exactly as the other
-    # applications on this cluster are served today. It is self-signed:
-    # browsers will warn. Accepted for now, and stated rather than hidden.
-    mode: controller-default
+    mode: secret
+    # Issued by cert-manager from `deploy/edge-tls/`, renewed automatically.
+    secretName: drake-edge-tls
 
 # The deployment's identity, not merely its address: the session cookie,
 # the CSRF origin comparison and the OIDC redirect URL all derive from it,
@@ -67,7 +85,7 @@ ingress:
 #
 # It carries the port because the route is a NodePort, and the browser is
 # told this exact origin.
-publicOrigin: https://drake-84-247-180-172.sslip.io:30773
+publicOrigin: https://drake-84-247-180-173.sslip.io:30773
 
 # Drake's GHCR packages are private. Without this every pod stops at
 # ImagePullBackOff. Created out of band:
