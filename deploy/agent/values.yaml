@@ -64,9 +64,29 @@ networkPolicy:
   # FAIL-CLOSED egress: every destination is explicit. Rendering fails on
   # empty values, and the policy gate refuses 0.0.0.0/0 and ::/0 — "the
   # whole internet" is never a reviewable destination.
-  # The Drake internal gateway endpoint (CIDR + port):
+  #
+  # The Drake gateway is named in exactly ONE of two ways. Naming both is
+  # refused, because a render cannot decide which one was meant:
+  #
+  #   IN-CLUSTER (production) — gatewayNamespace + gatewayPodSelector.
+  #     Prefer this. A Service ClusterIP is not a stable identifier: delete
+  #     and recreate the Service and the address changes, leaving a
+  #     committed CIDR aimed at nothing. Egress matches the destination
+  #     after DNAT, so pod labels are what the packet is judged against
+  #     anyway, and they outlive the Service object.
+  #
+  #   OFF-CLUSTER (k3d smokes, host-run listeners) — apiEndpointCIDR.
+  #     A listener that is not a pod cannot be selected by labels.
+  gatewayNamespace: ""
+  gatewayPodSelector: {}
   apiEndpointCIDR: ""
+  # The ingest listener's port. `enrollmentPort` is rendered ALONGSIDE it
+  # when the two differ: production enrolls on 8144 (CERT_NONE) and ingests
+  # on 8143 (CERT_REQUIRED), so a policy carrying only one of them lets the
+  # agent enrol and then go silent, or never enrol at all. Empty means one
+  # listener serves both calls, which is what local and CI run.
   apiEndpointPort: 443
+  enrollmentPort: ""
   # The Kubernetes API: egress policies match the POST-DNAT destination,
   # so this must cover the REAL apiserver endpoint addresses
   # (`kubectl get endpoints kubernetes`), not the in-cluster service VIP.
@@ -75,6 +95,12 @@ networkPolicy:
   # Cluster DNS: restricted to the kube-dns service pods, not "any:53".
   dnsNamespace: kube-system
   dnsPodSelector: "k8s-app: kube-dns"
+  # Node-local DNS caches (kubespray's `nodelocaldns`, and equivalents)
+  # answer on a link-local address owned by the node, not by any pod, so
+  # the selector above cannot name them. List them per cluster as /32s
+  # ONLY where the kubelet hands pods such a resolver — an empty list is
+  # the correct default.
+  dnsExtraCIDRs: []
 
 serviceAccount:
   name: drake-cluster-agent
