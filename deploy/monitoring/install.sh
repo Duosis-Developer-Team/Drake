@@ -51,5 +51,10 @@ helm upgrade --install "${ARGS[@]}" --wait --timeout 10m
 
 echo "[monitoring] pods:"
 kubectl get pods -n "$NAMESPACE" --no-headers | awk '{print "  " $1, $2, $3}'
-echo "[monitoring] Drake reaches this at:"
-echo "  http://${RELEASE}-server.${NAMESPACE}.svc.cluster.local"
+
+# Printed from the cluster, not composed from the release name: the chart
+# names the Service `<release>-prometheus-server`, and a guessed address in
+# a success message is how the wrong one ends up in a values file.
+echo "[monitoring] Drake reaches this at the pinned address:"
+kubectl get svc -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus \
+  -o jsonpath='  http://{.items[0].spec.clusterIP}  ({.items[0].metadata.name}){"\n"}'
