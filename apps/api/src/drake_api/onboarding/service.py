@@ -81,6 +81,7 @@ from drake_api.onboarding.model import (
     deployment_source_item,
 )
 from drake_api.rbac.service import Principal
+from drake_api.service_health.bindings import resolve_pending_bindings
 from drake_api.service_health.policy import DEFAULT_POLICY_KEY
 from drake_api.service_health.presets import DEFAULT_PRESET_KEY
 from drake_api.settings import Settings
@@ -2226,8 +2227,18 @@ async def _apply_binding_create(context: _ApplyContext, item: dict[str, Any]) ->
     ).first()
     if inserted is None:
         context.counters.unchanged += 1
-        return
-    context.counters.bindings_created += 1
+    else:
+        context.counters.bindings_created += 1
+
+    # Attach it to the workload the agent has already observed, in this same
+    # transaction. Onboarding used to leave every binding unresolved, which
+    # meant a freshly imported project showed empty charts for workloads that
+    # were running and observed — and the only way out was an operator
+    # calling the resolve endpoint by hand, 21 times.
+    #
+    # Runs on a repeated apply too, deliberately: the second import is often
+    # the one that happens after the workload finally exists.
+    await resolve_pending_bindings(context.connection, row[1])
 
 
 async def _apply_repository_link(context: _ApplyContext, item: dict[str, Any]) -> None:

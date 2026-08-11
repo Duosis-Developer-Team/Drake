@@ -114,6 +114,63 @@ async def _catalog_context(
     }
 
 
+async def resolve_pending_bindings(
+    connection: AsyncConnection, cluster_id: uuid.UUID
+) -> tuple[int, int]:
+    """Attach every unresolved binding on a cluster that inventory can now explain.
+
+    Called from two places, and both matter: after a manifest apply, because
+    the workload usually exists before the catalog describes it, and after a
+    snapshot completes, because sometimes it is the other way round. Without
+    the second one, a binding created before its workload was deployed stays
+    unresolved forever and its charts stay empty while the workload runs.
+
+    There is no guessing here. A binding names a cluster, a namespace, a kind
+    and a name, and that tuple is unique in Kubernetes — so a match is an
+    identity, not a similarity. Anything that does not match stays unresolved
+    and keeps saying so, which is the honest state for a workload the manifest
+    expects and the cluster does not have.
+
+    Returns (resolved, still_unresolved) for the caller to record.
+    """
+    rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT id, namespace, workload_kind, workload_name
+                FROM service_workload_bindings
+                WHERE cluster_id = :cluster AND lifecycle = 'active'
+                  AND resolved_resource_uid IS NULL
+                """
+            ),
+            {"cluster": cluster_id},
+        )
+    ).all()
+
+    resolved_count = 0
+    for row in rows:
+        found = await resolve_workload(
+            connection, cluster_id, str(row[1]), str(row[2]), str(row[3])
+        )
+        if found is None:
+            continue
+        await connection.execute(
+            text(
+                """
+                UPDATE service_workload_bindings
+                SET resolved_resource_uid = :uid,
+                    resolved_at = now(),
+                    revision = revision + 1,
+                    updated_at = now()
+                WHERE id = :id AND resolved_resource_uid IS NULL
+                """
+            ),
+            {"id": row[0], "uid": found["uid"]},
+        )
+        resolved_count += 1
+    return resolved_count, len(rows) - resolved_count
+
+
 async def resolve_workload(
     connection: AsyncConnection,
     cluster_id: uuid.UUID,
