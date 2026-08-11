@@ -133,6 +133,7 @@ export function ChartFrame({
   correlationId,
   onRetry,
   emptyDescription,
+  errorDescription,
   summary,
   series,
   legend,
@@ -153,6 +154,10 @@ export function ChartFrame({
   correlationId?: string;
   onRetry?: () => void;
   emptyDescription?: string;
+  /** Why the query failed. "Rate limited", "source unreachable" and "the
+   *  request threw" send an operator to three different places, so the frame
+   *  must not flatten them into one sentence. */
+  errorDescription?: string;
   /** The chart's shape in words. Rendered visibly under dense charts and
    *  always exposed to assistive technology. */
   summary?: React.ReactNode;
@@ -196,7 +201,12 @@ export function ChartFrame({
         <NoDataState compact description={emptyDescription} />
       ) : null}
       {status === "error" ? (
-        <ErrorState compact correlationId={correlationId} onRetry={onRetry} />
+        <ErrorState
+          compact
+          description={errorDescription}
+          correlationId={correlationId}
+          onRetry={onRetry}
+        />
       ) : null}
 
       {status === "ready" ? (

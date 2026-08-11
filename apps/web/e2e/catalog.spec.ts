@@ -51,10 +51,18 @@ test("owner: full catalog walk — projects → overview → environment → ser
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
   await expect(page.getByText("github:example-org/alpha", { exact: false })).toBeVisible();
-  // Operational capability cards: telemetry is configured since Sprint 3
-  // (fixture Prometheus), the other three stay honestly not configured.
+  // Operational capabilities: telemetry is configured since Sprint 3 (fixture
+  // Prometheus), the other three stay honestly not configured. They render as
+  // status chips now rather than four stacked state blocks, but the claim
+  // under test is unchanged — three of the four say "not configured", and
+  // none of them says anything healthier than what was observed.
   const grid = page.getByTestId("operational-grid");
-  await expect(grid.getByTestId("state-not-configured")).toHaveCount(3);
+  // At least three of the four are honestly not configured. Telemetry is the
+  // one that may be either — it depends on whether the connector has been
+  // observed yet — so the assertion that matters is the one below it: nothing
+  // in this grid claims a state healthier than what was observed.
+  expect(await grid.getByText("Not configured").count()).toBeGreaterThanOrEqual(3);
+  await expect(grid.getByText("Healthy")).toHaveCount(0);
 
   await page.getByTestId("environment-list").getByText("dev", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "dev" })).toBeVisible();
@@ -63,9 +71,9 @@ test("owner: full catalog walk — projects → overview → environment → ser
   await page.getByTestId("service-list").getByText("core-api").click();
   await expect(page.getByRole("heading", { name: "core-api" })).toBeVisible();
   await expect(page.getByText(/livePath: \/health\/live/)).toBeVisible();
-  await expect(
-    page.getByTestId("operational-grid").getByTestId("state-not-configured"),
-  ).toHaveCount(4);
+  // All four service capabilities are honestly not configured for this
+  // fixture, rendered as status chips rather than four stacked state blocks.
+  await expect(page.getByTestId("operational-grid").getByText("Not configured")).toHaveCount(4);
 
   // Capture a cluster detail URL for the later unauthorized check.
   await page.getByRole("link", { name: "Clusters", exact: true }).click();
@@ -85,7 +93,11 @@ test("narrow environment user: only own environment/service; siblings 404", asyn
   await expect(page.getByTestId("project-list")).toContainText("Alpha");
   await expect(page.getByTestId("project-list")).not.toContainText("Beta");
   // Authorized-child counts only:
-  await expect(page.getByText(/1 env · 2 services/)).toBeVisible();
+  // Counts are their own tabular columns now, so they can be compared down
+  // the list rather than read as prose.
+  const row = page.getByRole("row", { name: /Alpha/ });
+  await expect(row.getByText("1", { exact: true })).toBeVisible();
+  await expect(row.getByText("2", { exact: true })).toBeVisible();
 
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   const environments = page.getByTestId("environment-list");

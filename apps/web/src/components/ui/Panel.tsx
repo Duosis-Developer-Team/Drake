@@ -48,7 +48,11 @@ export function Panel({
     <Element
       data-testid={testId}
       data-tone={tone}
-      className={`flex min-w-0 flex-col rounded-panel border border-border bg-surface shadow-panel ${
+      // `[&>*]:min-w-0` closes the flexbox horizontal-overflow class of bug at
+      // its source: a flex child defaults to `min-width: auto`, so any wrapper
+      // around a wide table grows past the panel and the PAGE scrolls
+      // sideways instead of the table's own scroller doing it.
+      className={`flex min-w-0 flex-col rounded-panel border border-border bg-surface shadow-panel [&>*]:min-w-0 ${
         RAIL[tone] ?? ""
       } ${flush ? "" : "gap-3 p-4"} ${className}`}
       {...rest}

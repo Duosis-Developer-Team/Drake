@@ -26,7 +26,7 @@
 import { ArrowRight, Boxes, Plug, RefreshCw, ShieldAlert, Siren, Waypoints } from "lucide-react";
 import Link from "next/link";
 
-import { CompositionBar } from "@/components/charts/CategoryCharts";
+import { CompositionBar } from "@/components/charts/InlineBars";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
@@ -408,7 +408,9 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
       ) : !resource.data ? (
         <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
       ) : (
-        <dl className="grid grid-cols-3 gap-2">
+        /* A list of counts, not term/definition pairs: a <dl> whose children
+           are links is both wrong markup and an axe violation. */
+        <ul className="grid grid-cols-3 gap-2">
           {(
             [
               ["Projects", resource.data.projects, "/projects"],
@@ -424,21 +426,22 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
                 <span className="mt-0.5 block text-micro text-ink-muted">{label}</span>
               </>
             );
-            return href ? (
-              <Link
-                key={label}
-                href={href}
-                className="rounded-control px-2 py-1.5 transition-colors hover:bg-surface-hover"
-              >
-                {body}
-              </Link>
-            ) : (
-              <div key={label} className="px-2 py-1.5">
-                {body}
-              </div>
+            return (
+              <li key={label}>
+                {href ? (
+                  <Link
+                    href={href}
+                    className="block rounded-control px-2 py-1.5 transition-colors hover:bg-surface-hover"
+                  >
+                    {body}
+                  </Link>
+                ) : (
+                  <span className="block px-2 py-1.5">{body}</span>
+                )}
+              </li>
             );
           })}
-        </dl>
+        </ul>
       )}
     </Panel>
   );
@@ -530,6 +533,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
           <NotConfiguredState compact title="No clusters in scope" />
         </div>
       ) : (
+        <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
         <table className="w-full text-body" data-tabular>
           <caption className="sr-only">
             Clusters in your scope, with agent connection and inventory freshness
@@ -591,6 +595,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </Panel>
   );

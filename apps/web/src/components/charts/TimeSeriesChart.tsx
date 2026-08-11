@@ -26,7 +26,7 @@ import {
   type ChartStatus,
   type ChartWindow,
 } from "@/components/charts/ChartFrame";
-import { AXIS_STYLE, baseOption, type EChartsOption } from "@/components/charts/echarts";
+import { AXIS_STYLE, baseOption, type EChartsOption } from "@/components/charts/options";
 import { EChart } from "@/components/charts/LazyChart";
 import { formatTimeAxis, formatUnit, formatUtc } from "@/lib/design/format";
 import type { Thresholds } from "@/lib/design/status";
@@ -60,6 +60,7 @@ export function TimeSeriesChart({
   area = false,
   height = 220,
   emptyDescription,
+  errorDescription,
   actions,
   deterministic,
 }: {
@@ -79,6 +80,7 @@ export function TimeSeriesChart({
   area?: boolean;
   height?: number;
   emptyDescription?: string;
+  errorDescription?: string;
   actions?: React.ReactNode;
   deterministic?: boolean;
 }) {
@@ -262,6 +264,7 @@ export function TimeSeriesChart({
       correlationId={correlationId}
       onRetry={onRetry}
       emptyDescription={emptyDescription}
+      errorDescription={errorDescription}
       height={height}
       actions={actions}
       summary={summaryText}

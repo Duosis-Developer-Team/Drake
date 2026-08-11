@@ -101,7 +101,7 @@ export const DARK_TOKENS: Tokens = {
   "surface-3": "#0e4a3c",
   "surface-elevated": "#0a3e33",
   "surface-hover": "#0f4a3d",
-  "surface-selected": "#12503f",
+  "surface-selected": "#0e4535",
   "border-subtle": "#18543f",
   "border-strong": "#3e8c71",
   "text-primary": "#f7f9f9",

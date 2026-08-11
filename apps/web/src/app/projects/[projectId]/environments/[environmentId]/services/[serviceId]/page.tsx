@@ -181,7 +181,7 @@ function ServiceDetailInner() {
               description="Each one reports the state its own source is in — an unconfigured capability is an absence, not a failure."
               level={3}
             />
-            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <ul data-testid="operational-grid" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {Object.entries(CAPABILITY_LABELS).map(([key, label]) => {
                 const state = service.operational?.[key] ?? "unknown";
                 return (

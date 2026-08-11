@@ -82,8 +82,23 @@ export function DataTable<Row>({
   }
 
   return (
-    <div className="w-full overflow-x-auto" data-testid="data-table-scroller">
-      <table className="w-full min-w-full border-collapse text-body" data-tabular>
+    /*
+     * Two things keep a wide table from taking the page with it:
+     *
+     * `min-w-0` — a flex item defaults to `min-width: auto`, so without it
+     *   this wrapper grows to the table's width and the PAGE scrolls instead
+     *   of the wrapper.
+     * `contain: paint` — `overflow-x: auto` clips the paint but Chromium still
+     *   propagates the descendant's width into the root scroll width, and the
+     *   page really does pan (47px on a 390px viewport with six columns).
+     *   Containment stops the propagation at this box, which is exactly what
+     *   the scroller already promises visually.
+     */
+    <div
+      className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]"
+      data-testid="data-table-scroller"
+    >
+      <table className="w-full border-collapse text-body" data-tabular>
         <caption className="sr-only">{caption}</caption>
         <thead
           className={`bg-surface-2 text-caption text-ink-secondary ${

@@ -11,10 +11,10 @@ import { useEffect, useState } from "react";
 import { AuditPanel } from "@/components/admin/AuditPanel";
 import { GrantsPanel } from "@/components/admin/GrantsPanel";
 import { RolesPanel } from "@/components/admin/RolesPanel";
-import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel } from "@/components/ui/Panel";
+import { DeniedState } from "@/components/ui/states";
 import { useSession } from "@/lib/session";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 type Tab = "roles" | "grants" | "audit";
 
@@ -38,14 +38,15 @@ export default function AccessControlPage() {
 
   if (!canManage && !canAudit) {
     return (
-      <div className="mx-auto max-w-3xl">
-        <Card title="Access Control">
-          <DataState
-            kind="permission-denied"
-            description="Managing access requires rbac.manage; reading the audit trail requires audit.view."
-          />
-        </Card>
-      </div>
+      <PageFrame width="narrow">
+        <PageHeader
+          title="Audit & access"
+          description="Dynamic roles, scoped grants, and the append-only audit trail."
+        />
+        <Panel>
+          <DeniedState description="Managing access requires rbac.manage; reading the audit trail requires audit.view." />
+        </Panel>
+      </PageFrame>
     );
   }
 
@@ -57,14 +58,11 @@ export default function AccessControlPage() {
 
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <div>
-        <h1 className="text-title font-semibold text-ink">Access Control</h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          Dynamic roles, scoped grants, and the append-only audit trail.
-        </p>
-      </div>
-
+      <PageHeader
+        title="Audit & access"
+        description="Dynamic roles, scoped grants, and the append-only audit trail."
+      />
+      <div className="space-y-4">
       <div role="tablist" aria-label="Access control sections" className="flex gap-1 border-b border-border">
         {tabs
           .filter((entry) => entry.visible)
@@ -74,10 +72,10 @@ export default function AccessControlPage() {
               role="tab"
               aria-selected={tab === entry.key}
               onClick={() => setTab(entry.key)}
-              className={`-mb-px rounded-t-lg border-x border-t px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent ${
+              className={`-mb-px border-b-2 px-3 py-2 text-body font-medium transition-colors ${
                 tab === entry.key
-                  ? "border-border bg-surface text-ink"
-                  : "border-transparent text-ink-muted hover:text-ink"
+                  ? "border-brand text-ink"
+                  : "border-transparent text-ink-secondary hover:text-ink"
               }`}
             >
               {entry.label}

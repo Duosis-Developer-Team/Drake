@@ -21,7 +21,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
-import { CompositionBar } from "@/components/charts/CategoryCharts";
+import { CompositionBar } from "@/components/charts/InlineBars";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Panel, PanelHeader } from "@/components/ui/Panel";

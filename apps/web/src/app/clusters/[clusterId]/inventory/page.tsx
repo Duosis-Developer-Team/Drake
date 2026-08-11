@@ -28,7 +28,7 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { SortedBarChart } from "@/components/charts/CategoryCharts";
-import { CompositionBar } from "@/components/charts/CategoryCharts";
+import { CompositionBar } from "@/components/charts/InlineBars";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";

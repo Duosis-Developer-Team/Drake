@@ -24,6 +24,11 @@
  *
  *   Animation is off under `prefers-reduced-motion` and off when
  *   `deterministic` is set, which is what makes a screenshot comparable.
+ *
+ * The option BUILDERS live in `./options`, which imports ECharts only as a
+ * type. This module is the sole value-importer of the engine, and the only
+ * way in is the dynamic import in `LazyChart` — so a screen that frames a
+ * chart without rendering one never downloads it.
  */
 
 import * as echarts from "echarts/core";
@@ -41,6 +46,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 
 import { readTokens, type ThemeMode, type Tokens } from "@/lib/design/tokens";
+import type { EChartsOption } from "@/components/charts/options";
 
 echarts.use([
   BarChart,
@@ -58,8 +64,6 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-export type EChartsOption = echarts.EChartsCoreOption;
-
 function currentMode(): ThemeMode {
   if (typeof document === "undefined") return "light";
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
@@ -69,61 +73,6 @@ function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
-
-/**
- * The shared shell of every Drake chart option.
- *
- * Axis, grid, tooltip and legend styling live here rather than in each chart,
- * so a tooltip on the overview and a tooltip on a service detail are the same
- * object. Callers merge their series and axis data on top.
- */
-export function baseOption(tokens: Tokens, animate: boolean): EChartsOption {
-  return {
-    animation: animate,
-    animationDuration: 240,
-    animationEasing: "cubicOut",
-    textStyle: {
-      fontFamily:
-        'var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-      fontSize: 11,
-      color: tokens["text-secondary"],
-    },
-    grid: { left: 8, right: 12, top: 8, bottom: 4, containLabel: true },
-    legend: {
-      show: false,
-      icon: "roundRect",
-      itemWidth: 10,
-      itemHeight: 10,
-      textStyle: { color: tokens["text-secondary"], fontSize: 11 },
-      inactiveColor: tokens["text-muted"],
-    },
-    tooltip: {
-      // The tooltip is confined to the chart box so it cannot spill past the
-      // viewport on a narrow screen or inside a scrolled panel.
-      confine: true,
-      appendToBody: false,
-      backgroundColor: tokens["chart-tooltip"],
-      borderColor: tokens["border-strong"],
-      borderWidth: 1,
-      padding: [6, 8],
-      textStyle: { color: tokens["chart-tooltip-text"], fontSize: 11 },
-      extraCssText: "box-shadow: var(--shadow-overlay); border-radius: 8px;",
-      axisPointer: {
-        type: "line",
-        lineStyle: { color: tokens["border-strong"], width: 1, type: "dashed" },
-        crossStyle: { color: tokens["border-strong"] },
-        label: { backgroundColor: tokens["chart-tooltip"], color: tokens["chart-tooltip-text"] },
-      },
-    },
-  };
-}
-
-export const AXIS_STYLE = (tokens: Tokens) => ({
-  axisLine: { show: true, lineStyle: { color: tokens["border-subtle"] } },
-  axisTick: { show: false },
-  axisLabel: { color: tokens["chart-axis"], fontSize: 11, hideOverlap: true },
-  splitLine: { show: true, lineStyle: { color: tokens["chart-grid"], type: "solid" as const } },
-});
 
 /**
  * Mount an ECharts instance and keep it in sync.

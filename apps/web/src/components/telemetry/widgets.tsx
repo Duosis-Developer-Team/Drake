@@ -284,8 +284,9 @@ export function TimeseriesWidget({
         emptyDescription={
           state.kind === "ready" && state.envelope.data_state === "not_configured"
             ? "No telemetry source is configured for this scope."
-            : failureDescription(state)
+            : undefined
         }
+        errorDescription={failureDescription(state)}
         window={
           envelope
             ? {

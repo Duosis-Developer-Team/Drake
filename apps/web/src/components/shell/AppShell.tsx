@@ -103,7 +103,9 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar onOpenSidebar={openDrawer} />
-        <main id="main" tabIndex={-1} className="flex-1 bg-canvas">
+        {/* The sideways-scroll backstop lives on `html` in globals.css; this
+            keeps a wide panel from stretching the column it sits in. */}
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 bg-canvas">
           {children}
         </main>
       </div>

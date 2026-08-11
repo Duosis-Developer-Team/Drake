@@ -102,7 +102,7 @@
   --surface-3: #0e4a3c;
   --surface-elevated: #0a3e33;
   --surface-hover: #0f4a3d;
-  --surface-selected: #12503f;
+  --surface-selected: #0e4535;
 
   --border-subtle: #18543f;
   --border-strong: #3e8c71;
@@ -259,6 +259,13 @@
 
 html {
   height: 100%;
+  /*
+   * The page never pans sideways. Wide regions own their own scroller and
+   * contain their overflow; this is the last line of defence for anything
+   * that slips through. `clip` rather than `hidden`: it does not turn the
+   * root into a scroll container, so sticky positioning keeps working.
+   */
+  overflow-x: clip;
 }
 
 body {
