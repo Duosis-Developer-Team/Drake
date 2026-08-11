@@ -141,8 +141,13 @@ test("semantics: headings and tables are real structure, not styling", async ({
 
   await page.goto(`/clusters/${clusterId}/inventory`);
   await expect(page.getByTestId("resource-rows")).toBeVisible();
-  const table = page.locator("table").first();
-  const headers = table.locator("thead th[scope='col']");
+  // The RESOURCE table specifically. The page carries a second one now — the
+  // kind-distribution chart ships its numbers as a table too, which is how a
+  // reader who cannot use the chart still gets the data — so "the first table
+  // on the page" no longer means the one under test.
+  const headers = page
+    .getByTestId("resource-rows")
+    .locator("table thead th[scope='col']");
   expect(await headers.count()).toBeGreaterThanOrEqual(5);
 });
 
@@ -220,11 +225,14 @@ test("honesty gates: stale is never healthy-colored, unknown stays visible", asy
 
 test("denied and not-found stay uniform without data leakage", async ({ page }) => {
   await signInAs(page, "user-plain");
+  // Out of scope answers 404, and both screens render that the same way — the
+  // uniformity is the point: a different state on one of them would say
+  // whether the cluster exists.
   await page.goto(`/clusters/${clusterId}`);
-  await expect(page.getByTestId("state-not-configured").first()).toBeVisible();
+  await expect(page.getByTestId("state-not-found").first()).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/clusters/${clusterId}/inventory`);
-  await expect(page.getByTestId("state-not-configured").first()).toBeVisible();
+  await expect(page.getByTestId("state-not-found").first()).toBeVisible();
   await assertNoHorizontalOverflow(page, "denied inventory @ 390px");
   await assertAxeClean(page, "denied inventory");
 });

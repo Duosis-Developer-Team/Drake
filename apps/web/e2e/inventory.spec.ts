@@ -418,7 +418,7 @@ test("step 11: no cluster scope means uniform 404s in UI and API", async ({ page
   await expect(page.getByTestId("state-empty")).toBeVisible();
 
   await page.goto(`/clusters/${clusterId}`);
-  await expect(page.getByTestId("state-not-configured").first()).toBeVisible();
+  await expect(page.getByTestId("state-not-found").first()).toBeVisible();
 
   const denied = await page.request.get(`/v1/clusters/${clusterId}/inventory/summary`);
   expect(denied.status()).toBe(404);
