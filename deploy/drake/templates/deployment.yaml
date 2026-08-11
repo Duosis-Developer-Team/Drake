@@ -34,6 +34,19 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        {{- if .Values.github.enabled }}
+        # The GitHub App's private key and webhook secret arrive as a Secret
+        # volume, and Kubernetes gives those files to root. Without an
+        # fsGroup this process (uid 65532) cannot read them at any mode
+        # tighter than world-readable — the same defect that crash-looped
+        # the internal listener on its CA bundle. fsGroup makes the volume
+        # group-owned by this gid so 0440 is readable here and by nobody
+        # else; 0444 would leave an App private key readable by any uid in
+        # the pod.
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        {{- end }}
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: api
@@ -105,8 +118,12 @@ spec:
       volumes:
         - name: github-app
           secret:
-            secretName: {{ .Values.github.existingSecret }}
-            defaultMode: 0400
+            secretName: {{ required "github.existingSecret is required when github.enabled" .Values.github.existingSecret }}
+            # 0440, not 0400: with the fsGroup above, the owning group is
+            # this process's gid, so it can read the files while no other
+            # uid in the pod can. 0400 renders, installs, and then fails at
+            # the first read — the worst place to find out.
+            defaultMode: 0440
       {{- end }}
 ---
 apiVersion: apps/v1

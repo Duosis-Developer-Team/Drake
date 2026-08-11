@@ -1,0 +1,19 @@
+# The edge certificate. It lives in `drake-prod` because an Ingress can
+# only reference a TLS Secret in its own namespace, and the chart names
+# this Secret in `ingress.tls.secretName`.
+#
+# One name, matching `ingress.host` and `publicOrigin` exactly. A
+# certificate for a name the deployment does not serve proves nothing, and
+# a name served without a certificate is what kept the catalog empty.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: drake-edge-tls
+  namespace: drake-prod
+spec:
+  secretName: drake-edge-tls
+  dnsNames:
+    - drake-84-247-180-173.sslip.io
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
