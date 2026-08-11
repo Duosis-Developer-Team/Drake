@@ -428,14 +428,23 @@ def test_internal_mode_still_demands_a_real_identity() -> None:
 
 
 def test_the_expected_production_workloads_and_nothing_else() -> None:
+    """The listener is in this list because production RUNS it.
+
+    It was absent while `values-drake-prod.yaml` omitted `internalAgentApi`
+    — and the omission was not a decision, it was a gap: revision 12 ran
+    the listener in the cluster while the committed values said nothing,
+    so the first upgrade driven only by this file deleted it.
+    """
     docs = render_prod()
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Deployment")) == [
+        "drake-agent-gateway",
         "drake-api",
         "drake-edge",
         "drake-web",
     ]
     assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
+        "drake-agent-gateway",
         "drake-api",
         "drake-edge",
         "drake-web",
@@ -445,7 +454,7 @@ def test_the_expected_production_workloads_and_nothing_else() -> None:
 def test_every_workload_can_pull_private_images() -> None:
     docs = render_prod()
     workloads = by_kind(docs, "Deployment") + by_kind(docs, "Job")
-    assert len(workloads) == 4, "api, web, edge, migration"
+    assert len(workloads) == 5, "api, web, edge, agent-gateway, migration"
     for doc in workloads:
         pod = doc["spec"]["template"]["spec"]
         assert pod["imagePullSecrets"] == [{"name": "drake-ghcr"}], doc["metadata"]["name"]
@@ -1077,12 +1086,14 @@ def test_the_render_claims_no_out_of_band_resource() -> None:
 def test_the_render_owns_exactly_the_application_resources() -> None:
     docs = render_prod()
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Deployment")) == [
+        "drake-agent-gateway",
         "drake-api",
         "drake-edge",
         "drake-web",
     ]
     assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
+        "drake-agent-gateway",
         "drake-api",
         "drake-edge",
         "drake-web",
@@ -1225,7 +1236,13 @@ def test_no_pod_receives_kubernetes_service_link_variables() -> None:
     none of these variables.
     """
     specs = _pod_specs(render_prod())
-    assert set(specs) == {"drake-api", "drake-web", "drake-migrate", "drake-edge"}
+    assert set(specs) == {
+        "drake-api",
+        "drake-web",
+        "drake-migrate",
+        "drake-edge",
+        "drake-agent-gateway",
+    }
     for name, spec in specs.items():
         assert spec.get("enableServiceLinks") is False, (
             f"{name} would receive DRAKE_API_PORT and fail to parse it as a setting"
@@ -1248,7 +1265,7 @@ def test_the_setting_that_collided_is_still_named_api_port() -> None:
 
     assert "api_port" in Settings.model_fields
     services = {s["metadata"]["name"] for s in by_kind(render_prod(), "Service")}
-    assert services == {"drake-api", "drake-web", "drake-edge"}
+    assert services == {"drake-api", "drake-web", "drake-edge", "drake-agent-gateway"}
 
 
 def test_the_fix_did_not_disturb_ownership_or_images() -> None:
@@ -1516,8 +1533,14 @@ def render_listener(*overrides: str) -> list[dict[str, Any]]:
 
 
 def test_the_listener_is_off_unless_it_is_switched_on() -> None:
-    """Shipping a listener and running one are separate decisions."""
-    names = {d["metadata"]["name"] for d in render_prod()}
+    """Shipping a listener and running one are separate decisions.
+
+    Asserted against the CHART DEFAULTS, which is what this test was always
+    about. It used to read `render_prod()` — true only while the production
+    values happened to omit the block, and it stopped being a statement
+    about the chart the moment production switched the listener on.
+    """
+    names = {d["metadata"]["name"] for d in render()}
     assert not [n for n in names if "agent-gateway" in n]
 
 
@@ -1660,10 +1683,28 @@ def test_the_listener_admits_one_peer_and_reaches_only_its_datastores() -> None:
 
 def test_a_listener_without_its_secrets_refuses_to_render() -> None:
     """Fail closed: a missing CA reference must not become a listener that
-    silently serves without one."""
-    assert refuses_prod("--set", "internalAgentApi.enabled=true")
+    silently serves without one.
+
+    The secret names are blanked EXPLICITLY. They used to be absent simply
+    because the production values named neither, so `enabled=true` alone
+    was enough to prove the refusal. Now that production names both, this
+    has to unset them or it would assert nothing.
+    """
     assert refuses_prod(
-        "--set", "internalAgentApi.enabled=true", "--set", "internalAgentApi.tlsSecret=t"
+        "--set",
+        "internalAgentApi.enabled=true",
+        "--set",
+        "internalAgentApi.tlsSecret=",
+        "--set",
+        "internalAgentApi.caSecret=",
+    )
+    assert refuses_prod(
+        "--set",
+        "internalAgentApi.enabled=true",
+        "--set",
+        "internalAgentApi.tlsSecret=t",
+        "--set",
+        "internalAgentApi.caSecret=",
     )
 
 
