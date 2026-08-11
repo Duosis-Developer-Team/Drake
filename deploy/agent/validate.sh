@@ -36,7 +36,27 @@ if helm template policy-check . --namespace drake-system \
 fi
 if helm template policy-check . --namespace drake-system \
   "${COMMON_SETS[@]}" --set networkPolicy.apiEndpointCIDR="" >/dev/null 2>&1; then
-  echo "POLICY VIOLATION: render succeeded without an explicit API endpoint CIDR" >&2
+  echo "POLICY VIOLATION: render succeeded without naming the gateway at all" >&2
+  exit 1
+fi
+# The gateway is named ONE way or the other. Both at once is not a stricter
+# policy, it is an ambiguous one — and the reader cannot tell which rule the
+# cluster is enforcing.
+if helm template policy-check . --namespace drake-system \
+  "${COMMON_SETS[@]}" \
+  --set networkPolicy.gatewayNamespace=drake-prod \
+  --set networkPolicy.gatewayPodSelector."app\.kubernetes\.io/name"=drake \
+  >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: render succeeded naming the gateway by CIDR AND by selector" >&2
+  exit 1
+fi
+# A namespace with no pod selector would allow egress to EVERY pod in that
+# namespace, which is a different (and much wider) rule than the one the
+# values file appears to describe.
+if helm template policy-check . --namespace drake-system \
+  "${COMMON_SETS[@]}" --set networkPolicy.apiEndpointCIDR="" \
+  --set networkPolicy.gatewayNamespace=drake-prod >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: render succeeded with a gateway namespace and no pod selector" >&2
   exit 1
 fi
 if helm template policy-check . --namespace drake-system \

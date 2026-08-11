@@ -60,12 +60,22 @@ logLevel: info
 
 networkPolicy:
   enabled: true
-  # The gateway Service ClusterIP, as a /32. Read from the live cluster;
-  # the policy matches the post-DNAT destination.
-  apiEndpointCIDR: 10.233.43.18/32
-  # Both listener ports are needed: enrollment happens on 8144 and every
-  # subsequent call on 8143.
+  # The gateway, named by what it IS rather than by the address it happens
+  # to answer on today. This file used to carry the Service ClusterIP as a
+  # /32; revision 13 deleted and recreated that Service, the ClusterIP moved
+  # from 10.233.43.18 to 10.233.48.114, and the committed rule was left
+  # pointing at nothing — before the agent was ever installed, so nobody
+  # would have found out from a failure that looked like anything but DNS.
+  # Labels do not move when a Service is rebuilt.
+  gatewayNamespace: drake-prod
+  gatewayPodSelector:
+    app.kubernetes.io/name: drake
+    app.kubernetes.io/component: agent-gateway
+  # Both listener ports, because the listeners differ in client-certificate
+  # policy: enroll 8144 CERT_NONE, ingest 8143 CERT_REQUIRED. With only
+  # 8143 allowed the agent could never make its one pre-certificate call.
   apiEndpointPort: 8143
+  enrollmentPort: 8144
   # The REAL apiserver endpoint, not the in-cluster service VIP — an
   # egress policy matches the address after DNAT.
   # `kubectl get endpoints kubernetes` -> 84.247.180.172:6443
@@ -73,3 +83,9 @@ networkPolicy:
   kubernetesApiPort: 6443
   dnsNamespace: kube-system
   dnsPodSelector: "k8s-app: kube-dns"
+  # This cluster runs kubespray's node-local DNS cache: pods resolve
+  # against 169.254.25.10, a link-local address on the node itself, so the
+  # kube-dns pod selector above matches none of the agent's lookups.
+  # Read from a running pod's /etc/resolv.conf, not assumed.
+  dnsExtraCIDRs:
+    - 169.254.25.10/32

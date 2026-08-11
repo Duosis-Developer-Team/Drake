@@ -50,7 +50,8 @@ case "$JOB" in
     # job, which is selected by chart changes. Running them in both places
     # rendered the chart 149 times twice on every full suite.
     run uv run pytest -m "not integration" -q \
-      --ignore=apps/api/tests/test_production_chart_unit.py
+      --ignore=apps/api/tests/test_production_chart_unit.py \
+      --ignore=apps/api/tests/test_agent_chart_unit.py
     # Does the production image contain the code the chart tells it to run?
     # It did not, once, and a production upgrade rolled back.
     run bash scripts/api_image_entrypoint_smoke.sh
@@ -92,7 +93,8 @@ case "$JOB" in
     run bash deploy/drake/validate.sh
     run bash deploy/agent/validate.sh
     run bash deploy/dev/observability/validate.sh
-    run uv run --directory apps/api pytest tests/test_production_chart_unit.py -q
+    run uv run --directory apps/api pytest \
+      tests/test_production_chart_unit.py tests/test_agent_chart_unit.py -q
     ;;
 
   go-agent)

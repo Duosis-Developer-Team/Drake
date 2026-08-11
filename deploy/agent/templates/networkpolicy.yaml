@@ -1,4 +1,18 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $selector := $np.gatewayPodSelector | default dict }}
+{{- $bySelector := and (not (empty $np.gatewayNamespace)) (gt (len $selector) 0) }}
+{{- $byCIDR := not (empty $np.apiEndpointCIDR) }}
+{{- if and $bySelector $byCIDR }}
+{{- fail "networkPolicy: name the gateway EITHER by gatewayNamespace + gatewayPodSelector OR by apiEndpointCIDR, not both" }}
+{{- end }}
+{{- if not (or $bySelector $byCIDR) }}
+{{- fail "networkPolicy: the Drake gateway destination is required (gatewayNamespace + gatewayPodSelector, or apiEndpointCIDR) — fail-closed egress" }}
+{{- end }}
+{{- $ports := list (required "networkPolicy.apiEndpointPort is required (fail-closed egress)" $np.apiEndpointPort) }}
+{{- if and $np.enrollmentPort (ne (toString $np.enrollmentPort) (toString $np.apiEndpointPort)) }}
+{{- $ports = append $ports $np.enrollmentPort }}
+{{- end }}
 # Outbound-only, FAIL-CLOSED: all ingress denied (the agent has no inbound
 # surface at all); egress is limited to cluster DNS pods, the Kubernetes
 # API, and the Drake internal endpoint — every destination explicit.
@@ -23,29 +37,75 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}
+              kubernetes.io/metadata.name: {{ $np.dnsNamespace }}
           podSelector:
             matchLabels:
-              {{ .Values.networkPolicy.dnsPodSelector }}
+              {{ $np.dnsPodSelector }}
       ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
+    {{- if $np.dnsExtraCIDRs }}
+    # A node-local DNS cache answers on a link-local address that belongs to
+    # no pod and no namespace, so no selector can name it. Where the kubelet
+    # hands pods such a resolver, the rule above matches nothing the agent
+    # actually sends and every lookup fails. These are listed per cluster,
+    # as /32s, for that reason alone.
+    - to:
+        {{- range $cidr := $np.dnsExtraCIDRs }}
+        - ipBlock:
+            cidr: {{ $cidr }}
+        {{- end }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
     # The Kubernetes API (explicit CIDR; required).
     - to:
         - ipBlock:
-            cidr: {{ required "networkPolicy.kubernetesApiCIDR is required (fail-closed egress)" .Values.networkPolicy.kubernetesApiCIDR }}
+            cidr: {{ required "networkPolicy.kubernetesApiCIDR is required (fail-closed egress)" $np.kubernetesApiCIDR }}
       ports:
+        {{- /* 6443 stays listed for clusters that publish the apiserver on
+               a second port; listing it twice when they are the same reads
+               as two rules where there is one. */}}
+        {{- $apiPorts := list (int $np.kubernetesApiPort) }}
+        {{- if ne (int $np.kubernetesApiPort) 6443 }}
+        {{- $apiPorts = append $apiPorts 6443 }}
+        {{- end }}
+        {{- range $port := $apiPorts }}
         - protocol: TCP
-          port: {{ .Values.networkPolicy.kubernetesApiPort }}
-        - protocol: TCP
-          port: 6443
-    # The Drake internal gateway (explicit CIDR; required).
+          port: {{ $port }}
+        {{- end }}
+    # The Drake internal gateway.
     - to:
+      {{- if $bySelector }}
+        # Named by namespace + pod labels rather than by the Service
+        # ClusterIP. An egress rule matches the destination AFTER DNAT, so
+        # the pod labels are what the packet is actually judged against —
+        # and unlike the ClusterIP, they survive the Service being deleted
+        # and recreated. Revision 13 recreated exactly that Service, which
+        # left the committed CIDR pointing at an address nothing answers on:
+        # a policy that silently stops matching reads as a network fault.
+        - namespaceSelector:
+            matchLabels:
+              # Set by the API server, not by whoever wrote the manifest.
+              kubernetes.io/metadata.name: {{ $np.gatewayNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $selector | nindent 14 }}
+      {{- else }}
+        # The listener is not a pod in this cluster (host-run, or off-cluster
+        # entirely), so no selector can name it and an explicit CIDR is the
+        # only honest description.
         - ipBlock:
-            cidr: {{ required "networkPolicy.apiEndpointCIDR is required (fail-closed egress)" .Values.networkPolicy.apiEndpointCIDR }}
+            cidr: {{ $np.apiEndpointCIDR }}
+      {{- end }}
       ports:
+        {{- range $port := $ports }}
         - protocol: TCP
-          port: {{ .Values.networkPolicy.apiEndpointPort }}
+          port: {{ $port }}
+        {{- end }}
 {{- end }}
