@@ -4,9 +4,16 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@c36f43f by publish
-# run 31344622026. Both were built from that one commit, so the API, the
-# web app and the migration cannot drift apart.
+# Images are pinned to real digests published from main@e17cfe2 by publish
+# run 31482696935. All three — API, web and migration — were built from
+# that one commit, so they cannot drift apart.
+#
+# The digests these replaced (API `8c401467…706c`, web `5f6113ea…0076`)
+# named main@c36f43f. The web digest was what revision 12 actually ran; the
+# API digest was NOT — revision 12 served `7b02b3fe…4341`, applied from a
+# later build than this file recorded. So this file has described the API
+# inaccurately since then, and the fix is this update rather than a note:
+# a committed pin is only useful if it says what is deployed.
 #
 # Nothing is left blank: the datastores are selected by label rather than
 # by address, so this file is complete as committed.
@@ -72,11 +79,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit c36f43fdf4c35096568e1623b36c1b4252aa8eb9
+    # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:8c40146793ac1f8d44c25c242c61a07e0c24dfec1b4b120fb9610ae15430706c"
+    digest: "sha256:a01951ec5136c6060a1d66dac422dcb00c6d86dc156fa90c890d5ac3be0be68a"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -88,8 +95,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit c36f43fdf4c35096568e1623b36c1b4252aa8eb9
-    digest: "sha256:5f6113ea63ab17f1640ba162c0b63b6face42eb884532e5229202b61c0c90076"
+    # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8
+    digest: "sha256:ed99ce0d96302d16c13bbb86dbf6320599b572a9eff94c9576e9488a6f98d540"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -100,7 +107,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:8c40146793ac1f8d44c25c242c61a07e0c24dfec1b4b120fb9610ae15430706c"
+    digest: "sha256:a01951ec5136c6060a1d66dac422dcb00c6d86dc156fa90c890d5ac3be0be68a"
   backoffLimit: 0
 
 networkPolicy:
