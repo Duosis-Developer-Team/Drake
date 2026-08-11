@@ -14,6 +14,10 @@ NAMESPACE="${DRAKE_MONITORING_NAMESPACE:-drake-monitoring}"
 RELEASE="${DRAKE_MONITORING_RELEASE:-drake-metrics}"
 CHART_VERSION="${DRAKE_PROMETHEUS_CHART_VERSION:-27.44.0}"
 
+# The narrowed ClusterRole first: the chart's binding names it, and a
+# binding to a role that does not exist grants nothing quietly.
+kubectl apply -f deploy/monitoring/rbac.yaml
+
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts \
   --force-update >/dev/null
 helm repo update prometheus-community >/dev/null

@@ -23,11 +23,36 @@ prometheus-pushgateway:
 
 kube-state-metrics:
   enabled: true
+  # The default collector set includes `secrets`, and collecting a resource
+  # means holding cluster-wide `list` on it — which returns the values, not
+  # just the metadata kube-state-metrics publishes. Drake's own agent is
+  # denied secrets deliberately; installing a component that holds what the
+  # agent may not would move the cluster's posture backwards to light up a
+  # chart nobody asked for.
+  #
+  # This list is what the recording rules actually read, plus the two
+  # (namespaces, persistentvolumeclaims) an operator reaches for next.
+  # `configmaps` is absent for the same reason as `secrets`: people put
+  # things in them that they would not put in a metric.
+  collectors:
+    - daemonsets
+    - deployments
+    - namespaces
+    - nodes
+    - persistentvolumeclaims
+    - pods
+    - replicasets
+    - statefulsets
 
 prometheus-node-exporter:
   enabled: true
 
 server:
+  # The narrowed ClusterRole from rbac.yaml, applied out of band. The chart
+  # then binds to it instead of creating one that can read every ConfigMap
+  # in the cluster.
+  useExistingClusterRoleName: drake-metrics-prometheus-read
+
   # Seven days. Drake's own query budgets cap a range at seven days
   # (`maxRangeSeconds: 604800`), so retaining more would store what no
   # query can ask for.
