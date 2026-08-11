@@ -193,18 +193,30 @@ internalAgentApi:
 auth:
   mode: local
 
-# Drake deploys before the GitHub App exists. The integration UI reports
-# NOT_CONFIGURED, no token is minted, and no provider call is made.
+# The App exists now: `drake-duosis-production`, owned by
+# Duosis-Developer-Team, installed on exactly three repositories with four
+# read permissions (metadata, contents, administration, actions) and two
+# events (repository, push). Verified against the GitHub API rather than
+# read off the settings screen.
 #
-# All three are stated explicitly rather than left to the chart's defaults.
-# A default is a fact about the chart; this file is the record of what this
-# deployment decided, and "the repository-write path is off" is exactly the
-# kind of decision that should be readable here without opening values.yaml.
+# Read-only stays read-only: `gitopsPrEnabled` and `workerEnabled` remain
+# off, so no branch, commit or pull request can be created in any
+# repository. They are one decision and the chart refuses half of it —
+# one alone would either accept proposals nothing delivers, or run a
+# worker nothing can reach.
 #
-# `gitopsPrEnabled` and `workerEnabled` are one decision and the chart
-# refuses half of it: one alone would either accept proposals nothing
-# delivers, or run a worker nothing can reach.
+# Only IDENTIFIERS live here. The private key and the webhook secret are in
+# `drake-github-app`, created out of band and mounted as files, because a
+# settings value can end up in `kubectl describe pod`, a crash dump or a
+# child process environment; a file cannot.
 github:
-  enabled: false
+  enabled: true
+  existingSecret: drake-github-app
+  # GitHub recommends the client id as the JWT issuer. The numeric app id
+  # is recorded alongside it because the installation and the audit trail
+  # are keyed on it, and reading it out of a settings screen later is how
+  # the wrong App gets debugged for an hour.
+  clientId: "Iv23lihz94WBYwjFSnOu"
+  appId: "4559623"
   gitopsPrEnabled: false
   workerEnabled: false
