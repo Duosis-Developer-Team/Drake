@@ -33,10 +33,16 @@ spec:
     defaultBranch: dev
 
   # UNVERIFIED. The repository has no CODEOWNERS and no team is named in the
-  # CTO integration pack, so this is intent, not evidence. Drake's owner-team
-  # catalog is authoritative: until a team exists there, this resolves to an
-  # `unmapped` plan item, which is the correct outcome for an ownership
-  # claim nobody has confirmed.
+  # CTO integration pack, so this is intent, not evidence.
+  #
+  # This comment previously claimed an unknown team "resolves to an
+  # `unmapped` plan item". It does not, and never did — verified against
+  # build_plan: an owner team key is a bounded label that grants no
+  # permission, so an unrecognised one plans as `no_change`, and applying
+  # this manifest CREATES the owner row from whatever is written here.
+  # Ownership is therefore an operator gate on the manifest, not a planner
+  # gate. See docs/onboarding/FIKIR_SEPETI.md, which records the same
+  # finding and the decision it needs.
   owners:
     - team: logislot
       role: primary

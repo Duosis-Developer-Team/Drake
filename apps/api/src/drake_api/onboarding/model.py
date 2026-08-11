@@ -142,7 +142,15 @@ REASON_TEXT: dict[str, str] = {
         "The manifest references a cluster Drake does not have. Clusters are "
         "operator-registered infrastructure; a manifest cannot create one."
     ),
-    "owner_team_unknown": "The manifest references an owning team Drake does not have.",
+    # No `owner_team_unknown`. It was defined here and emitted by nothing,
+    # which read as a guarantee that an unrecognised team would be refused —
+    # and two manifests documented that guarantee in prose. Drake has no
+    # independent team catalog; an owner team key is bounded metadata on a
+    # project and grants nothing, so there is no state in which the code
+    # could honestly produce it.
+    "owner_team_already_recorded": (
+        "This project already records this team in this role; nothing to add."
+    ),
     "dependency_provider_change_resets_verification": (
         "This dependency's provider changed while its verification is above "
         "repository_intent. Evidence obtained for the old provider does not carry over, "
@@ -241,6 +249,12 @@ IMMUTABLE_DEPENDENCY_FIELDS: frozenset[str] = frozenset(
     {"dependency_key", "dependency_class", "engine"}
 )
 
+#: What `owners[].role` means when the manifest omits it. Mirrors the
+#: server default on `project_owners.owner_role`, and normalising to it
+#: EARLY is what keeps an omitted role and an explicit `primary` from being
+#: treated as two different associations by anything downstream.
+DEFAULT_OWNER_ROLE = "primary"
+
 # Kubernetes kinds Drake can bind a service to. Mirrors the CHECK on
 # `service_workload_bindings.workload_kind`.
 BINDABLE_WORKLOAD_KINDS: frozenset[str] = frozenset({"Deployment", "StatefulSet", "DaemonSet"})
@@ -292,6 +306,10 @@ PAYLOAD_ALLOWLIST: dict[str, frozenset[str]] = {
             "health",
         }
     ),
+    # A team key and a role, and deliberately nothing else. An ownership
+    # association is catalog metadata; it carries no identity, no principal
+    # and no grant, so there is no third field it could honestly hold.
+    str(EntityKind.OWNER_TEAM): frozenset({"team", "role"}),
     str(EntityKind.DEPENDENCY): frozenset(
         {
             "dependency_key",
@@ -597,6 +615,15 @@ class CatalogSnapshot:
     clusters: dict[str, str] = field(default_factory=dict)
     #: owner team key -> team id
     owner_teams: dict[str, str] = field(default_factory=dict)
+    #: (project_key, team_key, owner_role) already recorded in the catalog.
+    #:
+    #: Keyed exactly like `uq_project_owner`, because that constraint IS the
+    #: identity of an ownership association. `owner_teams` above cannot
+    #: answer this: it is a GLOBAL set of team keys, so it says "some
+    #: project somewhere has this team" and never "this project has it".
+    #: Planning ownership from it reported an owner as settled whenever any
+    #: other project happened to use the same team name.
+    project_owners: frozenset[tuple[str, str, str]] = frozenset()
     #: curated metric profile keys
     metric_profiles: frozenset[str] = frozenset()
     #: curated SLO profile keys
@@ -884,29 +911,74 @@ def build_plan(
     )
 
     # --- owner teams --------------------------------------------------------
+    # A team key Drake has not seen before is INTRODUCED by this manifest,
+    # not missing from it — the first project any team owns would otherwise
+    # be permanently unonboardable. The key is bounded metadata on a
+    # project; it grants nothing, and authority still comes from RBAC
+    # grants, which no manifest can touch. So an unrecognised team is never
+    # blocking.
+    #
+    # It is not therefore free. The first version reported EVERY owner as
+    # `no_change` / `applied_with_parent`, which is true only while the
+    # project is being created in the same transaction. For a project that
+    # already exists, `_apply_project` never runs, so a manifest that added
+    # an owner planned "nothing to do" and then did nothing — the owner was
+    # silently dropped, and the plan said so in words that read like
+    # success. Three cases, told apart:
+    #
+    #   new project              created with the project, in one transaction
+    #   existing + recorded      genuinely nothing to do
+    #   existing + not recorded  a real add, planned and applied as one
+    creating_project = existing_project is None
     for owner in spec.get("owners") or []:
         team = str(owner.get("team") or "")
-        known = snapshot.owner_teams.get(team)
-        # A team key Drake has not seen before is INTRODUCED by this
-        # manifest, not missing from it — the first project any team owns
-        # would otherwise be permanently unonboardable. The key is a
-        # bounded label on a project; it grants nothing. Authority still
-        # comes from RBAC grants, which no manifest can touch.
+        # Normalised ONCE, here, and every downstream use reads this
+        # variable: the item key, `detail`, the payload and the row apply
+        # writes. An omitted role and an explicit `primary` are the same
+        # association, and they must not be able to disagree about it.
+        role = str(owner.get("role") or DEFAULT_OWNER_ROLE)
+        # Keyed like `uq_project_owner`: (project, team, role) IS the
+        # identity of an association, so the same team in a different role
+        # is a different row rather than a conflicting one.
+        recorded = (project_key, team, role) in snapshot.project_owners
+
+        if creating_project:
+            action, reason = str(Action.NO_CHANGE), "applied_with_parent"
+        elif recorded:
+            action, reason = str(Action.NO_CHANGE), "owner_team_already_recorded"
+        else:
+            action, reason = str(Action.CREATE), None
+
         items.append(
             PlanItem(
                 entity_kind=str(EntityKind.OWNER_TEAM),
-                action=str(Action.NO_CHANGE),
-                item_key=f"owner_team:{team}",
+                action=action,
+                # The ROLE is part of the key, because it is part of the
+                # identity. Keyed on the team alone, the same team in two
+                # roles produced two plan items with one key — and
+                # `onboarding_plan_items` is `UNIQUE(plan_id, item_key)`
+                # written with `ON CONFLICT DO NOTHING`, so the second was
+                # silently dropped. The digest covered two items and the
+                # persisted plan held one: an approval that did not
+                # represent what it approved.
+                item_key=f"owner_team:{team}:{role}",
                 proposed_name=team,
                 # A team KEY is not a row id. `existing_entity_id` is a uuid
                 # column, and `project_owners` is keyed by the team string —
                 # so the key stays where it belongs, in the name.
-                existing_name=team if known else None,
-                reason_code="applied_with_parent",
+                existing_name=team if recorded else None,
+                reason_code=reason,
                 detail={
                     "grants_no_permissions": True,
                     "parent": f"project:{project_key}",
+                    "role": role,
                 },
+                # Only a real add carries values for apply to execute.
+                payload=(
+                    build_payload(str(EntityKind.OWNER_TEAM), {"team": team, "role": role})
+                    if action == str(Action.CREATE)
+                    else {}
+                ),
             )
         )
 

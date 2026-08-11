@@ -13,9 +13,12 @@ metadata:
   displayName: Epsilon
 spec:
   repository: {provider: github, owner: example-org, name: epsilon, defaultBranch: main}
-  # Ownership is deliberately left to resolve as unmapped: no team is
-  # asserted that nobody confirmed.
-  owners: [{team: unknown-team, role: primary}]
+  # A fictional team, like the rest of this fixture. It is deliberately NOT
+  # a placeholder such as `unknown-team`: an unrecognised team key does not
+  # resolve as `unmapped` — verified against build_plan — and apply creates
+  # the `project_owners` row from whatever is written here, so a placeholder
+  # would assert ownership under a name nobody owns.
+  owners: [{team: example-team, role: primary}]
   environments:
     # No clusterRef and no namespace — and the schema now REFUSES them here,
     # so an external environment cannot quietly acquire Kubernetes identity.

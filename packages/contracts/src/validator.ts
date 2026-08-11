@@ -6,7 +6,7 @@ import Ajv2019Import from "ajv/dist/2019.js";
 import addFormatsImport from "ajv-formats";
 import { parse as parseYaml } from "yaml";
 
-import { checkPolicy, type PolicyFinding } from "./policy.js";
+import { checkOwnerConsistency, checkPolicy, type PolicyFinding } from "./policy.js";
 
 export type SchemaName =
   | "drake-project"
@@ -93,6 +93,11 @@ export function validateDocument(document: unknown, schema: SchemaName): Validat
   }
 
   const policyFindings: PolicyFinding[] = checkPolicy(document);
+  // Structural consistency the schema cannot express. Scoped to the project
+  // manifest, which is the only contract with an `owners` list.
+  if (schema === "drake-project") {
+    policyFindings.push(...checkOwnerConsistency(document));
+  }
   for (const finding of policyFindings) {
     issues.push({ path: finding.path, rule: finding.rule, message: finding.message });
   }

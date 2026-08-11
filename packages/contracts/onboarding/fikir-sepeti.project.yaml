@@ -1,0 +1,158 @@
+# Fikir Sepeti → Drake onboarding manifest.
+#
+# Every value here was read from the Fikir Sepeti repository, read-only, at
+# one pinned commit. The evidence is recorded in
+# docs/onboarding/FIKIR_SEPETI.md, claim by claim, with the file that
+# establishes it.
+#
+# This is the first project Drake describes that Drake does not run. There
+# is no cluster, no namespace, no Deployment, no agent and nothing scraping
+# it — and this manifest says so by OMISSION rather than by inventing
+# placeholder Kubernetes identity. Every absence below is deliberate and
+# has a reason attached.
+#
+# Source of truth:
+#   repository   github.com/Duosis-Developer-Team/Fikir-Sepeti
+#   commit       bde38ccd9c0e58570de28b0d4d1ef8eae41f7e5a
+#   read at      2026-08-11, read-only, no fork, no clone push, no mutation
+#
+# NOTHING here is an observation. Importing this manifest records intent
+# read out of a repository. It does not establish that the production
+# deployment exists, responds, or is connected to anything — and Drake's
+# external-runtime model (ADR-0027) keeps those apart on purpose.
+
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+
+metadata:
+  name: fikir-sepeti
+  displayName: Fikir Sepeti
+
+spec:
+  # `main` is the current default branch, verified against remote metadata
+  # rather than carried over from the earlier audit. HEAD at read time was
+  # bde38ccd, pushed 2026-07-16.
+  repository:
+    provider: github
+    owner: Duosis-Developer-Team
+    name: Fikir-Sepeti
+    defaultBranch: main
+
+  # OWNER-CONFIRMED, and by that route only.
+  #
+  # The repository establishes nothing about ownership: there is no
+  # CODEOWNERS at any of the three locations GitHub honours, no owning team
+  # named in its documentation, and no team assignment Drake can read. This
+  # value therefore does not come from the repository at all — it is an
+  # explicit operator decision, recorded as such in
+  # docs/onboarding/FIKIR_SEPETI.md.
+  #
+  # The earlier `unknown-team` placeholder is gone. It was not the visible
+  # non-claim it looked like: apply turns whatever is written here into a
+  # real `project_owners` row, so it would have asserted ownership in the
+  # catalog under a name nobody owns.
+  #
+  # What this is NOT: not a CODEOWNERS file, not GitHub team membership,
+  # not a Drake RBAC grant, not a provider observation, and not a
+  # production health observation. An ownership row is bounded catalog
+  # metadata that grants no permission — authority comes from RBAC grants,
+  # which no manifest can reach. It stays at owner-confirmed and is never
+  # promoted to `provider_observed`.
+  owners:
+    - team: fikir-sepeti
+      role: primary
+
+  environments:
+    # One environment, because one is deployed. `.github/workflows/deploy.yml`
+    # runs `vercel deploy --prod` and nothing else deploys anywhere else.
+    # There is no staging or preview environment declared as a Drake
+    # environment: Vercel builds preview deployments per branch, but nothing
+    # in the repository promotes any of them to a named environment, and a
+    # per-PR preview URL is not an environment Drake can be accountable for.
+    #
+    # No `clusterRef` and no `namespace`. The schema now REFUSES both here,
+    # so an external environment cannot quietly acquire Kubernetes identity
+    # even by accident.
+    #
+    # `criticality: medium` is a declared operator judgement, not an
+    # observation — nothing in the repository states a criticality.
+    - name: prod
+      runtime: external
+      branch: main
+      criticality: medium
+      hostingProvider: vercel
+
+  services:
+    # One service. The repository is a single Next.js application: one
+    # package.json, one build, one deploy target. The route handlers under
+    # app/api/** run as part of that same application, so listing a separate
+    # `api` service would split one deployable into two things Drake would
+    # then report on independently.
+    #
+    # No `metricsProfile`: nothing scrapes this. There is no /metrics route,
+    # no prom-client, no OpenTelemetry and no APM SDK anywhere in the
+    # source. Naming a profile would assert a scrape target that does not
+    # exist, and 0021 made the column nullable precisely so this can be
+    # said honestly.
+    #
+    # No `health` block: the repository has no liveness or readiness route.
+    # `app/api/me/route.ts` describes itself as "auth health for QA" and
+    # returns identity or 401 — it is an authentication check behind auth,
+    # not a health endpoint, and treating it as one would invite a prober
+    # that reads 401 as down.
+    #
+    # No `workloadSelector`: there is no workload. No Dockerfile, no Helm
+    # chart, no Kubernetes or Kustomize manifest exists in the repository.
+    - name: fikir-sepeti-web
+      component: web
+      # Next.js 16.2.10 (package.json), React 19.2.4, App Router.
+      runtime: nextjs
+
+  # EVIDENCED, not assumed.
+  #
+  # One set of domain tables in one database, each carrying a NOT NULL
+  # `tenant_id` referencing `tenants`, with row-level security scoping every
+  # policy through `current_tenant_id()`. That is `shared_table` in the
+  # exact sense the enum means it.
+  #
+  #   supabase/migrations/0002_tenants.sql  tenants + app_users
+  #   supabase/migrations/0003_tenant_id.sql  tenant_id NOT NULL on 9 tables
+  #   supabase/migrations/0005_rls.sql      RLS enabled + tenant policies
+  #
+  # It is NOT schema_per_tenant (no per-tenant schema is created anywhere)
+  # and NOT database_per_tenant (one Supabase project, one database).
+  tenantModel:
+    mode: shared_table
+
+  dataStores:
+    # Supabase, and therefore NOT a workload.
+    #
+    # Drake does not run this, cannot restart it, has no replica count for
+    # it and must never list it among workloads. `managed_data_platform`
+    # says exactly that, and the catalog refuses to attach a provider to an
+    # `in_cluster` dependency, so the two cannot be confused.
+    #
+    # `verification: repository_intent` is the ONLY level a repository read
+    # can establish. The repository imports @supabase/supabase-js and ships
+    # 15 SQL migrations under supabase/migrations, which is strong evidence
+    # about the SOURCE CODE and no evidence at all that a production
+    # connection exists or works. Raising this to `owner_confirmed` or
+    # `provider_observed` requires a human or a provider, and the import
+    # path will not raise it no matter what a manifest declares.
+    #
+    # No `measurementProfile`: the schema requires one only for `in_cluster`
+    # stores, because a profile describes something Drake measures.
+    #
+    # No `connectionSecretRef`, no project ref, no URL, no key. None of it
+    # is needed to say that this dependency exists, and a field nobody reads
+    # is a field that can only ever leak.
+    #
+    # Supabase Auth and Supabase Realtime are also used — components of this
+    # same managed platform, not separate dependencies — and are documented
+    # in docs/onboarding/FIKIR_SEPETI.md rather than invented as extra rows.
+    - name: fikir-sepeti-db
+      engine: postgresql
+      scope: project
+      dependencyClass: managed_data_platform
+      provider: supabase
+      verification: repository_intent

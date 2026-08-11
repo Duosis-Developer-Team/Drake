@@ -265,6 +265,63 @@ def check_policy(document: Any) -> list[Finding]:
     return findings
 
 
+#: Mirrors the server default on `project_owners.owner_role`.
+DEFAULT_OWNER_ROLE = "primary"
+
+
+def check_owner_consistency(document: Any) -> list[Finding]:
+    """Refuse two `owners` entries that mean the same association.
+
+    Identity is (team, role), and an omitted role means `primary`. So these
+    two lists both declare `alpha-team` as primary twice:
+
+        - {team: alpha-team}                 - {team: alpha-team, role: primary}
+        - {team: alpha-team, role: primary}  - {team: alpha-team, role: primary}
+
+    JSON Schema's `uniqueItems` catches only the second. The first is two
+    STRUCTURALLY different objects with one meaning, and it would produce
+    two plan items with the same identity — of which the catalog stores one
+    and the plan digest counts two.
+
+    The same team in DIFFERENT roles is not a duplicate. It is two real
+    associations, and it stays allowed.
+    """
+    if not isinstance(document, dict):
+        return []
+    owners = ((document.get("spec") or {}) if isinstance(document.get("spec"), dict) else {}).get(
+        "owners"
+    )
+    if not isinstance(owners, list):
+        return []
+
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for index, owner in enumerate(owners):
+        if not isinstance(owner, dict):
+            continue
+        team = str(owner.get("team") or "")
+        role = str(owner.get("role") or DEFAULT_OWNER_ROLE)
+        if (team, role) in seen:
+            findings.append(
+                Finding(
+                    path=f"spec.owners[{index}]",
+                    rule="owner-duplicate",
+                    # The team key is contract vocabulary and already
+                    # constrained to a slug by the schema, but the message
+                    # names neither it nor the role: findings are rendered
+                    # and audited, and the position is enough to act on.
+                    message=(
+                        "This entry declares an ownership association an earlier entry "
+                        "already declares. An omitted role means `primary`, so an omitted "
+                        "role and an explicit `primary` are the same association. The same "
+                        "team in a different role is allowed."
+                    ),
+                )
+            )
+        seen.add((team, role))
+    return findings
+
+
 def _schema_path(error: Any) -> str:
     parts: list[str] = []
     for token in error.absolute_path:
@@ -302,6 +359,9 @@ def validate_document(document: Any) -> ValidationResult:
             )
         )
     findings.extend(check_policy(document))
+    # Structural consistency the schema cannot express: two `owners` entries
+    # that differ as objects and mean one association.
+    findings.extend(check_owner_consistency(document))
     return ValidationResult(
         valid=not findings, findings=findings, document=document if not findings else None
     )

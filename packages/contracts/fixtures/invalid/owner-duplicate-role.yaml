@@ -1,0 +1,29 @@
+# Must be rejected: two `owners` entries declaring ONE association.
+#
+# Ownership identity is (team, role), and an omitted role means `primary`.
+# So both entries below say "platform owns this, as primary" — twice.
+#
+# JSON Schema `uniqueItems` cannot catch this. The two objects are
+# structurally different (`role` present vs absent), so the schema sees two
+# unique items. Only a semantic check knows they mean the same thing.
+#
+# It matters downstream: two owner plan items with one identity, and
+# `onboarding_plan_items` is UNIQUE(plan_id, item_key) written with
+# ON CONFLICT DO NOTHING. One item is dropped, and the persisted plan then
+# no longer hashes to the digest the approval was taken over.
+#
+# The same team in DIFFERENT roles is legitimate and stays allowed — see
+# fixtures/valid/project-epsilon.yaml and the owner-consistency tests.
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+metadata: {name: alpha}
+spec:
+  repository: {provider: github, owner: example-org, name: alpha}
+  owners:
+    - {team: platform}
+    - {team: platform, role: primary}
+  environments:
+    - {name: prod, runtime: external, branch: main, criticality: medium}
+  services:
+    - {name: web, component: web, runtime: nextjs}
+  tenantModel: {mode: none}

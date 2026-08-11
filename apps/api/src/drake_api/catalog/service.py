@@ -132,17 +132,38 @@ class CatalogService:
             },
         )
         for team_key, owner_role in owners or []:
-            await self._connection.execute(
-                text(
-                    """
-                    INSERT INTO project_owners (project_id, team_key, owner_role)
-                    VALUES (:project_id, :team, :role)
-                    ON CONFLICT (project_id, team_key, owner_role) DO NOTHING
-                    """
-                ),
-                {"project_id": project_id, "team": team_key, "role": owner_role},
-            )
+            await self.add_project_owner(project_id, team_key, owner_role)
         return CreatedEntity(project_id, scope.id)
+
+    async def add_project_owner(
+        self, project_id: uuid.UUID, team_key: str, owner_role: str = "primary"
+    ) -> bool:
+        """Record one ownership association. Returns whether a row was added.
+
+        Purely additive: it inserts the association the manifest names and
+        touches nothing else. It does NOT remove owners the manifest omits,
+        replace an existing team, or reassign a role — those are destructive
+        acts on a record somebody made deliberately, and an import is the
+        wrong place to perform them silently.
+
+        An ownership row is catalog METADATA. It creates no principal, no
+        group and no grant, and nothing reads it as authority: permission
+        comes from RBAC grants, which no manifest can reach.
+
+        `ON CONFLICT DO NOTHING` on the full (project, team, role) key, so
+        re-importing the same manifest adds nothing the second time.
+        """
+        result = await self._connection.execute(
+            text(
+                """
+                INSERT INTO project_owners (project_id, team_key, owner_role)
+                VALUES (:project_id, :team, :role)
+                ON CONFLICT (project_id, team_key, owner_role) DO NOTHING
+                """
+            ),
+            {"project_id": project_id, "team": team_key, "role": owner_role},
+        )
+        return bool(result.rowcount)
 
     # ------------------------------------------------------------ environment
     async def _project_identity(self, project_id: uuid.UUID) -> tuple[str, uuid.UUID]:
