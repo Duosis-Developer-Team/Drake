@@ -13,6 +13,13 @@
 # Every address below was read from the live cluster, read-only, on
 # 2026-08-11 — not copied from a chart default.
 
+# The published agent package is private, exactly like the API and web
+# ones, so the agent's namespace needs its own copy of the pull credential
+# — a Secret is namespaced, and `drake-ghcr` in `drake-prod` is invisible
+# from here. Created out of band; this file names it and nothing more.
+imagePullSecrets:
+  - drake-ghcr
+
 image:
   repository: ghcr.io/duosis-developer-team/drake-cluster-agent
   # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8, publish run
