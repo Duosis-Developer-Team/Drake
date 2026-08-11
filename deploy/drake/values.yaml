@@ -181,6 +181,38 @@ networkPolicy:
   #  - cidr: 10.20.30.40/32
   #    port: 443
 
+  # In-cluster destinations for the API, named the way the agent's egress
+  # names its gateway: by namespace and pod labels. A Service's ClusterIP
+  # is not an identity — recreating the Service assigns a new one and the
+  # rule goes on matching nothing — so a metrics backend living in this
+  # cluster belongs here rather than in `apiExternalEgress`.
+  apiClusterEgress: []
+  #  - namespace: drake-monitoring
+  #    podSelector:
+  #      app.kubernetes.io/name: prometheus
+  #    port: 9090
+
+telemetry:
+  # Server-owned Prometheus connectors, by the name an integration's
+  # `config_ref` points at. Empty by default: a Drake with no metrics
+  # backend reports every signal as unavailable, which is the honest answer
+  # and not a failure.
+  #
+  # `url` must be an IP LITERAL in production — hostname connectors are
+  # refused until the transport pins the address it validated, because
+  # httpx re-resolves and a hostile answer could flip public→private in
+  # between. For an in-cluster provider, pin the Service's clusterIP in the
+  # provider's own chart and put that address here; it is then a declared
+  # constant rather than whatever the cluster assigned this time.
+  #
+  # `allowPrivate` and `allowPlaintext` are separate, deliberate opt-ins.
+  # Plaintext is refused to a public address even when set.
+  connectors: {}
+  #  duosis-prod-1:
+  #    url: http://10.233.0.42
+  #    allowPrivate: true
+  #    allowPlaintext: true
+
 github:
   # Drake must be deployable before the real App exists. Disabled means
   # no token mint, no webhook registration, no provider call.

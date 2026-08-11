@@ -436,6 +436,43 @@ class CatalogService:
         return code
 
     # ------------------------------------------------------------ integration
+    async def configure_integration(
+        self, integration_type: str, scope_id: uuid.UUID, config_ref: str
+    ) -> bool:
+        """Point an EXISTING integration at a server-owned configuration.
+
+        Separate from `register_integration` rather than folded into its
+        upsert, and the reason is the caller neither of them has: onboarding
+        registers integrations with an empty ref every time a manifest is
+        applied. If registration also wrote the ref, re-importing a project
+        would silently disconnect its provider — the catalog reverting an
+        operator's decision because a manifest said nothing about it.
+
+        So: register creates, configure connects, and configure refuses an
+        empty ref because "connect it to nothing" is a disconnect, which
+        deserves its own verb if anyone ever wants it.
+        """
+        if not config_ref:
+            raise CatalogValidationError("config_ref is required; use a reference name")
+        if redact(config_ref) != config_ref:
+            raise CatalogValidationError("config_ref must be a reference name, not a credential")
+        result = await self._connection.execute(
+            text(
+                """
+                UPDATE integrations
+                SET config_ref = :config_ref,
+                    configuration_state = 'configured',
+                    version = version + 1,
+                    updated_at = now()
+                WHERE integration_type = :type AND scope_id = :scope_id
+                  AND lifecycle = 'active'
+                  AND config_ref IS DISTINCT FROM :config_ref
+                """
+            ),
+            {"type": integration_type, "scope_id": scope_id, "config_ref": config_ref},
+        )
+        return bool(result.rowcount)
+
     async def register_integration(
         self, integration_type: str, scope_id: uuid.UUID, config_ref: str = ""
     ) -> uuid.UUID:

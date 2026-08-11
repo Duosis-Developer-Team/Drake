@@ -22,10 +22,10 @@ imagePullSecrets:
 
 image:
   repository: ghcr.io/duosis-developer-team/drake-cluster-agent
-  # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8, publish run
-  # 31482696935 — the same commit and the same run that produced the API
+  # Source commit 68486066f345b1673cab895a04f2a916a5b8d1ce, publish run
+  # 31517960078 — the same commit and the same run that produced the API
   # and web images this control plane runs.
-  digest: "sha256:5320e1cd7935b952709a3b87652b4a95b065288b99d8c7014e00dec2888d4ef0"
+  digest: "sha256:842357ff50879c84e792050da19f15d05cc9bd9c4c2a8b90734cbc99613daaa7"
   pullPolicy: IfNotPresent
 
 # Supplied at install time from the catalog row created during enrollment.

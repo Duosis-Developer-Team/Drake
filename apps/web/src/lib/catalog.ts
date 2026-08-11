@@ -127,7 +127,20 @@ export interface Cluster {
   version: number;
   scope: ScopeRef;
   source: Provenance;
-  operational: Record<string, OperationalState>;
+  /**
+   * The agent's own vocabulary, NOT `OperationalState`.
+   *
+   * `/v1/clusters` reports `{agent: "connected", inventory: "fresh"}`, and
+   * typing it as the integration vocabulary said those values could not
+   * occur — so a comparison against them type-checked, matched nothing at
+   * runtime, and the badge it fed silently never lit up. These words come
+   * from `agents/observation.py` and the `inventory_state` check
+   * constraint in migration 0006.
+   */
+  operational: {
+    agent?: "connected" | "disconnected" | "enrolled" | "revoked";
+    inventory?: "empty" | "reconciling" | "fresh" | "stale" | "reconcile_required";
+  };
   as_of: string;
   referenced_environments?: {
     project_key: string;

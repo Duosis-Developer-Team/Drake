@@ -28,15 +28,20 @@ import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
 import { needsAttention } from "@/lib/overview";
 import { useResource } from "@/lib/useResource";
 
-/** `ok` means different things on the two axes; name each one properly. */
+/**
+ * The two axes speak the agent's vocabulary, not the integration one.
+ *
+ * `connected`/`disconnected` for the agent, `fresh`/`stale` for the sweep —
+ * the shared status map already knows both, so neither needs translating
+ * here. (An earlier version compared against `"ok"`, which the corrected type
+ * on `Cluster.operational` now proves could never match.)
+ */
 function agentTone(cluster: Cluster) {
-  const value = cluster.operational?.agent;
-  return toneForHealth(value === "ok" ? "connected" : value);
+  return toneForHealth(cluster.operational?.agent);
 }
 
 function inventoryTone(cluster: Cluster) {
-  const value = cluster.operational?.inventory;
-  return toneForHealth(value === "ok" ? "fresh" : value);
+  return toneForHealth(cluster.operational?.inventory);
 }
 
 export default function ClustersPage() {
@@ -49,8 +54,8 @@ export default function ClustersPage() {
   const attention = clusters.filter(
     (cluster) => needsAttention(agentTone(cluster)) || needsAttention(inventoryTone(cluster)),
   );
-  const connected = clusters.filter((cluster) => cluster.operational?.agent === "ok");
-  const fresh = clusters.filter((cluster) => cluster.operational?.inventory === "ok");
+  const connected = clusters.filter((cluster) => cluster.operational?.agent === "connected");
+  const fresh = clusters.filter((cluster) => cluster.operational?.inventory === "fresh");
 
   const columns: Column<Cluster>[] = [
     {

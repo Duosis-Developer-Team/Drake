@@ -52,6 +52,7 @@ import {
   tallyByTone,
   type AttentionItem,
 } from "@/lib/overview";
+import type { InventorySummary } from "@/lib/inventory";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
 import { useResource, type Resource } from "@/lib/useResource";
 
@@ -549,6 +550,9 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
               <th scope="col" className="px-3 py-1.5 text-left font-medium">
                 Inventory
               </th>
+              <th scope="col" className="px-3 py-1.5 text-left font-medium">
+                Healthy / total
+              </th>
               <th scope="col" className="px-4 py-1.5 text-right font-medium">
                 Observed
               </th>
@@ -570,23 +574,18 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
                 </td>
                 <td className="px-3 py-2">
                   <StatusDot
-                    status={toneForHealth(
-                      cluster.operational?.agent === "ok"
-                        ? "connected"
-                        : cluster.operational?.agent,
-                    )}
+                    status={toneForHealth(cluster.operational?.agent)}
                     label={humanize(cluster.operational?.agent ?? "unknown")}
                   />
                 </td>
                 <td className="px-3 py-2">
                   <StatusDot
-                    status={toneForHealth(
-                      cluster.operational?.inventory === "ok"
-                        ? "fresh"
-                        : cluster.operational?.inventory,
-                    )}
+                    status={toneForHealth(cluster.operational?.inventory)}
                     label={humanize(cluster.operational?.inventory ?? "unknown")}
                   />
+                </td>
+                <td className="px-3 py-2">
+                  <FleetCounts cluster={cluster} />
                 </td>
                 <td className="px-4 py-2 text-right text-micro text-ink-muted">
                   <RelativeTime value={cluster.as_of} />
@@ -598,6 +597,55 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
         </div>
       )}
     </Panel>
+  );
+}
+
+/**
+ * What the agent's last sweep actually counted.
+ *
+ * Healthy-over-total, per cluster, straight from the summary — never a
+ * percentage this component computed and never a bare "healthy".
+ *
+ * An agent that is not connected has no current view to report, and saying so
+ * beats showing its last numbers as if they were now. That is the same rule
+ * the freshness column states, applied to the numbers themselves.
+ */
+function FleetCounts({ cluster }: { cluster: Cluster }) {
+  const summary = useResource<InventorySummary>(
+    `/v1/clusters/${cluster.id}/inventory/summary`,
+  );
+
+  if (summary.loading && !summary.data) {
+    return <span className="text-micro text-ink-muted">…</span>;
+  }
+  if (!summary.data) {
+    return <span className="text-micro text-ink-muted">—</span>;
+  }
+  if (summary.data.agent.status !== "connected") {
+    return (
+      <span className="text-micro text-ink-muted" data-testid="fleet-counts-unavailable">
+        Agent {summary.data.agent.status}; inventory {summary.data.inventory.state}.
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-micro" data-testid="fleet-counts">
+      {(
+        [
+          ["nodes", summary.data.nodes],
+          ["workloads", summary.data.workloads],
+          ["pods", summary.data.pods],
+        ] as const
+      ).map(([label, rollup]) => (
+        <span key={label} className="whitespace-nowrap text-ink-secondary">
+          <span data-tabular className="font-medium text-ink">
+            {rollup.healthy}
+            <span className="text-ink-muted">/{rollup.total}</span>
+          </span>{" "}
+          {label}
+        </span>
+      ))}
+    </span>
   );
 }
 

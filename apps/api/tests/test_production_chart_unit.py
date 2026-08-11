@@ -334,6 +334,63 @@ def test_github_key_material_is_mounted_as_files_not_env_vars() -> None:
     assert mount["readOnly"] is True
 
 
+def test_production_names_its_metrics_backend_and_can_reach_it() -> None:
+    """The connector and the policy that lets the API use it, together.
+
+    They are asserted in one test because they fail apart: a connector with
+    no egress rule is a query that times out, and an egress rule with no
+    connector is a hole in a policy for no reason.
+    """
+    docs = render_prod()
+    api = next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-api")
+    env = {
+        e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    connectors = json.loads(env["DRAKE_TELEMETRY_CONNECTORS"])
+    assert list(connectors) == ["duosis-prod-1"]
+    connector = connectors["duosis-prod-1"]
+    # An IP literal, because hostname connectors are refused in production.
+    assert connector["url"] == "http://10.233.0.42"
+    assert connector["allow_private"] is True
+    assert connector["allow_plaintext"] is True
+
+    policy = next(
+        d for d in by_kind(docs, "NetworkPolicy") if d["metadata"]["name"] == "drake-api-egress"
+    )
+    reachable = [
+        (t["namespaceSelector"]["matchLabels"], t.get("podSelector", {}).get("matchLabels"), rule)
+        for rule in policy["spec"]["egress"]
+        for t in rule["to"]
+        if "namespaceSelector" in t
+        and t["namespaceSelector"]["matchLabels"].get("kubernetes.io/metadata.name")
+        == "drake-monitoring"
+    ]
+    assert len(reachable) == 1, "exactly one way to the metrics backend"
+    _, pods, rule = reachable[0]
+    assert pods == {"app.kubernetes.io/name": "prometheus"}
+    assert [p["port"] for p in rule["ports"]] == [9090]
+
+
+def test_the_metrics_egress_is_not_written_as_an_address() -> None:
+    """A ClusterIP in a policy is the defect PR #45 removed from the agent."""
+    policy = next(
+        d
+        for d in by_kind(render_prod(), "NetworkPolicy")
+        if d["metadata"]["name"] == "drake-api-egress"
+    )
+    blocks = [
+        t["ipBlock"]["cidr"]
+        for rule in policy["spec"]["egress"]
+        for t in rule["to"]
+        if "ipBlock" in t
+    ]
+    assert "10.233.0.42/32" not in blocks
+
+
+def test_a_connector_without_a_url_refuses_to_render() -> None:
+    assert refuses("--set", "telemetry.connectors.broken.allowPrivate=true")
+
+
 def test_the_github_material_is_readable_by_the_process_that_reads_it() -> None:
     """Mounting a Secret is not the same as being able to read it.
 

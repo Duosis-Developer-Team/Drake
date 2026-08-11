@@ -45,17 +45,17 @@ class SignalProvider:
     #: metric substring → value. Ordered: the first match wins, so more
     #: specific names must come first.
     HEALTHY: tuple[tuple[str, float], ...] = (
-        ("kube_workload_spec_replicas", 3.0),
-        ("kube_workload_status_ready_replicas", 3.0),
-        ("kube_pod_container_status_restarts_total", 0.0),
-        ("container_cpu_cfs_throttled_periods_total", 0.0),
-        ("container_cpu_usage_seconds_total", 0.4),
-        ("kube_pod_container_resource_limits_cpu_cores", 2.0),
-        ("container_memory_working_set_bytes", 200_000_000.0),
-        ("kube_pod_container_resource_limits_memory_bytes", 1_000_000_000.0),
+        ("drake:workload:replicas_desired", 3.0),
+        ("drake:workload:replicas_ready", 3.0),
+        ("drake:workload_pod:restarts_total", 0.0),
+        ("drake:workload_pod:cpu_cfs_throttled_periods_total", 0.0),
+        ("drake:workload_pod:cpu_usage_seconds_total", 0.4),
+        ("drake:workload_pod:cpu_limit_cores", 2.0),
+        ("drake:workload_pod:memory_working_set_bytes", 200_000_000.0),
+        ("drake:workload_pod:memory_limit_bytes", 1_000_000_000.0),
         ("http_server_requests_total", 12.0),
         ("http_server_request_duration_seconds_bucket", 0.15),
-        ("up{", 1.0),
+        ("drake:workload:up", 1.0),
     )
 
     def __init__(self) -> None:
@@ -245,8 +245,8 @@ async def test_no_query_credential_or_expression_reaches_the_client(
     for payload in (health, metrics, series):
         for forbidden in (
             "sum(rate(",
-            "kube_workload",
-            "container_cpu_usage_seconds_total",
+            "drake:workload",
+            "drake:workload_pod:cpu_usage_seconds_total",
             "it-fake",  # the integration's config ref
             "127.0.0.1:59096",  # the provider URL
             "config_ref",
@@ -261,7 +261,7 @@ async def test_an_empty_signal_is_reported_as_missing_not_as_zero(
     world = await seed_catalog_world(engine)
     await seed_workload(engine, world["cluster_a"].id)
     harness, provider = health_harness()
-    provider.empty = {"kube_workload_status_ready_replicas"}
+    provider.empty = {"drake:workload:replicas_ready"}
     await configure_alpha_prometheus(engine, world)
 
     async with owner(harness, engine) as client:

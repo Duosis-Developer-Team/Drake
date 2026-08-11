@@ -4,8 +4,8 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@e17cfe2 by publish
-# run 31482696935. All three — API, web and migration — were built from
+# Images are pinned to real digests published from main@78b8503 by publish
+# run 31530918769. All three — API, web and migration — were built from
 # that one commit, so they cannot drift apart.
 #
 # The digests these replaced (API `8c401467…706c`, web `5f6113ea…0076`)
@@ -97,11 +97,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8
+    # Source commit 78b85037a54183b75ff64409d0f6e5c8890bf85c
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:a01951ec5136c6060a1d66dac422dcb00c6d86dc156fa90c890d5ac3be0be68a"
+    digest: "sha256:118332df48e26303bc5cf05ff60f561c9cf4a0adafd952ca4899a92afba63c39"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -113,8 +113,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit e17cfe29272fe8b7e1c82b099cf0a573326d35c8
-    digest: "sha256:ed99ce0d96302d16c13bbb86dbf6320599b572a9eff94c9576e9488a6f98d540"
+    # Source commit 78b85037a54183b75ff64409d0f6e5c8890bf85c
+    digest: "sha256:491e8b3ffa08efe4af2d0b79dd55703942c58eaa950fe9859b07f85ef79d44a4"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -125,7 +125,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:a01951ec5136c6060a1d66dac422dcb00c6d86dc156fa90c890d5ac3be0be68a"
+    digest: "sha256:118332df48e26303bc5cf05ff60f561c9cf4a0adafd952ca4899a92afba63c39"
   backoffLimit: 0
 
 networkPolicy:
@@ -158,10 +158,21 @@ networkPolicy:
       matchLabels:
         k8s-app: kube-dns
     port: 53
-  # Drake calls no third party in this deployment: telemetry connectors are
-  # unset and the GitHub integration is disabled. Add narrow entries here
-  # when either is switched on.
+  # Still empty, and now for a narrower reason than "Drake calls nobody":
+  # GitHub is reached over the public internet, which needs no rule here
+  # because this policy governs egress the cluster can express — and the
+  # metrics backend it does need is in-cluster, so it belongs below.
   apiExternalEgress: []
+
+  # Prometheus, by namespace and pod labels rather than by the ClusterIP the
+  # connector URL happens to name — the address is pinned for Drake's SSRF
+  # check, but a policy that also depended on it would break the day the
+  # Service is recreated, which is exactly what happened to the agent.
+  apiClusterEgress:
+    - namespace: drake-monitoring
+      podSelector:
+        app.kubernetes.io/name: prometheus
+      port: 9090
 
 # The internal agent listener. ClusterIP-only; never published.
 #
@@ -209,6 +220,18 @@ auth:
 # `drake-github-app`, created out of band and mounted as files, because a
 # settings value can end up in `kubectl describe pod`, a crash dump or a
 # child process environment; a file cannot.
+# The metrics backend, installed by deploy/monitoring/. The address is the
+# Service's PINNED ClusterIP: Drake refuses hostname connectors in
+# production, and an unpinned ClusterIP is the same trap the agent's egress
+# rule fell into. Both opt-ins are stated rather than defaulted — this is
+# plaintext to a private address, and each half is a decision.
+telemetry:
+  connectors:
+    duosis-prod-1:
+      url: http://10.233.0.42
+      allowPrivate: true
+      allowPlaintext: true
+
 github:
   enabled: true
   existingSecret: drake-github-app

@@ -43,6 +43,25 @@ imagePullSecrets:
 {{- end }}
 {{- end -}}
 
+{{/* Telemetry connectors as the API's settings expect them.
+
+     The chart speaks camelCase and the settings model speaks snake_case;
+     translating here rather than asking an operator to write `allow_private`
+     in a values file keeps one spelling per audience. Emitted as JSON
+     because pydantic-settings parses a complex field from one env var, and
+     the values are addresses — never credentials, which is why this may be
+     an env var at all. */}}
+{{- define "drake.telemetryConnectors" -}}
+{{- $out := dict -}}
+{{- range $name, $connector := (.Values.telemetry).connectors }}
+{{- $_ := set $out $name (dict
+      "url" (required (printf "telemetry.connectors.%s.url is required" $name) $connector.url)
+      "allow_private" (default false $connector.allowPrivate)
+      "allow_plaintext" (default false $connector.allowPlaintext)) -}}
+{{- end }}
+{{- toJson $out -}}
+{{- end -}}
+
 {{/* Which edge mode is active. */}}
 {{- define "drake.internalMode" -}}
 {{- eq (.Values.edge).mode "internal" -}}

@@ -73,7 +73,7 @@ export function clusterItems(clusters: Cluster[]): AttentionItem[] {
     const inventory = cluster.operational?.inventory ?? "unknown";
     const name = cluster.display_name || cluster.cluster_ref;
 
-    const agentTone = toneForHealth(agent === "ok" ? "connected" : agent);
+    const agentTone = toneForHealth(agent);
     if (needsAttention(agentTone)) {
       items.push({
         key: `cluster-agent:${cluster.id}`,
@@ -86,7 +86,7 @@ export function clusterItems(clusters: Cluster[]): AttentionItem[] {
         origin: "cluster",
       });
     }
-    const inventoryTone = toneForHealth(inventory === "ok" ? "fresh" : inventory);
+    const inventoryTone = toneForHealth(inventory);
     if (needsAttention(inventoryTone)) {
       items.push({
         key: `cluster-inventory:${cluster.id}`,
