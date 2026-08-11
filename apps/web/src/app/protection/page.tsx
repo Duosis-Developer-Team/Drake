@@ -11,6 +11,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import {
@@ -227,7 +228,7 @@ function ProtectionTable() {
           <div className="overflow-x-auto">
             <table className="w-full text-left" data-testid="protection-table">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                <tr className="text-caption text-ink-secondary">
                   <th className="pb-2 pr-3 font-medium">Store</th>
                   <th className="pb-2 pr-3 font-medium">Backup</th>
                   <th className="pb-2 pr-3 font-medium">Recoverability</th>
@@ -258,10 +259,11 @@ function ProtectionTable() {
 
 export default function ProtectionPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Protection</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Protection</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           A successful backup job is not a backup, and a valid backup nobody has restored
           is not proven recoverable. Those are two separate columns here for exactly that
           reason.
@@ -270,6 +272,7 @@ export default function ProtectionPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <ProtectionTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

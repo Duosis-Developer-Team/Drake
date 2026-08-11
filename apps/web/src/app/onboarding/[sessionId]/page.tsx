@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useRef, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import { ActionBadge, GitOpsBadge, SessionBadge } from "@/components/onboarding/primitives";
@@ -139,7 +140,8 @@ export default function OnboardingSessionPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={session} retry={reloadSession}>
         {(data) => (
           <>
@@ -414,6 +416,7 @@ export default function OnboardingSessionPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

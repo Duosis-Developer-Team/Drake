@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import {
   CriticalityBadge,
@@ -37,7 +38,8 @@ export default function EnvironmentDetailPage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={environment} retry={retryEnvironment}>
         {(data) => (
           <>
@@ -53,7 +55,7 @@ export default function EnvironmentDetailPage() {
                   </Link>{" "}
                   / <span className="font-mono">{data.environment_key}</span>
                 </p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+                <h1 className="mt-1 text-title font-semibold text-ink">
                   {data.environment_key}
                 </h1>
               </div>
@@ -180,6 +182,7 @@ export default function EnvironmentDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

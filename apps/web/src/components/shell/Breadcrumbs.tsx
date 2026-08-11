@@ -8,17 +8,18 @@
  * This one walks the real path segments and renders every ancestor that is a
  * real, reachable route.
  *
- * Identifier segments — the `{projectId}` in `/projects/p1/...` — are shown as
- * the identifier, monospaced, and NOT resolved to a display name here: this
- * component has no data, and fetching one name per crumb on every navigation
- * would be four extra requests to render a header. The page itself puts the
- * display name in its own title, which is where a reader looks for it.
+ * Identifier segments — the `{projectId}` in `/projects/p1/...` — show
+ * whatever name the page has published for them through `lib/crumbs`, and the
+ * raw identifier until it does. This component fetches nothing: one request
+ * per crumb on every navigation would be four extra round trips to render a
+ * header, and they would land after the page already had.
  */
 
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useCrumbLabels } from "@/lib/crumbs";
 import { NAV_ITEMS } from "@/lib/navigation";
 
 /** Static segments that name a concept rather than an entity. */
@@ -60,7 +61,10 @@ export interface Crumb {
   mono: boolean;
 }
 
-export function buildCrumbs(pathname: string): Crumb[] {
+export function buildCrumbs(
+  pathname: string,
+  labelFor: (id: string) => string | undefined = () => undefined,
+): Crumb[] {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length === 0) return [{ label: "Command Center", href: null, mono: false }];
 
@@ -69,10 +73,13 @@ export function buildCrumbs(pathname: string): Crumb[] {
   for (const segment of segments) {
     path += `/${segment}`;
     const known = SEGMENT_LABELS[segment];
+    const published = known ? undefined : labelFor(decodeURIComponent(segment));
     crumbs.push({
-      label: known ?? decodeURIComponent(segment),
+      label: known ?? published ?? decodeURIComponent(segment),
       href: LINKABLE.has(path) ? path : null,
-      mono: !known,
+      // An identifier reads as a value; a name the page published reads as a
+      // word, and takes the same type as the rest of the trail.
+      mono: !known && !published,
     });
   }
   // The last crumb is the current page and is never a link.
@@ -82,7 +89,8 @@ export function buildCrumbs(pathname: string): Crumb[] {
 
 export function Breadcrumbs() {
   const pathname = usePathname() || "/";
-  const crumbs = buildCrumbs(pathname);
+  const labelFor = useCrumbLabels();
+  const crumbs = buildCrumbs(pathname, labelFor);
 
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">

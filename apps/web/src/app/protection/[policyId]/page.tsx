@@ -11,6 +11,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
@@ -53,7 +54,8 @@ export default function ProtectionDetailPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={policy} retry={retry}>
         {(data) => (
           <>
@@ -71,7 +73,7 @@ export default function ProtectionDetailPage() {
                     </>
                   ) : null}
                 </p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+                <h1 className="mt-1 text-title font-semibold text-ink">
                   {data.display_name}
                 </h1>
               </div>
@@ -293,6 +295,7 @@ export default function ProtectionDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

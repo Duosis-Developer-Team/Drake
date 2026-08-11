@@ -164,7 +164,11 @@ export function TimeSeriesChart({
           series: [
             ...visible.map((entry) => {
               const slot = shown.findIndex((candidate) => candidate.name === entry.name);
-              const color = `var(${SERIES_TOKENS[slot % SERIES_TOKENS.length]})`;
+              // Resolved value, not `var(--series-n)`: the canvas renderer
+              // cannot read custom properties, and an unparsed colour falls
+              // back to ECharts' own palette — which is how four series end
+              // up sharing one line colour.
+              const color = tokens[SERIES_TOKENS[slot % SERIES_TOKENS.length]];
               const dash = SERIES_DASH[slot % SERIES_DASH.length];
               return {
                 name: entry.name,

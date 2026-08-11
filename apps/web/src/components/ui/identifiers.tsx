@@ -105,12 +105,41 @@ export function CopyableIdentifier({
 }
 
 /**
+ * One clock for the whole application.
+ *
+ * Every relative timestamp on screen needs to advance, and an inventory table
+ * has hundreds of them. A `setInterval` per instance means hundreds of timers
+ * waking the main thread out of phase with each other; this is a single
+ * interval that exists only while something is subscribed to it.
+ */
+const clockSubscribers = new Set<() => void>();
+let clockTimer: ReturnType<typeof setInterval> | null = null;
+let clockNow = 0;
+
+function subscribeToClock(onChange: () => void): () => void {
+  clockSubscribers.add(onChange);
+  if (clockTimer === null) {
+    clockNow = Date.now();
+    clockTimer = setInterval(() => {
+      clockNow = Date.now();
+      for (const subscriber of clockSubscribers) subscriber();
+    }, 30_000);
+  }
+  return () => {
+    clockSubscribers.delete(onChange);
+    if (clockSubscribers.size === 0 && clockTimer !== null) {
+      clearInterval(clockTimer);
+      clockTimer = null;
+    }
+  };
+}
+
+/**
  * Relative time that stays honest.
  *
- * Rendered from `suppressHydrationWarning` on the server as the absolute
- * value and swapped to relative after mount: "4m ago" computed during SSR is
- * wrong by however long the response sat in flight, and it is a guaranteed
- * hydration mismatch.
+ * Renders the absolute value on the server and swaps to relative after mount:
+ * "4m ago" computed during SSR is wrong by however long the response sat in
+ * flight, and it is a guaranteed hydration mismatch.
  */
 export function RelativeTime({
   value,
@@ -123,8 +152,7 @@ export function RelativeTime({
 
   useEffect(() => {
     setNow(new Date());
-    const timer = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(timer);
+    return subscribeToClock(() => setNow(new Date(clockNow)));
   }, []);
 
   if (!value) return <span className="text-ink-muted">{MISSING}</span>;

@@ -22,6 +22,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { BurnTable, SloBadge } from "@/components/alerting/primitives";
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
@@ -45,7 +46,8 @@ export default function SloDetailPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={slo} retry={retry}>
         {(data) => (
           <>
@@ -257,6 +259,7 @@ export default function SloDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

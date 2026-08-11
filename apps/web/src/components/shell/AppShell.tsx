@@ -3,10 +3,13 @@
 /**
  * The application shell.
  *
- * Layout: a fixed-height viewport with an independently scrolling main
- * region, rather than a page that scrolls as one column. On a monitoring
- * screen the navigation and the breadcrumb have to stay put while a
- * thousand-row inventory table scrolls underneath them.
+ * Layout: the DOCUMENT scrolls, and the rail and top bar are sticky within
+ * it. The obvious alternative — a viewport-height flex box with an
+ * independently scrolling `<main>` — keeps the chrome in place too, but it
+ * puts the page content in a nested scroller, and that breaks
+ * find-in-page's scroll-into-view, full-page screenshots, and the mobile
+ * address-bar collapse. Sticky positioning gets the same fixed chrome with
+ * none of that.
  *
  * The mobile drawer is a real dialog — focus trapped, Escape closes, focus
  * returns to the trigger — because it is the only way to navigate below
@@ -63,7 +66,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   useScrollLock(drawerOpen);
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex min-h-screen">
       <a
         href="#main"
         className="sr-only rounded-control bg-brand px-3 py-2 text-body font-medium text-ink-inverse focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
@@ -72,7 +75,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
       </a>
 
       <aside
-        className={`hidden shrink-0 border-r border-border transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
+        className={`sticky top-0 hidden h-screen shrink-0 self-start border-r border-border transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
           collapsed ? "w-14" : "w-60"
         }`}
       >
@@ -100,7 +103,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar onOpenSidebar={openDrawer} />
-        <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+        <main id="main" tabIndex={-1} className="flex-1 bg-canvas">
           {children}
         </main>
       </div>

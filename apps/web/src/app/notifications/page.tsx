@@ -12,6 +12,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
@@ -133,11 +134,12 @@ export default function NotificationsPage() {
       : [];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Notifications</h1>
-          <p className="mt-1 text-sm text-ink-secondary">
+          <h1 className="text-title font-semibold text-ink">Notifications</h1>
+          <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
             Incidents you were routed by a notification policy. Drake writes these; nothing
             here was composed by another user.
           </p>
@@ -216,6 +218,7 @@ export default function NotificationsPage() {
           </ul>
         </Card>
       ) : null}
-    </div>
+      </div>
+    </PageFrame>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
@@ -41,7 +42,8 @@ export default function InventoryResourcePage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={resource} retry={retry}>
         {(data) => (
           <>
@@ -64,7 +66,7 @@ export default function InventoryResourcePage() {
                   </Link>{" "}
                   / <span className="font-mono">{data.kind}</span>
                 </p>
-                <h1 className="mt-1 break-all text-xl font-semibold tracking-tight text-ink">
+                <h1 className="mt-1 break-all text-title font-semibold text-ink">
                   {data.name}
                 </h1>
                 <p className="mt-1 font-mono text-xs text-ink-muted">
@@ -234,6 +236,7 @@ export default function InventoryResourcePage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

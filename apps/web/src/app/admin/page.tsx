@@ -14,6 +14,7 @@ import { RolesPanel } from "@/components/admin/RolesPanel";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import { useSession } from "@/lib/session";
+import { PageFrame } from "@/components/shell/AppShell";
 
 type Tab = "roles" | "grants" | "audit";
 
@@ -55,10 +56,11 @@ export default function AccessControlPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Access Control</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Access Control</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Dynamic roles, scoped grants, and the append-only audit trail.
         </p>
       </div>
@@ -86,6 +88,7 @@ export default function AccessControlPage() {
       {tab === "roles" && canManage ? <RolesPanel /> : null}
       {tab === "grants" && canManage ? <GrantsPanel /> : null}
       {tab === "audit" && canAudit ? <AuditPanel /> : null}
-    </div>
+      </div>
+    </PageFrame>
   );
 }

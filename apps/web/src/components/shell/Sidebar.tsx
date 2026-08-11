@@ -112,11 +112,16 @@ export function Sidebar({
               {collapsed ? (
                 <div aria-hidden className="mx-2 mb-2 border-t border-border first:border-0" />
               ) : (
-                <h2 className="mb-1 px-2 text-micro font-semibold tracking-wide text-ink-muted uppercase">
+                <p
+                  aria-hidden
+                  className="mb-1 px-2 text-micro font-semibold tracking-wide text-ink-muted uppercase"
+                >
                   {group.label}
-                </h2>
+                </p>
               )}
-              <ul className="space-y-0.5" aria-label={collapsed ? group.label : undefined}>
+              {/* The group name lives on the list, not on a heading: these sit
+                  above the page's h1 and would put the outline out of order. */}
+              <ul className="space-y-0.5" aria-label={group.label}>
                 {items.map((item) => {
                   const isActive = active === item.href;
                   const Icon = item.icon;

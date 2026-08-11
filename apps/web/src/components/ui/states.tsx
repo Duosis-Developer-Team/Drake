@@ -108,11 +108,13 @@ export function NoDataState({
 }
 
 export function ErrorState({
+  title,
   description,
   correlationId,
   onRetry,
   compact,
 }: {
+  title?: string;
   description?: React.ReactNode;
   correlationId?: string;
   onRetry?: () => void;
@@ -122,7 +124,7 @@ export function ErrorState({
     <StateBlock
       tone="critical"
       testId="state-error"
-      title="Query failed"
+      title={title ?? "Query failed"}
       description={description ?? "The request did not complete. This is not the same as empty."}
       compact={compact}
     >
@@ -138,7 +140,7 @@ export function ErrorState({
           </button>
         ) : null}
         {correlationId ? (
-          <span className="font-mono text-micro text-ink-muted">ref {correlationId}</span>
+          <span className="font-mono text-micro text-ink-muted">ref: {correlationId}</span>
         ) : null}
       </div>
     </StateBlock>

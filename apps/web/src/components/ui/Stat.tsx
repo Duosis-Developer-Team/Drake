@@ -43,6 +43,7 @@ export function Stat({
   detail,
   href,
   size = "default",
+  bare = false,
 }: {
   label: React.ReactNode;
   value: number | null | undefined;
@@ -56,6 +57,9 @@ export function Stat({
   detail?: React.ReactNode;
   href?: string;
   size?: "default" | "large";
+  /** Drop the frame — for a Stat that is already inside a panel, where the
+   *  extra border reads as a box inside a box. */
+  bare?: boolean;
 }) {
   const tone = explicitTone ?? toneForThreshold(value, thresholds);
   const spec = toneSpec(tone);
@@ -112,8 +116,9 @@ export function Stat({
     </>
   );
 
-  const className =
-    "flex min-w-0 flex-col rounded-control border border-border bg-surface px-3 py-2.5";
+  const className = bare
+    ? "flex min-w-0 flex-col"
+    : "flex min-w-0 flex-col rounded-control border border-border bg-surface px-3 py-2.5";
 
   if (href) {
     return (

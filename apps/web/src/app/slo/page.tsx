@@ -15,6 +15,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
@@ -116,7 +117,8 @@ function SloInner() {
   const [page, retry] = useApi<Page<Slo>>(sloListPath({ status }));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-ink">Service objectives</h1>
         <p className="text-sm text-ink-secondary">
@@ -215,7 +217,8 @@ function SloInner() {
           </>
         )}
       </Card>
-    </div>
+      </div>
+    </PageFrame>
   );
 }
 

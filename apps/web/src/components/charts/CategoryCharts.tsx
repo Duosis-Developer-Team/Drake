@@ -30,7 +30,7 @@ import { EChart } from "@/components/charts/LazyChart";
 import { formatUnit } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";
-import { SERIES_TOKENS, type Tokens } from "@/lib/design/tokens";
+import { SERIES_TOKENS, type TokenName, type Tokens } from "@/lib/design/tokens";
 
 export interface Category {
   name: string;
@@ -41,6 +41,11 @@ export interface Category {
 }
 
 const OTHER = "other";
+
+/** `--status-warning` -> `status-warning`, so a tone can index the token map. */
+function tokenName(cssVariable: string): TokenName {
+  return cssVariable.replace(/^--/, "") as TokenName;
+}
 
 export function SortedBarChart({
   title,
@@ -122,11 +127,13 @@ export function SortedBarChart({
               data: plotted.map((entry) => ({
                 value: entry.value,
                 itemStyle: {
+                  // Resolved values: the canvas renderer cannot read CSS
+                  // custom properties.
                   color: entry.tone
-                    ? `var(${toneSpec(entry.tone).token})`
+                    ? tokens[tokenName(toneSpec(entry.tone).token)]
                     : entry.name.startsWith(OTHER)
                       ? tokens["text-muted"]
-                      : `var(${SERIES_TOKENS[0]})`,
+                      : tokens[SERIES_TOKENS[0]],
                   borderRadius: [0, 4, 4, 0],
                 },
               })),
