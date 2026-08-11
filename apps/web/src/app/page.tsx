@@ -1,48 +1,62 @@
 "use client";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
+import type { Loadable } from "@/components/catalog/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
-import type { CatalogContext } from "@/lib/catalog";
+import type { CatalogContext, Cluster } from "@/lib/catalog";
+import type { InventorySummary } from "@/lib/inventory";
 
 /**
- * Command Center — Sprint 0 foundation.
+ * Command Center.
  *
- * No sources are connected yet, so every domain card honestly reports
- * "not configured" with an empty provenance footer. No fabricated KPIs,
- * no hard-coded healthy states.
+ * Fleet health reads the cluster agent's own inventory, because that is a
+ * source Drake actually has. The rest still report "not configured", and
+ * they say what would configure them rather than naming a sprint — a card
+ * that promised "arrives with the inventory sprint" was still saying it
+ * after the inventory shipped, which reads as a product that forgot.
+ *
+ * Nothing here is derived from a source that does not exist. Capacity is
+ * the one worth naming: node and volume pressure need a signal Drake does
+ * not collect yet, and a plausible number assembled from what it does have
+ * would be the most dangerous card on the page.
  */
 
 const DOMAIN_CARDS = [
   {
-    title: "Fleet health",
-    description: "Cluster and workload health arrives with the inventory sprint.",
-  },
-  {
     title: "Active incidents",
-    description: "Alert-to-incident projection arrives with the incidents sprint.",
+    description: "No alert source is registered, so there is nothing to project into incidents.",
   },
   {
     title: "Capacity risk",
-    description: "Node and volume capacity signals arrive with the telemetry sprint.",
+    description:
+      "Needs node and volume pressure signals. Drake collects workload metrics, not host capacity.",
   },
   {
     title: "Backup & RPO",
-    description: "Backup freshness and restore evidence arrive with the protection sprint.",
+    description: "No backup reporter is configured for any project in scope.",
   },
   {
     title: "Tenants",
-    description: "Tenant plans and usage snapshots arrive with the metering sprint.",
+    description: "No tenant plan or usage source is connected.",
   },
   {
     title: "Recent deployments",
-    description: "Commit-to-rollout correlation arrives with the GitHub sprint.",
+    description: "No deployment source is connected for any project in scope.",
   },
 ] as const;
 
 export default function CommandCenterPage() {
+  // One fetch, two readers: the badge and the fleet card answer the same
+  // question, and asking twice would let them disagree on screen.
+  const [clusters, retry] = useApi<{ clusters: Cluster[] }>("/v1/clusters");
+  // `ok` is the operational vocabulary's word for a live agent and a
+  // current inventory; `stale` and `degraded` deliberately do not count.
+  const connected =
+    clusters.state === "ready" &&
+    clusters.data.clusters.some((cluster) => cluster.operational?.inventory === "ok");
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -52,12 +66,16 @@ export default function CommandCenterPage() {
             Unified operations view. Sources appear here as integrations are connected.
           </p>
         </div>
-        <StatusBadge status="unknown" label="No operational sources connected" />
+        <StatusBadge
+          status={connected ? "healthy" : "unknown"}
+          label={connected ? "Cluster inventory connected" : "No operational sources connected"}
+        />
       </div>
 
       <CatalogCounts />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <FleetHealth clusters={clusters} retry={retry} />
         {DOMAIN_CARDS.map((card) => (
           <Card key={card.title} title={card.title} footer={<Provenance />}>
             <DataState kind="not-configured" description={card.description} />
@@ -85,6 +103,83 @@ export default function CommandCenterPage() {
         </p>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Fleet health, from the cluster agent's inventory.
+ *
+ * One row per cluster rather than one aggregated number: two clusters, one
+ * healthy and one unreachable, average to something that describes neither,
+ * and the operator's next question is always "which one".
+ */
+function FleetHealth({
+  clusters,
+  retry,
+}: {
+  clusters: Loadable<{ clusters: Cluster[] }>;
+  retry: () => void;
+}) {
+  return (
+    <Card title="Fleet health" footer={<Provenance />}>
+      <LoadGate value={clusters} retry={retry}>
+        {(body) =>
+          body.clusters.length === 0 ? (
+            <DataState
+              kind="not-configured"
+              description="No cluster is registered, so there is no fleet to report on."
+            />
+          ) : (
+            <ul className="space-y-3" data-testid="fleet-health">
+              {body.clusters.map((cluster) => (
+                <ClusterFleetRow key={cluster.id} cluster={cluster} />
+              ))}
+            </ul>
+          )
+        }
+      </LoadGate>
+    </Card>
+  );
+}
+
+function ClusterFleetRow({ cluster }: { cluster: Cluster }) {
+  const [summary, retry] = useApi<InventorySummary>(
+    `/v1/clusters/${cluster.id}/inventory/summary`,
+  );
+  return (
+    <li>
+      <p className="text-sm font-medium text-ink">{cluster.display_name}</p>
+      <LoadGate value={summary} retry={retry}>
+        {(data) =>
+          data.agent.status !== "connected" ? (
+            // An agent that is not connected has no current view to report.
+            // Saying so beats showing its last numbers as if they were now.
+            <DataState
+              kind="not-configured"
+              description={`Agent ${data.agent.status}; inventory ${data.inventory.state}.`}
+            />
+          ) : (
+            <dl className="mt-1 grid grid-cols-3 gap-3 text-center">
+              {(
+                [
+                  ["Nodes", data.nodes],
+                  ["Workloads", data.workloads],
+                  ["Pods", data.pods],
+                ] as const
+              ).map(([label, rollup]) => (
+                <div key={label}>
+                  <dd className="text-lg font-semibold tabular-nums text-ink">
+                    {rollup.healthy}
+                    <span className="text-sm font-normal text-ink-muted">/{rollup.total}</span>
+                  </dd>
+                  <dt className="text-xs text-ink-muted">{label} healthy</dt>
+                </div>
+              ))}
+            </dl>
+          )
+        }
+      </LoadGate>
+    </li>
   );
 }
 

@@ -236,6 +236,57 @@ def test_private_ip_literal_requires_explicit_opt_in() -> None:
     assert _run(validate_connector(allowed, settings)) == allowed.url
 
 
+def test_plaintext_needs_an_opt_in_even_to_a_private_address() -> None:
+    """The scheme is its own decision; being private is not a licence."""
+    settings = _prod_settings()
+    connector = TelemetryConnector(url="http://10.20.30.40:9090", allow_private=True)
+    with pytest.raises(ConnectorRefusedError, match="connector_plaintext_refused"):
+        _run(validate_connector(connector, settings))
+
+
+def test_plaintext_to_a_public_address_stays_refused_with_the_opt_in() -> None:
+    """The half of the rule that must not become negotiable.
+
+    `allow_plaintext` exists so an in-cluster Prometheus is expressible. If
+    it also permitted plaintext to the internet it would be a way to send
+    every query in the clear, which is the thing the original rule was
+    written to stop.
+    """
+    settings = _prod_settings()
+    connector = TelemetryConnector(
+        url="http://93.184.216.34:9090", allow_private=True, allow_plaintext=True
+    )
+    with pytest.raises(ConnectorRefusedError, match="connector_plaintext_refused"):
+        _run(validate_connector(connector, settings))
+
+
+def test_plaintext_to_a_private_address_is_allowed_with_both_opt_ins() -> None:
+    """The case this exists for: a ClusterIP Prometheus, in production."""
+    settings = _prod_settings()
+    connector = TelemetryConnector(
+        url="http://10.233.0.42:80", allow_private=True, allow_plaintext=True
+    )
+    assert _run(validate_connector(connector, settings)) == connector.url
+
+
+def test_plaintext_opt_in_does_not_relax_anything_else() -> None:
+    """Loopback, link-local and the private opt-in are untouched by it."""
+    settings = _prod_settings()
+    for url, code in (
+        ("http://127.0.0.1:9090", "connector_target_refused"),
+        ("http://169.254.169.254:80", "connector_target_refused"),
+    ):
+        connector = TelemetryConnector(url=url, allow_private=True, allow_plaintext=True)
+        with pytest.raises(ConnectorRefusedError, match=code):
+            _run(validate_connector(connector, settings))
+    # Still no hostname connectors, opt-in or not.
+    hostname = TelemetryConnector(
+        url="http://prometheus.internal", allow_private=True, allow_plaintext=True
+    )
+    with pytest.raises(ConnectorRefusedError, match="connector_hostname_unpinned"):
+        _run(validate_connector(hostname, settings))
+
+
 def test_hostname_connectors_fail_closed_outside_local_test() -> None:
     # DNS-name connectors are refused in production-like environments until
     # the transport pins validated addresses (rebinding cannot reach a

@@ -1,0 +1,153 @@
+# Drake's workload normalisation layer.
+#
+# Drake asks for workload-scoped signals by `namespace` + `workload_name`.
+# Kubernetes publishes them per POD (cAdvisor, kube-state-metrics), and a
+# pod's name is not its workload's name. These rules add the missing label
+# and change nothing else.
+#
+# Three decisions worth knowing, because each has a wrong-looking
+# alternative that is easy to reach for:
+#
+# 1. The rules ENRICH per-pod series instead of pre-aggregating them. A
+#    summed counter looks tidier, but when a pod is replaced its series
+#    disappears and the sum drops — `rate()`/`increase()` read that drop as
+#    a counter reset and compensate, inflating exactly the number an
+#    operator is most likely to be looking at (restarts, during a rollout).
+#    Keeping one series per pod means Prometheus handles resets per series,
+#    the way it is designed to, and Drake sums afterwards.
+#
+# 2. They are published under `drake:` names rather than re-emitting
+#    `container_cpu_usage_seconds_total` with an extra label. Re-emitting
+#    would double every unqualified `sum(rate(container_cpu…))` in this
+#    Prometheus for anyone else who uses it later. A recording rule that
+#    silently changes what an unrelated query returns is a trap.
+#
+# 3. The pod → workload mapping comes from `kube_pod_owner`, not from a
+#    regex over pod names. Pod names cannot tell you the owner kind:
+#    `api-7d9f8b`, could be a DaemonSet pod or a StatefulSet's sixth
+#    replica, and the two need different suffixes stripped.
+#
+# `groups[].interval` is 30s to match the shortest step Drake's budgets
+# allow (`minStepSeconds: 30`); a slower rule would leave gaps a chart
+# would draw as an outage.
+
+groups:
+  - name: drake.pod-workload-identity
+    interval: 30s
+    rules:
+      # ReplicaSet-owned pods: the RS name is `<deployment>-<template-hash>`,
+      # so exactly one trailing segment is the hash. Anchored, and it strips
+      # ONE segment: a deployment legitimately named `hermes-api-v2` keeps
+      # its name.
+      - record: drake:pod:workload
+        expr: |
+          max by (namespace, pod, workload_name) (
+            label_replace(
+              kube_pod_owner{owner_kind="ReplicaSet"},
+              "workload_name", "$1", "owner_name", "^(.*)-[^-]+$"
+            )
+          )
+      # StatefulSets and DaemonSets own their pods directly, so the owner
+      # name IS the workload name.
+      - record: drake:pod:workload
+        expr: |
+          max by (namespace, pod, workload_name) (
+            label_replace(
+              kube_pod_owner{owner_kind=~"StatefulSet|DaemonSet"},
+              "workload_name", "$1", "owner_name", "^(.*)$"
+            )
+          )
+
+  - name: drake.workload-pod-signals
+    interval: 30s
+    rules:
+      # Multiplying by the mapping (whose value is always 1) preserves the
+      # left-hand value and carries `workload_name` across. `container!=""`
+      # drops the pod-level cgroup roll-up, which would double every sum.
+      - record: drake:workload_pod:cpu_usage_seconds_total
+        expr: |
+          container_cpu_usage_seconds_total{container!="", container!="POD"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      - record: drake:workload_pod:memory_working_set_bytes
+        expr: |
+          container_memory_working_set_bytes{container!="", container!="POD"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      - record: drake:workload_pod:cpu_cfs_throttled_periods_total
+        expr: |
+          container_cpu_cfs_throttled_periods_total{container!="", container!="POD"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      - record: drake:workload_pod:cpu_cfs_periods_total
+        expr: |
+          container_cpu_cfs_periods_total{container!="", container!="POD"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      - record: drake:workload_pod:restarts_total
+        expr: |
+          kube_pod_container_status_restarts_total
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      # kube-state-metrics publishes limits as one series per resource
+      # kind. Drake asks for cores and bytes separately, so they are split
+      # here rather than in the query.
+      - record: drake:workload_pod:cpu_limit_cores
+        expr: |
+          kube_pod_container_resource_limits{resource="cpu"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      - record: drake:workload_pod:memory_limit_bytes
+        expr: |
+          kube_pod_container_resource_limits{resource="memory"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+
+  - name: drake.workload-replicas
+    interval: 30s
+    rules:
+      # One name per controller kind, because "desired replicas" is a
+      # different metric for each and Drake asks one question.
+      - record: drake:workload:replicas_desired
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(kube_deployment_spec_replicas, "workload_name", "$1", "deployment", "(.*)")
+          )
+      - record: drake:workload:replicas_desired
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(kube_statefulset_replicas, "workload_name", "$1", "statefulset", "(.*)")
+          )
+      - record: drake:workload:replicas_desired
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(
+              kube_daemonset_status_desired_number_scheduled,
+              "workload_name", "$1", "daemonset", "(.*)"
+            )
+          )
+      - record: drake:workload:replicas_ready
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(
+              kube_deployment_status_replicas_ready, "workload_name", "$1", "deployment", "(.*)"
+            )
+          )
+      - record: drake:workload:replicas_ready
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(
+              kube_statefulset_status_replicas_ready, "workload_name", "$1", "statefulset", "(.*)"
+            )
+          )
+      - record: drake:workload:replicas_ready
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(
+              kube_daemonset_status_number_ready, "workload_name", "$1", "daemonset", "(.*)"
+            )
+          )
+
+  - name: drake.workload-freshness
+    interval: 30s
+    rules:
+      # "Is this pipeline still describing this workload?" — 1 while the
+      # mapping is being produced, absent once it stops. Deliberately NOT
+      # the scrape `up` of an application target: no application here is
+      # scraped, and reporting a target's health as the workload's would be
+      # a claim nothing supports.
+      - record: drake:workload:up
+        expr: max by (namespace, workload_name) (drake:pod:workload)

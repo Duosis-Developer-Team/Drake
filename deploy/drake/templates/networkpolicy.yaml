@@ -150,6 +150,18 @@ spec:
     {{- include "drake.dnsEgress" . | nindent 4 }}
     {{- include "drake.datastoreEgress" (dict "root" . "peer" $np.database) | nindent 4 }}
     {{- include "drake.datastoreEgress" (dict "root" . "peer" $np.redis) | nindent 4 }}
+    {{- range $np.apiClusterEgress }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "apiClusterEgress[].namespace is required" .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml (required "apiClusterEgress[].podSelector is required" .podSelector) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ required "apiClusterEgress[].port is required" .port }}
+    {{- end }}
     {{- range $np.apiExternalEgress }}
     - to:
         - ipBlock:

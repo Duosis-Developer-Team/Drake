@@ -21,10 +21,23 @@ class TelemetryConnector(BaseModel):
     resolve to private-network targets in a production-like environment
     (ADR-0015: "private networks only via explicitly allowed server-owned
     connectors"). Being present in the map is not enough on its own.
+
+    ``allow_plaintext`` is the same shape of decision for the scheme, and it
+    exists because the rule it relaxes had no way to express the ordinary
+    case. A Prometheus reached over a Kubernetes Service speaks HTTP; there
+    is no hostname to put on a certificate that anything would trust, so
+    "https only in production" did not mean "be careful", it meant "no
+    in-cluster provider, ever".
+
+    What it does NOT relax: plaintext to a PUBLIC address stays refused even
+    with this set, so the flag cannot become a way to send queries across
+    the internet in the clear. Like ``allow_private`` it lives only in
+    server-owned settings and can never arrive from a caller.
     """
 
     url: str
     allow_private: bool = False
+    allow_plaintext: bool = False
 
 
 class WebhookDestination(BaseModel):

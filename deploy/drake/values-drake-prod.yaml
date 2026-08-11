@@ -163,6 +163,16 @@ networkPolicy:
   # when either is switched on.
   apiExternalEgress: []
 
+  # Prometheus, by namespace and pod labels rather than by the ClusterIP the
+  # connector URL happens to name — the address is pinned for Drake's SSRF
+  # check, but a policy that also depended on it would break the day the
+  # Service is recreated, which is exactly what happened to the agent.
+  apiClusterEgress:
+    - namespace: drake-monitoring
+      podSelector:
+        app.kubernetes.io/name: prometheus
+      port: 9090
+
 # The internal agent listener. ClusterIP-only; never published.
 #
 # This block was MISSING from this file while revision 12 ran the listener
@@ -209,6 +219,18 @@ auth:
 # `drake-github-app`, created out of band and mounted as files, because a
 # settings value can end up in `kubectl describe pod`, a crash dump or a
 # child process environment; a file cannot.
+# The metrics backend, installed by deploy/monitoring/. The address is the
+# Service's PINNED ClusterIP: Drake refuses hostname connectors in
+# production, and an unpinned ClusterIP is the same trap the agent's egress
+# rule fell into. Both opt-ins are stated rather than defaulted — this is
+# plaintext to a private address, and each half is a decision.
+telemetry:
+  connectors:
+    duosis-prod-1:
+      url: http://10.233.0.42
+      allowPrivate: true
+      allowPlaintext: true
+
 github:
   enabled: true
   existingSecret: drake-github-app

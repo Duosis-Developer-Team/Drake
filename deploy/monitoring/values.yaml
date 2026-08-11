@@ -1,0 +1,73 @@
+# Drake's metrics backend — prometheus-community/prometheus.
+#
+# This cluster had no Prometheus at all. Drake's telemetry adapter speaks
+# only Prometheus (every one of the 22 query templates is
+# `providerType: prometheus`), so every metric panel in the product was
+# empty for the most boring possible reason: there was nothing to ask.
+#
+# Datadog and Zabbix agents already run here. Neither is replaced and
+# neither is touched — Drake simply has no adapter for them, and writing
+# one to avoid installing Prometheus would be a much larger commitment
+# than this file.
+#
+# Scope kept deliberately small: a server, kube-state-metrics and
+# node-exporter. Alertmanager and Pushgateway stay off because nothing
+# consumes them yet; turning them on before there is a consumer produces
+# alerts nobody routes.
+
+alertmanager:
+  enabled: false
+
+prometheus-pushgateway:
+  enabled: false
+
+kube-state-metrics:
+  enabled: true
+
+prometheus-node-exporter:
+  enabled: true
+
+server:
+  # Seven days. Drake's own query budgets cap a range at seven days
+  # (`maxRangeSeconds: 604800`), so retaining more would store what no
+  # query can ask for.
+  retention: 7d
+
+  persistentVolume:
+    enabled: true
+    storageClass: local-path
+    size: 20Gi
+
+  # This is a two-node cluster running other teams' production workloads.
+  # The requests are what Prometheus needs to stay responsive; the limits
+  # are what keeps a runaway cardinality problem from becoming everyone's
+  # problem.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  # No ingress, no NodePort: Drake reaches it through the cluster Service
+  # and nothing outside the cluster can reach it at all.
+  #
+  # The ClusterIP is PINNED, and that is the whole reason this works.
+  # Drake refuses hostname connectors in production (httpx re-resolves
+  # independently of the SSRF check, so a hostile DNS answer could flip
+  # public→private between validating and connecting), which leaves an IP
+  # literal — and an unpinned ClusterIP changes whenever the Service is
+  # recreated, which is the failure the agent's egress rule already taught
+  # us. Declared here, it is a constant that survives a reinstall.
+  #
+  # 10.233.0.42 sits in the static band at the bottom of the service CIDR
+  # (10.233.0.0/18), which Kubernetes does not hand out dynamically.
+  service:
+    type: ClusterIP
+    clusterIP: 10.233.0.42
+
+serverFiles:
+  # Loaded from deploy/monitoring/recording-rules.yaml by install.sh, so
+  # the rules stay reviewable as YAML instead of a quoted string here.
+  recording_rules.yml: {}

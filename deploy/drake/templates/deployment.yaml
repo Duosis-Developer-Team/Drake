@@ -71,6 +71,10 @@ spec:
               value: {{ printf "%s/v1/auth/callback" (include "drake.publicOrigin" .) | quote }}
             - name: DRAKE_API_HOST
               value: "0.0.0.0"
+            {{- if (.Values.telemetry).connectors }}
+            - name: DRAKE_TELEMETRY_CONNECTORS
+              value: {{ include "drake.telemetryConnectors" . | quote }}
+            {{- end }}
             - name: DRAKE_GITHUB_APP_ENABLED
               value: {{ .Values.github.enabled | quote }}
             {{- if .Values.github.enabled }}
