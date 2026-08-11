@@ -28,6 +28,7 @@ import {
   ReasonList,
   SignalCell,
 } from "@/components/service-health/primitives";
+import { Gauge, RingProgress, ToneCounters } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
@@ -73,6 +74,21 @@ function SectionCard({
     </Card>
   );
 }
+
+/**
+ * The bands the gauges draw.
+ *
+ * Only when limits are configured: without a limit there is nothing to be a
+ * percentage OF, so the platform reports usage and judges nothing, and a
+ * coloured zone would be a promise nobody made.
+ */
+const UTILISATION_THRESHOLDS = (limitsConfigured: boolean | undefined) =>
+  limitsConfigured === false
+    ? null
+    : { warn: 0.8, critical: 0.9, direction: "above" as const };
+
+/** Throttling is a symptom, not a budget: any sustained share is a problem. */
+const THROTTLE_THRESHOLDS = { warn: 0.05, critical: 0.25, direction: "above" as const };
 
 export default function ServiceHealthDetailPage() {
   const { bindingId } = useParams<{ bindingId: string }>();
@@ -152,12 +168,38 @@ export default function ServiceHealthDetailPage() {
                   status={data.availability.status}
                   reasons={data.availability.reasons}
                 >
-                  <MetaRow label="Ready / desired">
-                    <span className="font-mono text-xs">
-                      {data.availability.ready_replicas ?? "—"} /{" "}
-                      {data.availability.desired_replicas ?? "—"}
+                  <div className="flex items-center gap-3 py-1">
+                    <RingProgress
+                      size={52}
+                      label="Replicas ready"
+                      value={
+                        data.availability.desired_replicas
+                          ? ((data.availability.ready_replicas ?? 0) /
+                              data.availability.desired_replicas) *
+                            100
+                          : null
+                      }
+                      tone={
+                        data.availability.ready_replicas === null ||
+                        data.availability.desired_replicas === null
+                          ? "unknown"
+                          : data.availability.ready_replicas >= data.availability.desired_replicas
+                            ? "success"
+                            : data.availability.ready_replicas === 0
+                              ? "critical"
+                              : "warning"
+                      }
+                    />
+                    <span>
+                      <span data-tabular className="block text-title font-semibold text-ink">
+                        {data.availability.ready_replicas ?? "—"}
+                        <span className="text-ink-muted">
+                          /{data.availability.desired_replicas ?? "—"}
+                        </span>
+                      </span>
+                      <span className="text-caption text-ink-secondary">replicas ready</span>
                     </span>
-                  </MetaRow>
+                  </div>
                   {data.availability.scaled_to_zero ? (
                     <MetaRow label="Scaled to zero">
                       <span className="text-xs text-ink-secondary">
@@ -172,15 +214,29 @@ export default function ServiceHealthDetailPage() {
                   status={data.stability.status}
                   reasons={data.stability.reasons}
                 >
-                  <MetaRow label="Restarts in window">
-                    <Measure value={data.stability.restarts_in_window} unit="count" />
-                  </MetaRow>
-                  <MetaRow label="Crash looping">
-                    <span className="text-xs">{data.stability.crash_looping ? "Yes" : "No"}</span>
-                  </MetaRow>
-                  <MetaRow label="OOM killed">
-                    <span className="text-xs">{data.stability.oom_killed ? "Yes" : "No"}</span>
-                  </MetaRow>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-1">
+                    <span>
+                      <span data-tabular className="block text-title font-semibold text-ink">
+                        {data.stability.restarts_in_window ?? "—"}
+                      </span>
+                      <span className="text-caption text-ink-secondary">restarts in window</span>
+                    </span>
+                    <ToneCounters
+                      size="compact"
+                      items={[
+                        {
+                          label: "crash-looping",
+                          count: data.stability.crash_looping ? 1 : 0,
+                          tone: "critical",
+                        },
+                        {
+                          label: "OOM-killed",
+                          count: data.stability.oom_killed ? 1 : 0,
+                          tone: "critical",
+                        },
+                      ]}
+                    />
+                  </div>
                 </SectionCard>
 
                 <SectionCard
@@ -188,33 +244,63 @@ export default function ServiceHealthDetailPage() {
                   status={data.resources.status}
                   reasons={data.resources.reasons}
                 >
-                  <MetaRow label="CPU">
-                    <span className="font-mono text-xs">
-                      <Measure value={data.resources.cpu_cores_used} unit="cores" /> /{" "}
-                      <Measure value={data.resources.cpu_limit_cores} unit="cores" />
-                    </span>
-                  </MetaRow>
-                  <MetaRow label="CPU utilization">
-                    <Measure value={data.resources.cpu_utilization} unit="ratio" />
-                  </MetaRow>
-                  <MetaRow label="Memory">
-                    <span className="font-mono text-xs">
-                      <Measure value={data.resources.memory_bytes_used} unit="bytes" /> /{" "}
-                      <Measure value={data.resources.memory_limit_bytes} unit="bytes" />
-                    </span>
-                  </MetaRow>
-                  <MetaRow label="Memory utilization">
-                    <Measure value={data.resources.memory_utilization} unit="ratio" />
-                  </MetaRow>
-                  <MetaRow label="CPU throttling">
-                    <Measure value={data.resources.cpu_throttled_ratio} unit="ratio" />
-                  </MetaRow>
+                  {/* Utilisation against a limit is exactly what a gauge is
+                      for: bounded, and the distance to the limit is the
+                      point. The bands only appear when limits are configured
+                      — without them Drake reports usage and judges nothing,
+                      so a coloured zone would be an invented promise. */}
+                  <div className="flex flex-wrap justify-around gap-2 py-1">
+                    <Gauge
+                      size="compact"
+                      label="CPU"
+                      unit="ratio"
+                      value={data.resources.cpu_utilization}
+                      thresholds={UTILISATION_THRESHOLDS(data.resources.limits_configured)}
+                      missingReason="not measured"
+                      caption={
+                        data.resources.cpu_limit_cores !== null ? (
+                          <>
+                            <Measure value={data.resources.cpu_cores_used} unit="cores" /> of{" "}
+                            <Measure value={data.resources.cpu_limit_cores} unit="cores" />
+                          </>
+                        ) : (
+                          "no limit set"
+                        )
+                      }
+                    />
+                    <Gauge
+                      size="compact"
+                      label="Memory"
+                      unit="ratio"
+                      value={data.resources.memory_utilization}
+                      thresholds={UTILISATION_THRESHOLDS(data.resources.limits_configured)}
+                      missingReason="not measured"
+                      caption={
+                        data.resources.memory_limit_bytes !== null ? (
+                          <>
+                            <Measure value={data.resources.memory_bytes_used} unit="bytes" /> of{" "}
+                            <Measure value={data.resources.memory_limit_bytes} unit="bytes" />
+                          </>
+                        ) : (
+                          "no limit set"
+                        )
+                      }
+                    />
+                    <Gauge
+                      size="compact"
+                      label="CPU throttling"
+                      unit="ratio"
+                      value={data.resources.cpu_throttled_ratio}
+                      thresholds={THROTTLE_THRESHOLDS}
+                      missingReason="not measured"
+                      caption="share of periods throttled"
+                    />
+                  </div>
                   {data.resources.limits_configured === false ? (
-                    <MetaRow label="Limits">
-                      <span className="text-xs italic text-ink-muted">
-                        none configured — usage is reported, pressure is not judged
-                      </span>
-                    </MetaRow>
+                    <p className="text-caption text-ink-muted italic">
+                      No limits configured — usage is reported, pressure is not judged, and the
+                      gauges carry no threshold bands.
+                    </p>
                   ) : null}
                 </SectionCard>
 

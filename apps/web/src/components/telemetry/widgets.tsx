@@ -39,6 +39,7 @@ import {
   PartialBanner,
   StaleBanner,
 } from "@/components/ui/states";
+import { Sparkline } from "@/components/charts/visuals";
 import { toneForThreshold } from "@/lib/design/status";
 import type { DashboardWidget, TelemetryEnvelope, TelemetrySeries } from "@/lib/telemetry";
 import { formatValue, reduceEnvelope } from "@/lib/telemetry";
@@ -187,17 +188,30 @@ export function KpiWidget({
     >
       {(envelope) => {
         const value = reduceEnvelope(envelope, widget.reducer);
+        // The series is already here — the shape of the window costs nothing
+        // and answers "is this rising" before the reader opens the chart.
+        const shape =
+          envelope.series[0]?.points.map(([, sample]) => sample) ?? [];
         return (
           <>
-            <Stat
-              bare
-              label={<span className="sr-only">{widget.title}</span>}
-              value={value}
-              unit={widget.unit}
-              thresholds={widget.thresholds ?? null}
-              size="large"
-              missingReason="The source returned no usable sample in this window."
-            />
+            <div className="flex items-end justify-between gap-3">
+              <Stat
+                bare
+                label={<span className="sr-only">{widget.title}</span>}
+                value={value}
+                unit={widget.unit}
+                thresholds={widget.thresholds ?? null}
+                size="large"
+                missingReason="The source returned no usable sample in this window."
+              />
+              {shape.length > 1 ? (
+                <Sparkline
+                  points={shape}
+                  label={`${widget.title} over the window`}
+                  tone={toneForThreshold(value, widget.thresholds ?? null)}
+                />
+              ) : null}
+            </div>
             <p className="sr-only">
               {widget.accessibleSummary ?? widget.title}: {formatValue(value, widget.unit)}
               {widget.thresholds

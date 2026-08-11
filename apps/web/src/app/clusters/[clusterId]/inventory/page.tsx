@@ -28,7 +28,7 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { SortedBarChart } from "@/components/charts/CategoryCharts";
-import { CompositionBar } from "@/components/charts/InlineBars";
+import { Donut, ToneCounters } from "@/components/charts/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
@@ -294,7 +294,7 @@ function InventoryInner() {
                 </>
               }
             />
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
               {(
                 [
                   ["Nodes", summary.data.nodes],
@@ -306,25 +306,45 @@ function InventoryInner() {
               )
                 .filter(([, rollup]) => rollup.total > 0)
                 .map(([label, rollup]) => (
-                  <div key={label}>
-                    <div className="mb-1 flex items-baseline justify-between gap-2">
-                      <span className="text-caption font-medium text-ink">{label}</span>
-                      <span data-tabular className="text-caption text-ink-muted">
-                        {rollup.total}
-                      </span>
-                    </div>
-                    <CompositionBar
+                  <div key={label} className="min-w-0">
+                    <p className="mb-1.5 text-caption font-medium text-ink">{label}</p>
+                    <Donut
+                      size={104}
+                      thickness={12}
                       label={`${label} by health`}
-                      segments={rollupSegments(rollup)}
+                      centerLabel={`${rollup.total}`}
+                      slices={rollupSegments(rollup)}
                     />
                   </div>
                 ))}
-              {summary.data.pods.crashloop > 0 || summary.data.pods.oom_killed > 0 ? (
-                <p className="text-caption text-warning">
-                  {summary.data.pods.crashloop} pod(s) crash-looping ·{" "}
-                  {summary.data.pods.oom_killed} OOM-killed ·{" "}
-                  {summary.data.pods.restarts} restarts in window
-                </p>
+              {summary.data.pods.crashloop > 0 ||
+              summary.data.pods.oom_killed > 0 ||
+              summary.data.pods.restarts > 0 ? (
+                <div className="sm:col-span-2">
+                  <p className="mb-1.5 text-caption font-medium text-ink">Pod instability</p>
+                  {/* These are counts of specific failure modes, not a
+                      composition — they do not add up to the pod total, so
+                      they get counters rather than a wedge each. */}
+                  <ToneCounters
+                    items={[
+                      {
+                        label: "crash-looping",
+                        count: summary.data.pods.crashloop,
+                        tone: "critical",
+                      },
+                      {
+                        label: "OOM-killed",
+                        count: summary.data.pods.oom_killed,
+                        tone: "critical",
+                      },
+                      {
+                        label: "restarts in window",
+                        count: summary.data.pods.restarts,
+                        tone: "warning",
+                      },
+                    ]}
+                  />
+                </div>
               ) : null}
             </div>
           </Panel>
