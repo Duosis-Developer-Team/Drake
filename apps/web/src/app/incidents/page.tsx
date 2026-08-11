@@ -17,6 +17,7 @@ import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import { IncidentStateBadge, ReasonLabel } from "@/components/incidents/primitives";
+import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -178,6 +179,34 @@ function IncidentTable() {
             kind="empty"
             title="No incidents"
             description="Nothing matches these filters in your authorized scope."
+          />
+        </Card>
+      ) : null}
+
+      {page.state === "ready" && page.data.items.length > 0 ? (
+        <Card title="In this view">
+          {/* Computed from the rows on screen, and labelled as such: this is
+              a page, not the whole set, and calling it a total would be a
+              number nobody measured. */}
+          <StackedBar
+            label="Incidents on this page by state"
+            segments={[
+              {
+                name: "Open",
+                value: page.data.items.filter((item) => item.state === "open").length,
+                tone: "critical",
+              },
+              {
+                name: "Acknowledged",
+                value: page.data.items.filter((item) => item.state === "acknowledged").length,
+                tone: "warning",
+              },
+              {
+                name: "Resolved",
+                value: page.data.items.filter((item) => item.state === "resolved").length,
+                tone: "success",
+              },
+            ]}
           />
         </Card>
       ) : null}

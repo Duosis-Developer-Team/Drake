@@ -19,6 +19,7 @@ import { PageFrame } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
+import { Donut } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -160,6 +161,55 @@ function SloInner() {
           />
         ) : (
           <>
+            {/* insufficient_data and not_configured stay OUT of the healthy
+                wedge: nothing was measured, and a green slice for an
+                unmeasured objective is the most misleading thing here. */}
+            <div className="mb-4 border-b border-border pb-4">
+              <Donut
+                size={116}
+                thickness={13}
+                label="Objectives on this page by verdict"
+                centerLabel={`${page.data.items.length}`}
+                slices={[
+                  {
+                    name: "Meeting",
+                    value: page.data.items.filter((slo) => slo.evaluation?.status === "healthy")
+                      .length,
+                    tone: "success",
+                  },
+                  {
+                    name: "Burning fast",
+                    value: page.data.items.filter((slo) => slo.evaluation?.status === "warning")
+                      .length,
+                    tone: "warning",
+                  },
+                  {
+                    name: "Breached",
+                    value: page.data.items.filter((slo) =>
+                      ["critical", "exhausted", "query_failed"].includes(
+                        slo.evaluation?.status ?? "",
+                      ),
+                    ).length,
+                    tone: "critical",
+                  },
+                  {
+                    name: "Stale",
+                    value: page.data.items.filter((slo) => slo.evaluation?.status === "stale")
+                      .length,
+                    tone: "stale",
+                  },
+                  {
+                    name: "Never measured",
+                    value: page.data.items.filter(
+                      (slo) =>
+                        !slo.evaluation ||
+                        ["insufficient_data", "not_configured"].includes(slo.evaluation.status),
+                    ).length,
+                    tone: "unknown",
+                  },
+                ]}
+              />
+            </div>
             <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-ink-muted">

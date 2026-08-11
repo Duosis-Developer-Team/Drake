@@ -610,3 +610,246 @@ export function ToneCounters({
     </div>
   );
 }
+
+/**
+ * One horizontal bar, segmented, with the counts inside it.
+ *
+ * For an ORDERED distribution — severities, lifecycle states, rollout
+ * outcomes — where a donut would lose the ordering. A reader scans left to
+ * right and sees the shape of the queue: how much of it is the bad end.
+ *
+ * Segments below the label threshold keep their colour and drop their text
+ * rather than shrinking it into illegibility; the legend underneath carries
+ * every count regardless.
+ */
+export function StackedBar({
+  segments,
+  label,
+  height = 28,
+  legend = true,
+}: {
+  segments: Slice[];
+  label: string;
+  height?: number;
+  legend?: boolean;
+}) {
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  if (total === 0) {
+    return (
+      <p className="text-caption text-ink-muted" data-testid="stacked-empty">
+        Nothing recorded in this window.
+      </p>
+    );
+  }
+  const drawn = segments.filter((segment) => segment.value > 0);
+
+  return (
+    <div className="min-w-0" data-testid="stacked-bar">
+      <div
+        role="img"
+        aria-label={`${label}: ${drawn.map((s) => `${s.name} ${s.value}`).join(", ")}`}
+        className="flex w-full gap-0.5 overflow-hidden rounded"
+        style={{ height }}
+      >
+        {drawn.map((segment) => {
+          const share = (segment.value / total) * 100;
+          const colour = segment.token
+            ? `var(${segment.token})`
+            : segment.tone
+              ? `var(${toneSpec(segment.tone).token})`
+              : "var(--series-1)";
+          return (
+            <span
+              key={segment.name}
+              className="flex items-center justify-center text-micro font-semibold"
+              style={{
+                width: `${share}%`,
+                background: colour,
+                color: "var(--text-inverse)",
+              }}
+              title={`${segment.name}: ${segment.value}`}
+            >
+              {share > 9 ? segment.value : ""}
+            </span>
+          );
+        })}
+      </div>
+      {legend ? (
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {segments.map((segment) => (
+            <li
+              key={segment.name}
+              className={`flex items-center gap-1.5 text-micro ${
+                segment.value === 0 ? "text-ink-muted" : "text-ink-secondary"
+              }`}
+            >
+              <span
+                aria-hidden
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{
+                  background: segment.token
+                    ? `var(${segment.token})`
+                    : segment.tone
+                      ? `var(${toneSpec(segment.tone).token})`
+                      : "var(--series-1)",
+                  opacity: segment.value === 0 ? 0.35 : 1,
+                }}
+              />
+              {segment.name}
+              <span data-tabular className="font-medium text-ink">
+                {segment.value}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A status matrix.
+ *
+ * For the shape "one row per thing, one column per aspect, a state in every
+ * cell" — integrations across scopes, capabilities across environments. A
+ * table of words makes the reader compare strings; a grid of tones makes the
+ * gaps visible from across the room, and each cell keeps its word as its
+ * title and its accessible name.
+ */
+export function StatusMatrix({
+  rows,
+  columns,
+  cell,
+  label,
+  rowLabel,
+}: {
+  rows: { key: string; label: string; sub?: string }[];
+  columns: { key: string; label: string }[];
+  /** The tone and word for one intersection. `null` means "not applicable". */
+  cell: (rowKey: string, columnKey: string) => { tone: StatusTone; label: string } | null;
+  label: string;
+  rowLabel?: string;
+}) {
+  return (
+    <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
+      <table className="w-full border-collapse text-caption" data-testid="status-matrix">
+        <caption className="sr-only">{label}</caption>
+        <thead>
+          <tr>
+            <th scope="col" className="px-2 py-1.5 text-left font-medium text-ink-secondary">
+              {rowLabel ?? "Item"}
+            </th>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                scope="col"
+                className="px-2 py-1.5 text-center font-medium whitespace-nowrap text-ink-secondary"
+              >
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key} className="border-t border-border">
+              <th scope="row" className="px-2 py-1.5 text-left font-normal">
+                <span className="block text-ink">{row.label}</span>
+                {row.sub ? (
+                  <span className="block font-mono text-micro text-ink-muted">{row.sub}</span>
+                ) : null}
+              </th>
+              {columns.map((column) => {
+                const state = cell(row.key, column.key);
+                if (!state) {
+                  return (
+                    <td key={column.key} className="px-2 py-1.5 text-center">
+                      <span
+                        className="inline-block h-6 w-full max-w-16 rounded bg-surface-3"
+                        title="not applicable"
+                      >
+                        <span className="sr-only">not applicable</span>
+                      </span>
+                    </td>
+                  );
+                }
+                const spec = toneSpec(state.tone);
+                return (
+                  <td key={column.key} className="px-2 py-1.5 text-center">
+                    <span
+                      title={state.label}
+                      className={`inline-flex h-6 w-full max-w-16 items-center justify-center rounded text-micro font-medium ${spec.chip}`}
+                    >
+                      <span aria-hidden>{state.label.slice(0, 3).toLowerCase()}</span>
+                      <span className="sr-only">{state.label}</span>
+                    </span>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * A countdown against a deadline.
+ *
+ * For "how long until this expires" — a certificate, a retention window, a
+ * scheduled run. Distinct from a gauge because the scale is time and the
+ * interesting end is the near one: the bar drains toward the left as the
+ * deadline approaches, and the tone follows how close it is.
+ */
+export function Countdown({
+  deadline,
+  windowDays = 90,
+  label,
+  warnDays = 30,
+  criticalDays = 7,
+  now = new Date(),
+}: {
+  deadline: string | null | undefined;
+  /** The full span the bar represents. */
+  windowDays?: number;
+  label: string;
+  warnDays?: number;
+  criticalDays?: number;
+  now?: Date;
+}) {
+  if (!deadline) {
+    return (
+      <div data-testid="countdown">
+        <span className="text-caption text-ink-secondary">{label}</span>
+        <p className="text-caption text-ink-muted">no expiry reported</p>
+      </div>
+    );
+  }
+  const days = (new Date(deadline).getTime() - now.getTime()) / 86_400_000;
+  const tone: StatusTone =
+    days <= 0 ? "critical" : days <= criticalDays ? "critical" : days <= warnDays ? "warning" : "success";
+  const spec = toneSpec(tone);
+  const share = Math.max(0, Math.min(1, days / windowDays));
+
+  return (
+    <div className="min-w-0" data-testid="countdown">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-caption text-ink-secondary">{label}</span>
+        <span data-tabular className={`shrink-0 text-caption font-medium ${spec.text}`}>
+          {days <= 0 ? "expired" : `${Math.floor(days)}d left`}
+        </span>
+      </div>
+      <div
+        role="img"
+        aria-label={`${label}: ${days <= 0 ? "expired" : `${Math.floor(days)} days remaining`}`}
+        className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
+      >
+        <span
+          className={`block h-full rounded-full ${spec.dot}`}
+          style={{ width: `${share * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+}

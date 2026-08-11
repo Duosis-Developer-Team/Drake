@@ -3,6 +3,8 @@
 import Link from "next/link";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
+import { StatusMatrix } from "@/components/charts/visuals";
+import { humanize, toneForHealth } from "@/lib/design/status";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -52,6 +54,53 @@ export default function IntegrationsPage() {
                 description="Integrations registered on scopes you can read will appear here."
               />
             ) : (
+              <>
+              {/* Provider × scope is a matrix, and the gaps are the point: a
+                  grid of tones shows which scope is missing which provider
+                  from across the room, where a column of words makes the
+                  reader compare strings. The table underneath keeps every
+                  detail — this is the index, not a replacement. */}
+              <div className="mb-4 border-b border-border pb-4">
+                <StatusMatrix
+                  label="Provider readiness by scope"
+                  rowLabel="Scope"
+                  rows={[
+                    ...new Map(
+                      body.integrations.map((integration) => [
+                        `${integration.scope.type}/${integration.scope.ref}`,
+                        {
+                          key: `${integration.scope.type}/${integration.scope.ref}`,
+                          label: integration.scope.ref,
+                          sub: integration.scope.type,
+                        },
+                      ]),
+                    ).values(),
+                  ]}
+                  columns={[
+                    ...new Map(
+                      body.integrations.map((integration) => [
+                        integration.integration_type,
+                        { key: integration.integration_type, label: integration.integration_type },
+                      ]),
+                    ).values(),
+                  ]}
+                  cell={(scopeKey, type) => {
+                    const match = body.integrations.find(
+                      (integration) =>
+                        `${integration.scope.type}/${integration.scope.ref}` === scopeKey &&
+                        integration.integration_type === type,
+                    );
+                    if (!match) return null;
+                    if (match.configuration_state !== "configured") {
+                      return { tone: "not-applicable", label: "Not connected" };
+                    }
+                    return {
+                      tone: toneForHealth(match.observed_state),
+                      label: humanize(match.observed_state),
+                    };
+                  }}
+                />
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm" data-testid="integration-table">
                   <thead>
@@ -106,6 +155,7 @@ export default function IntegrationsPage() {
                   </tbody>
                 </table>
               </div>
+              </>
             )
           }
         </LoadGate>

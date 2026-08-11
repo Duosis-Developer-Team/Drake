@@ -27,6 +27,7 @@ import {
   StatusPill,
 } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
+import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -143,11 +144,33 @@ function AlertsInner() {
           <DataState kind="error" description={summary.message} />
         ) : (
           <div className="flex flex-wrap gap-2.5" data-testid="alert-summary">
-            <CountChip label="Firing" count={summary.data.firing} tone="critical" />
-            <CountChip label="P1" count={summary.data.p1} tone="critical" />
-            <CountChip label="P2" count={summary.data.p2} tone="warning" />
-            <CountChip label="Silenced" count={summary.data.silenced} tone="maintenance" />
-            <CountChip label="Unmapped" count={summary.data.unmapped} tone="warning" />
+            <div className="w-full">
+              {/* Priority is ordered, so it reads left-to-right rather than
+                  around a circle. "Other" is what is firing outside P1/P2 —
+                  computed, not assumed, and never negative. */}
+              <StackedBar
+                label="Firing alerts by priority"
+                segments={[
+                  { name: "P1", value: summary.data.p1, tone: "critical" },
+                  { name: "P2", value: summary.data.p2, tone: "warning" },
+                  {
+                    name: "Other priorities",
+                    value: Math.max(0, summary.data.firing - summary.data.p1 - summary.data.p2),
+                    tone: "info",
+                  },
+                ]}
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                <CountChip label="Firing" count={summary.data.firing} tone="critical" />
+                <CountChip label="Silenced" count={summary.data.silenced} tone="maintenance" />
+                <CountChip label="Unmapped" count={summary.data.unmapped} tone="warning" />
+                <CountChip
+                  label="With incident"
+                  count={summary.data.with_incident}
+                  tone="maintenance"
+                />
+              </div>
+            </div>
           </div>
         )}
       </Card>
