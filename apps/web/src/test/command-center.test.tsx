@@ -21,7 +21,7 @@ vi.mock("next/navigation", () => ({
 
 const CONTEXT = { projects: 3, environments: 5, clusters: 1 };
 
-function cluster(inventory: string) {
+function cluster(agent: string, inventory: string) {
   return {
     id: "c1",
     cluster_ref: "duosis-prod-1",
@@ -31,7 +31,7 @@ function cluster(inventory: string) {
     version: 1,
     scope: { type: "cluster", ref: "duosis-prod-1" },
     source: { kind: "operator", ref: "operator:-", revision: "v1", accepted_at: "2026-08-11T00:00:00Z" },
-    operational: { agent: "ok", inventory },
+    operational: { agent, inventory },
     as_of: "2026-08-11T00:00:00Z",
   };
 }
@@ -74,7 +74,7 @@ describe("Command Center", () => {
   it("reports fleet health from the agent's own inventory", async () => {
     installFetchMock({
       "/v1/catalog/context": { status: 200, body: CONTEXT },
-      "/v1/clusters": { status: 200, body: { clusters: [cluster("ok")] } },
+      "/v1/clusters": { status: 200, body: { clusters: [cluster("connected", "fresh")] } },
       "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("connected") },
     });
     render(<CommandCenterPage />);
@@ -95,7 +95,7 @@ describe("Command Center", () => {
   it("does not show last-known numbers for an agent that is not connected", async () => {
     installFetchMock({
       "/v1/catalog/context": { status: 200, body: CONTEXT },
-      "/v1/clusters": { status: 200, body: { clusters: [cluster("stale")] } },
+      "/v1/clusters": { status: 200, body: { clusters: [cluster("disconnected", "stale")] } },
       "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("disconnected") },
     });
     render(<CommandCenterPage />);
