@@ -13,8 +13,10 @@ metadata:
   displayName: Epsilon
 spec:
   repository: {provider: github, owner: example-org, name: epsilon, defaultBranch: main}
-  # Ownership is deliberately left to resolve as unmapped: no team is
-  # asserted that nobody confirmed.
+  # A visible non-claim rather than a plausible-looking team name. NOTE: an
+  # unrecognised team key does NOT resolve as `unmapped` — verified against
+  # build_plan, it plans as `no_change` and apply creates the owner row. The
+  # earlier wording here claimed otherwise and was wrong.
   owners: [{team: unknown-team, role: primary}]
   environments:
     # No clusterRef and no namespace — and the schema now REFUSES them here,
