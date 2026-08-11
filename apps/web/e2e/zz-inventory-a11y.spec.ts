@@ -56,17 +56,20 @@ async function findClusterA(page: Page): Promise<string> {
 }
 
 async function setTheme(page: Page, dark: boolean) {
-  // Three states now — system / light / dark — as radios rather than a
-  // two-state toggle, so "system" can stay a real choice that keeps
-  // following the OS.
-  const isDark = () =>
-    page.evaluate(() => document.documentElement.classList.contains("dark"));
-  if ((await isDark()) === dark) return;
-  await page
-    .getByRole("radio", { name: dark ? /dark/i : /light/i })
-    .first()
-    .click();
-  await expect.poll(async () => await isDark()).toBe(dark);
+  // The theme is a PRECONDITION for these gates, not the thing under test —
+  // the control itself is covered by experience.spec.ts. Setting the stored
+  // preference and reloading is how a returning operator arrives, and it does
+  // not depend on where the control sits at a given width (at 390px it lives
+  // in the navigation drawer, so a direct click would have to open that
+  // first).
+  await page.evaluate(
+    (value) => localStorage.setItem("drake-theme", value),
+    dark ? "dark" : "light",
+  );
+  await page.reload();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.classList.contains("dark")))
+    .toBe(dark);
 }
 
 async function assertNoHorizontalOverflow(page: Page, label: string) {

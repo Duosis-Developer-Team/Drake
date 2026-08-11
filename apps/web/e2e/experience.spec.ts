@@ -196,6 +196,26 @@ test("mobile: the rail becomes a dialog that traps focus and closes on Escape", 
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
+test("mobile: the theme control is reachable, in the drawer with the rest of settings", async ({
+  page,
+}) => {
+  // The persistent rail is gone below 1024px and the top bar drops the theme
+  // control for space, so the drawer is the only route to it. That is a
+  // deliberate placement — it sits with scope and sign-out — but it has to
+  // actually work, and nothing else asserts it.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await expect(page.getByRole("radio", { name: /dark/i })).toBeHidden();
+
+  await page.getByRole("button", { name: /open navigation/i }).click();
+  const drawer = page.getByRole("dialog", { name: "Navigation" });
+  await drawer.getByRole("radio", { name: /dark/i }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
 test("keyboard: the skip link reaches the content and navigation is operable", async ({
   page,
 }) => {
