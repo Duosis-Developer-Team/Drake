@@ -33,8 +33,13 @@ import sys
 import yaml
 
 values = yaml.safe_load(open("deploy/monitoring/values.yaml"))
-rules = yaml.safe_load(open("deploy/monitoring/recording-rules.yaml"))
-values.setdefault("serverFiles", {})["recording_rules.yml"] = rules
+server_files = values.setdefault("serverFiles", {})
+server_files["recording_rules.yml"] = yaml.safe_load(
+    open("deploy/monitoring/recording-rules.yaml")
+)
+server_files["alerting_rules.yml"] = yaml.safe_load(
+    open("deploy/monitoring/alert-rules.yaml")
+)
 yaml.safe_dump(values, open(sys.argv[1], "w"), sort_keys=False)
 PYEOF
 

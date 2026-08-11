@@ -175,6 +175,14 @@ networkPolicy:
   # connector URL happens to name — the address is pinned for Drake's SSRF
   # check, but a policy that also depended on it would break the day the
   # Service is recreated, which is exactly what happened to the agent.
+  # Alertmanager delivers notifications to the API's webhook. In-cluster,
+  # by label — the notification never leaves the cluster to come back
+  # through the public edge.
+  apiClusterIngress:
+    - namespace: drake-monitoring
+      podSelector:
+        app.kubernetes.io/name: alertmanager
+
   apiClusterEgress:
     - namespace: drake-monitoring
       podSelector:
@@ -232,6 +240,24 @@ auth:
 # production, and an unpinned ClusterIP is the same trap the agent's egress
 # rule fell into. Both opt-ins are stated rather than defaulted — this is
 # plaintext to a private address, and each half is a decision.
+# The Alertmanager installed by deploy/monitoring/. One integration per
+# catalog project, because the integration — not the payload — decides
+# which project an alert may resolve into. Platform alerts (a failing node,
+# a dead scrape target) claim `project: drake`, match none of these, and are
+# kept as unmapped platform evidence rather than filed against a service.
+alerting:
+  existingSecret: drake-alertmanager-webhook
+  integrations:
+    hermes:
+      projectKey: hermes
+      displayName: "duosis-prod-1 Alertmanager"
+    logislot:
+      projectKey: logislot
+      displayName: "duosis-prod-1 Alertmanager"
+    fikir-sepeti:
+      projectKey: fikir-sepeti
+      displayName: "duosis-prod-1 Alertmanager"
+
 telemetry:
   connectors:
     duosis-prod-1:
