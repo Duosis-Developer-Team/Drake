@@ -144,6 +144,34 @@ def test_the_apiserver_stays_an_explicit_address() -> None:
     assert [p["port"] for p in rules[0]["ports"]] == [6443], "one port, listed once"
 
 
+def test_production_can_pull_its_private_image() -> None:
+    """A Secret is namespaced, so `drake-ghcr` in drake-prod does not reach here.
+
+    Without this the pod stops at ImagePullBackOff behind a kubelet event
+    that reads "failed to fetch anonymous token" — a 401 about a package
+    that exists and is simply private. The install itself reports only that
+    the rollout did not finish.
+    """
+    deployments = [d for d in render_prod() if d.get("kind") == "Deployment"]
+    assert len(deployments) == 1
+    pod = deployments[0]["spec"]["template"]["spec"]
+    assert pod["imagePullSecrets"] == [{"name": "drake-ghcr"}]
+
+
+def test_a_chart_with_no_pull_secret_omits_the_key_entirely() -> None:
+    """`imagePullSecrets: []` is a valid field with a meaningless value.
+
+    It would hide the difference between "no credential is needed" — which
+    is true of the smoke clusters, whose images are imported locally — and
+    "somebody forgot to name one".
+    """
+    result = _render(*_OFF_CLUSTER, "--set=networkPolicy.apiEndpointCIDR=203.0.113.10/32")
+    assert result.returncode == 0, result.stderr
+    docs = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+    pod = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]
+    assert "imagePullSecrets" not in pod
+
+
 def test_an_off_cluster_listener_can_still_be_named_by_cidr() -> None:
     """The k3d smokes run the listener on the host, where labels cannot reach it."""
     result = _render(*_OFF_CLUSTER, "--set=networkPolicy.apiEndpointCIDR=203.0.113.10/32")

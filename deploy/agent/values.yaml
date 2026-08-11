@@ -3,6 +3,17 @@
 # a real or shared cluster by the repository itself. Disposable test
 # clusters are the only sanctioned apply target during acceptance runs.
 
+# Names of EXISTING docker-registry Secrets in the agent's namespace. The
+# chart never creates one — it holds a registry credential, and a chart
+# that templates credentials is a chart that commits them somewhere.
+#
+# Empty is correct for smoke clusters with locally imported images. It is
+# NOT correct for the published packages: `ghcr.io/duosis-developer-team/*`
+# is private, an anonymous pull is answered with a 401 that reads as
+# "failed to fetch anonymous token", and the pod sits in ImagePullBackOff
+# until somebody reads the kubelet event.
+imagePullSecrets: []
+
 image:
   repository: ghcr.io/duosis-developer-team/drake-cluster-agent
   # Digest-pinned at deploy time by the operator; the empty default keeps
