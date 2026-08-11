@@ -249,6 +249,12 @@ IMMUTABLE_DEPENDENCY_FIELDS: frozenset[str] = frozenset(
     {"dependency_key", "dependency_class", "engine"}
 )
 
+#: What `owners[].role` means when the manifest omits it. Mirrors the
+#: server default on `project_owners.owner_role`, and normalising to it
+#: EARLY is what keeps an omitted role and an explicit `primary` from being
+#: treated as two different associations by anything downstream.
+DEFAULT_OWNER_ROLE = "primary"
+
 # Kubernetes kinds Drake can bind a service to. Mirrors the CHECK on
 # `service_workload_bindings.workload_kind`.
 BINDABLE_WORKLOAD_KINDS: frozenset[str] = frozenset({"Deployment", "StatefulSet", "DaemonSet"})
@@ -926,7 +932,11 @@ def build_plan(
     creating_project = existing_project is None
     for owner in spec.get("owners") or []:
         team = str(owner.get("team") or "")
-        role = str(owner.get("role") or "primary")
+        # Normalised ONCE, here, and every downstream use reads this
+        # variable: the item key, `detail`, the payload and the row apply
+        # writes. An omitted role and an explicit `primary` are the same
+        # association, and they must not be able to disagree about it.
+        role = str(owner.get("role") or DEFAULT_OWNER_ROLE)
         # Keyed like `uq_project_owner`: (project, team, role) IS the
         # identity of an association, so the same team in a different role
         # is a different row rather than a conflicting one.
@@ -943,7 +953,15 @@ def build_plan(
             PlanItem(
                 entity_kind=str(EntityKind.OWNER_TEAM),
                 action=action,
-                item_key=f"owner_team:{team}",
+                # The ROLE is part of the key, because it is part of the
+                # identity. Keyed on the team alone, the same team in two
+                # roles produced two plan items with one key — and
+                # `onboarding_plan_items` is `UNIQUE(plan_id, item_key)`
+                # written with `ON CONFLICT DO NOTHING`, so the second was
+                # silently dropped. The digest covered two items and the
+                # persisted plan held one: an approval that did not
+                # represent what it approved.
+                item_key=f"owner_team:{team}:{role}",
                 proposed_name=team,
                 # A team KEY is not a row id. `existing_entity_id` is a uuid
                 # column, and `project_owners` is keyed by the team string —

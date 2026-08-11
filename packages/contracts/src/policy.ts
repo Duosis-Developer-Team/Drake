@@ -114,3 +114,56 @@ export function checkPolicy(document: unknown): PolicyFinding[] {
   });
   return findings;
 }
+
+/** Mirrors the server default on `project_owners.owner_role`. */
+export const DEFAULT_OWNER_ROLE = "primary";
+
+/**
+ * Refuse two `owners` entries that mean the same ownership association.
+ *
+ * Identity is (team, role), and an omitted role means `primary`. So both of
+ * these declare `alpha-team` as primary twice:
+ *
+ *     - {team: alpha-team}                 - {team: alpha-team, role: primary}
+ *     - {team: alpha-team, role: primary}  - {team: alpha-team, role: primary}
+ *
+ * JSON Schema's `uniqueItems` catches only the second: the first is two
+ * structurally different objects with one meaning. Downstream that becomes
+ * two plan items with one identity, of which the catalog stores one and the
+ * plan digest counts two.
+ *
+ * The same team in DIFFERENT roles is not a duplicate — it is two real
+ * associations, and it stays allowed.
+ */
+export function checkOwnerConsistency(document: unknown): PolicyFinding[] {
+  if (typeof document !== "object" || document === null) return [];
+  const spec = (document as { spec?: unknown }).spec;
+  if (typeof spec !== "object" || spec === null) return [];
+  const owners = (spec as { owners?: unknown }).owners;
+  if (!Array.isArray(owners)) return [];
+
+  const findings: PolicyFinding[] = [];
+  const seen = new Set<string>();
+  owners.forEach((owner, index) => {
+    if (typeof owner !== "object" || owner === null) return;
+    const entry = owner as { team?: unknown; role?: unknown };
+    const team = typeof entry.team === "string" ? entry.team : "";
+    const role = typeof entry.role === "string" && entry.role ? entry.role : DEFAULT_OWNER_ROLE;
+    const key = `${team} ${role}`;
+    if (seen.has(key)) {
+      findings.push({
+        path: `spec.owners[${index}]`,
+        rule: "owner-duplicate",
+        // Names neither the team nor the role: findings are rendered and
+        // audited, and the position is enough to act on.
+        message:
+          "This entry declares an ownership association an earlier entry already " +
+          "declares. An omitted role means `primary`, so an omitted role and an " +
+          "explicit `primary` are the same association. The same team in a " +
+          "different role is allowed.",
+      });
+    }
+    seen.add(key);
+  });
+  return findings;
+}

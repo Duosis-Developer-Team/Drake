@@ -163,9 +163,103 @@ async def _owners(engine: AsyncEngine, project_key: str = PROJECT_KEY) -> list[t
 async def test_a_new_project_records_its_owner(engine: AsyncEngine, tmp_path: Path) -> None:
     items = await _run(engine, tmp_path / "first", ONE_OWNER, "own-new-project")
     assert items == [
-        {"key": "owner_team:alpha-team", "action": "no_change", "reason": "applied_with_parent"}
+        {
+            "key": "owner_team:alpha-team:primary",
+            "action": "no_change",
+            "reason": "applied_with_parent",
+        }
     ]
     assert await _owners(engine) == [("alpha-team", "primary")]
+
+
+# --- one team, two roles, one manifest -------------------------------------
+
+
+SAME_TEAM_TWO_ROLES = document(
+    "    - team: alpha-team\n      role: primary\n    - team: alpha-team\n      role: secondary\n"
+)
+
+
+async def test_one_team_in_two_roles_produces_two_persisted_plan_items(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Two associations, two reviewable items, two rows that survive.
+
+    The item key used to be `owner_team:{team}`, so these two collided.
+    `onboarding_plan_items` is `UNIQUE(plan_id, item_key)` written with
+    `ON CONFLICT DO NOTHING`, so the second was silently discarded — the
+    plan digest was computed over two items and the persisted plan held
+    one. The approval then covered a plan that no longer represented it.
+
+    Reading the items back FROM THE DATABASE is the whole point: an
+    in-memory assertion would have passed throughout.
+    """
+    items = await _run(engine, tmp_path / "first", SAME_TEAM_TWO_ROLES, "own-two-roles")
+    assert [item["key"] for item in items] == [
+        "owner_team:alpha-team:primary",
+        "owner_team:alpha-team:secondary",
+    ]
+    assert await _owners(engine) == [("alpha-team", "primary"), ("alpha-team", "secondary")]
+
+
+async def test_re_importing_one_team_in_two_roles_changes_neither(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    await _run(engine, tmp_path / "first", SAME_TEAM_TWO_ROLES, "own-two-roles-1")
+    items = await _run(engine, tmp_path / "second", SAME_TEAM_TWO_ROLES, "own-two-roles-2")
+
+    assert {item["action"] for item in items} == {"no_change"}
+    assert {item["reason"] for item in items} == {"owner_team_already_recorded"}
+    assert await _owners(engine) == [("alpha-team", "primary"), ("alpha-team", "secondary")]
+
+
+async def test_the_persisted_plan_verifies_against_the_digest_it_was_approved_under(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Integrity, checked exactly the way apply checks it.
+
+    `plan_digest` is computed from the IN-MEMORY plan and stored;
+    `verify_plan_integrity` recomputes it from the STORED items and refuses
+    on a mismatch. With a colliding item key the two disagreed by one item,
+    so this manifest was not merely mis-recorded — it could not be applied
+    at all, and the refusal named plan tampering rather than the duplicate
+    key that caused it.
+
+    Called directly rather than inferred from a successful apply, because
+    apply runs this check twice and a green apply would prove it only
+    incidentally.
+    """
+    _h, settings, client, session_id, analysis, actor = await _import(
+        engine, tmp_path, SAME_TEAM_TWO_ROLES
+    )
+    async with engine.connect() as connection:
+        plan_id, plan_digest = (
+            await connection.execute(
+                text("SELECT id, plan_digest FROM onboarding_plans WHERE session_id = :s"),
+                {"s": session_id},
+            )
+        ).one()
+        # Raises PlanIntegrityError if the stored items no longer hash to
+        # the digest the approval was taken over.
+        items = await service.verify_plan_integrity(connection, plan_id, str(plan_digest))
+
+    owner_keys = [i["item_key"] for i in items if i["entity_kind"] == "owner_team"]
+    assert owner_keys == [
+        "owner_team:alpha-team:primary",
+        "owner_team:alpha-team:secondary",
+    ], "both associations must survive persistence, or the digest cannot match"
+
+    # And the apply that re-runs this check still succeeds end to end.
+    result = await service.apply(
+        engine,
+        settings,
+        client,
+        session_id=session_id,
+        plan_version=analysis["plan_version"],
+        idempotency_key="own-digest-check",
+        actor_identity_id=actor,
+    )
+    assert result.outcome == "applied"
 
 
 # --- existing project, owner missing ---------------------------------------
@@ -185,10 +279,10 @@ async def test_an_owner_added_to_an_existing_project_is_planned_and_applied(
     items = await _run(engine, tmp_path / "second", TWO_OWNERS, "own-add-2")
     by_key = {item["key"]: item for item in items}
     # The one already recorded is genuinely nothing to do...
-    assert by_key["owner_team:alpha-team"]["action"] == "no_change"
-    assert by_key["owner_team:alpha-team"]["reason"] == "owner_team_already_recorded"
+    assert by_key["owner_team:alpha-team:primary"]["action"] == "no_change"
+    assert by_key["owner_team:alpha-team:primary"]["reason"] == "owner_team_already_recorded"
     # ...and the new one is a real add, said out loud.
-    assert by_key["owner_team:beta-team"]["action"] == "create"
+    assert by_key["owner_team:beta-team:secondary"]["action"] == "create"
 
     # And the plan is confirmed by the database, not by the plan.
     assert await _owners(engine) == [("alpha-team", "primary"), ("beta-team", "secondary")]
@@ -242,6 +336,116 @@ async def test_the_same_team_in_another_role_is_added_beside_the_existing_row(
 
     await _run(engine, tmp_path / "second", ONE_OWNER, "own-role-2")
     assert await _owners(engine) == [("alpha-team", "primary"), ("alpha-team", "secondary")]
+
+
+# --- the association is satisfied between approval and apply ---------------
+
+
+async def test_an_owner_added_after_approval_applies_as_a_no_op(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """The window nothing holds still.
+
+    The plan is built during analyze and executed after approval. In
+    between, another legitimate operation can record the same
+    (project, team, role). `ON CONFLICT DO NOTHING` makes the apply a safe
+    no-op — the approved intent is satisfied either way, so it must not
+    fail and must not duplicate — but the receipt must not claim a create
+    that never happened.
+    """
+    await _run(engine, tmp_path / "first", ONE_OWNER, "own-race-first")
+
+    # Plan and approve an import that ADDS beta-team...
+    second = tmp_path / "second"
+    second.mkdir()
+    _h, settings, client, session_id, analysis, actor = await _import(engine, second, TWO_OWNERS)
+    async with engine.connect() as connection:
+        planned = (
+            await connection.execute(
+                text(
+                    "SELECT action FROM onboarding_plan_items i "
+                    "JOIN onboarding_plans p ON p.id = i.plan_id "
+                    "WHERE p.session_id = :s AND i.item_key = 'owner_team:beta-team:secondary'"
+                ),
+                {"s": session_id},
+            )
+        ).scalar_one()
+    assert planned == "create", "precondition: the plan must intend a real add"
+
+    # ...then somebody else records exactly that association first.
+    async with engine.begin() as connection:
+        project_id = (
+            await connection.execute(
+                text("SELECT id FROM projects WHERE project_key = :k"), {"k": PROJECT_KEY}
+            )
+        ).scalar_one()
+        inserted = await CatalogService(connection).add_project_owner(
+            project_id, "beta-team", "secondary"
+        )
+    assert inserted is True
+
+    result = await service.apply(
+        engine,
+        settings,
+        client,
+        session_id=session_id,
+        plan_version=analysis["plan_version"],
+        idempotency_key="own-race-apply",
+        actor_identity_id=actor,
+    )
+
+    # Succeeds, because the approved intent is satisfied.
+    assert result.outcome == "applied"
+    # No duplicate, and the existing association is untouched.
+    assert await _owners(engine) == [("alpha-team", "primary"), ("beta-team", "secondary")]
+
+    # And the receipt reports what committed, not what was intended. Read
+    # from the stored row: a retry replays this rather than recounting.
+    async with engine.connect() as connection:
+        created, unchanged = (
+            await connection.execute(
+                text(
+                    "SELECT created_entities, unchanged_entities FROM onboarding_applies "
+                    "WHERE idempotency_key = :k"
+                ),
+                {"k": "own-race-apply"},
+            )
+        ).one()
+    assert created == 0, "the receipt claims a create this apply did not perform"
+    assert unchanged >= 1, "the no-op was not counted as unchanged"
+
+
+async def test_the_receipt_and_the_response_agree(engine: AsyncEngine, tmp_path: Path) -> None:
+    """Whatever the counters say, the stored row and the response say it
+    together — otherwise an audit and a UI disagree about the same apply."""
+    await _run(engine, tmp_path / "first", ONE_OWNER, "own-receipt-1")
+
+    second = tmp_path / "second"
+    second.mkdir()
+    _h, settings, client, session_id, analysis, actor = await _import(engine, second, TWO_OWNERS)
+    result = await service.apply(
+        engine,
+        settings,
+        client,
+        session_id=session_id,
+        plan_version=analysis["plan_version"],
+        idempotency_key="own-receipt-2",
+        actor_identity_id=actor,
+    )
+    async with engine.connect() as connection:
+        created, unchanged = (
+            await connection.execute(
+                text(
+                    "SELECT created_entities, unchanged_entities FROM onboarding_applies "
+                    "WHERE idempotency_key = :k"
+                ),
+                {"k": "own-receipt-2"},
+            )
+        ).one()
+    assert created == result.created
+    assert unchanged == result.unchanged
+    # The owner genuinely was created this time, so it is counted.
+    assert created >= 1
 
 
 # --- isolation -------------------------------------------------------------

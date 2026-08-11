@@ -51,6 +51,10 @@ EXPECTED_RULES = {
     "insecure-config.yaml": "plaintext-endpoint",
     "invalid-enum.yaml": "schema",
     "missing-required.yaml": "schema",
+    # Not `schema`: JSON Schema cannot express it. An omitted role and an
+    # explicit `primary` are structurally different and semantically one
+    # association, so `uniqueItems` sees two unique items.
+    "owner-duplicate-role.yaml": "owner-duplicate",
     "unknown-field.yaml": "schema",
     "wrong-api-version.yaml": "schema",
 }
@@ -182,3 +186,68 @@ def test_a_mismatched_repository_identity_is_reported(owner: str, name: str, bra
 
 def test_identity_comparison_is_case_insensitive_on_owner_and_name() -> None:
     assert manifest.check_repository_identity(_alpha(), "Example-Org", "ALPHA", "dev") == []
+
+
+# --- ownership consistency -------------------------------------------------
+# A structural rule rather than a pattern rule, so it sits outside the
+# `_VALUE_RULES`/`_KEY_RULES` catalogue above. Parity is held by the shared
+# fixture corpus: both validators must reject `owner-duplicate-role.yaml`
+# with rule `owner-duplicate`.
+
+
+def _owners(*entries: dict) -> dict:
+    return {"spec": {"owners": list(entries)}}
+
+
+def test_the_same_team_in_two_roles_is_two_associations() -> None:
+    findings = manifest.check_owner_consistency(
+        _owners(
+            {"team": "alpha-team", "role": "primary"}, {"team": "alpha-team", "role": "secondary"}
+        )
+    )
+    assert findings == []
+
+
+def test_an_omitted_role_collides_with_an_explicit_primary() -> None:
+    """The case JSON Schema `uniqueItems` cannot see: two structurally
+    different objects meaning one association."""
+    findings = manifest.check_owner_consistency(
+        _owners({"team": "alpha-team"}, {"team": "alpha-team", "role": "primary"})
+    )
+    assert [finding.rule for finding in findings] == ["owner-duplicate"]
+    assert findings[0].path == "spec.owners[1]"
+
+
+def test_an_exact_duplicate_owner_is_refused() -> None:
+    findings = manifest.check_owner_consistency(
+        _owners(
+            {"team": "alpha-team", "role": "primary"}, {"team": "alpha-team", "role": "primary"}
+        )
+    )
+    assert [finding.rule for finding in findings] == ["owner-duplicate"]
+
+
+def test_two_omitted_roles_for_one_team_are_refused() -> None:
+    findings = manifest.check_owner_consistency(_owners({"team": "a"}, {"team": "a"}))
+    assert [finding.rule for finding in findings] == ["owner-duplicate"]
+
+
+def test_different_teams_do_not_collide() -> None:
+    findings = manifest.check_owner_consistency(_owners({"team": "a"}, {"team": "b"}))
+    assert findings == []
+
+
+def test_the_owner_finding_never_echoes_the_team_name() -> None:
+    findings = manifest.check_owner_consistency(
+        _owners({"team": "alpha-team"}, {"team": "alpha-team"})
+    )
+    assert "alpha-team" not in findings[0].message
+
+
+def test_owner_consistency_tolerates_a_malformed_document() -> None:
+    """Schema errors are reported by the schema. This must not raise on the
+    way there, because both run and the caller sees every reason at once."""
+    assert manifest.check_owner_consistency(None) == []
+    assert manifest.check_owner_consistency({"spec": None}) == []
+    assert manifest.check_owner_consistency({"spec": {"owners": "not-a-list"}}) == []
+    assert manifest.check_owner_consistency({"spec": {"owners": ["not-an-object"]}}) == []

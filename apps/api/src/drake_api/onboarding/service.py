@@ -66,6 +66,7 @@ from drake_api.onboarding.model import (
     ACTIONABLE_ACTIONS,
     ANALYZER_VERSION,
     BINDABLE_WORKLOAD_KINDS,
+    DEFAULT_OWNER_ROLE,
     MUTABLE_ENVIRONMENT_FIELDS,
     MUTABLE_PROJECT_FIELDS,
     MUTABLE_SERVICE_FIELDS,
@@ -2351,15 +2352,26 @@ async def _apply_owner_team_create(context: _ApplyContext, item: dict[str, Any])
 
     Additive only. Nothing here removes an owner the manifest omits or
     reassigns one, and an ownership row grants no permission.
+
+    The insert result is USED rather than assumed. The plan is built during
+    analyze and executed after approval, and nothing holds the association
+    still in between: another legitimate operation can add the same
+    (project, team, role) first. `ON CONFLICT DO NOTHING` makes that a safe
+    no-op — the approved intent is satisfied either way, so this does not
+    fail — but counting it as a create would put a mutation in the receipt
+    and the audit trail that this apply never performed.
     """
     payload = item["payload"]
     assert context.project_id is not None
-    await context.catalog.add_project_owner(
+    inserted = await context.catalog.add_project_owner(
         context.project_id,
         str(payload["team"]),
-        str(payload.get("role") or "primary"),
+        str(payload.get("role") or DEFAULT_OWNER_ROLE),
     )
-    context.counters.created += 1
+    if inserted:
+        context.counters.created += 1
+    else:
+        context.counters.unchanged += 1
 
 
 async def _apply_dependency_create(context: _ApplyContext, item: dict[str, Any]) -> None:

@@ -306,7 +306,7 @@ def test_re_planning_against_the_applied_catalog_creates_nothing_twice() -> None
     actions = {item.item_key: item.action for item in plan(applied).items}
     assert actions["project:fikir-sepeti"] != "create"
     assert actions["environment:prod"] != "create"
-    assert actions["owner_team:fikir-sepeti"] != "create"
+    assert actions["owner_team:fikir-sepeti:primary"] != "create"
     assert actions["service:fikir-sepeti-web"] != "create"
     assert actions["dependency:fikir-sepeti-db"] != "create"
 
