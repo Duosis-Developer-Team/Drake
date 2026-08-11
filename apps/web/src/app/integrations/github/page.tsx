@@ -52,7 +52,7 @@ export default function GitHubIntegrationPage() {
   }>("/v1/integrations/github/repositories");
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="mx-auto w-full max-w-[110rem] space-y-5 px-4 py-5 lg:px-6">
       <div>
         <p className="text-xs text-ink-muted">
           <Link href="/integrations" className="hover:text-ink">
@@ -60,10 +60,10 @@ export default function GitHubIntegrationPage() {
           </Link>{" "}
           / GitHub
         </p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+        <h1 className="mt-1 text-title font-semibold text-ink">
           GitHub App integration
         </h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Read-only repository governance. Drake evaluates branch protection, required
           checks and deployment gates — it never changes a repository setting.
         </p>

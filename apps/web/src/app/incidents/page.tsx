@@ -13,6 +13,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import { IncidentStateBadge, ReasonLabel } from "@/components/incidents/primitives";
@@ -186,7 +187,7 @@ function IncidentTable() {
           <div className="overflow-x-auto">
             <table className="w-full text-left" data-testid="incident-table">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                <tr className="text-caption text-ink-secondary">
                   <th className="pb-2 pr-3 font-medium">Incident</th>
                   <th className="pb-2 pr-3 font-medium">Severity</th>
                   <th className="pb-2 pr-3 font-medium">State</th>
@@ -216,10 +217,11 @@ function IncidentTable() {
 
 export default function IncidentsPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Incidents</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Incidents</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Opened by Drake after two consecutive trustworthy critical evaluations, and closed
           automatically when the service reports healthy twice. A datasource outage never
           opens one.
@@ -228,6 +230,7 @@ export default function IncidentsPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <IncidentTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

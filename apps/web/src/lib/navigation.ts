@@ -1,9 +1,21 @@
 /**
- * Primary navigation, mirroring the product information architecture.
- * Routes beyond the Command Center are placeholders until their sprints land.
+ * Primary navigation.
+ *
+ * Grouped by what an operator is doing, not by which sprint shipped the
+ * screen: Overview is where you start, Observe is where you look at what the
+ * platform is doing, Operate is where you act on it, and Manage is
+ * configuration and governance.
+ *
+ * Every entry points at a route that exists. The "coming in a later sprint"
+ * placeholders that used to sit here — Tenants, Catalog & Templates — are
+ * gone: a permanently disabled menu item teaches people the nav is unreliable
+ * and does nothing else.
+ *
+ * `anyPermission` shapes the menu; it is not a security boundary. The API
+ * remains the authority, and hiding a link never stands in for an
+ * authorization check.
  */
 import {
-  Activity,
   Bell,
   Boxes,
   FolderKanban,
@@ -17,7 +29,6 @@ import {
   Shield,
   ShieldCheck,
   Siren,
-  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,101 +36,148 @@ export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
-  /** True when the destination screen exists in the current sprint. */
-  enabled: boolean;
-  /**
-   * Any of these permissions unlocks the entry. UI gating is a convenience —
-   * the API remains the authorization authority.
-   */
+  /** Any one of these unlocks the entry. Absent means always visible. */
   anyPermission?: string[];
+  /** Longest-prefix matching for detail routes underneath this entry. */
+  matchPrefix?: string;
 }
 
-export const NAVIGATION: NavItem[] = [
-  { label: "Command Center", href: "/", icon: LayoutDashboard, enabled: true },
+export interface NavGroup {
+  key: string;
+  label: string;
+  items: NavItem[];
+}
+
+export const NAVIGATION: NavGroup[] = [
   {
-    label: "Projects",
-    href: "/projects",
-    icon: FolderKanban,
-    enabled: true,
-    anyPermission: ["project.view", "environment.view"],
+    key: "overview",
+    label: "Overview",
+    items: [{ label: "Command Center", href: "/", icon: LayoutDashboard }],
   },
   {
-    label: "Clusters",
-    href: "/clusters",
-    icon: Boxes,
-    enabled: true,
-    anyPermission: ["cluster.view"],
+    key: "observe",
+    label: "Observe",
+    items: [
+      {
+        label: "Projects",
+        href: "/projects",
+        icon: FolderKanban,
+        matchPrefix: "/projects",
+        anyPermission: ["project.view", "environment.view"],
+      },
+      {
+        label: "Service health",
+        href: "/service-health",
+        icon: HeartPulse,
+        matchPrefix: "/service-health",
+        anyPermission: ["environment.view"],
+      },
+      {
+        label: "Clusters",
+        href: "/clusters",
+        icon: Boxes,
+        matchPrefix: "/clusters",
+        anyPermission: ["cluster.view"],
+      },
+      {
+        label: "Objectives",
+        href: "/slo",
+        icon: Gauge,
+        matchPrefix: "/slo",
+        anyPermission: ["slo.view"],
+      },
+    ],
   },
   {
-    label: "Service Health",
-    href: "/service-health",
-    icon: HeartPulse,
-    enabled: true,
-    anyPermission: ["environment.view"],
-  },
-  { label: "Tenants", href: "/tenants", icon: Users, enabled: false },
-  {
-    label: "Alerts & Incidents",
-    href: "/incidents",
-    icon: Bell,
-    enabled: true,
-    anyPermission: ["environment.view"],
-  },
-  {
-    label: "Alerts",
-    href: "/alerts",
-    icon: Siren,
-    enabled: true,
-    anyPermission: ["alert.view"],
-  },
-  {
-    label: "Service Objectives",
-    href: "/slo",
-    icon: Gauge,
-    enabled: true,
-    anyPermission: ["slo.view"],
-  },
-  {
-    label: "Notification Routing",
-    href: "/notification-policies",
-    icon: Send,
-    enabled: true,
-    anyPermission: ["notification.view", "notification.manage"],
+    key: "operate",
+    label: "Operate",
+    items: [
+      {
+        label: "Incidents",
+        href: "/incidents",
+        icon: Siren,
+        matchPrefix: "/incidents",
+        anyPermission: ["environment.view"],
+      },
+      {
+        label: "Alerts",
+        href: "/alerts",
+        icon: Bell,
+        matchPrefix: "/alerts",
+        anyPermission: ["alert.view"],
+      },
+      {
+        label: "Deployments",
+        href: "/deployments",
+        icon: Rocket,
+        matchPrefix: "/deployments",
+        anyPermission: ["environment.view", "cluster.view"],
+      },
+      {
+        label: "Protection",
+        href: "/protection",
+        icon: ShieldCheck,
+        matchPrefix: "/protection",
+        anyPermission: ["protection.view"],
+      },
+    ],
   },
   {
-    label: "Protection",
-    href: "/protection",
-    icon: ShieldCheck,
-    enabled: true,
-    anyPermission: ["protection.view"],
-  },
-  {
-    label: "Deployments",
-    href: "/deployments",
-    icon: Rocket,
-    enabled: true,
-    anyPermission: ["environment.view", "cluster.view"],
-  },
-  {
-    label: "Onboard Project",
-    href: "/onboarding",
-    icon: PackagePlus,
-    enabled: true,
-    anyPermission: ["onboarding.view", "onboarding.manage"],
-  },
-  {
-    label: "Integrations",
-    href: "/integrations",
-    icon: Puzzle,
-    enabled: true,
-    anyPermission: ["project.view", "environment.view", "cluster.view"],
-  },
-  { label: "Catalog & Templates", href: "/catalog", icon: Activity, enabled: false },
-  {
-    label: "Audit & Administration",
-    href: "/admin",
-    icon: Shield,
-    enabled: true,
-    anyPermission: ["rbac.manage", "audit.view"],
+    key: "manage",
+    label: "Manage",
+    items: [
+      {
+        label: "Onboard project",
+        href: "/onboarding",
+        icon: PackagePlus,
+        matchPrefix: "/onboarding",
+        anyPermission: ["onboarding.view", "onboarding.manage"],
+      },
+      {
+        label: "Integrations",
+        href: "/integrations",
+        icon: Puzzle,
+        matchPrefix: "/integrations",
+        anyPermission: ["project.view", "environment.view", "cluster.view"],
+      },
+      {
+        label: "Notification routing",
+        href: "/notification-policies",
+        icon: Send,
+        matchPrefix: "/notification-",
+        anyPermission: ["notification.view", "notification.manage"],
+      },
+      {
+        label: "Audit & access",
+        href: "/admin",
+        icon: Shield,
+        matchPrefix: "/admin",
+        anyPermission: ["rbac.manage", "audit.view"],
+      },
+    ],
   },
 ];
+
+export const NAV_ITEMS: NavItem[] = NAVIGATION.flatMap((group) => group.items);
+
+/**
+ * Which entry a path belongs to.
+ *
+ * Longest prefix wins so `/projects/p1/environments/e1` highlights Projects,
+ * while `/` only ever matches Command Center exactly — a prefix match on "/"
+ * would light up every entry at once.
+ */
+export function activeNavHref(pathname: string): string | null {
+  let best: { href: string; length: number } | null = null;
+  for (const item of NAV_ITEMS) {
+    if (item.href === "/") {
+      if (pathname === "/") return "/";
+      continue;
+    }
+    const prefix = item.matchPrefix ?? item.href;
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`) || pathname.startsWith(prefix)) {
+      if (!best || prefix.length > best.length) best = { href: item.href, length: prefix.length };
+    }
+  }
+  return best?.href ?? null;
+}

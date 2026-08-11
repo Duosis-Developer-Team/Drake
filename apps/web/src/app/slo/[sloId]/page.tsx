@@ -22,6 +22,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { BurnTable, SloBadge } from "@/components/alerting/primitives";
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
@@ -45,7 +46,8 @@ export default function SloDetailPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={slo} retry={retry}>
         {(data) => (
           <>
@@ -219,6 +221,7 @@ export default function SloDetailPage() {
               ) : history.data.evaluations.length === 0 ? (
                 <DataState kind="empty" title="No evaluations yet" />
               ) : (
+                <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
                 <table className="w-full text-left text-xs" data-testid="slo-history">
                   <thead className="text-ink-muted">
                     <tr>
@@ -252,11 +255,13 @@ export default function SloDetailPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </Card>
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

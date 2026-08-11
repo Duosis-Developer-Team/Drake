@@ -1,234 +1,375 @@
 "use client";
 
+/**
+ * Project detail.
+ *
+ * Order follows what an operator wants: what is this and is it well
+ * (identity + capabilities), then the live signals, then the standing
+ * inventory of environments and dependencies.
+ *
+ * Two distinctions this page exists to keep:
+ *
+ *   Managed dependencies are not workloads. A provider-run database has no
+ *   Deployment, no replicas and nothing to restart, and listing it among
+ *   workloads invites somebody to ask why it will not roll. Its
+ *   `workload_applicability: not_applicable` renders as "not applicable" —
+ *   which is a different answer from "unknown".
+ *
+ *   Verification is not health. `repository_intent` means somebody declared a
+ *   dependency in source; it is evidence about a repository, not about a
+ *   running system, and it never renders in the healthy colour.
+ */
+
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense } from "react";
 
-import {
-  CriticalityBadge,
-  LifecycleBadge,
-  LoadGate,
-  MetaRow,
-  OperationalGrid,
-  provenanceProps,
-  useApi,
-} from "@/components/catalog/primitives";
-import { Provenance } from "@/components/provenance/Provenance";
-import { DataState } from "@/components/state/DataState";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { ProjectMetricsSection } from "@/components/telemetry/ProjectMetricsSection";
-import { Card } from "@/components/ui/Card";
-import type { Environment, Project } from "@/lib/catalog";
+import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { InlineCode, RelativeTime } from "@/components/ui/identifiers";
+import {
+  DeniedState,
+  EmptyState,
+  ErrorState,
+  LoadingSkeleton,
+  NotFoundState,
+} from "@/components/ui/states";
+import type { Environment, Project, ProjectDependency } from "@/lib/catalog";
+import { useCrumbLabel } from "@/lib/crumbs";
+import { humanize, toneForHealth, type StatusTone } from "@/lib/design/status";
+import { useResource } from "@/lib/useResource";
 
-const OPERATIONAL_LABELS = {
+const CAPABILITY_LABELS: Record<string, string> = {
   telemetry: "Telemetry",
   inventory: "Cluster inventory",
   deployment: "Deployments",
   protection: "Backup & restore",
 };
 
+const CRITICALITY_TONE: Record<string, StatusTone> = {
+  critical: "critical",
+  high: "warning",
+  medium: "info",
+  low: "neutral",
+};
+
+/**
+ * How a dependency's evidence was obtained.
+ *
+ * Deliberately never a health tone: `provider_observed` is the strongest of
+ * the three and still only means "the provider told us something", which is
+ * not the same claim as "this is working".
+ */
+const VERIFICATION_LABELS: Record<string, string> = {
+  repository_intent: "declared in repository",
+  owner_confirmed: "confirmed by owner",
+  provider_observed: "observed from provider",
+};
+
+function MetaRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border py-2 last:border-b-0">
+      <dt className="text-caption text-ink-muted">{label}</dt>
+      <dd className="text-body text-ink">{children}</dd>
+    </div>
+  );
+}
+
+function DependencyRow({ dependency }: { dependency: ProjectDependency }) {
+  const notApplicable = dependency.workload_applicability === "not_applicable";
+  return (
+    <li className="px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-body font-medium text-ink">{dependency.display_name}</span>
+        <span className="flex items-center gap-1.5">
+          {dependency.health ? (
+            <StatusBadge
+              status={toneForHealth(dependency.health.status)}
+              label={dependency.health.status}
+              size="compact"
+            />
+          ) : null}
+          {dependency.health ? (
+            <StatusBadge
+              status={
+                dependency.health.freshness === "fresh"
+                  ? "neutral"
+                  : dependency.health.freshness === "stale"
+                    ? "stale"
+                    : "unknown"
+              }
+              label={dependency.health.freshness}
+              size="compact"
+            />
+          ) : null}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">
+        <span>
+          <InlineCode>{dependency.provider}</InlineCode>{" "}
+          <InlineCode>{dependency.dependency_class}</InlineCode>
+        </span>
+        <span>
+          <InlineCode>{dependency.verification}</InlineCode>{" "}
+          {VERIFICATION_LABELS[dependency.verification] ?? ""}
+        </span>
+        <span className={notApplicable ? "" : "text-ink-secondary"}>
+          Workload: {notApplicable ? "Not applicable" : dependency.workload_applicability}
+        </span>
+        {dependency.health?.last_observed_at ? (
+          <span>
+            observed <RelativeTime value={dependency.health.last_observed_at} />
+          </span>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
 export default function ProjectOverviewPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [project, retryProject] = useApi<Project>(`/v1/projects/${projectId}`);
-  const [environments, retryEnvironments] = useApi<{ environments: Environment[]; next_cursor: string | null }>(
+  const project = useResource<Project>(`/v1/projects/${projectId}`);
+  const environments = useResource<{ environments: Environment[]; next_cursor: string | null }>(
     `/v1/projects/${projectId}/environments`,
   );
+  useCrumbLabel(projectId, project.data?.project_key);
+
+  if (project.loading && !project.data) {
+    return (
+      <PageFrame width="wide">
+        <LoadingSkeleton rows={4} label="Loading project" />
+      </PageFrame>
+    );
+  }
+  if (project.notFound) {
+    return (
+      <PageFrame width="wide">
+        <NotFoundState description="This project does not exist in your authorized scope." />
+      </PageFrame>
+    );
+  }
+  if (project.denied) {
+    return (
+      <PageFrame width="wide">
+        <DeniedState />
+      </PageFrame>
+    );
+  }
+  if (!project.data) {
+    return (
+      <PageFrame width="wide">
+        <ErrorState
+          description={project.error ?? undefined}
+          correlationId={project.correlationId}
+          onRetry={project.reload}
+        />
+      </PageFrame>
+    );
+  }
+
+  const data = project.data;
+  const managed = data.dependencies?.filter((d) => d.dependency_class !== "in_cluster") ?? [];
+  const inCluster = data.dependencies?.filter((d) => d.dependency_class === "in_cluster") ?? [];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <LoadGate value={project} retry={retryProject}>
-        {(data) => (
+    <PageFrame width="wide">
+      <PageHeader
+        title={data.display_name}
+        status={
           <>
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-xs text-ink-muted">
-                  <Link href="/projects" className="hover:text-ink">
-                    Projects
-                  </Link>{" "}
-                  / <span className="font-mono">{data.project_key}</span>
-                </p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
-                  {data.display_name}
-                </h1>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <CriticalityBadge criticality={data.criticality} />
-                <LifecycleBadge lifecycle={data.lifecycle} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card
-                title="Project metadata"
-                footer={<Provenance {...provenanceProps(data.source, data.as_of)} />}
-              >
-                <dl className="divide-y divide-border">
-                  <MetaRow label="Repository">
-                    <span className="font-mono text-xs">
-                      {data.repository.provider}:{data.repository.owner}/
-                      {data.repository.name}
-                      {data.repository.default_branch
-                        ? ` @ ${data.repository.default_branch}`
-                        : ""}
-                    </span>
-                  </MetaRow>
-                  <MetaRow label="Tenant model">
-                    <span className="font-mono text-xs">{data.tenant_model}</span>
-                  </MetaRow>
-                  <MetaRow label="Owners">
-                    {data.owners && data.owners.length > 0
-                      ? data.owners
-                          .map((owner) => `${owner.team} (${owner.role})`)
-                          .join(", ")
-                      : "—"}
-                  </MetaRow>
-                  <MetaRow label="Catalog version">
-                    <span className="font-mono text-xs">v{data.version}</span>
-                  </MetaRow>
-                </dl>
-              </Card>
-
-              {data.dependencies?.some((d) => d.dependency_class !== "in_cluster") ? (
-                <Card title="Managed dependencies">
-                  {/* Deliberately its OWN section, not the workload list. A
-                      provider-managed platform has no Deployment, no replicas
-                      and nothing to restart, and putting it among workloads
-                      invites somebody to ask why it will not restart. */}
-                  <ul className="divide-y divide-border" data-testid="dependency-list">
-                    {data.dependencies
-                      .filter((d) => d.dependency_class !== "in_cluster")
-                      .map((dependency) => (
-                      <li key={dependency.id} className="px-1 py-2.5">
-                        <span className="block text-sm font-medium text-ink">
-                          {dependency.display_name}
-                        </span>
-                        <dl className="mt-1">
-                          <MetaRow label="Class">
-                            <span className="font-mono text-xs">
-                              {dependency.dependency_class}
-                            </span>
-                          </MetaRow>
-                          <MetaRow label="Provider">
-                            <span className="font-mono text-xs">{dependency.provider}</span>
-                          </MetaRow>
-                          <MetaRow label="Verification">
-                            {/* Never styled as a verified/healthy state:
-                                repository intent is evidence about source
-                                code, not about a running system. */}
-                            <span className="font-mono text-xs">
-                              {dependency.verification}
-                            </span>
-                          </MetaRow>
-                          <MetaRow label="Workload">
-                            <span className="text-xs italic text-ink-muted">
-                              {dependency.workload_applicability === "not_applicable"
-                                ? "Not applicable"
-                                : dependency.workload_applicability}
-                            </span>
-                          </MetaRow>
-                          <MetaRow label="Health">
-                            <span className="font-mono text-xs">
-                              {dependency.health?.status ?? "unknown"}
-                            </span>
-                          </MetaRow>
-                          <MetaRow label="Freshness">
-                            <span className="font-mono text-xs">
-                              {dependency.health?.freshness ?? "unavailable"}
-                            </span>
-                          </MetaRow>
-                        </dl>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              ) : null}
-
-              {data.dependencies?.some((d) => d.dependency_class === "in_cluster") ? (
-                <Card title="In-cluster datastores">
-                  {/* Drake runs these. They keep workload semantics and are
-                      deliberately NOT listed as managed dependencies — the
-                      first version put every dependency under one heading and
-                      told an in-cluster datastore its workload was "not
-                      applicable", which is false. */}
-                  <ul className="divide-y divide-border" data-testid="in-cluster-dependency-list">
-                    {data.dependencies
-                      .filter((d) => d.dependency_class === "in_cluster")
-                      .map((dependency) => (
-                        <li key={dependency.id} className="px-1 py-2.5">
-                          <span className="block text-sm font-medium text-ink">
-                            {dependency.display_name}
-                          </span>
-                          <dl className="mt-1">
-                            <MetaRow label="Engine">
-                              <span className="font-mono text-xs">{dependency.engine}</span>
-                            </MetaRow>
-                            <MetaRow label="Scope">
-                              <span className="font-mono text-xs">{dependency.scope}</span>
-                            </MetaRow>
-                          </dl>
-                        </li>
-                      ))}
-                  </ul>
-                </Card>
-              ) : null}
-
-              <Card title="Environments">
-                <LoadGate value={environments} retry={retryEnvironments}>
-                  {(body) =>
-                    body.environments.length === 0 ? (
-                      <DataState
-                        kind="empty"
-                        title="No environments in your scope"
-                      />
-                    ) : (
-                      <ul className="divide-y divide-border" data-testid="environment-list">
-                        {body.environments.map((environment) => (
-                          <li key={environment.id}>
-                            <Link
-                              href={`/projects/${projectId}/environments/${environment.id}`}
-                              className="flex items-center justify-between gap-3 px-1 py-2.5 hover:bg-surface-sunken"
-                            >
-                              <span>
-                                <span className="block text-sm font-medium text-ink">
-                                  {environment.environment_key}
-                                </span>
-                                <span className="block text-xs text-ink-muted">
-                                  {environment.runtime}
-                                  {environment.cluster
-                                    ? ` · ${environment.cluster.ref}/${environment.namespace}`
-                                    : ""}
-                                </span>
-                              </span>
-                              <CriticalityBadge criticality={environment.criticality} />
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    )
-                  }
-                </LoadGate>
-              </Card>
-            </div>
-
-            <LoadGate value={environments} retry={retryEnvironments}>
-              {(body) => (
-                <Suspense fallback={null}>
-                  <ProjectMetricsSection environments={body.environments} />
-                </Suspense>
-              )}
-            </LoadGate>
-
-            <section aria-label="Operational capabilities">
-              <h2 className="mb-3 text-sm font-semibold text-ink">
-                Operational capabilities
-              </h2>
-              <OperationalGrid
-                states={data.operational ?? {}}
-                labels={OPERATIONAL_LABELS}
-              />
-            </section>
+            <StatusBadge
+              status={CRITICALITY_TONE[data.criticality] ?? "neutral"}
+              label={`${humanize(data.criticality)} criticality`}
+            />
+            <StatusBadge
+              status={data.lifecycle === "active" ? "success" : "neutral"}
+              label={humanize(data.lifecycle)}
+            />
           </>
-        )}
-      </LoadGate>
-    </div>
+        }
+        meta={
+          <>
+            <span className="font-mono">{data.project_key}</span>
+            <span>
+              {/* Provenance: present on every project, quiet by design. It is
+                  how you verify a project is what it claims, not a headline. */}
+              <InlineCode>
+                {`${data.repository.provider}:${data.repository.owner}/${data.repository.name}${
+                  data.repository.default_branch ? ` @ ${data.repository.default_branch}` : ""
+                }`}
+              </InlineCode>
+            </span>
+            <span>
+              {data.counts.environments} environments · {data.counts.services} services
+            </span>
+            <span>
+              catalog record accepted <RelativeTime value={data.source.accepted_at} />
+            </span>
+          </>
+        }
+      />
+
+      <Panel data-testid="operational-grid" className="mb-5">
+        <PanelHeader
+          title="Capabilities"
+          description="What Drake can currently observe for this project. A capability that is not configured is an absence, not a fault."
+          level={2}
+        />
+        <ul className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {Object.entries(CAPABILITY_LABELS).map(([key, label]) => {
+            const state = data.operational?.[key] ?? "unknown";
+            return (
+              <li
+                key={key}
+                className="flex flex-col gap-1.5 rounded-control border border-border px-3 py-2"
+              >
+                <span className="text-caption text-ink-secondary">{label}</span>
+                <StatusBadge
+                  status={toneForHealth(state === "ok" ? "healthy" : state)}
+                  label={humanize(state)}
+                  size="compact"
+                />
+              </li>
+            );
+          })}
+        </ul>
+      </Panel>
+
+      <Suspense fallback={<LoadingSkeleton variant="chart" label="Loading metrics" />}>
+        <ProjectMetricsSection environments={environments.data?.environments ?? []} />
+      </Suspense>
+
+      <div className="mt-6">
+        <SectionHeader
+          title="Composition"
+          description="The environments Drake runs for this project, and the dependencies it does not."
+        />
+        <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Panel flush>
+            <PanelHeader flush title="Environments" level={3} />
+            {environments.loading && !environments.data ? (
+              <div className="px-4 py-3">
+                <LoadingSkeleton variant="table" rows={3} />
+              </div>
+            ) : environments.denied ? (
+              <div className="px-4 py-2">
+                <DeniedState compact />
+              </div>
+            ) : !environments.data ? (
+              <div className="px-4 py-2">
+                <ErrorState
+                  compact
+                  description={environments.error ?? undefined}
+                  onRetry={environments.reload}
+                />
+              </div>
+            ) : environments.data.environments.length === 0 ? (
+              <div className="px-4 py-2">
+                <EmptyState compact title="No environments in your scope" />
+              </div>
+            ) : (
+              <ul className="divide-y divide-border" data-testid="environment-list">
+                {environments.data.environments.map((environment) => (
+                  <li key={environment.id}>
+                    <Link
+                      href={`/projects/${projectId}/environments/${environment.id}`}
+                      className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-surface-hover"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-body font-medium text-ink">
+                          {environment.environment_key}
+                        </span>
+                        <span className="block truncate font-mono text-micro text-ink-muted">
+                          {environment.runtime}
+                          {environment.cluster
+                            ? ` · ${environment.cluster.ref}/${environment.namespace}`
+                            : environment.hosting_provider
+                              ? ` · ${environment.hosting_provider}`
+                              : ""}
+                        </span>
+                      </span>
+                      <StatusBadge
+                        status={CRITICALITY_TONE[environment.criticality] ?? "neutral"}
+                        label={humanize(environment.criticality)}
+                        size="compact"
+                      />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <div className="flex flex-col gap-4">
+            {managed.length > 0 ? (
+              <Panel flush>
+                <PanelHeader
+                  flush
+                  title="Managed dependencies"
+                  description="Run by a provider, not by Drake, so there is no in-cluster workload behind them."
+                  level={3}
+                />
+                <ul className="divide-y divide-border" data-testid="dependency-list">
+                  {managed.map((dependency) => (
+                    <DependencyRow key={dependency.id} dependency={dependency} />
+                  ))}
+                </ul>
+              </Panel>
+            ) : null}
+
+            {inCluster.length > 0 ? (
+              <Panel flush>
+                <PanelHeader
+                  flush
+                  title="In-cluster datastores"
+                  description="Drake runs these, so they keep workload semantics and their health comes from the workload path."
+                  level={3}
+                />
+                <ul className="divide-y divide-border" data-testid="in-cluster-dependency-list">
+                  {inCluster.map((dependency) => (
+                    <li key={dependency.id} className="px-4 py-3">
+                      <span className="block text-body font-medium text-ink">
+                        {dependency.display_name}
+                      </span>
+                      <span className="mt-0.5 block text-micro text-ink-muted">
+                        <InlineCode>{dependency.engine}</InlineCode> · scope{" "}
+                        <InlineCode>{dependency.scope}</InlineCode>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            ) : null}
+
+            <Panel>
+              <PanelHeader title="Catalog record" level={3} />
+              <dl>
+                <MetaRow label="Tenant model">
+                  <InlineCode>{data.tenant_model}</InlineCode>
+                </MetaRow>
+                <MetaRow label="Owners">
+                  {data.owners && data.owners.length > 0
+                    ? data.owners.map((owner) => `${owner.team} (${owner.role})`).join(", ")
+                    : "—"}
+                </MetaRow>
+                <MetaRow label="Source">
+                  <InlineCode>
+                    {data.source.kind}:{data.source.ref}
+                  </InlineCode>
+                </MetaRow>
+                <MetaRow label="Revision">
+                  <InlineCode>{data.source.revision}</InlineCode>
+                </MetaRow>
+                <MetaRow label="Catalog version">
+                  <span data-tabular>v{data.version}</span>
+                </MetaRow>
+              </dl>
+            </Panel>
+          </div>
+        </div>
+      </div>
+    </PageFrame>
   );
 }

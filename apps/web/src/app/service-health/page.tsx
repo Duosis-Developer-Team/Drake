@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
@@ -125,7 +126,7 @@ function ServiceHealthTable() {
             <div className="overflow-x-auto">
               <table className="w-full text-left" data-testid="service-health-table">
                 <thead>
-                  <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                  <tr className="text-caption text-ink-secondary">
                     <th className="pb-2 pr-3 font-medium">Service</th>
                     <th className="pb-2 pr-3 font-medium">Health</th>
                     <th className="pb-2 pr-3 font-medium">Binding</th>
@@ -156,10 +157,11 @@ function ServiceHealthTable() {
 
 export default function ServiceHealthPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Service health</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Service health</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Computed by Drake from curated queries against each service&apos;s bound workload.
           A dash means nothing was measured — never that the value is zero.
         </p>
@@ -167,6 +169,7 @@ export default function ServiceHealthPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <ServiceHealthTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

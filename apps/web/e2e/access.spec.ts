@@ -62,7 +62,7 @@ test("unauthorized user cannot reach Access Control", async ({ page }) => {
   await signInAs(page, "user-plain");
   // Permission-gated nav entry is absent for a zero-permission identity.
   await expect(
-    page.getByRole("link", { name: /audit & administration/i }),
+    page.getByRole("link", { name: /audit & access/i }),
   ).not.toBeVisible();
   // Direct navigation hits the server-verified permission-denied state.
   await page.goto("/admin");
@@ -73,7 +73,7 @@ test("permission-aware navigation and role editing", async ({ page }) => {
   await signInAs(page, "user-owner");
 
   await expect(
-    page.getByRole("link", { name: /audit & administration/i }),
+    page.getByRole("link", { name: /audit & access/i }),
   ).toBeVisible();
   await page.goto("/admin");
 
@@ -180,17 +180,23 @@ test("responsive shell: mobile drawer works", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 });
 
-test("dark/light theme toggle", async ({ page }) => {
+test("theme control: system, light and dark", async ({ page }) => {
+  // Three states now, not a toggle: "system" is a real persisted choice that
+  // keeps following the OS, which a two-state toggle stops doing.
   await signInAs(page, "user-owner");
   const hasDark = () =>
     page.evaluate(() => document.documentElement.classList.contains("dark"));
-  const before = await hasDark();
-  await page
-    .getByRole("button", {
-      name: before ? /switch to light theme/i : /switch to dark theme/i,
-    })
-    .click();
-  await expect.poll(async () => await hasDark()).toBe(!before);
+
+  await page.getByRole("radio", { name: /dark/i }).first().click();
+  await expect.poll(hasDark).toBe(true);
+
+  await page.getByRole("radio", { name: /light/i }).first().click();
+  await expect.poll(hasDark).toBe(false);
+
+  await page.getByRole("radio", { name: /system/i }).first().click();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("drake-theme")))
+    .toBeNull();
 });
 
 test("keyboard: sign-in is reachable and actionable", async ({ page }) => {

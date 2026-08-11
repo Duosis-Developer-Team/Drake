@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
@@ -82,7 +83,8 @@ export default function ServiceHealthDetailPage() {
   const [range, setRange] = useState<SeriesRange>("1h");
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={health} retry={retryHealth}>
         {(data) => {
           const binding = data.binding;
@@ -104,7 +106,7 @@ export default function ServiceHealthDetailPage() {
                     <span className="font-mono">{binding.environment_key}</span> /{" "}
                     <span className="font-mono">{binding.service_key}</span>
                   </p>
-                  <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+                  <h1 className="mt-1 text-title font-semibold text-ink">
                     {binding.service_key}
                   </h1>
                 </div>
@@ -364,6 +366,7 @@ export default function ServiceHealthDetailPage() {
           );
         }}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

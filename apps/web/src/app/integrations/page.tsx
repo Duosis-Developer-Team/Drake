@@ -7,6 +7,7 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
 import type { IntegrationHealth } from "@/lib/catalog";
+import { PageFrame } from "@/components/shell/AppShell";
 
 const OBSERVED_STATUS: Record<string, HealthStatus> = {
   ok: "healthy",
@@ -22,12 +23,13 @@ export default function IntegrationsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">
+        <h1 className="text-title font-semibold text-ink">
           Integration Health
         </h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Connector configuration and observed state per scope. Providers are
           not yet connected in this phase.
         </p>
@@ -53,7 +55,7 @@ export default function IntegrationsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm" data-testid="integration-table">
                   <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-ink-muted">
+                    <tr className="border-b border-border text-left text-caption text-ink-secondary">
                       <th className="px-2 py-2">Type</th>
                       <th className="px-2 py-2">Scope</th>
                       <th className="px-2 py-2">Configuration</th>
@@ -108,6 +110,7 @@ export default function IntegrationsPage() {
           }
         </LoadGate>
       </Card>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

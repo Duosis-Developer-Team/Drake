@@ -10,6 +10,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import {
@@ -195,7 +196,7 @@ function DeploymentTable() {
           <div className="overflow-x-auto">
             <table className="w-full text-left" data-testid="deployment-table">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                <tr className="text-caption text-ink-secondary">
                   <th className="pb-2 pr-3 font-medium">Workload</th>
                   <th className="pb-2 pr-3 font-medium">Revision</th>
                   <th className="pb-2 pr-3 font-medium">Rollout</th>
@@ -225,10 +226,11 @@ function DeploymentTable() {
 
 export default function DeploymentsPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Deployments</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Deployments</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           One row per observed workload revision. Evidence says how much of the commit →
           workflow → digest → workload chain Drake actually saw; anything less than the
           whole chain is never shown as verified.
@@ -237,6 +239,7 @@ export default function DeploymentsPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <DeploymentTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

@@ -15,6 +15,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
@@ -116,7 +117,8 @@ function SloInner() {
   const [page, retry] = useApi<Page<Slo>>(sloListPath({ status }));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-ink">Service objectives</h1>
         <p className="text-sm text-ink-secondary">
@@ -158,6 +160,7 @@ function SloInner() {
           />
         ) : (
           <>
+            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-ink-muted">
                 <tr>
@@ -176,6 +179,7 @@ function SloInner() {
                 ))}
               </tbody>
             </table>
+            </div>
 
             {/* Anything that is not a measurement is explained in words, so
                 nobody reads a dash as a zero. */}
@@ -215,7 +219,8 @@ function SloInner() {
           </>
         )}
       </Card>
-    </div>
+      </div>
+    </PageFrame>
   );
 }
 

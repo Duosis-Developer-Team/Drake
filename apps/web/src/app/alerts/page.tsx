@@ -17,6 +17,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import {
   CountChip,
@@ -125,7 +126,8 @@ function AlertsInner() {
   const [page, retry] = useApi<Page<AlertInstance>>(alertListPath({ status, priority }));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-ink">Alerts</h1>
         <p className="text-sm text-ink-secondary">
@@ -198,6 +200,7 @@ function AlertsInner() {
           />
         ) : (
           <>
+            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-ink-muted">
                 <tr>
@@ -216,6 +219,7 @@ function AlertsInner() {
                 ))}
               </tbody>
             </table>
+            </div>
             {page.data.items.some((alert) => alert.mapping_state !== "mapped") ? (
               <div className="mt-4 space-y-1.5" data-testid="unmapped-note">
                 <p className="text-xs font-medium text-ink">Unmapped alerts</p>
@@ -235,7 +239,8 @@ function AlertsInner() {
           </>
         )}
       </Card>
-    </div>
+      </div>
+    </PageFrame>
   );
 }
 

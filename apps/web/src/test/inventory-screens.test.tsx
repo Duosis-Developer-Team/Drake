@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ClusterDetailPage from "@/app/clusters/[clusterId]/page";
 import ClusterInventoryPage from "@/app/clusters/[clusterId]/inventory/page";
@@ -11,12 +11,44 @@ import {
 } from "@/components/inventory/primitives";
 import { errorBody, installFetchMock } from "@/test/mock-api";
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/clusters",
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-  useParams: () => ({ clusterId: "c1", resourceId: "r1" }),
+/**
+ * A stateful router mock.
+ *
+ * The inventory filters live in the URL now — that is the point of them, so a
+ * filtered view can be shared and the back button undoes a filter. A mock
+ * whose `replace` threw the new query away would make every filter look
+ * broken here while working perfectly in the browser, so this one reflects it
+ * back through `useSearchParams` and notifies subscribers, the way Next does.
+ */
+const { routerState, listeners } = vi.hoisted(() => ({
+  routerState: { params: new URLSearchParams() },
+  listeners: new Set<() => void>(),
 }));
+
+vi.mock("next/navigation", async () => {
+  const react = await import("react");
+  return {
+    usePathname: () => "/clusters",
+    useRouter: () => ({
+      push: vi.fn(),
+      replace: (href: string) => {
+        const query = href.includes("?") ? href.slice(href.indexOf("?") + 1) : "";
+        routerState.params = new URLSearchParams(query);
+        listeners.forEach((listener) => listener());
+      },
+    }),
+    useSearchParams: () =>
+      react.useSyncExternalStore(
+        (onChange: () => void) => {
+          listeners.add(onChange);
+          return () => listeners.delete(onChange);
+        },
+        () => routerState.params,
+        () => routerState.params,
+      ),
+    useParams: () => ({ clusterId: "c1", resourceId: "r1" }),
+  };
+});
 
 const CLUSTER = {
   id: "c1",
@@ -110,6 +142,10 @@ const RESOURCE_DETAIL = {
 };
 
 describe("cluster inventory screens", () => {
+  beforeEach(() => {
+    routerState.params = new URLSearchParams();
+  });
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("cluster list shows real agent + inventory states, never fabricated", async () => {
@@ -121,9 +157,9 @@ describe("cluster inventory screens", () => {
     });
     render(<ClustersPage />);
     await waitFor(() => expect(screen.getByTestId("cluster-list")).toBeInTheDocument());
-    expect(screen.getByText("connected")).toBeInTheDocument();
+    expect(screen.getByTestId("cluster-list")).toHaveTextContent(/connected/i);
     // Stale renders as STALE (its own tone), never as the healthy badge.
-    const stale = screen.getByText("stale");
+    const stale = screen.getByText(/^stale$/i);
     expect(stale.closest("[data-testid]")).toHaveAttribute("data-testid", "status-stale");
   });
 
@@ -135,7 +171,7 @@ describe("cluster inventory screens", () => {
     render(<ClusterDetailPage />);
     await waitFor(() => expect(screen.getByTestId("agent-card")).toBeInTheDocument());
     const agentCard = within(screen.getByTestId("agent-card"));
-    expect(agentCard.getByText("connected")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-card")).toHaveTextContent(/connected/i);
     expect(agentCard.getByText("0.4.0")).toBeInTheDocument();
     expect(agentCard.getByText("expires soon")).toBeInTheDocument();
 
@@ -173,7 +209,7 @@ describe("cluster inventory screens", () => {
     expect(rows.getByText("api-1")).toBeInTheDocument();
     // The missing resource renders its OWN state; it is not dropped.
     expect(rows.getByText("gone-1")).toBeInTheDocument();
-    expect(rows.getByText("missing")).toBeInTheDocument();
+    expect(screen.getByTestId("resource-rows")).toHaveTextContent(/missing/i);
 
     fireEvent.change(screen.getByTestId("filter-kind"), { target: { value: "Pod" } });
     await waitFor(() =>
@@ -192,7 +228,7 @@ describe("cluster inventory screens", () => {
     });
     render(<ClusterInventoryPage />);
     await waitFor(() =>
-      expect(screen.getByTestId("state-not-configured")).toBeInTheDocument(),
+      expect(screen.getByTestId("state-not-found")).toBeInTheDocument(),
     );
     expect(screen.getByText(/not found/i)).toBeInTheDocument();
   });
