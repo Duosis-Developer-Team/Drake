@@ -41,7 +41,13 @@ describe("DataState", () => {
   it("stale exposes the last successful update time", () => {
     render(<DataState kind="stale" lastSuccessAt="2026-08-06T00:00:00Z" />);
     expect(screen.getByTestId("state-stale")).toHaveTextContent("Last successful update");
-    expect(screen.getByTestId("state-stale")).toHaveTextContent("2026-08-06T00:00:00Z");
+    // Readable UTC for the operator, the machine-readable instant on the
+    // element itself — a stale banner is evidence and has to carry both.
+    expect(screen.getByTestId("state-stale")).toHaveTextContent("2026-08-06 00:00:00 UTC");
+    expect(screen.getByTestId("state-stale").querySelector("time")).toHaveAttribute(
+      "datetime",
+      "2026-08-06T00:00:00Z",
+    );
   });
 
   it("error offers retry when a handler is provided", async () => {

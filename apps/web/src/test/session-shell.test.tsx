@@ -74,7 +74,7 @@ describe("session-aware shell", () => {
     );
     await waitFor(() => expect(screen.getByText("content")).toBeInTheDocument());
     expect(
-      screen.getByRole("link", { name: /audit & administration/i }),
+      screen.getByRole("link", { name: /audit & access/i }),
     ).toBeInTheDocument();
   });
 
@@ -87,7 +87,7 @@ describe("session-aware shell", () => {
     );
     await waitFor(() => expect(screen.getByText("content")).toBeInTheDocument());
     expect(
-      screen.queryByRole("link", { name: /audit & administration/i }),
+      screen.queryByRole("link", { name: /audit & access/i }),
     ).not.toBeInTheDocument();
   });
 

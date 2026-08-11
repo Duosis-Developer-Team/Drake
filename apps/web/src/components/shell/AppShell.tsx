@@ -1,11 +1,26 @@
 "use client";
 
-import { X } from "lucide-react";
+/**
+ * The application shell.
+ *
+ * Layout: a fixed-height viewport with an independently scrolling main
+ * region, rather than a page that scrolls as one column. On a monitoring
+ * screen the navigation and the breadcrumb have to stay put while a
+ * thousand-row inventory table scrolls underneath them.
+ *
+ * The mobile drawer is a real dialog — focus trapped, Escape closes, focus
+ * returns to the trigger — because it is the only way to navigate below
+ * 1024px and losing focus inside it strands a keyboard user.
+ */
+
 import { useCallback, useState } from "react";
 
-import { Header } from "@/components/shell/Header";
-import { Sidebar } from "@/components/shell/Sidebar";
+import { Sidebar, useSidebarCollapse } from "@/components/shell/Sidebar";
 import { SignedOut } from "@/components/shell/SignedOut";
+import { ThemeControl } from "@/components/shell/ThemeControl";
+import { TopBar } from "@/components/shell/TopBar";
+import { LoadingSkeleton } from "@/components/ui/states";
+import { useDismissable, useScrollLock } from "@/components/ui/overlay";
 import { SessionProvider, useSession } from "@/lib/session";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -24,13 +39,10 @@ function SessionGate({ children }: { children: React.ReactNode }) {
       <div
         data-testid="session-loading"
         aria-busy="true"
-        className="flex min-h-screen items-center justify-center"
+        className="flex min-h-screen items-center justify-center px-6"
       >
-        <div className="w-72 space-y-3">
-          <div className="h-8 w-8 animate-pulse rounded-lg bg-surface-sunken" />
-          <div className="h-4 w-2/3 animate-pulse rounded bg-surface-sunken" />
-          <div className="h-4 w-1/2 animate-pulse rounded bg-surface-sunken" />
-          <span className="sr-only">Checking session</span>
+        <div className="w-72">
+          <LoadingSkeleton rows={3} label="Checking session" />
         </div>
       </div>
     );
@@ -43,44 +55,135 @@ function SessionGate({ children }: { children: React.ReactNode }) {
 }
 
 function AuthenticatedShell({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const openSidebar = useCallback(() => setSidebarOpen(true), []);
-  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, toggleCollapse] = useSidebarCollapse();
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const drawerRef = useDismissable<HTMLDivElement>({ open: drawerOpen, onClose: closeDrawer });
+  useScrollLock(drawerOpen);
 
   return (
-    <div className="flex min-h-screen">
-      {/* Static sidebar for large screens */}
-      <aside className="hidden w-64 shrink-0 border-r border-border bg-surface lg:block">
-        <Sidebar />
+    <div className="flex h-screen overflow-hidden">
+      <a
+        href="#main"
+        className="sr-only rounded-control bg-brand px-3 py-2 text-body font-medium text-ink-inverse focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
+      >
+        Skip to content
+      </a>
+
+      <aside
+        className={`hidden shrink-0 border-r border-border transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
+          collapsed ? "w-14" : "w-60"
+        }`}
+      >
+        <Sidebar
+          collapsed={collapsed}
+          onToggleCollapse={toggleCollapse}
+          footer={collapsed ? null : <ShellFooter />}
+        />
       </aside>
 
-      {/* Slide-over sidebar for small screens */}
-      {sidebarOpen ? (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
-          <button
-            type="button"
-            aria-label="Close navigation"
-            onClick={closeSidebar}
-            className="absolute inset-0 bg-black/40"
-          />
-          <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-surface shadow-xl">
-            <button
-              type="button"
-              onClick={closeSidebar}
-              aria-label="Close navigation"
-              className="absolute top-4 right-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-ink-secondary"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <Sidebar onNavigate={closeSidebar} />
+      {drawerOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div aria-hidden className="absolute inset-0 bg-[var(--scrim)]" />
+          <div
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-border shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
+          >
+            <Sidebar onNavigate={closeDrawer} footer={<ShellFooter />} />
           </div>
         </div>
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header onOpenSidebar={openSidebar} />
-        <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
+        <TopBar onOpenSidebar={openDrawer} />
+        <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+          {children}
+        </main>
       </div>
+    </div>
+  );
+}
+
+/** Scope and theme, at the bottom of the rail where settings belong. */
+function ShellFooter() {
+  const { state } = useSession();
+  const scopeCount = state.status === "authenticated" ? Object.keys(state.me.scopes).length : 0;
+  return (
+    <div className="space-y-2 px-3 py-3">
+      <ThemeControl />
+      <p className="text-micro text-ink-muted">
+        {scopeCount === 1 ? "1 authorized scope" : `${scopeCount} authorized scopes`}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The page frame.
+ *
+ * `width` is per-page rather than global: a dense table or a telemetry grid
+ * uses the whole viewport, and a settings form does not — a 2560px-wide form
+ * is unreadable. Everything else defaults to a measured column.
+ */
+export function PageFrame({
+  children,
+  width = "default",
+}: {
+  children: React.ReactNode;
+  width?: "default" | "wide" | "narrow";
+}) {
+  const max =
+    width === "wide" ? "max-w-none" : width === "narrow" ? "max-w-3xl" : "max-w-[110rem]";
+  return <div className={`mx-auto w-full px-4 py-5 lg:px-6 ${max}`}>{children}</div>;
+}
+
+/**
+ * A page's title block.
+ *
+ * The title is one line and stays out of the way — a monitoring page's job is
+ * the data below it, not its own name. `status` is where the page's overall
+ * state goes, so a reader sees "degraded" beside the title rather than having
+ * to find it in the third panel down.
+ */
+export function PageHeader({
+  title,
+  description,
+  status,
+  meta,
+  actions,
+  tabs,
+}: {
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  status?: React.ReactNode;
+  meta?: React.ReactNode;
+  actions?: React.ReactNode;
+  tabs?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-5">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="min-w-0 truncate text-title font-semibold text-ink">{title}</h1>
+            {status}
+          </div>
+          {description ? (
+            <p className="mt-1 max-w-3xl text-caption text-ink-secondary">{description}</p>
+          ) : null}
+          {meta ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">
+              {meta}
+            </div>
+          ) : null}
+        </div>
+        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+      </div>
+      {tabs ? <div className="mt-4">{tabs}</div> : null}
     </div>
   );
 }
