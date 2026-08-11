@@ -94,10 +94,12 @@ async def validate_connector(
     """SSRF boundary for server-owned connectors (never caller input)."""
     parts = urlsplit(connector.url)
     _refuse(parts.scheme not in ("http", "https"), "connector_scheme_refused")
-    _refuse(
-        parts.scheme == "http" and settings.env not in ("local", "test"),
-        "connector_plaintext_refused",
-    )
+    # Plaintext needs an explicit opt-in outside local/test, and the opt-in
+    # is only half a permission: the address still has to turn out private
+    # below. Checked in two places on purpose — the scheme is knowable here,
+    # the destination is not.
+    plaintext = parts.scheme == "http" and settings.env not in ("local", "test")
+    _refuse(plaintext and not connector.allow_plaintext, "connector_plaintext_refused")
     _refuse(
         parts.username is not None or parts.password is not None, "connector_credentials_refused"
     )
@@ -114,7 +116,10 @@ async def validate_connector(
 
     if literal is not None:
         # IP-literal connectors: no DNS involved, no rebinding surface.
-        _check_address(literal, settings, connector)
+        private = _check_address(literal, settings, connector)
+        # The second half of the plaintext permission: in the clear is only
+        # ever acceptable to a private destination.
+        _refuse(plaintext and not private, "connector_plaintext_refused")
         return connector.url
 
     # DNS-name connectors: httpx re-resolves independently of this check, so
@@ -134,6 +139,7 @@ async def validate_connector(
     ]
     # Mixed public/private answer sets are a rebinding smell: refuse outright.
     _refuse(any(verdicts) and not all(verdicts), "connector_mixed_answers_refused")
+    _refuse(plaintext and not all(verdicts), "connector_plaintext_refused")
     return connector.url
 
 

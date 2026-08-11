@@ -417,7 +417,7 @@
       "metricKey": "workload.cpu_limit_cores",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(kube_pod_container_resource_limits_cpu_cores{ {{matchers}} })",
+      "expression": "sum(drake:workload_pod:cpu_limit_cores{ {{matchers}} })",
       "scopeTypes": [
         "workload"
       ],
@@ -460,7 +460,7 @@
       "metricKey": "workload.cpu_throttled_ratio",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(rate(container_cpu_cfs_throttled_periods_total{ {{matchers}} }[{{window}}])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{ {{matchers}} }[{{window}}])), 1)",
+      "expression": "sum(rate(drake:workload_pod:cpu_cfs_throttled_periods_total{ {{matchers}} }[{{window}}])) / clamp_min(sum(rate(drake:workload_pod:cpu_cfs_periods_total{ {{matchers}} }[{{window}}])), 1)",
       "scopeTypes": [
         "workload"
       ],
@@ -503,7 +503,7 @@
       "metricKey": "workload.cpu_usage_cores",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(rate(container_cpu_usage_seconds_total{ {{matchers}} }[{{window}}]))",
+      "expression": "sum(rate(drake:workload_pod:cpu_usage_seconds_total{ {{matchers}} }[{{window}}]))",
       "scopeTypes": [
         "workload"
       ],
@@ -679,7 +679,7 @@
       "metricKey": "workload.memory_limit_bytes",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(kube_pod_container_resource_limits_memory_bytes{ {{matchers}} })",
+      "expression": "sum(drake:workload_pod:memory_limit_bytes{ {{matchers}} })",
       "scopeTypes": [
         "workload"
       ],
@@ -722,7 +722,7 @@
       "metricKey": "workload.memory_working_set_bytes",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(container_memory_working_set_bytes{ {{matchers}} })",
+      "expression": "sum(drake:workload_pod:memory_working_set_bytes{ {{matchers}} })",
       "scopeTypes": [
         "workload"
       ],
@@ -765,7 +765,7 @@
       "metricKey": "workload.replicas_desired",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "max(kube_workload_spec_replicas{ {{matchers}} })",
+      "expression": "max(drake:workload:replicas_desired{ {{matchers}} })",
       "scopeTypes": [
         "workload"
       ],
@@ -808,7 +808,7 @@
       "metricKey": "workload.replicas_ready",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "max(kube_workload_status_ready_replicas{ {{matchers}} })",
+      "expression": "max(drake:workload:replicas_ready{ {{matchers}} })",
       "scopeTypes": [
         "workload"
       ],
@@ -894,7 +894,7 @@
       "metricKey": "workload.restarts_delta",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(increase(kube_pod_container_status_restarts_total{ {{matchers}} }[{{window}}]))",
+      "expression": "sum(increase(drake:workload_pod:restarts_total{ {{matchers}} }[{{window}}]))",
       "scopeTypes": [
         "workload"
       ],
@@ -937,7 +937,7 @@
       "metricKey": "workload.scrape_up",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "max(up{ {{matchers}} })",
+      "expression": "max(drake:workload:up{ {{matchers}} })",
       "scopeTypes": [
         "workload"
       ],

@@ -1,0 +1,68 @@
+# The Prometheus server's read permissions, narrowed.
+#
+# The chart's own ClusterRole grants cluster-wide read on `configmaps`
+# alongside the discovery resources. Prometheus does not need it for the
+# service discovery this deployment uses (nodes, pods, services, endpoints,
+# endpointslices, ingresses), and on a cluster shared with other teams a
+# component that can read every ConfigMap is a component that can read
+# whatever anyone put in one.
+#
+# So: the same role minus that, referenced from values.yaml via
+# `server.useExistingClusterRoleName`. Apply it BEFORE the chart — the
+# binding the chart creates points at this name, and a binding to a role
+# that does not exist grants nothing and reports nothing.
+#
+#   kubectl apply -f deploy/monitoring/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: drake-metrics-prometheus-read
+  labels:
+    app.kubernetes.io/part-of: drake
+    app.kubernetes.io/component: metrics
+rules:
+  # Kubernetes service discovery. Read-only, and every one of these is a
+  # target list rather than a payload.
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/metrics
+      - nodes/proxy
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  # The kubelet's own metrics endpoints.
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+---
+# The binding too, and this is the part the chart stops doing.
+#
+# `server.useExistingClusterRoleName` makes the chart create NEITHER the
+# ClusterRole nor its binding — it assumes an operator who names a role
+# manages both. Setting the value without this object left the server with
+# no permissions at all: `kubernetes-nodes`, `kubernetes-nodes-cadvisor`
+# and `kubernetes-apiservers` all went down while pod and endpoint
+# discovery (which needs none) stayed up, so the stack looked half-healthy
+# rather than broken.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: drake-metrics-prometheus-read
+  labels:
+    app.kubernetes.io/part-of: drake
+    app.kubernetes.io/component: metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: drake-metrics-prometheus-read
+subjects:
+  - kind: ServiceAccount
+    name: drake-metrics-prometheus-server
+    namespace: drake-monitoring
