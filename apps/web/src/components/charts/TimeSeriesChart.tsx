@@ -26,7 +26,8 @@ import {
   type ChartStatus,
   type ChartWindow,
 } from "@/components/charts/ChartFrame";
-import { AXIS_STYLE, EChart, baseOption, type EChartsOption } from "@/components/charts/echarts";
+import { AXIS_STYLE, baseOption, type EChartsOption } from "@/components/charts/echarts";
+import { EChart } from "@/components/charts/LazyChart";
 import { formatTimeAxis, formatUnit, formatUtc } from "@/lib/design/format";
 import type { Thresholds } from "@/lib/design/status";
 import { SERIES_DASH, SERIES_LIMIT, SERIES_TOKENS, type Tokens } from "@/lib/design/tokens";

@@ -165,6 +165,34 @@ export function DeniedState({
   );
 }
 
+/**
+ * The resource is not there — or is not yours.
+ *
+ * Deliberately one state for both. Drake's API answers 404 for a resource
+ * outside the caller's scope precisely so that probing an id cannot tell you
+ * whether it exists, and a UI that rendered "permission denied" here would
+ * hand that distinction straight back.
+ */
+export function NotFoundState({
+  title = "Not found",
+  description = "This resource does not exist in your authorized scope.",
+  compact,
+}: {
+  title?: string;
+  description?: React.ReactNode;
+  compact?: boolean;
+}) {
+  return (
+    <StateBlock
+      tone="not-applicable"
+      testId="state-not-found"
+      title={title}
+      description={description}
+      compact={compact}
+    />
+  );
+}
+
 export function NotConfiguredState({
   title,
   description = "No source has been connected for this yet.",

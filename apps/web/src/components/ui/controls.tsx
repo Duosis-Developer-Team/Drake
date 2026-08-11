@@ -199,6 +199,7 @@ export function Select<T extends string>({
   onChange,
   hideLabel = false,
   placeholder,
+  "data-testid": testId,
 }: {
   label: string;
   value: T | "";
@@ -206,6 +207,7 @@ export function Select<T extends string>({
   onChange: (value: T | "") => void;
   hideLabel?: boolean;
   placeholder?: string;
+  "data-testid"?: string;
 }) {
   const id = useId();
   return (
@@ -219,6 +221,7 @@ export function Select<T extends string>({
       <div className="relative min-w-0">
         <select
           id={id}
+          data-testid={testId}
           value={value}
           onChange={(event) => onChange(event.target.value as T | "")}
           className="h-9 w-full min-w-0 appearance-none rounded-control border border-border bg-surface pr-8 pl-2.5 text-body text-ink"

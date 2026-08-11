@@ -25,7 +25,8 @@ import {
   ChartFrame,
   type ChartStatus,
 } from "@/components/charts/ChartFrame";
-import { AXIS_STYLE, EChart, baseOption, type EChartsOption } from "@/components/charts/echarts";
+import { AXIS_STYLE, baseOption, type EChartsOption } from "@/components/charts/echarts";
+import { EChart } from "@/components/charts/LazyChart";
 import { formatUnit } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";

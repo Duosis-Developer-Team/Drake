@@ -267,8 +267,15 @@ body {
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  /* Inter's slashed zero and disambiguated l: a digest, a namespace and a
-     pod name are read character by character here. */
+  /* Inter's disambiguated l, so a pod name is read character by character. */
+  font-feature-settings: "cv05" 1;
+}
+
+/* Slashed zero where a value is an identifier — a digest, a namespace, a
+   revision — and nowhere else: at metric size it reads as a typo. */
+code,
+.font-mono,
+[class*="font-mono"] {
   font-feature-settings: "zero" 1, "cv05" 1;
 }
 
