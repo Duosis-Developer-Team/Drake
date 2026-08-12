@@ -72,12 +72,19 @@ def _provenance(row: Any, offset: int) -> dict[str, Any]:
     }
 
 
-async def _operational_states(connection: AsyncConnection, scope_id: uuid.UUID) -> dict[str, str]:
-    """Honest capability states from integrations at this scope.
+async def _operational_states(
+    connection: AsyncConnection, scope_id: uuid.UUID, settings: Settings | None = None
+) -> dict[str, str]:
+    """Honest capability states for a project, from whatever actually feeds them.
 
-    No integration row, or a not_configured one → `not_configured`; a
-    configured integration without observations → `unknown`. Nothing here
-    can produce `healthy` in Sprint 2.
+    Telemetry and protection are integration rows: no row, or a
+    not_configured one → `not_configured`; configured but never observed →
+    `unknown`.
+
+    Inventory and deployment are not, and the two are derived below from
+    their real sources instead. This function can now report `ok`, which it
+    could not when it was written — because until recently nothing it read
+    was ever written to.
     """
     rows = (
         await connection.execute(
@@ -96,7 +103,99 @@ async def _operational_states(connection: AsyncConnection, scope_id: uuid.UUID) 
             states[capability] = "not_configured"
         else:
             states[capability] = entry[1]  # observed_state: unknown/stale/…
+
+    # Inventory and deployment do not live in an integration row, and asking
+    # one about them is why they read `not_configured` in production while
+    # the data was arriving.
+    #
+    # The `cluster-agent` row is created by onboarding and then read by
+    # nothing: no code resolves it, no code writes its observed_state. The
+    # real inventory comes from enrolled agents keyed on the CLUSTER, which
+    # is why the cluster screen was right while the project screen was not.
+    # Marking that row `configured` would have turned a silent gap into a
+    # confident lie — a capability claiming configuration that feeds nothing.
+    #
+    # So both are derived from the evidence that actually exists.
+    states["inventory"] = await _project_inventory_state(connection, scope_id)
+    states["deployment"] = await _project_deployment_state(connection, scope_id, settings)
     return states
+
+
+# Weakest link first. A project whose environments span several clusters is
+# only as observed as its least observed cluster, and averaging that away is
+# how a screen reports coverage it does not have.
+_INVENTORY_CAPABILITY = {
+    "fresh": "ok",
+    "stale": "stale",
+    "reconciling": "unknown",
+    "reconcile_required": "unknown",
+    "empty": "unknown",
+    "not_configured": "not_configured",
+}
+_INVENTORY_RANK = {"not_configured": 0, "unknown": 1, "stale": 2, "ok": 3}
+
+
+async def _project_inventory_state(connection: AsyncConnection, scope_id: uuid.UUID) -> str:
+    """Inventory coverage across every cluster this project's environments run on."""
+    cluster_ids = [
+        row[0]
+        for row in (
+            await connection.execute(
+                text(
+                    """
+                    SELECT DISTINCT e.cluster_id
+                    FROM environments e
+                    JOIN projects p ON p.id = e.project_id
+                    WHERE p.scope_id = :scope_id AND e.lifecycle = 'active'
+                      AND e.cluster_id IS NOT NULL
+                    """
+                ),
+                {"scope_id": scope_id},
+            )
+        ).all()
+    ]
+    if not cluster_ids:
+        return "not_configured"
+
+    observations = await agent_observations(connection, cluster_ids)
+    seen = {
+        _INVENTORY_CAPABILITY.get(observation["inventory"]["state"], "unknown")
+        for observation in observations.values()
+    }
+    if not seen:
+        return "not_configured"
+    if seen == {"ok"}:
+        return "ok"
+    # Some covered and some not is neither. `degraded` is the word for
+    # partial, and it is the one thing "worst of" would have thrown away.
+    if "ok" in seen:
+        return "degraded"
+    return min(seen, key=lambda state: _INVENTORY_RANK.get(state, 1))
+
+
+async def _project_deployment_state(
+    connection: AsyncConnection, scope_id: uuid.UUID, settings: Settings | None
+) -> str:
+    """Whether Drake has actually recorded a rollout for this project."""
+    recorded = (
+        await connection.execute(
+            text(
+                """
+                SELECT count(*) FROM deployment_revisions d
+                JOIN projects p ON p.id = d.project_id
+                WHERE p.scope_id = :scope_id
+                """
+            ),
+            {"scope_id": scope_id},
+        )
+    ).scalar_one()
+    if int(recorded):
+        return "ok"
+    # Same distinction the service screen makes, so one fact is not
+    # described two ways: watching-and-nothing-seen is not nobody-asked.
+    if settings is not None and settings.deployment_ingest_enabled:
+        return "unknown"
+    return "not_configured"
 
 
 async def _visible_project_ids(
@@ -133,6 +232,7 @@ async def _project_payload(
     row: Any,
     *,
     include_details: bool,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
     project_id = row[0]
     env_scopes = await visible_scope_ids(connection, auth.principal, "environment.view")
@@ -241,7 +341,7 @@ async def _project_payload(
             )
         ).all()
         payload["owners"] = [{"team": o[0], "role": o[1]} for o in owners]
-        payload["operational"] = await _operational_states(connection, row[15])
+        payload["operational"] = await _operational_states(connection, row[15], settings)
     return payload
 
 
@@ -329,7 +429,9 @@ async def get_project(
         ).first()
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
-        return await _project_payload(connection, auth, row, include_details=True)
+        return await _project_payload(
+            connection, auth, row, include_details=True, settings=settings
+        )
 
 
 # NOTE: callers append `p.project_key` AFTER this list, so read it as

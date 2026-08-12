@@ -404,6 +404,47 @@ async def test_capabilities_with_no_source_stay_honestly_absent(engine: AsyncEng
     assert detail["operational"]["traces"] == "not_configured"
 
 
+async def test_project_inventory_cannot_be_faked_by_an_integration_row(
+    engine: AsyncEngine,
+) -> None:
+    """The `cluster-agent` row is written by onboarding and read by nothing.
+
+    No code resolves it and no code writes its observed_state, so in
+    production it sat at not_configured/unknown while enrolled agents were
+    reporting fresh inventory — the cluster screen was right and the project
+    screen was wrong about the same estate.
+
+    This marks that row as configured AND observed `ok`, which is the most
+    optimistic thing the old code path could have been told, and asserts the
+    project still reports the truth: these clusters have no agent.
+    """
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO integrations
+                    (integration_type, scope_id, configuration_state, config_ref, observed_state)
+                VALUES ('cluster-agent', :scope, 'configured', 'pretend-agent', 'ok')
+                """
+            ),
+            {"scope": world["alpha"].scope_id},
+        )
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-plain")
+        detail = (await client.get(f"/v1/projects/{world['alpha'].id}")).json()
+
+    assert detail["operational"]["inventory"] == "not_configured", (
+        "no cluster in this world has an enrolled agent, and a row nobody "
+        "feeds must not be able to claim otherwise"
+    )
+    # Protection still reads its integration row, because that IS its source.
+    assert detail["operational"]["protection"] == "not_configured"
+
+
 async def test_cluster_separation(engine: AsyncEngine) -> None:
     world = await seed_catalog_world(engine)
     harness = await build_users(engine)
