@@ -198,6 +198,84 @@
       }
     },
     {
+      "key": "environment.container-restarts.v1",
+      "version": 1,
+      "metricKey": "workload.restarts_delta",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(increase(drake:workload_pod:restarts_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 50,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.cpu-usage.v1",
+      "version": 1,
+      "metricKey": "workload.cpu_usage_cores",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(drake:workload_pod:cpu_usage_seconds_total{ {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 50,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
       "key": "environment.error-ratio.v1",
       "version": 1,
       "metricKey": "service.error_ratio",
@@ -276,6 +354,45 @@
       "output": {
         "resultType": "timeseries",
         "unit": "seconds",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.memory-usage.v1",
+      "version": 1,
+      "metricKey": "workload.memory_working_set_bytes",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(drake:workload_pod:memory_working_set_bytes{ {{matchers}} })",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 50,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "bytes",
         "labels": []
       },
       "semantics": {

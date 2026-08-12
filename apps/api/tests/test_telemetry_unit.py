@@ -39,8 +39,12 @@ def test_authoritative_registry_loads_and_hashes() -> None:
     # that a template or metric cannot be added without someone noticing.
     # +5 metrics and +5 templates in Sprint 13I: cluster CPU, memory and
     # filesystem capacity, the first cluster-scope entries in the registry.
+    # +3 templates in Sprint 13F.6: environment-scope CPU, memory and
+    # restarts. The metric count is UNCHANGED because they reuse the workload
+    # metrics that already existed — the gap was never a missing measurement,
+    # it was that the environment scope could not ask for one.
     assert len(registry.metrics) == 24
-    assert len(registry.templates) == 27
+    assert len(registry.templates) == 30
     # +1 board: cluster capacity, the first cluster-scope dashboard.
     assert len(registry.dashboards) == 3
     assert len(registry.content_hash) == 64

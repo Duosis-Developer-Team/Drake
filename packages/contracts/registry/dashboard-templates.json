@@ -164,6 +164,42 @@
               "drilldownRoute": "/projects/{projectId}/environments/{environmentId}/services/{serviceId}"
             }
           ]
+        },
+        {
+          "key": "workloads",
+          "title": "Workloads",
+          "widgets": [
+            {
+              "key": "env-cpu-usage",
+              "title": "CPU in use",
+              "display": "timeseries",
+              "queryTemplateKey": "environment.cpu-usage.v1",
+              "reducer": "latest",
+              "unit": "cores",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "CPU consumed by every workload Drake observes in this environment."
+            },
+            {
+              "key": "env-memory-usage",
+              "title": "Memory in use",
+              "display": "timeseries",
+              "queryTemplateKey": "environment.memory-usage.v1",
+              "reducer": "latest",
+              "unit": "bytes",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Working-set memory across this environment's workloads."
+            },
+            {
+              "key": "env-restarts",
+              "title": "Container restarts",
+              "display": "kpi",
+              "queryTemplateKey": "environment.container-restarts.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Container restarts observed in this environment over the window."
+            }
+          ]
         }
       ]
     },
