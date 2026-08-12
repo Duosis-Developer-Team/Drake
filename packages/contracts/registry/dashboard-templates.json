@@ -93,6 +93,52 @@
       "summary": "Golden-signal overview for one authorized environment: request throughput, error share, p95 latency, and telemetry source state.",
       "sections": [
         {
+          "key": "failures",
+          "title": "Not running",
+          "widgets": [
+            {
+              "key": "env-waiting-reason",
+              "title": "Containers waiting",
+              "display": "timeseries",
+              "queryTemplateKey": "environment.waiting-reason.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Containers not running, one series per reason such as CrashLoopBackOff or ImagePullBackOff."
+            },
+            {
+              "key": "env-replicas-unavailable",
+              "title": "Replicas missing",
+              "display": "kpi",
+              "queryTemplateKey": "environment.replicas-unavailable.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "thresholds": {
+                "warn": 1,
+                "critical": 3,
+                "direction": "above"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Replicas the workloads want and do not have."
+            },
+            {
+              "key": "env-pods-not-ready",
+              "title": "Pods not ready",
+              "display": "kpi",
+              "queryTemplateKey": "environment.pods-not-ready.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "thresholds": {
+                "warn": 1,
+                "critical": 3,
+                "direction": "above"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Pods that exist but do not pass their readiness condition."
+            }
+          ]
+        },
+        {
           "key": "signals",
           "title": "Golden signals",
           "widgets": [
@@ -162,6 +208,42 @@
               "emptyBehavior": "show_empty",
               "accessibleSummary": "Request throughput over time, one series per service.",
               "drilldownRoute": "/projects/{projectId}/environments/{environmentId}/services/{serviceId}"
+            }
+          ]
+        },
+        {
+          "key": "workloads",
+          "title": "Workloads",
+          "widgets": [
+            {
+              "key": "env-cpu-usage",
+              "title": "CPU in use",
+              "display": "timeseries",
+              "queryTemplateKey": "environment.cpu-usage.v1",
+              "reducer": "latest",
+              "unit": "cores",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "CPU consumed by every workload Drake observes in this environment."
+            },
+            {
+              "key": "env-memory-usage",
+              "title": "Memory in use",
+              "display": "timeseries",
+              "queryTemplateKey": "environment.memory-usage.v1",
+              "reducer": "latest",
+              "unit": "bytes",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Working-set memory across this environment's workloads."
+            },
+            {
+              "key": "env-restarts",
+              "title": "Container restarts",
+              "display": "kpi",
+              "queryTemplateKey": "environment.container-restarts.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Container restarts observed in this environment over the window."
             }
           ]
         }

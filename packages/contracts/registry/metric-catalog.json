@@ -640,6 +640,41 @@
       }
     },
     {
+      "key": "workload.pods_not_ready",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_status_ready",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Pods that exist but do not pass their readiness condition.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13f6",
+        "revision": "1"
+      }
+    },
+    {
       "key": "workload.replicas_desired",
       "version": 1,
       "type": "gauge",
@@ -706,6 +741,41 @@
       "provenance": {
         "kind": "registry",
         "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.replicas_unavailable",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_deployment_status_replicas_unavailable",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Replicas the workload wants and does not have, as the controller reports it.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13f6",
         "revision": "1"
       }
     },
@@ -811,6 +881,43 @@
       "provenance": {
         "kind": "registry",
         "ref": "sprint-5",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "workload.waiting_reason",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_status_waiting_reason",
+      "allowedInputLabels": [
+        "namespace",
+        "workload_name"
+      ],
+      "allowedOutputLabels": [
+        "reason"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Containers not running, labelled by the reason they are waiting.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13f6",
         "revision": "1"
       }
     }

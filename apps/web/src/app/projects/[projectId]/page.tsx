@@ -48,6 +48,19 @@ const CAPABILITY_LABELS: Record<string, string> = {
   protection: "Backup & restore",
 };
 
+/**
+ * Where each capability's evidence actually lives.
+ *
+ * Telemetry stays on this page — the signals it feeds are rendered further
+ * down — so it anchors rather than navigating away from what it describes.
+ */
+const CAPABILITY_HREF: Record<string, (projectId: string) => string> = {
+  telemetry: () => "#signals",
+  inventory: () => "/clusters",
+  deployment: () => "/deployments",
+  protection: () => "/protection",
+};
+
 const CRITICALITY_TONE: Record<string, StatusTone> = {
   critical: "critical",
   high: "warning",
@@ -220,17 +233,34 @@ export default function ProjectOverviewPage() {
         <ul className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           {Object.entries(CAPABILITY_LABELS).map(([key, label]) => {
             const state = data.operational?.[key] ?? "unknown";
-            return (
-              <li
-                key={key}
-                className="flex flex-col gap-1.5 rounded-control border border-border px-3 py-2"
-              >
+            // A capability that reports something has somewhere to report it,
+            // and saying "Ok" without a way through is a dead end. Absences
+            // stay unlinked on purpose: there is nothing to go and look at.
+            const href = state === "not_configured" ? null : CAPABILITY_HREF[key]?.(projectId);
+            const body = (
+              <>
                 <span className="text-caption text-ink-secondary">{label}</span>
                 <StatusBadge
                   status={toneForHealth(state === "ok" ? "healthy" : state)}
                   label={humanize(state)}
                   size="compact"
                 />
+              </>
+            );
+            return (
+              <li key={key}>
+                {href ? (
+                  <Link
+                    href={href}
+                    className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2 transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    {body}
+                  </Link>
+                ) : (
+                  <div className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2">
+                    {body}
+                  </div>
+                )}
               </li>
             );
           })}
@@ -238,7 +268,10 @@ export default function ProjectOverviewPage() {
       </Panel>
 
       <Suspense fallback={<LoadingSkeleton variant="chart" label="Loading metrics" />}>
-        <ProjectMetricsSection environments={environments.data?.environments ?? []} />
+        {/* The Telemetry capability card links here, so the target has to exist. */}
+        <div id="signals" className="scroll-mt-4">
+          <ProjectMetricsSection environments={environments.data?.environments ?? []} />
+        </div>
       </Suspense>
 
       <div className="mt-6">

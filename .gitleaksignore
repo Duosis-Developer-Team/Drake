@@ -8,18 +8,23 @@
 # not blind the scanner to real secrets in the same fields.
 #
 # Tree findings (line-scoped, so they MOVE when the registry grows).
-# Re-derived in Sprint 13I after the cluster-capacity entries shifted
-# every line below them. Each one is a registry identifier —
+# Re-derived again in Sprint 13F.6: the environment workload templates
+# were inserted and the template list is kept sorted, so three of the six
+# lines moved. The findings themselves are unchanged registry identifiers. Each one is a registry identifier —
 # `latency-p95-kpi`, `environment.scrape-up.v1` and friends — flagged by
 # the generic rule on entropy, verified by reading the line before it was
 # listed here. The canaries below still plant credential-shaped values in
 # these same JSON fields and must still be caught.
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:125
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:128
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:143
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:214
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:244
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:332
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:103
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:113
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:171
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:174
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:189
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:296
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:322
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:443
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:527
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:570
 
 # History findings (commit-scoped):
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49
@@ -59,3 +64,15 @@ cc408f0e7b11531c36c877b6c9988888faa700e9:docs/runbooks/SERVICE_HEALTH_BINDINGS.m
 # historical commit, which is not rewritten because this branch does not
 # rewrite history.
 56083ff842e5b15af43820e94300e74a76f300a9:apps/api/tests/test_github_contract_unit.py:private-key:105
+
+# Sprint 13F.6 — the failure-signal registry commit.
+# Adding "Not running" widgets and their templates put four more registry
+# identifiers on lines the generic-api-key rule flags on entropy:
+# widget keys like `env-waiting-reason` and template keys like
+# `environment.replicas-unavailable.v1`. Reviewed as identifiers, not
+# credentials. History fingerprints are commit-scoped and therefore stable;
+# only the tree ones above move as the registry grows.
+591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/dashboard-templates.json:generic-api-key:103
+591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/dashboard-templates.json:generic-api-key:113
+591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/query-templates.json:generic-api-key:443
+591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/query-templates.json:generic-api-key:570

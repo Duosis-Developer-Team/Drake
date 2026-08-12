@@ -372,7 +372,8 @@ class TelemetryBroker:
                 await connection.execute(
                     text(
                         """
-                        SELECT e.scope_id, e.environment_key, p.project_key, p.scope_id
+                        SELECT e.scope_id, e.environment_key, p.project_key, p.scope_id,
+                               e.namespace
                         FROM environments e JOIN projects p ON p.id = e.project_id
                         WHERE e.id = :id AND e.lifecycle = 'active'
                         """
@@ -382,10 +383,23 @@ class TelemetryBroker:
             ).first()
             if row is None:
                 return None
+            # `namespace` joins this scope to the series Drake actually
+            # collects. The application signals here match on project and
+            # environment LABELS, which only exist if the application exports
+            # them — and none of ours do, so this scope could ask for nothing
+            # it had. The workload series are labelled by namespace, which an
+            # environment already knows.
+            #
+            # Omitted when the environment is not a Kubernetes one: the column
+            # is nullable by constraint, and a matcher bound to "None" would
+            # quietly select nothing rather than refuse.
+            source_values = {"project_key": str(row[2]), "environment_key": str(row[1])}
+            if row[4]:
+                source_values["namespace"] = str(row[4])
             return ResolvedScope(
                 scope_id=row[0],
                 scope_ref=f"{row[2]}/{row[1]}",
-                source_values={"project_key": str(row[2]), "environment_key": str(row[1])},
+                source_values=source_values,
                 provider_scope_id=row[3],
             )
         if scope_type == "service":
