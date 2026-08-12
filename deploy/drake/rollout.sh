@@ -68,15 +68,19 @@ esac
 # Compare what the values file asks for against what the cluster is running,
 # per workload. Rendering is cheap and honest: it asks the chart, rather than
 # re-implementing which value maps to which image.
-rendered="$(helm template "$RELEASE" deploy/drake -n "$NAMESPACE" -f "$VALUES")"
-changes="$(python3 - "$NAMESPACE" <<'PYEOF'
+RENDERED_FILE="$(mktemp)"
+trap 'rm -f "$RENDERED_FILE"' EXIT
+helm template "$RELEASE" deploy/drake -n "$NAMESPACE" -f "$VALUES" > "$RENDERED_FILE"
+changes="$(python3 - "$NAMESPACE" "$RENDERED_FILE" <<'PYEOF'
 import json, subprocess, sys
 
 import yaml
 
-namespace = sys.argv[1]
+namespace, rendered_path = sys.argv[1], sys.argv[2]
 wanted = {}
-for doc in yaml.safe_load_all(sys.stdin.read()):
+# From a FILE, not stdin: this program itself arrives on stdin, so anything
+# pushed there is read as source code and never reaches this line.
+for doc in yaml.safe_load_all(open(rendered_path).read()):
     if not doc or doc.get("kind") != "Deployment":
         continue
     containers = doc["spec"]["template"]["spec"]["containers"]
@@ -100,7 +104,7 @@ for name, image in sorted(wanted.items()):
         was = (current or "absent").rsplit("@", 1)[-1][:19]
         print(f"  {name}: {was} -> {short}")
 PYEOF
-<<<"$rendered")"
+)"
 
 if [ -z "$changes" ]; then
   echo "[rollout] every workload already runs the pinned image; nothing to apply."
