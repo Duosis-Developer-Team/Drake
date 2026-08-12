@@ -401,6 +401,84 @@
       }
     },
     {
+      "key": "environment.pods-not-ready.v1",
+      "version": 1,
+      "metricKey": "workload.pods_not_ready",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(drake:workload_pod:not_ready{ {{matchers}} } > 0)",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 50,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.replicas-unavailable.v1",
+      "version": 1,
+      "metricKey": "workload.replicas_unavailable",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(drake:workload:replicas_unavailable{ {{matchers}} })",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 50,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "replicas",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
       "key": "environment.request-rate.v1",
       "version": 1,
       "metricKey": "service.request_rate",
@@ -482,6 +560,47 @@
         "resultType": "timeseries",
         "unit": "count",
         "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "environment.waiting-reason.v1",
+      "version": 1,
+      "metricKey": "workload.waiting_reason",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum by (reason) (drake:workload_pod:waiting_reason{ {{matchers}} } > 0)",
+      "scopeTypes": [
+        "environment"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "namespace",
+          "source": "namespace"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 20,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": [
+          "reason"
+        ]
       },
       "semantics": {
         "empty": "no_data",
