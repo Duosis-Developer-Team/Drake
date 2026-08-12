@@ -835,6 +835,66 @@ def test_an_integration_with_no_readable_credential_authenticates_nobody() -> No
 
 
 @pytest.mark.anyio
+async def test_a_delivered_notification_is_recorded_as_a_real_observation(
+    engine: AsyncEngine, migrated_db: None, tmp_path: Any
+) -> None:
+    """The projection said "never heard from" about a source just heard from.
+
+    Only the telemetry broker ever wrote `observed_state`, so an Alertmanager
+    that was authenticating and delivering real alerts sat at `unknown`
+    forever. A delivery that authenticated and projected IS an interaction
+    with the integration, and this records it as one.
+
+    It goes through the HTTP route on purpose: the other delivery tests call
+    `apply_delivery` directly, which is exactly the layer this does not live
+    in.
+    """
+    world = await make_world(engine)
+    context = await make_alertmanager(engine, world)
+    reference = tmp_path / "am-token"
+    reference.write_text("test-token-value")
+    configured = AlertmanagerIntegration(
+        # The seeded project, so the route resolves the same row this asserts on.
+        project_key=context["project_key"],
+        webhook_token_file=str(reference),
+        api_base_url="https://alertmanager.test",
+    )
+    settings = require_it_settings()
+    harness = build_harness(
+        settings.model_copy(update={"alertmanager_integrations": {"am-test": configured}})
+    )
+
+    async def observed() -> tuple[str, Any]:
+        async with engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT observed_state, last_success_at FROM integrations "
+                        "WHERE config_ref = 'am-test'"
+                    )
+                )
+            ).first()
+        assert row is not None
+        return str(row[0]), row[1]
+
+    before, _ = await observed()
+    assert before == "unknown", "nothing has been heard from this integration yet"
+
+    payload = delivery_payload([alert_payload(labels=labels_for(context))])
+    async with harness.api_client() as client:
+        accepted = await client.post(
+            "/webhooks/alertmanager/am-test",
+            json=payload,
+            headers={"Authorization": "Bearer test-token-value"},
+        )
+    assert accepted.status_code == 202, accepted.text
+
+    after, last_success = await observed()
+    assert after == "ok"
+    assert last_success is not None, "a success must carry the time it happened"
+
+
+@pytest.mark.anyio
 async def test_the_webhook_refuses_an_unknown_integration_and_a_bad_token(
     engine: AsyncEngine, migrated_db: None, tmp_path: Any
 ) -> None:
