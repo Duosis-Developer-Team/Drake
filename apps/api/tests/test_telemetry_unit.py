@@ -41,7 +41,8 @@ def test_authoritative_registry_loads_and_hashes() -> None:
     # filesystem capacity, the first cluster-scope entries in the registry.
     assert len(registry.metrics) == 24
     assert len(registry.templates) == 27
-    assert len(registry.dashboards) == 2
+    # +1 board: cluster capacity, the first cluster-scope dashboard.
+    assert len(registry.dashboards) == 3
     assert len(registry.content_hash) == 64
     assert registry.content_hash == load_registry().content_hash  # deterministic
 
