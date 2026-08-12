@@ -1,16 +1,50 @@
 "use client";
 
-import { LogIn, ShieldCheck } from "lucide-react";
+/**
+ * The signed-out surfaces.
+ *
+ * Three genuinely different situations, and they must not collapse into one
+ * "Something went wrong" card:
+ *
+ *   signed-out   nobody is signed in. Offer the sign-in this deployment has.
+ *   expired      somebody WAS signed in and the session ended. Say so, and
+ *                come back to where they were.
+ *   unavailable  the auth service cannot be reached. This is a dependency
+ *                outage, not a sign-out — offering a sign-in button here
+ *                sends people into a loop.
+ *
+ * The provider button is what renders until `/v1/auth/mode` answers. A
+ * deployment in local mode swaps it for the form, and the Entra button is
+ * never shown alongside it.
+ */
+
+import { LogIn } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { LocalSignIn } from "@/components/auth/LocalSignIn";
-import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { DrakeWordmark } from "@/components/shell/Brand";
+import { ThemeControl } from "@/components/shell/ThemeControl";
+import { toneSpec } from "@/lib/design/status";
 
-/**
- * Signed-out landing. The sign-in action is a plain navigation to the API's
- * login endpoint — no tokens, no client-side OIDC, nothing in storage.
- */
+const COPY = {
+  "signed-out": {
+    title: "Sign in to Drake",
+    body: "Observability and operations control plane. Sign in with your organization account.",
+    tone: "info" as const,
+  },
+  expired: {
+    title: "Session expired",
+    body: "Your session ended. Signing in again returns you to the page you were on.",
+    tone: "warning" as const,
+  },
+  unavailable: {
+    title: "Sign-in temporarily unavailable",
+    body: "The authentication service cannot be reached. This is a dependency outage, not a sign-out — no action is needed beyond trying again shortly.",
+    tone: "critical" as const,
+  },
+};
+
 export function SignedOut({
   variant = "signed-out",
 }: {
@@ -18,10 +52,10 @@ export function SignedOut({
 }) {
   const pathname = usePathname();
   const loginHref = `/v1/auth/login?redirect=${encodeURIComponent(pathname || "/")}`;
+  const copy = COPY[variant];
+  const spec = toneSpec(copy.tone);
+  const Icon = spec.icon;
 
-  // Which sign-in this deployment offers. Until the answer arrives the
-  // provider button is shown, which is the long-standing behaviour; a
-  // deployment configured for local sign-in swaps it for the form.
   const [mode, setMode] = useState<"oidc" | "local">("oidc");
   useEffect(() => {
     let cancelled = false;
@@ -40,54 +74,30 @@ export function SignedOut({
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col" data-testid={`screen-${variant}`}>
-      <header className="flex h-16 items-center justify-between px-6">
-        <div className="flex items-center gap-3">
-          <div
-            aria-hidden
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent font-semibold text-white"
-          >
-            D
-          </div>
-          <span className="text-sm font-semibold tracking-wide text-ink">Drake</span>
-        </div>
-        <ThemeToggle />
+    <div
+      className="flex min-h-screen flex-col bg-canvas"
+      data-testid={`screen-${variant}`}
+    >
+      <header className="flex h-14 items-center justify-between px-5">
+        <DrakeWordmark height={22} />
+        <ThemeControl compact />
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-6">
-        <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 text-center shadow-sm">
-          <div
-            aria-hidden
-            className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-accent-soft"
-          >
-            <ShieldCheck className="h-6 w-6 text-accent" />
-          </div>
-          {variant === "unavailable" ? (
-            <>
-              <h1 className="text-lg font-semibold text-ink">Sign-in temporarily unavailable</h1>
-              <p className="mt-2 text-sm text-ink-secondary">
-                The authentication service cannot be reached right now. This is a
-                dependency outage, not a sign-out. Try again shortly.
-              </p>
-            </>
-          ) : (
-            <>
-              <h1 className="text-lg font-semibold text-ink">
-                {variant === "expired" ? "Session expired" : "Sign in to Drake"}
-              </h1>
-              <p className="mt-2 text-sm text-ink-secondary">
-                {variant === "expired"
-                  ? "Your session ended. Sign in again to continue where you left off."
-                  : "Operations control plane for your platform. Sign in with your organization account."}
-              </p>
-            </>
-          )}
-          {variant !== "unavailable" && mode === "local" ? (
+      <main className="flex flex-1 items-center justify-center px-5 pb-16">
+        <div className="w-full max-w-sm rounded-panel border border-border bg-surface p-6 shadow-panel">
+          <span className={`inline-flex items-center gap-2 text-caption font-medium ${spec.text}`}>
+            <Icon className="h-4 w-4" aria-hidden />
+            {variant === "signed-out" ? "Authentication required" : spec.label}
+          </span>
+          <h1 className="mt-3 text-title font-semibold text-ink">{copy.title}</h1>
+          <p className="mt-1.5 text-body text-ink-secondary">{copy.body}</p>
+
+          {variant === "unavailable" ? null : mode === "local" ? (
             <LocalSignIn />
           ) : (
             <a
               href={loginHref}
-              className="mt-6 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-accent px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent"
+              className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control bg-brand px-4 text-body font-medium text-ink-inverse transition-colors hover:bg-brand-hover"
             >
               <LogIn className="h-4 w-4" aria-hidden />
               Sign in

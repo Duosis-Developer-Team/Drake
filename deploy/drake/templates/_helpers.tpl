@@ -62,6 +62,24 @@ imagePullSecrets:
 {{- toJson $out -}}
 {{- end -}}
 
+{{/* Alertmanager integrations, as the settings model expects them.
+
+     Same translation as the telemetry connectors: camelCase in values,
+     snake_case in settings, and only REFERENCES cross the boundary. The
+     token file path is derived from the mount path and the map key, so a
+     new integration cannot be half-configured with a file nobody wrote. */}}
+{{- define "drake.alertmanagerIntegrations" -}}
+{{- $out := dict -}}
+{{- $mount := (.Values.alerting).secretMountPath | default "/etc/drake/alertmanager" -}}
+{{- range $key, $integration := (.Values.alerting).integrations }}
+{{- $_ := set $out $key (dict
+      "project_key" (required (printf "alerting.integrations.%s.projectKey is required" $key) $integration.projectKey)
+      "display_name" (default "" $integration.displayName)
+      "webhook_token_file" (printf "%s/%s" $mount $key)) -}}
+{{- end }}
+{{- toJson $out -}}
+{{- end -}}
+
 {{/* Which edge mode is active. */}}
 {{- define "drake.internalMode" -}}
 {{- eq (.Values.edge).mode "internal" -}}

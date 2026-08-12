@@ -186,11 +186,41 @@ networkPolicy:
   # is not an identity — recreating the Service assigns a new one and the
   # rule goes on matching nothing — so a metrics backend living in this
   # cluster belongs here rather than in `apiExternalEgress`.
+  # Who may reach the API in-cluster, beyond the edge. Alertmanager
+  # delivers notifications to `/v1/webhooks/alertmanager/{key}` and is the
+  # first entry this list has ever needed.
+  apiClusterIngress: []
+  #  - namespace: drake-monitoring
+  #    podSelector:
+  #      app.kubernetes.io/name: alertmanager
+
   apiClusterEgress: []
   #  - namespace: drake-monitoring
   #    podSelector:
   #      app.kubernetes.io/name: prometheus
   #    port: 9090
+
+alerting:
+  # Alertmanagers Drake accepts alerts from. The map key is the OPAQUE
+  # WEBHOOK KEY in `/v1/webhooks/alertmanager/{key}`, and it decides which
+  # project those alerts may resolve into — a payload cannot name its own
+  # project, which is the whole reason this registry exists.
+  #
+  # `existingSecret` holds one key per integration, each containing that
+  # integration's bearer token. Mounted as files, never as env values, and
+  # the same Secret is mounted into Alertmanager so both ends compare the
+  # same material.
+  #
+  # `apiBaseUrl` is left unset: it is where Drake would CREATE silences, it
+  # must be https outside local/test, and an in-cluster Alertmanager speaks
+  # http. Reading alerts needs none of it, so the credential does not exist
+  # until silencing does.
+  existingSecret: ""
+  secretMountPath: /etc/drake/alertmanager
+  integrations: {}
+  #  hermes:
+  #    projectKey: hermes
+  #    displayName: "Duosis production Alertmanager"
 
 telemetry:
   # Server-owned Prometheus connectors, by the name an integration's

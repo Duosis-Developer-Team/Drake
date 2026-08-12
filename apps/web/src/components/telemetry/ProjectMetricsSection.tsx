@@ -10,6 +10,9 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
+import { SectionHeader } from "@/components/ui/Panel";
+import { Select } from "@/components/ui/controls";
+import { NotConfiguredState } from "@/components/ui/states";
 import type { Environment } from "@/lib/catalog";
 import { parseRangePreset } from "@/lib/telemetry";
 
@@ -26,11 +29,14 @@ export function ProjectMetricsSection({ environments }: { environments: Environm
 
   if (!selected) {
     return (
-      <section aria-label="Metrics">
-        <h2 className="mb-3 text-sm font-semibold text-ink">Metrics</h2>
-        <p className="text-sm italic text-ink-muted">
-          No authorized environments to show metrics for.
-        </p>
+      <section aria-label="Signals">
+        <SectionHeader title="Signals" />
+        <div className="mt-3">
+          <NotConfiguredState
+            title="No environment to measure"
+            description="Signals appear once this project has an active environment you are authorized to see."
+          />
+        </div>
       </section>
     );
   }
@@ -42,36 +48,36 @@ export function ProjectMetricsSection({ environments }: { environments: Environm
   };
 
   return (
-    <section aria-label="Metrics" className="space-y-3" data-testid="project-metrics">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">Metrics</h2>
-        {active.length > 1 ? (
-          <label className="flex items-center gap-2 text-xs text-ink-muted">
-            Environment
-            <select
+    <section aria-label="Signals" data-testid="project-metrics">
+      <SectionHeader
+        title="Signals"
+        description={`Telemetry for one environment at a time — currently ${selected.environment_key}. Selection and time range are in the URL.`}
+        actions={
+          active.length > 1 ? (
+            <Select
+              label="Environment"
               value={selected.id}
-              onChange={(event) => selectEnvironment(event.target.value)}
-              className="h-8 rounded-lg border border-border bg-surface px-2 text-xs text-ink"
-            >
-              {active.map((environment) => (
-                <option key={environment.id} value={environment.id}>
-                  {environment.environment_key}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <span className="font-mono text-xs text-ink-muted">
-            {selected.environment_key}
-          </span>
-        )}
-      </div>
-      <DashboardRenderer
-        templateKey="project-environment-overview-v1"
-        scopeType="environment"
-        scopeId={selected.id}
-        preset={preset}
+              options={active.map((environment) => ({
+                value: environment.id,
+                label: environment.environment_key,
+              }))}
+              onChange={(value) => selectEnvironment(value)}
+            />
+          ) : (
+            <span className="font-mono text-micro text-ink-muted">
+              {selected.environment_key}
+            </span>
+          )
+        }
       />
+      <div className="mt-3">
+        <DashboardRenderer
+          templateKey="project-environment-overview-v1"
+          scopeType="environment"
+          scopeId={selected.id}
+          preset={preset}
+        />
+      </div>
     </section>
   );
 }

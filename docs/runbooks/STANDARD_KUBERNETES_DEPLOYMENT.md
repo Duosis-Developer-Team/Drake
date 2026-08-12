@@ -408,6 +408,28 @@ somewhere else.
 **8. Install.**
 
 ```
+## Rolling out when you are not the only one
+
+Use `deploy/drake/rollout.sh`, not `helm upgrade` by hand.
+
+Two sessions worked this repository in parallel and the collisions were
+real: `helm upgrade` refused with "another operation is in progress" while
+the other session's migration hook was mid-flight, and `helm list` returned
+nothing at all in that window — which reads exactly like the release is
+gone. The tempting recoveries at that moment (`--force`, deleting the
+pending release secret) are how a half-applied schema happens.
+
+The script refuses instead, names what is in flight, and exits non-zero. It
+is also idempotent: if every workload already runs the pinned image it says
+so and does nothing, so a second session rolling out the same digests does
+not race to burn an identical revision.
+
+**One owner for image pins and rollout.** `values-drake-prod.yaml` is a
+single file and the release is a single lock; parallel work streams should
+land code through PRs and leave pinning and rolling to whoever owns the
+release that day. The script makes the failure safe — it does not make
+concurrent ownership a good idea.
+
 helm upgrade --install drake deploy/drake \
   --namespace drake-prod \
   -f deploy/drake/values-drake-prod.yaml \

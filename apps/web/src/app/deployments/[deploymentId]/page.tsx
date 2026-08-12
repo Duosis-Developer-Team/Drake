@@ -11,6 +11,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
@@ -55,7 +56,8 @@ export default function DeploymentDetailPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={deployment} retry={retry}>
         {(data) => (
           <>
@@ -68,7 +70,7 @@ export default function DeploymentDetailPage() {
                   / <span className="font-mono">{data.cluster.cluster_ref}</span> /{" "}
                   <span className="font-mono">{data.namespace}</span>
                 </p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+                <h1 className="mt-1 text-title font-semibold text-ink">
                   {data.workload_name}{" "}
                   <span className="font-mono text-sm text-ink-muted">#{data.revision}</span>
                 </h1>
@@ -169,9 +171,10 @@ export default function DeploymentDetailPage() {
                     </span>
                   </div>
                   {data.health_comparison.signals ? (
+                    <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
                     <table className="w-full text-left" data-testid="health-comparison">
                       <thead>
-                        <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                        <tr className="text-caption text-ink-secondary">
                           <th className="pb-1 pr-3 font-medium">Signal</th>
                           <th className="pb-1 pr-3 font-medium">Before</th>
                           <th className="pb-1 pr-3 font-medium">After</th>
@@ -201,6 +204,7 @@ export default function DeploymentDetailPage() {
                         )}
                       </tbody>
                     </table>
+                    </div>
                   ) : null}
                   <p className="text-[11px] text-ink-muted">
                     This is a comparison of two time windows, not a causal claim. Drake does
@@ -272,6 +276,7 @@ export default function DeploymentDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

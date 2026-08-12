@@ -15,6 +15,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import {
   LabelChips,
@@ -49,7 +50,8 @@ export default function AlertDetailPage() {
   const [events] = useApi<{ events: AlertEvent[] }>(`/v1/alerts/${alertId}/events`);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={alert} retry={retry}>
         {(data) => (
           <>
@@ -222,6 +224,7 @@ export default function AlertDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

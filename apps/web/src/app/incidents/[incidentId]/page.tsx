@@ -12,6 +12,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
@@ -86,7 +87,8 @@ export default function IncidentDetailPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={incident} retry={retryIncident}>
         {(detail) => (
           <>
@@ -100,7 +102,7 @@ export default function IncidentDetailPage() {
                   <span className="font-mono">{detail.environment_key}</span> /{" "}
                   <span className="font-mono">{detail.service_key}</span>
                 </p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+                <h1 className="mt-1 text-title font-semibold text-ink">
                   {detail.title}
                 </h1>
               </div>
@@ -251,6 +253,7 @@ export default function IncidentDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

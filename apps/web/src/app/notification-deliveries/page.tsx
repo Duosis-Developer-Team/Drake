@@ -11,6 +11,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
@@ -125,13 +126,14 @@ export default function NotificationDeliveriesPage() {
   useEffect(() => load(), [load]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink">
+          <h1 className="text-title font-semibold text-ink">
             Notification deliveries
           </h1>
-          <p className="mt-1 text-sm text-ink-secondary">
+          <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
             Outbound webhook deliveries. Delivery is at-least-once: every request carries a
             stable idempotency key so a receiver can collapse repeats.
           </p>
@@ -229,6 +231,7 @@ export default function NotificationDeliveriesPage() {
           </ul>
         </Card>
       ) : null}
-    </div>
+      </div>
+    </PageFrame>
   );
 }

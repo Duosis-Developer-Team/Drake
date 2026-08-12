@@ -10,6 +10,7 @@ from drake_api.service_health.bindings import (
     get_binding,
     list_bindings,
     refresh_resolution,
+    resolve_pending_bindings,
     resolve_workload,
     set_lifecycle,
     validate_target,
@@ -397,3 +398,113 @@ async def test_a_workload_leaving_inventory_keeps_the_binding(engine: AsyncEngin
         still_there = await get_binding(connection, principal, binding_id)
     assert still_there is not None, "the binding must survive its workload disappearing"
     assert still_there["resolution"]["resolved"] is False
+
+
+@pytest.mark.asyncio
+async def test_pending_bindings_resolve_when_inventory_catches_up(engine: AsyncEngine) -> None:
+    """The half that was missing: a binding created BEFORE its workload exists.
+
+    Onboarding creates bindings from a manifest, and a manifest usually
+    describes a workload that is already running — but not always, and the
+    order is not something a catalog gets to insist on. Without this, such a
+    binding stayed unresolved forever, its charts empty while the workload
+    ran, and the only cure was an operator calling the resolve endpoint by
+    hand once per binding.
+    """
+    issuer, identity = await _owner(engine)
+    world = await _world(engine)
+
+    async with engine.begin() as connection:
+        principal = _principal(identity, issuer)
+        created = await create_binding(
+            connection,
+            principal,
+            target(
+                environment_service_id=world["environment_service_id"],
+                cluster_id=world["cluster_id"],
+                workload_name="arrives-later",
+            ),
+            PRESETS,
+            identity,
+        )
+    assert created["resolved"] is False, "nothing to resolve against yet"
+
+    # Nothing to attach to: a sweep must change nothing rather than guess.
+    async with engine.begin() as connection:
+        resolved, pending = await resolve_pending_bindings(connection, world["cluster_id"])
+    assert (resolved, pending) == (0, 1)
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO inventory_resources
+                    (cluster_id, api_group, api_version, kind, namespace, name, uid,
+                     resource_version, payload, last_seen_at, observed_at)
+                VALUES (:cluster, 'apps', 'v1', 'Deployment', 'hermes-dev', 'arrives-later',
+                        'uid-later', '1', '{}'::jsonb, now(), now())
+                """
+            ),
+            {"cluster": world["cluster_id"]},
+        )
+        resolved, pending = await resolve_pending_bindings(connection, world["cluster_id"])
+    assert (resolved, pending) == (1, 0)
+
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT resolved_resource_uid, resolved_at FROM service_workload_bindings "
+                    "WHERE id = :id"
+                ),
+                {"id": created["id"]},
+            )
+        ).first()
+    assert row is not None and row[0] == "uid-later" and row[1] is not None
+
+    # Idempotent: a second sweep finds nothing to do and does nothing.
+    async with engine.begin() as connection:
+        assert await resolve_pending_bindings(connection, world["cluster_id"]) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_never_attaches_a_workload_that_only_looks_similar(
+    engine: AsyncEngine,
+) -> None:
+    """A near-match is a no-match. The four fields are an identity, not a hint."""
+    issuer, identity = await _owner(engine)
+    world = await _world(engine)
+
+    async with engine.begin() as connection:
+        principal = _principal(identity, issuer)
+        await create_binding(
+            connection,
+            principal,
+            target(
+                environment_service_id=world["environment_service_id"],
+                cluster_id=world["cluster_id"],
+                workload_name="api",
+            ),
+            PRESETS,
+            identity,
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO inventory_resources
+                    (cluster_id, api_group, api_version, kind, namespace, name, uid,
+                     resource_version, payload, last_seen_at, observed_at)
+                VALUES
+                    (:cluster, 'apps', 'v1', 'Deployment', 'hermes-test', 'api',
+                     'uid-wrong-namespace', '1', '{}'::jsonb, now(), now()),
+                    (:cluster, 'apps', 'v1', 'StatefulSet', 'hermes-dev', 'api',
+                     'uid-wrong-kind', '1', '{}'::jsonb, now(), now()),
+                    (:cluster, 'apps', 'v1', 'Deployment', 'hermes-dev', 'api-gateway',
+                     'uid-wrong-name', '1', '{}'::jsonb, now(), now())
+                """
+            ),
+            {"cluster": world["cluster_id"]},
+        )
+        resolved, pending = await resolve_pending_bindings(connection, world["cluster_id"])
+
+    assert (resolved, pending) == (0, 1), "three near-misses are still a miss"

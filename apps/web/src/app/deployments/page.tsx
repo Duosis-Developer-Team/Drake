@@ -10,6 +10,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import {
@@ -18,6 +19,7 @@ import {
   ShortRef,
   VerdictBadge,
 } from "@/components/deployments/primitives";
+import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
@@ -191,11 +193,56 @@ function DeploymentTable() {
         </Card>
       ) : null}
       {page.state === "ready" && page.data.items.length > 0 ? (
+        <Card title="In this view">
+          {/* From the rows on screen, labelled as such. `unverified` is its
+              own segment and deliberately not red: an absence of evidence is
+              not a failed rollout. */}
+          <StackedBar
+            label="Rollouts on this page by state"
+            segments={[
+              {
+                name: "Failed",
+                value: page.data.items.filter((row) => row.rollout_state === "failed").length,
+                tone: "critical",
+              },
+              {
+                name: "Degraded",
+                value: page.data.items.filter((row) => row.rollout_state === "degraded").length,
+                tone: "warning",
+              },
+              {
+                name: "Stalled",
+                value: page.data.items.filter((row) => row.rollout_state === "stalled").length,
+                tone: "warning",
+              },
+              {
+                name: "Progressing",
+                value: page.data.items.filter((row) => row.rollout_state === "progressing").length,
+                tone: "info",
+              },
+              {
+                name: "Healthy",
+                value: page.data.items.filter((row) => row.rollout_state === "healthy").length,
+                tone: "success",
+              },
+              {
+                name: "Unknown",
+                value: page.data.items.filter((row) =>
+                  ["unknown", "pending"].includes(row.rollout_state),
+                ).length,
+                tone: "unknown",
+              },
+            ]}
+          />
+        </Card>
+      ) : null}
+
+      {page.state === "ready" && page.data.items.length > 0 ? (
         <Card>
           <div className="overflow-x-auto">
             <table className="w-full text-left" data-testid="deployment-table">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                <tr className="text-caption text-ink-secondary">
                   <th className="pb-2 pr-3 font-medium">Workload</th>
                   <th className="pb-2 pr-3 font-medium">Revision</th>
                   <th className="pb-2 pr-3 font-medium">Rollout</th>
@@ -225,10 +272,11 @@ function DeploymentTable() {
 
 export default function DeploymentsPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Deployments</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Deployments</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           One row per observed workload revision. Evidence says how much of the commit →
           workflow → digest → workload chain Drake actually saw; anything less than the
           whole chain is never shown as verified.
@@ -237,6 +285,7 @@ export default function DeploymentsPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <DeploymentTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

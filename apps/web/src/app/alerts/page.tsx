@@ -17,6 +17,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import {
   CountChip,
@@ -26,6 +27,7 @@ import {
   StatusPill,
 } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
+import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -125,7 +127,8 @@ function AlertsInner() {
   const [page, retry] = useApi<Page<AlertInstance>>(alertListPath({ status, priority }));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-ink">Alerts</h1>
         <p className="text-sm text-ink-secondary">
@@ -141,11 +144,33 @@ function AlertsInner() {
           <DataState kind="error" description={summary.message} />
         ) : (
           <div className="flex flex-wrap gap-2.5" data-testid="alert-summary">
-            <CountChip label="Firing" count={summary.data.firing} tone="critical" />
-            <CountChip label="P1" count={summary.data.p1} tone="critical" />
-            <CountChip label="P2" count={summary.data.p2} tone="warning" />
-            <CountChip label="Silenced" count={summary.data.silenced} tone="maintenance" />
-            <CountChip label="Unmapped" count={summary.data.unmapped} tone="warning" />
+            <div className="w-full">
+              {/* Priority is ordered, so it reads left-to-right rather than
+                  around a circle. "Other" is what is firing outside P1/P2 —
+                  computed, not assumed, and never negative. */}
+              <StackedBar
+                label="Firing alerts by priority"
+                segments={[
+                  { name: "P1", value: summary.data.p1, tone: "critical" },
+                  { name: "P2", value: summary.data.p2, tone: "warning" },
+                  {
+                    name: "Other priorities",
+                    value: Math.max(0, summary.data.firing - summary.data.p1 - summary.data.p2),
+                    tone: "info",
+                  },
+                ]}
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                <CountChip label="Firing" count={summary.data.firing} tone="critical" />
+                <CountChip label="Silenced" count={summary.data.silenced} tone="maintenance" />
+                <CountChip label="Unmapped" count={summary.data.unmapped} tone="warning" />
+                <CountChip
+                  label="With incident"
+                  count={summary.data.with_incident}
+                  tone="maintenance"
+                />
+              </div>
+            </div>
           </div>
         )}
       </Card>
@@ -198,6 +223,7 @@ function AlertsInner() {
           />
         ) : (
           <>
+            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-ink-muted">
                 <tr>
@@ -216,6 +242,7 @@ function AlertsInner() {
                 ))}
               </tbody>
             </table>
+            </div>
             {page.data.items.some((alert) => alert.mapping_state !== "mapped") ? (
               <div className="mt-4 space-y-1.5" data-testid="unmapped-note">
                 <p className="text-xs font-medium text-ink">Unmapped alerts</p>
@@ -235,7 +262,8 @@ function AlertsInner() {
           </>
         )}
       </Card>
-    </div>
+      </div>
+    </PageFrame>
   );
 }
 

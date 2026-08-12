@@ -13,9 +13,11 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import { IncidentStateBadge, ReasonLabel } from "@/components/incidents/primitives";
+import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
@@ -182,11 +184,39 @@ function IncidentTable() {
       ) : null}
 
       {page.state === "ready" && page.data.items.length > 0 ? (
+        <Card title="In this view">
+          {/* Computed from the rows on screen, and labelled as such: this is
+              a page, not the whole set, and calling it a total would be a
+              number nobody measured. */}
+          <StackedBar
+            label="Incidents on this page by state"
+            segments={[
+              {
+                name: "Open",
+                value: page.data.items.filter((item) => item.state === "open").length,
+                tone: "critical",
+              },
+              {
+                name: "Acknowledged",
+                value: page.data.items.filter((item) => item.state === "acknowledged").length,
+                tone: "warning",
+              },
+              {
+                name: "Resolved",
+                value: page.data.items.filter((item) => item.state === "resolved").length,
+                tone: "success",
+              },
+            ]}
+          />
+        </Card>
+      ) : null}
+
+      {page.state === "ready" && page.data.items.length > 0 ? (
         <Card>
           <div className="overflow-x-auto">
             <table className="w-full text-left" data-testid="incident-table">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                <tr className="text-caption text-ink-secondary">
                   <th className="pb-2 pr-3 font-medium">Incident</th>
                   <th className="pb-2 pr-3 font-medium">Severity</th>
                   <th className="pb-2 pr-3 font-medium">State</th>
@@ -216,10 +246,11 @@ function IncidentTable() {
 
 export default function IncidentsPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Incidents</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Incidents</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Opened by Drake after two consecutive trustworthy critical evaluations, and closed
           automatically when the service reports healthy twice. A datasource outage never
           opens one.
@@ -228,6 +259,7 @@ export default function IncidentsPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <IncidentTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

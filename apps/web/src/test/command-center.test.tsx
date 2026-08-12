@@ -1,11 +1,13 @@
 /**
  * Command Center honesty.
  *
- * The page's whole job is to distinguish "healthy" from "nobody is
- * looking", and it used to answer the second question with copy about a
- * future sprint. These assert the three states that matter: a live agent
- * reports counts, an agent that is not connected reports that instead of
- * its last known numbers, and a card with no source says so.
+ * The page's whole job is to distinguish "healthy" from "nobody is looking".
+ * These assert the three states that matter: a live agent reports counts, an
+ * agent that is not connected reports THAT instead of its last known numbers,
+ * and a page with no source says what it checked rather than implying health.
+ *
+ * The screen was rebuilt around a triage list in Sprint 13, so the selectors
+ * follow it; every claim under test is the one the previous version made.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +21,18 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const CONTEXT = { projects: 3, environments: 5, clusters: 1 };
+const CONTEXT = { projects: 3, environments: 5, clusters: 1, as_of: "2026-08-11T00:00:00Z" };
+
+/** The other five sources the page reads; empty so each test isolates one. */
+const QUIET_SOURCES = {
+  "/v1/alerts/summary": {
+    status: 200,
+    body: { firing: 0, p1: 0, p2: 0, silenced: 0, unmapped: 0, with_incident: 0 },
+  },
+  "/v1/incidents": { status: 200, body: { items: [], next_cursor: null, total: 0, limit: 25 } },
+  "/v1/service-health/services": { status: 200, body: { items: [] } },
+  "/v1/integrations/health": { status: 200, body: { integrations: [] } },
+} as const;
 
 function cluster(agent: string, inventory: string) {
   return {
@@ -73,27 +86,34 @@ afterEach(() => {
 describe("Command Center", () => {
   it("reports fleet health from the agent's own inventory", async () => {
     installFetchMock({
+      ...QUIET_SOURCES,
       "/v1/catalog/context": { status: 200, body: CONTEXT },
       "/v1/clusters": { status: 200, body: { clusters: [cluster("connected", "fresh")] } },
       "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("connected") },
     });
     render(<CommandCenterPage />);
 
-    // The card renders before its per-cluster summary resolves, so wait for
-    // the summary itself rather than the list that will hold it.
+    // The row renders before its per-cluster summary resolves, so wait for the
+    // summary itself rather than the panel that will hold it.
     await waitFor(() => expect(screen.getByText("/58")).toBeTruthy());
-    const fleet = within(screen.getByTestId("fleet-health"));
+    const fleet = within(screen.getByTestId("fleet-panel"));
     expect(fleet.getByText("Duosis Production")).toBeTruthy();
-    // Healthy-over-total, both read from the summary — never a percentage
-    // this component computed and never a bare "healthy".
+    // Healthy-over-total, both read from the summary — never a percentage this
+    // component computed and never a bare "healthy".
     expect(fleet.getByText("/2")).toBeTruthy();
     expect(fleet.getByText("/58")).toBeTruthy();
     expect(fleet.getByText("/97")).toBeTruthy();
-    expect(screen.getByText("Cluster inventory connected")).toBeTruthy();
+    // Connection and freshness stay separate claims, in the agent's own words:
+    // "the agent answers" and "the sweep is current" are different facts, and
+    // a row that collapsed them would let a silent cluster read as a well one.
+    const row = within(fleet.getByRole("row", { name: /Duosis Production/ }));
+    expect(row.getByText("Connected")).toBeTruthy();
+    expect(row.getByText("Fresh")).toBeTruthy();
   });
 
   it("does not show last-known numbers for an agent that is not connected", async () => {
     installFetchMock({
+      ...QUIET_SOURCES,
       "/v1/catalog/context": { status: 200, body: CONTEXT },
       "/v1/clusters": { status: 200, body: { clusters: [cluster("disconnected", "stale")] } },
       "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("disconnected") },
@@ -102,20 +122,43 @@ describe("Command Center", () => {
 
     await waitFor(() => expect(screen.getByText(/Agent disconnected/)).toBeTruthy());
     expect(screen.queryByText("/58")).toBeNull();
-    expect(screen.getByText("No operational sources connected")).toBeTruthy();
+    // A disconnected agent and a stale sweep are both things needing
+    // attention, and they are listed as two separate facts.
+    const attention = within(screen.getByTestId("attention-list"));
+    expect(attention.getByText(/agent disconnected/i)).toBeTruthy();
+    expect(attention.getByText(/inventory stale/i)).toBeTruthy();
   });
 
-  it("says what a card is missing instead of naming a future sprint", async () => {
+  it("says what it checked instead of claiming the platform is healthy", async () => {
+    // The replacement for the old "arrives with the X sprint" cards: with
+    // nothing flagged, the page names its sources rather than implying health.
     installFetchMock({
+      ...QUIET_SOURCES,
       "/v1/catalog/context": { status: 200, body: CONTEXT },
       "/v1/clusters": { status: 200, body: { clusters: [] } },
     });
     render(<CommandCenterPage />);
 
-    await waitFor(() =>
-      expect(screen.getByText(/No cluster is registered/)).toBeTruthy(),
-    );
+    const empty = await screen.findByTestId("attention-empty");
+    expect(empty).toHaveTextContent(/not a statement that the platform is healthy/i);
+    expect(empty).toHaveTextContent(/checked/i);
     expect(screen.queryByText(/arrives with the/)).toBeNull();
-    expect(screen.getByText(/No backup reporter is configured/)).toBeTruthy();
+    expect(screen.queryByText(/all systems/i)).toBeNull();
+    expect(screen.getByTestId("fleet-panel")).toHaveTextContent(/no clusters in scope/i);
+  });
+
+  it("shows a dash for a source it could not read, never a zero", async () => {
+    // A zero would read as "nothing wrong here" when the truth is "you cannot
+    // see this" — the single most misleading thing the strip could render.
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": { status: 403, body: { error: { code: "forbidden", message: "denied" } } },
+    });
+    render(<CommandCenterPage />);
+
+    const tile = await screen.findByTestId("triage-clusters");
+    await waitFor(() => expect(tile).toHaveTextContent(/permission required/i));
+    expect(tile).toHaveTextContent("—");
   });
 });

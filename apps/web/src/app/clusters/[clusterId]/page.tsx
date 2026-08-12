@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
+import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
+import { parseRangePreset } from "@/lib/telemetry";
 
 import {
   LifecycleBadge,
@@ -14,25 +17,40 @@ import {
   AgentBadge,
   HealthBadge,
   InventoryStateBadge,
-  RollupCounts,
   formatUtc,
 } from "@/components/inventory/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
+import { Countdown, Donut, ToneCounters } from "@/components/charts/visuals";
+import type { HealthRollup } from "@/lib/inventory";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
 import type { Cluster } from "@/lib/catalog";
 import type { InventorySummary } from "@/lib/inventory";
 
+/** One rollup, as donut slices. The unknown bucket is always present. */
+function healthSlices(rollup: HealthRollup) {
+  return [
+    { name: "Healthy", value: rollup.healthy, tone: "success" as const },
+    { name: "Degraded", value: rollup.degraded, tone: "warning" as const },
+    { name: "Unhealthy", value: rollup.unhealthy, tone: "critical" as const },
+    { name: "Unknown", value: rollup.unknown, tone: "unknown" as const },
+  ];
+}
+
 export default function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
+  // The same range control the service boards use, read from the URL,
+  // so a link to a cluster at 7d opens at 7d.
+  const preset = parseRangePreset(useSearchParams().get("range"));
   const [cluster, retry] = useApi<Cluster>(`/v1/clusters/${clusterId}`);
   const [summary, retrySummary] = useApi<InventorySummary>(
     `/v1/clusters/${clusterId}/inventory/summary`,
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={cluster} retry={retry}>
         {(data) => (
           <>
@@ -44,7 +62,7 @@ export default function ClusterDetailPage() {
                   </Link>{" "}
                   / <span className="font-mono">{data.cluster_ref}</span>
                 </p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+                <h1 className="mt-1 text-title font-semibold text-ink">
                   {data.display_name}
                 </h1>
               </div>
@@ -107,6 +125,18 @@ export default function ClusterDetailPage() {
                   Browse resources
                 </Link>
               </div>
+              {/* Capacity is what the HOST can give, and it comes from the
+                  metrics backend rather than from inventory — which is why it
+                  sits above the agent's own view rather than inside it. An
+                  agent can be perfectly healthy on a node that is full. */}
+              <DashboardRenderer
+                templateKey="cluster-capacity-v1"
+                scopeType="cluster"
+                scopeId={clusterId}
+                preset={preset}
+                profile="kubernetes-service-v1"
+              />
+
               <LoadGate value={summary} retry={retrySummary}>
                 {(inventory) => (
                   <div className="space-y-4">
@@ -137,6 +167,16 @@ export default function ClusterDetailPage() {
                             </span>
                           </MetaRow>
                         </dl>
+                        {/* A deadline, not a measurement — so it drains toward
+                            the near end rather than filling toward a limit.
+                            The server owns the warning; this only draws how
+                            much runway is left. */}
+                        <div className="mt-3 border-t border-border pt-3">
+                          <Countdown
+                            label="Certificate runway"
+                            deadline={inventory.agent.certificate_not_after}
+                          />
+                        </div>
                       </Card>
 
                       <Card title="Inventory freshness" data-testid="freshness-card">
@@ -166,41 +206,76 @@ export default function ClusterDetailPage() {
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                       <Card title="Nodes">
-                        <RollupCounts rollup={inventory.nodes} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Nodes by health"
+                          centerLabel={`${inventory.nodes.total}`}
+                          slices={healthSlices(inventory.nodes)}
+                        />
                       </Card>
                       <Card title="Namespaces">
-                        <RollupCounts rollup={inventory.namespaces} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Namespaces by health"
+                          centerLabel={`${inventory.namespaces.total}`}
+                          slices={healthSlices(inventory.namespaces)}
+                        />
                       </Card>
                       <Card title="Workloads">
-                        <RollupCounts rollup={inventory.workloads} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Workloads by health"
+                          centerLabel={`${inventory.workloads.total}`}
+                          slices={healthSlices(inventory.workloads)}
+                        />
                       </Card>
                       <Card title="Pods" data-testid="pods-card">
-                        <div className="space-y-2">
-                          <RollupCounts rollup={inventory.pods} />
-                          <dl className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 text-sm">
-                            <div className="flex items-baseline gap-1.5">
-                              <dt className="text-xs text-ink-muted">restarts</dt>
-                              <dd className="font-mono text-sm text-ink">
-                                {inventory.pods.restarts}
-                              </dd>
-                            </div>
-                            <div className="flex items-baseline gap-1.5">
-                              <dt className="text-xs text-critical">CrashLoop</dt>
-                              <dd className="font-mono text-sm text-ink">
-                                {inventory.pods.crashloop}
-                              </dd>
-                            </div>
-                            <div className="flex items-baseline gap-1.5">
-                              <dt className="text-xs text-critical">OOM killed</dt>
-                              <dd className="font-mono text-sm text-ink">
-                                {inventory.pods.oom_killed}
-                              </dd>
-                            </div>
-                          </dl>
+                        <div className="space-y-3">
+                          <Donut
+                            size={108}
+                            thickness={12}
+                            label="Pods by health"
+                            centerLabel={`${inventory.pods.total}`}
+                            slices={healthSlices(inventory.pods)}
+                          />
+                          {/* Failure modes, not a composition: these do not
+                              add up to the pod total, so they are counters
+                              rather than wedges. */}
+                          <div className="border-t border-border pt-2">
+                            <ToneCounters
+                              size="compact"
+                              items={[
+                                {
+                                  label: "restarts",
+                                  count: inventory.pods.restarts,
+                                  tone: "warning",
+                                },
+                                {
+                                  label: "CrashLoop",
+                                  count: inventory.pods.crashloop,
+                                  tone: "critical",
+                                },
+                                {
+                                  label: "OOM killed",
+                                  count: inventory.pods.oom_killed,
+                                  tone: "critical",
+                                },
+                              ]}
+                            />
+                          </div>
                         </div>
                       </Card>
                       <Card title="Persistent volume claims">
-                        <RollupCounts rollup={inventory.persistent_volume_claims} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Persistent volume claims by health"
+                          centerLabel={`${inventory.persistent_volume_claims.total}`}
+                          slices={healthSlices(inventory.persistent_volume_claims)}
+                        />
                       </Card>
                     </div>
 
@@ -231,11 +306,35 @@ export default function ClusterDetailPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                              {Object.entries(inventory.by_kind).map(([kind, rollup]) => (
+                              {Object.entries(inventory.by_kind)
+                                .sort(([, a], [, b]) => b.total - a.total)
+                                .map(([kind, rollup]) => {
+                                  const largest = Math.max(
+                                    ...Object.values(inventory.by_kind).map((r) => r.total),
+                                    1,
+                                  );
+                                  return (
                                 <tr key={kind}>
                                   <td className="py-2 pr-3 font-mono text-xs">{kind}</td>
-                                  <td className="py-2 pr-3 font-mono text-xs">
-                                    {rollup.total}
+                                  <td className="py-2 pr-3">
+                                    {/* Sorted, and the bar is the share of the
+                                        largest kind — so the shape of the
+                                        cluster reads before any digit does.
+                                        The exact count stays beside it. */}
+                                    <span className="flex items-center gap-2">
+                                      <span
+                                        aria-hidden
+                                        className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-surface-3"
+                                      >
+                                        <span
+                                          className="block h-full rounded-full bg-brand-accent"
+                                          style={{ width: `${(rollup.total / largest) * 100}%` }}
+                                        />
+                                      </span>
+                                      <span data-tabular className="font-mono text-xs text-ink">
+                                        {rollup.total}
+                                      </span>
+                                    </span>
                                   </td>
                                   <td className="py-2 pr-3">
                                     <HealthBadge
@@ -259,7 +358,8 @@ export default function ClusterDetailPage() {
                                     </Link>
                                   </td>
                                 </tr>
-                              ))}
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>
@@ -272,6 +372,7 @@ export default function ClusterDetailPage() {
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

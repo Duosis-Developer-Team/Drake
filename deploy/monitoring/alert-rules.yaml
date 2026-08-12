@@ -1,0 +1,174 @@
+# Production alerting rules.
+#
+# Every rule fires on evidence this deployment actually collects. A rule
+# about a signal nobody produces is not a safety net — it is a line that
+# will never fire, and it makes the rule set look more complete than it is.
+# That is why there is nothing here about application error ratio or
+# latency: Hermes and LogiSlot publish no HTTP metrics yet, so those rules
+# belong to the change that instruments them.
+#
+# `for:` durations are deliberate. Kubernetes is briefly inconsistent
+# during every rollout — a Deployment is legitimately below its desired
+# replicas while it rolls — and an alert that fires on that teaches people
+# to ignore alerts.
+#
+# HOW AN ALERT FINDS ITS PROJECT
+#
+# Drake's ingest fixes the project from the integration the delivery
+# authenticated as; a `project` label is a claim it CHECKS. So:
+#
+#   * workload rules DERIVE `project` and `environment` from the namespace
+#     convention `<project>-<environment>`, in the expression rather than in
+#     four near-identical copies of each rule. A namespace outside the
+#     convention gets no claim, and Drake records the alert as unmapped
+#     evidence instead of filing it at a guess. A static `project:` label
+#     here would silently override the derived one — Prometheus applies rule
+#     labels after the expression — so these rules deliberately set none.
+#
+#   * platform rules (nodes, Prometheus, the agent) claim `project: drake`,
+#     which matches no catalog project ON PURPOSE. A failing node belongs to
+#     nobody's service, and Drake keeps such an alert as platform evidence
+#     rather than attributing it to whichever project happens to receive it.
+
+groups:
+  - name: drake.telemetry-pipeline
+    interval: 60s
+    rules:
+      # If this fires, every other rule here is suspect. First for that reason.
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 10m
+        labels: {severity: warning, project: drake}
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+          description: >-
+            {{ $labels.job }} on {{ $labels.instance }} has not answered a
+            scrape for 10 minutes. Signals derived from it are stale, not zero.
+
+      - alert: PrometheusRuleEvaluationFailing
+        expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+        for: 10m
+        labels: {severity: warning, project: drake}
+        annotations:
+          summary: "Prometheus rule evaluations are failing"
+          description: >-
+            Drake's workload queries read recorded series, so a failure here
+            surfaces to an operator as missing data rather than as an error.
+
+  - name: drake.cluster-health
+    interval: 60s
+    rules:
+      - alert: NodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 10m
+        labels: {severity: critical, project: drake}
+        annotations:
+          summary: "Node {{ $labels.node }} is not Ready"
+
+      - alert: NodeUnderPressure
+        expr: kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure",status="true"} == 1
+        for: 15m
+        labels: {severity: warning, project: drake}
+        annotations:
+          summary: "Node {{ $labels.node }} reports {{ $labels.condition }}"
+
+      # 85% is not an emergency; it is the last comfortable moment to act,
+      # which is what a warning is for.
+      - alert: NodeFilesystemFillingUp
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+                / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) > 0.85
+        for: 30m
+        labels: {severity: warning, project: drake}
+        annotations:
+          summary: "{{ $labels.instance }}:{{ $labels.mountpoint }} is over 85% full"
+
+      - alert: NodeFilesystemCritical
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+                / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) > 0.95
+        for: 10m
+        labels: {severity: critical, project: drake}
+        annotations:
+          summary: "{{ $labels.instance }}:{{ $labels.mountpoint }} is over 95% full"
+
+  - name: drake.workload-health
+    interval: 60s
+    rules:
+      # Below desired replicas for 15 minutes is not a rollout any more.
+      - alert: WorkloadReplicasUnavailable
+        expr: |
+          label_replace(
+            label_replace(
+              (drake:workload:replicas_ready < drake:workload:replicas_desired)
+                and (drake:workload:replicas_desired > 0),
+              "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.workload_name }} is short of replicas"
+
+      - alert: WorkloadRestartBurst
+        expr: |
+          label_replace(
+            label_replace(
+              sum by (namespace, workload_name) (
+                increase(drake:workload_pod:restarts_total[15m])) > 3,
+              "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.workload_name }} restarted more than 3 times in 15m"
+
+      # Throttling is normal in bursts. Sustained throttling means the limit
+      # is wrong, and it is a capacity signal this cluster can prove today.
+      - alert: WorkloadCpuThrottledSustained
+        expr: |
+          label_replace(
+            label_replace(
+              (sum by (namespace, workload_name) (
+                 rate(drake:workload_pod:cpu_cfs_throttled_periods_total[10m]))
+               / clamp_min(sum by (namespace, workload_name) (
+                 rate(drake:workload_pod:cpu_cfs_periods_total[10m])), 1)) > 0.25,
+              "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.workload_name }} is CPU-throttled above 25%"
+
+      - alert: WorkloadMemoryNearLimit
+        expr: |
+          label_replace(
+            label_replace(
+              (sum by (namespace, workload_name) (drake:workload_pod:memory_working_set_bytes)
+               / clamp_min(sum by (namespace, workload_name) (
+                 drake:workload_pod:memory_limit_bytes), 1)) > 0.9,
+              "project", "$1", "namespace", "^(.+)-(dev|test|prod)$"),
+            "environment", "$2", "namespace", "^(.+)-(dev|test|prod)$")
+        for: 20m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.workload_name }} is above 90% of its memory limit"
+
+  - name: drake.agent-health
+    interval: 60s
+    rules:
+      # Drake watching itself. The agent going quiet makes every inventory
+      # answer stale, and a stale inventory nobody notices is the failure
+      # mode this control plane exists to prevent.
+      #
+      # It watches the pod, because that is what Prometheus can see: the
+      # agent's heartbeat lives in Drake's own database, and duplicating it
+      # here with a metric nothing publishes would be a rule that never fires.
+      - alert: DrakeAgentPodMissing
+        expr: absent(drake:workload:up{namespace="drake-agent", workload_name="drake-cluster-agent"}) == 1
+        for: 10m
+        labels: {severity: critical, project: drake}
+        annotations:
+          summary: "The Drake cluster agent is not present in inventory metrics"
+          description: >-
+            Without the agent, cluster inventory stops being refreshed and
+            every binding's workload signals go stale.

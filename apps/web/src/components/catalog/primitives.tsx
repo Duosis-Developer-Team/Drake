@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { DataState, type DataStateKind } from "@/components/state/DataState";
+import { NotFoundState } from "@/components/ui/states";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
 import { ApiError, apiGet } from "@/lib/api";
@@ -55,13 +56,12 @@ export function LoadGate<T>({
   if (value.state === "loading") return <DataState kind="loading" />;
   if (value.state === "error") {
     if (value.notFound) {
-      return (
-        <DataState
-          kind="not-configured"
-          title="Not found"
-          description="This resource does not exist in your authorized scope."
-        />
-      );
+      // The API answers 404 for a resource outside the caller's scope
+      // precisely so that probing an id cannot reveal whether it exists, and
+      // this renders that one way everywhere. It is deliberately NOT the
+      // "not configured" state: nothing here is unconfigured, and saying so
+      // would be a different — wrong — claim.
+      return <NotFoundState />;
     }
     return (
       <div>

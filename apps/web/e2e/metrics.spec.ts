@@ -130,9 +130,9 @@ test("owner: environment selector drives URL state and honest empty states", asy
   // alpha/test exists in the catalog but has NO telemetry targets:
   await metrics.getByRole("combobox").selectOption({ label: "test" });
   await expect(page).toHaveURL(/env=/);
-  await expect(
-    metrics.getByText("No data in the selected range.").first(),
-  ).toBeVisible();
+  // The empty state is its own thing, distinct from zero and from a failed
+  // query; assert the state rather than one wording of it.
+  await expect(metrics.getByTestId("state-no-data").first()).toBeVisible();
 });
 
 test("owner: service golden signals with chart, table fallback, profile gating", async ({
@@ -149,7 +149,7 @@ test("owner: service golden signals with chart, table fallback, profile gating",
   await expect(dashboard).toBeVisible();
   const trend = dashboard.getByTestId("widget-request-rate-trend");
   await expect(trend.getByRole("img")).toBeVisible(); // accessible SVG chart
-  await trend.getByText("Data table").click();
+  await trend.getByText("View as table").click();
   await expect(trend.getByRole("table")).toBeVisible(); // tabular fallback
 
   // fastapi-v1 profile: kubernetes-only workload widgets never render.
@@ -172,15 +172,19 @@ test("provider outage: stale last-good, then honest unavailable with correlation
   await setProviderMode(page, "fail");
   await page.waitForTimeout(2500);
   await page.reload();
-  // Last-good serves — explicitly STALE, never presented as healthy.
-  await expect(
-    dashboard.getByTestId("widget-request-rate-trend").getByText("stale", { exact: true }),
-  ).toBeVisible();
+  // Last-good serves — explicitly STALE, never presented as healthy. The
+  // state has its own banner now rather than a one-word chip, so assert the
+  // state itself and that it carries when the values were actually measured.
+  const trend = dashboard.getByTestId("widget-request-rate-trend");
+  await expect(trend.getByTestId("state-stale")).toBeVisible();
+  await expect(trend.getByTestId("state-stale")).toContainText(/last successful update/i);
 
   // A different range has no last-good: honest unavailability + reference.
   await page.getByRole("group", { name: "Time range" }).getByText("Last 7d").click();
   const unavailable = dashboard.getByTestId("widget-request-rate-trend");
-  await expect(unavailable.getByText("Telemetry source unavailable.")).toBeVisible();
+  // "Could not be reached" is a different answer from "empty" and from
+  // "throttled"; the wording says which one it is.
+  await expect(unavailable.getByText(/telemetry source could not be reached/i)).toBeVisible();
   await expect(unavailable.getByText(/^ref: /)).toBeVisible();
 
   await setProviderMode(page, "ok");
@@ -191,9 +195,7 @@ test("beta project: telemetry honestly not configured", async ({ page }) => {
   await page.getByRole("link", { name: "Projects", exact: true }).click();
   await page.getByTestId("project-list").getByText("Beta", { exact: true }).click();
   const metrics = page.getByTestId("project-metrics");
-  await expect(
-    metrics.getByText("Telemetry source not configured.").first(),
-  ).toBeVisible();
+  await expect(metrics.getByTestId("state-not-configured").first()).toBeVisible();
   // Never a fabricated zero or an "ok" state:
   await expect(metrics.getByText("req/s")).toHaveCount(0);
 });

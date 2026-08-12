@@ -1,23 +1,28 @@
-import {
-  AlertTriangle,
-  Ban,
-  CircleDashed,
-  CircleOff,
-  CircleSlash,
-  Clock,
-  HelpCircle,
-  Inbox,
-  PieChart,
-  Sigma,
-  XCircle,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+"use client";
 
 /**
- * Data-state primitives. These are semantically distinct and must never be
- * conflated: "no data", "zero", and "query failed" are three different truths.
- * Unknown/stale/partial/estimated are never rendered as healthy or zero.
+ * The original one-component state renderer, now a thin adapter over the
+ * separate primitives in `components/ui/states`.
+ *
+ * It stays because roughly thirty screens call it with a `kind`, and the
+ * distinctions it encodes — that "no data", "zero" and "query failed" are
+ * three different truths — are exactly the ones the new primitives keep. The
+ * `data-testid` each kind renders is unchanged, so the existing state tests
+ * keep testing the same thing.
  */
+
+import {
+  DeniedState,
+  EmptyState,
+  ErrorState,
+  LoadingSkeleton,
+  NoDataState,
+  NotConfiguredState,
+  PartialBanner,
+  StaleBanner,
+  UnknownState,
+} from "@/components/ui/states";
+
 export type DataStateKind =
   | "loading"
   | "empty"
@@ -31,82 +36,20 @@ export type DataStateKind =
   | "not-configured"
   | "permission-denied";
 
-interface KindSpec {
-  icon: LucideIcon;
-  defaultTitle: string;
-  defaultDescription: string;
-  tone: "neutral" | "warning" | "critical" | "stale";
-}
-
-const KIND_SPECS: Record<Exclude<DataStateKind, "loading">, KindSpec> = {
-  empty: {
-    icon: Inbox,
-    defaultTitle: "Nothing here yet",
-    defaultDescription: "This collection has no entries.",
-    tone: "neutral",
-  },
-  error: {
-    icon: XCircle,
-    defaultTitle: "Query failed",
-    defaultDescription: "The request did not complete. This is not the same as empty data.",
-    tone: "critical",
-  },
-  "no-data": {
-    icon: CircleOff,
-    defaultTitle: "No data",
-    defaultDescription: "The source returned no datapoints for this window.",
-    tone: "neutral",
-  },
-  zero: {
-    icon: Sigma,
-    defaultTitle: "Zero",
-    defaultDescription: "The source reported an actual value of 0.",
-    tone: "neutral",
-  },
-  stale: {
-    icon: Clock,
-    defaultTitle: "Stale data",
-    defaultDescription: "Showing the last good value; the source has not refreshed in time.",
-    tone: "stale",
-  },
-  partial: {
-    icon: PieChart,
-    defaultTitle: "Partial data",
-    defaultDescription: "Only part of the expected scope is covered.",
-    tone: "warning",
-  },
-  estimated: {
-    icon: Sigma,
-    defaultTitle: "Estimated",
-    defaultDescription: "Derived from a documented estimation method, not an exact measurement.",
-    tone: "warning",
-  },
-  unknown: {
-    icon: HelpCircle,
-    defaultTitle: "Unknown",
-    defaultDescription: "The state cannot be determined and is reported as its own state.",
-    tone: "warning",
-  },
-  "not-configured": {
-    icon: CircleDashed,
-    defaultTitle: "Not configured",
-    defaultDescription: "This capability has no configured source yet.",
-    tone: "neutral",
-  },
-  "permission-denied": {
-    icon: Ban,
-    defaultTitle: "Permission required",
-    defaultDescription: "Your current scope does not include this data.",
-    tone: "neutral",
-  },
-};
-
-const TONE_CLASSES: Record<KindSpec["tone"], string> = {
-  neutral: "text-ink-muted",
-  warning: "text-warning",
-  critical: "text-critical",
-  stale: "text-stale",
-};
+/** Every kind this product distinguishes. Asserted by the state tests. */
+export const DISTINCT_STATE_KINDS: DataStateKind[] = [
+  "loading",
+  "empty",
+  "error",
+  "no-data",
+  "zero",
+  "stale",
+  "partial",
+  "estimated",
+  "unknown",
+  "not-configured",
+  "permission-denied",
+];
 
 export function DataState({
   kind,
@@ -122,62 +65,44 @@ export function DataState({
   lastSuccessAt?: string;
   onRetry?: () => void;
 }) {
-  if (kind === "loading") {
-    return (
-      <div data-testid="state-loading" aria-busy="true" className="space-y-2.5">
-        <div className="h-4 w-2/5 animate-pulse rounded bg-surface-sunken" />
-        <div className="h-4 w-4/5 animate-pulse rounded bg-surface-sunken" />
-        <div className="h-4 w-3/5 animate-pulse rounded bg-surface-sunken" />
-        <span className="sr-only">Loading</span>
-      </div>
-    );
-  }
-
-  const spec = KIND_SPECS[kind];
-  const Icon = spec.icon;
-
-  return (
-    <div data-testid={`state-${kind}`} role="status" className="flex items-start gap-3 py-1">
-      <Icon aria-hidden className={`mt-0.5 h-5 w-5 shrink-0 ${TONE_CLASSES[spec.tone]}`} />
-      <div className="min-w-0">
-        <p className={`text-sm font-medium ${kind === "error" ? "text-critical" : "text-ink"}`}>
-          {title ?? spec.defaultTitle}
+  switch (kind) {
+    case "loading":
+      return <LoadingSkeleton rows={3} />;
+    case "empty":
+      return <EmptyState compact title={title} description={description} />;
+    case "error":
+      return <ErrorState compact description={description} onRetry={onRetry} />;
+    case "no-data":
+      return <NoDataState compact title={title} description={description} />;
+    case "zero":
+      // A measured zero is a value, not an absence: it renders as the number.
+      return (
+        <p data-testid="state-zero" className="text-body text-ink">
+          <span data-tabular className="font-semibold">
+            0
+          </span>{" "}
+          <span className="text-ink-secondary">
+            {description ?? "The source reported an actual value of 0."}
+          </span>
         </p>
-        <p className="mt-0.5 text-sm text-ink-secondary">{description ?? spec.defaultDescription}</p>
-        {kind === "stale" && lastSuccessAt ? (
-          <p className="mt-1 text-xs text-stale">
-            Last successful update: <time className="font-mono">{lastSuccessAt}</time>
-          </p>
-        ) : null}
-        {kind === "error" && onRetry ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
-          >
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-            Retry
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
+      );
+    case "stale":
+      return <StaleBanner asOf={lastSuccessAt} description={description} />;
+    case "partial":
+      return <PartialBanner description={description} />;
+    case "estimated":
+      return (
+        <p data-testid="state-estimated" className="text-caption text-warning">
+          <span className="font-medium">Estimated.</span>{" "}
+          {description ??
+            "Derived from a documented estimation method, not an exact measurement."}
+        </p>
+      );
+    case "unknown":
+      return <UnknownState compact title={title} description={description} />;
+    case "not-configured":
+      return <NotConfiguredState compact title={title} description={description} />;
+    case "permission-denied":
+      return <DeniedState compact title={title} description={description} />;
+  }
 }
-
-/** Small helper used by tests and future screens to assert distinctness. */
-export const DISTINCT_STATE_KINDS: DataStateKind[] = [
-  "loading",
-  "empty",
-  "error",
-  "no-data",
-  "zero",
-  "stale",
-  "partial",
-  "estimated",
-  "unknown",
-  "not-configured",
-  "permission-denied",
-];
-
-// Referenced to keep the icon set explicit for future variants.
-void CircleSlash;

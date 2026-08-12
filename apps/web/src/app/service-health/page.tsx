@@ -11,13 +11,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
   BindingStateBadge,
   HealthBadge,
-  Measure,
 } from "@/components/service-health/primitives";
+import { ValueChip } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import { formatAge, type ServiceHealthPage, type ServiceHealthRow } from "@/lib/serviceHealth";
@@ -31,6 +32,9 @@ function listPath(params: URLSearchParams): string {
   const suffix = query.toString() ? `?${query}` : "";
   return `/v1/service-health/services${suffix}`;
 }
+
+/** The pressure bands the platform already judges utilisation by. */
+const UTILISATION = { warn: 0.8, critical: 0.9, direction: "above" as const };
 
 function ServiceRow({ row }: { row: ServiceHealthRow }) {
   const { binding, health } = row;
@@ -56,7 +60,7 @@ function ServiceRow({ row }: { row: ServiceHealthRow }) {
       </td>
       <td className="py-2.5 pr-3">
         {binding ? (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col items-start gap-1">
             <BindingStateBadge lifecycle={binding.lifecycle} resolved={binding.resolved} />
             <span className="font-mono text-[11px] text-ink-muted">
               {binding.cluster.cluster_ref}/{binding.namespace}/{binding.workload_name}
@@ -80,13 +84,30 @@ function ServiceRow({ row }: { row: ServiceHealthRow }) {
         </span>
       </td>
       <td className="py-2.5 pr-3">
-        <Measure value={health.stability?.restarts_in_window ?? null} unit="count" />
+        {/* A restart count has no ceiling, so it carries severity rather than
+            a percentage: any restarts are worth a look, many are worth
+            acting on. */}
+        <ValueChip
+          value={health.stability?.restarts_in_window ?? null}
+          unit="count"
+          thresholds={{ warn: 1, critical: 5, direction: "above" }}
+        />
       </td>
       <td className="py-2.5 pr-3">
-        <Measure value={health.resources?.cpu_utilization ?? null} unit="ratio" />
+        {/* The chip is what makes this column scannable: exact digits, with
+            the colour saying which row to read first. */}
+        <ValueChip
+          value={health.resources?.cpu_utilization ?? null}
+          unit="ratio"
+          thresholds={UTILISATION}
+        />
       </td>
       <td className="py-2.5 pr-3">
-        <Measure value={health.resources?.memory_utilization ?? null} unit="ratio" />
+        <ValueChip
+          value={health.resources?.memory_utilization ?? null}
+          unit="ratio"
+          thresholds={UTILISATION}
+        />
       </td>
       <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
         {formatAge(health.freshness_age_seconds)}
@@ -125,7 +146,7 @@ function ServiceHealthTable() {
             <div className="overflow-x-auto">
               <table className="w-full text-left" data-testid="service-health-table">
                 <thead>
-                  <tr className="text-[11px] uppercase tracking-wide text-ink-muted">
+                  <tr className="text-caption text-ink-secondary">
                     <th className="pb-2 pr-3 font-medium">Service</th>
                     <th className="pb-2 pr-3 font-medium">Health</th>
                     <th className="pb-2 pr-3 font-medium">Binding</th>
@@ -156,10 +177,11 @@ function ServiceHealthTable() {
 
 export default function ServiceHealthPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Service health</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <h1 className="text-title font-semibold text-ink">Service health</h1>
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Computed by Drake from curated queries against each service&apos;s bound workload.
           A dash means nothing was measured — never that the value is zero.
         </p>
@@ -167,6 +189,7 @@ export default function ServiceHealthPage() {
       <Suspense fallback={<DataState kind="loading" />}>
         <ServiceHealthTable />
       </Suspense>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

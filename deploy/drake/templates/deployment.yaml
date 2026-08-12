@@ -34,7 +34,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
-        {{- if .Values.github.enabled }}
+        {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) }}
         # The GitHub App's private key and webhook secret arrive as a Secret
         # volume, and Kubernetes gives those files to root. Without an
         # fsGroup this process (uid 65532) cannot read them at any mode
@@ -71,6 +71,10 @@ spec:
               value: {{ printf "%s/v1/auth/callback" (include "drake.publicOrigin" .) | quote }}
             - name: DRAKE_API_HOST
               value: "0.0.0.0"
+            {{- if (.Values.alerting).integrations }}
+            - name: DRAKE_ALERTMANAGER_INTEGRATIONS
+              value: {{ include "drake.alertmanagerIntegrations" . | quote }}
+            {{- end }}
             {{- if (.Values.telemetry).connectors }}
             - name: DRAKE_TELEMETRY_CONNECTORS
               value: {{ include "drake.telemetryConnectors" . | quote }}
@@ -110,11 +114,19 @@ spec:
             # Secret REFERENCES only; no value is ever rendered here.
             - secretRef:
                 name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
-          {{- if .Values.github.enabled }}
+          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) }}
+          {{- if $secretVolumes }}
           volumeMounts:
+            {{- if .Values.github.enabled }}
             - name: github-app
               mountPath: {{ .Values.github.secretMountPath | quote }}
               readOnly: true
+            {{- end }}
+            {{- if (.Values.alerting).existingSecret }}
+            - name: alertmanager-tokens
+              mountPath: {{ (.Values.alerting).secretMountPath | quote }}
+              readOnly: true
+            {{- end }}
           {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -126,8 +138,9 @@ spec:
             httpGet: {path: /health/ready, port: http}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-      {{- if .Values.github.enabled }}
+      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) }}
       volumes:
+        {{- if .Values.github.enabled }}
         - name: github-app
           secret:
             secretName: {{ required "github.existingSecret is required when github.enabled" .Values.github.existingSecret }}
@@ -136,6 +149,16 @@ spec:
             # uid in the pod can. 0400 renders, installs, and then fails at
             # the first read — the worst place to find out.
             defaultMode: 0440
+        {{- end }}
+        {{- if (.Values.alerting).existingSecret }}
+        - name: alertmanager-tokens
+          secret:
+            secretName: {{ (.Values.alerting).existingSecret }}
+            # Same 0440 + fsGroup contract as the App key: a Secret volume
+            # is root-owned, and 0400 would render, install and then fail at
+            # the first read.
+            defaultMode: 0440
+        {{- end }}
       {{- end }}
 ---
 apiVersion: apps/v1
