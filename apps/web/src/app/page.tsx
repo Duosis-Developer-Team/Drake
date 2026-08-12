@@ -26,7 +26,7 @@
 import { ArrowRight, Boxes, Plug, RefreshCw, ShieldAlert, Siren, Waypoints } from "lucide-react";
 import Link from "next/link";
 
-import { CompositionBar } from "@/components/charts/InlineBars";
+import { Donut, RingProgress } from "@/components/charts/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
@@ -194,6 +194,7 @@ function TriageStrip({
       href: "/incidents",
       resource: incidents,
       value: incidents.data?.items.filter((item) => item.state !== "resolved").length ?? null,
+      total: incidents.data?.items.length ?? null,
       tone: countBy("incident", "critical") > 0 ? ("critical" as const) : ("neutral" as const),
       detail: incidents.data
         ? `${incidents.data.items.filter((item) => item.state === "acknowledged").length} acknowledged`
@@ -206,6 +207,7 @@ function TriageStrip({
       href: "/alerts",
       resource: alerts,
       value: alerts.data?.firing ?? null,
+      total: alerts.data ? alerts.data.firing + alerts.data.silenced : null,
       tone:
         (alerts.data?.p1 ?? 0) > 0
           ? ("critical" as const)
@@ -221,6 +223,7 @@ function TriageStrip({
       href: "/clusters",
       resource: clusters,
       value: clusters.data ? countBy("cluster") : null,
+      total: clusters.data?.clusters.length ?? null,
       tone: countBy("cluster") > 0 ? ("warning" as const) : ("neutral" as const),
       detail: clusters.data ? `${clusters.data.clusters.length} in scope` : null,
     },
@@ -231,6 +234,7 @@ function TriageStrip({
       href: "/service-health",
       resource: services,
       value: services.data ? countBy("service") : null,
+      total: services.data?.items.length ?? null,
       tone:
         countBy("service", "critical") > 0
           ? ("critical" as const)
@@ -246,6 +250,10 @@ function TriageStrip({
       href: "/integrations",
       resource: integrations,
       value: integrations.data ? countBy("integration") : null,
+      total:
+        integrations.data?.integrations.filter(
+          (entry) => entry.configuration_state === "configured",
+        ).length ?? null,
       tone: countBy("integration") > 0 ? ("warning" as const) : ("neutral" as const),
       detail: integrations.data
         ? `${integrations.data.integrations.filter((entry) => entry.configuration_state === "configured").length} configured`
@@ -289,7 +297,24 @@ function TriageStrip({
                 </span>
               )}
             </span>
-            <span className="mt-0.5 truncate text-micro text-ink-muted">
+            {/* The share of what Drake watches that is affected. A bare count
+                cannot say whether 1 is one-of-two or one-of-four-hundred. */}
+            {!unreadable && tile.total ? (
+              <span
+                aria-hidden
+                className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-surface-3"
+              >
+                <span
+                  className={`block h-full rounded-full ${
+                    tile.value === 0 ? "bg-border-strong" : spec.dot
+                  }`}
+                  style={{
+                    width: `${Math.min(100, ((tile.value ?? 0) / tile.total) * 100)}%`,
+                  }}
+                />
+              </span>
+            ) : null}
+            <span className="mt-1 truncate text-micro text-ink-muted">
               {unreadable
                 ? tile.resource.denied
                   ? "permission required"
@@ -471,9 +496,10 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
         />
       ) : (
         <>
-          <CompositionBar
+          <Donut
             label="Service health"
-            segments={tally.map((entry) => ({
+            centerLabel={`${rows.length}`}
+            slices={tally.map((entry) => ({
               name: toneSpec(entry.tone).label,
               value: entry.count,
               tone: entry.tone,
@@ -622,14 +648,17 @@ function FleetCounts({ cluster }: { cluster: Cluster }) {
     return <span className="text-micro text-ink-muted">—</span>;
   }
   if (summary.data.agent.status !== "connected") {
+    // No current view to report. The agent and inventory columns beside this
+    // one already name which half is missing, and showing the last numbers
+    // here would present them as if they were now.
     return (
       <span className="text-micro text-ink-muted" data-testid="fleet-counts-unavailable">
-        Agent {summary.data.agent.status}; inventory {summary.data.inventory.state}.
+        no current sweep
       </span>
     );
   }
   return (
-    <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-micro" data-testid="fleet-counts">
+    <span className="flex flex-wrap items-center gap-3" data-testid="fleet-counts">
       {(
         [
           ["nodes", summary.data.nodes],
@@ -637,12 +666,27 @@ function FleetCounts({ cluster }: { cluster: Cluster }) {
           ["pods", summary.data.pods],
         ] as const
       ).map(([label, rollup]) => (
-        <span key={label} className="whitespace-nowrap text-ink-secondary">
-          <span data-tabular className="font-medium text-ink">
-            {rollup.healthy}
-            <span className="text-ink-muted">/{rollup.total}</span>
-          </span>{" "}
-          {label}
+        <span key={label} className="flex items-center gap-1.5">
+          {/* The ring reads before the digits do; the digits stay exact. */}
+          <RingProgress
+            size={34}
+            label={`${label} healthy`}
+            value={rollup.total > 0 ? (rollup.healthy / rollup.total) * 100 : null}
+            tone={
+              rollup.unhealthy > 0
+                ? "critical"
+                : rollup.degraded > 0 || rollup.unknown > 0
+                  ? "warning"
+                  : "success"
+            }
+          />
+          <span className="text-micro whitespace-nowrap text-ink-secondary">
+            <span data-tabular className="block font-medium text-ink">
+              {rollup.healthy}
+              <span className="text-ink-muted">/{rollup.total}</span>
+            </span>
+            {label}
+          </span>
         </span>
       ))}
     </span>
@@ -700,6 +744,29 @@ function IntegrationsPanel({
         </div>
       ) : (
         <>
+          {all.length > 0 ? (
+            <div className="border-b border-border px-4 py-3">
+              <Donut
+                size={110}
+                thickness={12}
+                label="Integrations by state"
+                centerLabel={`${all.length}`}
+                slices={[
+                  {
+                    name: "Reporting ok",
+                    value: configured.filter((entry) => entry.observed_state === "ok").length,
+                    tone: "success",
+                  },
+                  {
+                    name: "Degraded",
+                    value: configured.filter((entry) => entry.observed_state !== "ok").length,
+                    tone: "warning",
+                  },
+                  { name: "Not connected", value: notConfigured, tone: "not-applicable" },
+                ]}
+              />
+            </div>
+          ) : null}
           <ul className="divide-y divide-border">
             {sorted.map((integration) => (
               <li

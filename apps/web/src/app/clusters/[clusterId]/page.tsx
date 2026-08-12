@@ -15,15 +15,26 @@ import {
   AgentBadge,
   HealthBadge,
   InventoryStateBadge,
-  RollupCounts,
   formatUtc,
 } from "@/components/inventory/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
+import { Countdown, Donut, ToneCounters } from "@/components/charts/visuals";
+import type { HealthRollup } from "@/lib/inventory";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
 import type { Cluster } from "@/lib/catalog";
 import type { InventorySummary } from "@/lib/inventory";
+
+/** One rollup, as donut slices. The unknown bucket is always present. */
+function healthSlices(rollup: HealthRollup) {
+  return [
+    { name: "Healthy", value: rollup.healthy, tone: "success" as const },
+    { name: "Degraded", value: rollup.degraded, tone: "warning" as const },
+    { name: "Unhealthy", value: rollup.unhealthy, tone: "critical" as const },
+    { name: "Unknown", value: rollup.unknown, tone: "unknown" as const },
+  ];
+}
 
 export default function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
@@ -139,6 +150,16 @@ export default function ClusterDetailPage() {
                             </span>
                           </MetaRow>
                         </dl>
+                        {/* A deadline, not a measurement — so it drains toward
+                            the near end rather than filling toward a limit.
+                            The server owns the warning; this only draws how
+                            much runway is left. */}
+                        <div className="mt-3 border-t border-border pt-3">
+                          <Countdown
+                            label="Certificate runway"
+                            deadline={inventory.agent.certificate_not_after}
+                          />
+                        </div>
                       </Card>
 
                       <Card title="Inventory freshness" data-testid="freshness-card">
@@ -168,41 +189,76 @@ export default function ClusterDetailPage() {
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                       <Card title="Nodes">
-                        <RollupCounts rollup={inventory.nodes} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Nodes by health"
+                          centerLabel={`${inventory.nodes.total}`}
+                          slices={healthSlices(inventory.nodes)}
+                        />
                       </Card>
                       <Card title="Namespaces">
-                        <RollupCounts rollup={inventory.namespaces} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Namespaces by health"
+                          centerLabel={`${inventory.namespaces.total}`}
+                          slices={healthSlices(inventory.namespaces)}
+                        />
                       </Card>
                       <Card title="Workloads">
-                        <RollupCounts rollup={inventory.workloads} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Workloads by health"
+                          centerLabel={`${inventory.workloads.total}`}
+                          slices={healthSlices(inventory.workloads)}
+                        />
                       </Card>
                       <Card title="Pods" data-testid="pods-card">
-                        <div className="space-y-2">
-                          <RollupCounts rollup={inventory.pods} />
-                          <dl className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 text-sm">
-                            <div className="flex items-baseline gap-1.5">
-                              <dt className="text-xs text-ink-muted">restarts</dt>
-                              <dd className="font-mono text-sm text-ink">
-                                {inventory.pods.restarts}
-                              </dd>
-                            </div>
-                            <div className="flex items-baseline gap-1.5">
-                              <dt className="text-xs text-critical">CrashLoop</dt>
-                              <dd className="font-mono text-sm text-ink">
-                                {inventory.pods.crashloop}
-                              </dd>
-                            </div>
-                            <div className="flex items-baseline gap-1.5">
-                              <dt className="text-xs text-critical">OOM killed</dt>
-                              <dd className="font-mono text-sm text-ink">
-                                {inventory.pods.oom_killed}
-                              </dd>
-                            </div>
-                          </dl>
+                        <div className="space-y-3">
+                          <Donut
+                            size={108}
+                            thickness={12}
+                            label="Pods by health"
+                            centerLabel={`${inventory.pods.total}`}
+                            slices={healthSlices(inventory.pods)}
+                          />
+                          {/* Failure modes, not a composition: these do not
+                              add up to the pod total, so they are counters
+                              rather than wedges. */}
+                          <div className="border-t border-border pt-2">
+                            <ToneCounters
+                              size="compact"
+                              items={[
+                                {
+                                  label: "restarts",
+                                  count: inventory.pods.restarts,
+                                  tone: "warning",
+                                },
+                                {
+                                  label: "CrashLoop",
+                                  count: inventory.pods.crashloop,
+                                  tone: "critical",
+                                },
+                                {
+                                  label: "OOM killed",
+                                  count: inventory.pods.oom_killed,
+                                  tone: "critical",
+                                },
+                              ]}
+                            />
+                          </div>
                         </div>
                       </Card>
                       <Card title="Persistent volume claims">
-                        <RollupCounts rollup={inventory.persistent_volume_claims} />
+                        <Donut
+                          size={108}
+                          thickness={12}
+                          label="Persistent volume claims by health"
+                          centerLabel={`${inventory.persistent_volume_claims.total}`}
+                          slices={healthSlices(inventory.persistent_volume_claims)}
+                        />
                       </Card>
                     </div>
 

@@ -16,9 +16,9 @@ import { PageFrame } from "@/components/shell/AppShell";
 import { useApi } from "@/components/catalog/primitives";
 import {
   BackupBadge,
-  CountChip,
   RecoverabilityBadge,
 } from "@/components/protection/primitives";
+import { Donut } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
@@ -129,25 +129,60 @@ function ProtectionTable() {
   return (
     <div className="space-y-4">
       {summary.state === "ready" ? (
-        <div className="flex flex-wrap gap-2" data-testid="protection-summary">
-          <CountChip
-            label="Protected"
-            count={summary.data.backup.protected ?? 0}
-            tone="healthy"
-          />
-          <CountChip label="Overdue" count={summary.data.backup.overdue ?? 0} tone="warning" />
-          <CountChip label="Failed" count={summary.data.backup.failed ?? 0} tone="critical" />
-          <CountChip label="Unknown" count={summary.data.backup.unknown ?? 0} tone="unknown" />
-          <CountChip
-            label="Restore verified"
-            count={summary.data.recoverability.verified ?? 0}
-            tone="healthy"
-          />
-          <CountChip
-            label="Never verified"
-            count={summary.data.recoverability.unverified ?? 0}
-            tone="maintenance"
-          />
+        <div
+          className="grid grid-cols-1 gap-4 rounded-panel border border-border bg-surface p-4 sm:grid-cols-2"
+          data-testid="protection-summary"
+        >
+          {/* Two separate questions, so two separate donuts. "Backed up" and
+              "provably restorable" are not the same claim, and a policy can
+              be the first without ever having been the second. */}
+          <div className="min-w-0">
+            <p className="mb-2 text-caption font-medium text-ink">Backup state</p>
+            <Donut
+              size={112}
+              thickness={13}
+              label="Policies by backup state"
+              slices={[
+                { name: "Protected", value: summary.data.backup.protected ?? 0, tone: "success" },
+                { name: "At risk", value: summary.data.backup.at_risk ?? 0, tone: "warning" },
+                { name: "Overdue", value: summary.data.backup.overdue ?? 0, tone: "warning" },
+                { name: "Failed", value: summary.data.backup.failed ?? 0, tone: "critical" },
+                { name: "Unknown", value: summary.data.backup.unknown ?? 0, tone: "unknown" },
+              ]}
+              emptyMessage="No policy reports a backup state yet."
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="mb-2 text-caption font-medium text-ink">Restore evidence</p>
+            <Donut
+              size={112}
+              thickness={13}
+              label="Policies by restore evidence"
+              slices={[
+                {
+                  name: "Verified",
+                  value: summary.data.recoverability.verified ?? 0,
+                  tone: "success",
+                },
+                {
+                  name: "Never verified",
+                  value: summary.data.recoverability.unverified ?? 0,
+                  tone: "unknown",
+                },
+                {
+                  name: "Failed",
+                  value: summary.data.recoverability.failed ?? 0,
+                  tone: "critical",
+                },
+                {
+                  name: "Unknown",
+                  value: summary.data.recoverability.unknown ?? 0,
+                  tone: "unknown",
+                },
+              ]}
+              emptyMessage="No restore drill has been recorded."
+            />
+          </div>
         </div>
       ) : null}
 

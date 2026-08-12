@@ -98,11 +98,15 @@ describe("protection center", () => {
     });
     render(<ProtectionPage />);
 
+    // Two donuts, because "backed up" and "provably restorable" are two
+    // different claims — a policy can be the first without ever having been
+    // the second, and merging them would hide exactly that gap.
     const summary = await screen.findByTestId("protection-summary");
-    expect(within(summary).getByTestId("count-protected")).toHaveTextContent("2");
-    expect(within(summary).getByTestId("count-overdue")).toHaveTextContent("1");
-    expect(within(summary).getByTestId("count-restore-verified")).toHaveTextContent("1");
-    expect(within(summary).getByTestId("count-never-verified")).toHaveTextContent("2");
+    const [backup, restore] = within(summary).getAllByTestId("donut");
+    expect(backup).toHaveTextContent(/Protected\s*2/);
+    expect(backup).toHaveTextContent(/Overdue\s*1/);
+    expect(restore).toHaveTextContent(/Verified\s*1/);
+    expect(restore).toHaveTextContent(/Never verified\s*2/);
   });
 
   it("shows a policy with no evaluation as not evaluated, not as healthy", async () => {
