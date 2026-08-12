@@ -4,8 +4,8 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@5af0d8e by publish
-# run 31590308775. All three — API, web
+# Images are pinned to real digests published from main@ab699b1 by publish
+# run 31593079859. All three — API, web
 # and migration — were built from that one commit, so they cannot drift
 # apart. Both digests were read back from the registry rather than from the
 # build log: the log also prints a tooling image's digest, and pinning that
@@ -104,11 +104,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 5af0d8efeabef78881f262656c39facc85c37b2a
+    # Source commit ab699b19a77d088b83ff6a53987b60bc07c40452
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:173056399ec319d9afb8d6944d82ee8504c4c8bf7757579f5aecc5de39de561f"
+    digest: "sha256:4e771470ea1595f783373ba5658d6ab61dc29b4f65a1cf7c61df3f1afb73c8f8"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -120,8 +120,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 5af0d8efeabef78881f262656c39facc85c37b2a
-    digest: "sha256:9d16b46f26a6619fe8ad9747f74357ad391712da2f0b94c9d909cb1dd52b730c"
+    # Source commit ab699b19a77d088b83ff6a53987b60bc07c40452
+    digest: "sha256:36eed8d168f277b0549c69b16282872a5af675c364b335bcd0cb483e458d8668"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -132,7 +132,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:173056399ec319d9afb8d6944d82ee8504c4c8bf7757579f5aecc5de39de561f"
+    digest: "sha256:4e771470ea1595f783373ba5658d6ab61dc29b4f65a1cf7c61df3f1afb73c8f8"
   backoffLimit: 0
 
 networkPolicy:
