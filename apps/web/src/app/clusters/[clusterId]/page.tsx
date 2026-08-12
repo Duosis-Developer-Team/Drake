@@ -289,11 +289,35 @@ export default function ClusterDetailPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                              {Object.entries(inventory.by_kind).map(([kind, rollup]) => (
+                              {Object.entries(inventory.by_kind)
+                                .sort(([, a], [, b]) => b.total - a.total)
+                                .map(([kind, rollup]) => {
+                                  const largest = Math.max(
+                                    ...Object.values(inventory.by_kind).map((r) => r.total),
+                                    1,
+                                  );
+                                  return (
                                 <tr key={kind}>
                                   <td className="py-2 pr-3 font-mono text-xs">{kind}</td>
-                                  <td className="py-2 pr-3 font-mono text-xs">
-                                    {rollup.total}
+                                  <td className="py-2 pr-3">
+                                    {/* Sorted, and the bar is the share of the
+                                        largest kind — so the shape of the
+                                        cluster reads before any digit does.
+                                        The exact count stays beside it. */}
+                                    <span className="flex items-center gap-2">
+                                      <span
+                                        aria-hidden
+                                        className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-surface-3"
+                                      >
+                                        <span
+                                          className="block h-full rounded-full bg-brand-accent"
+                                          style={{ width: `${(rollup.total / largest) * 100}%` }}
+                                        />
+                                      </span>
+                                      <span data-tabular className="font-mono text-xs text-ink">
+                                        {rollup.total}
+                                      </span>
+                                    </span>
                                   </td>
                                   <td className="py-2 pr-3">
                                     <HealthBadge
@@ -317,7 +341,8 @@ export default function ClusterDetailPage() {
                                     </Link>
                                   </td>
                                 </tr>
-                              ))}
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>
