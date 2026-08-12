@@ -71,7 +71,12 @@ async def _resolve_scope(
 
 
 async def _run(
-    integration_type: str, project_key: str, cluster_ref: str, config_ref: str, actor: uuid.UUID
+    integration_type: str,
+    project_key: str,
+    cluster_ref: str,
+    config_ref: str,
+    actor: uuid.UUID,
+    create_missing: bool,
 ) -> int:
     settings = get_settings()
     engine = get_engine(settings)
@@ -103,8 +108,21 @@ async def _run(
                 )
             ).first()
             if existing is None:
-                print(f"refused: {target} has no active {integration_type} integration")
-                return 2
+                if not create_missing:
+                    # Onboarding creates a project's integration rows; a
+                    # CLUSTER has none until someone decides it should. That
+                    # decision is a create, and `configure` is not a create —
+                    # the same split that stops a re-import from silently
+                    # disconnecting a provider.
+                    print(f"refused: {target} has no active {integration_type} integration")
+                    print("         pass --create-missing to register one at this scope")
+                    return 2
+                await service.register_integration(integration_type, scope_id)
+                if not await service.configure_integration(integration_type, scope_id, config_ref):
+                    print(f"refused: could not configure {target}/{integration_type}")
+                    return 2
+                print(f"created and configured: {target}/{integration_type} -> {config_ref}")
+                changed = True
             print(f"unchanged: {target}/{integration_type} already references {config_ref}")
             return 0
 
@@ -136,6 +154,11 @@ def main() -> int:
     parser.add_argument("--integration-type", required=True, choices=CONFIGURABLE_TYPES)
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--project-key")
+    parser.add_argument(
+        "--create-missing",
+        action="store_true",
+        help="register the integration at this scope if it does not exist yet",
+    )
     scope.add_argument(
         "--cluster-ref",
         help="cluster-scope integration; capacity queries resolve against this scope",
@@ -156,6 +179,7 @@ def main() -> int:
                 args.cluster_ref or "",
                 args.config_ref,
                 actor,
+                args.create_missing,
             )
         )
     except CatalogValidationError as error:
