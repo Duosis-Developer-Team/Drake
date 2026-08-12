@@ -37,8 +37,10 @@ def test_authoritative_registry_loads_and_hashes() -> None:
     registry = load_registry()
     # Counts move whenever the curated registry grows; they are asserted so
     # that a template or metric cannot be added without someone noticing.
-    assert len(registry.metrics) == 19
-    assert len(registry.templates) == 22
+    # +5 metrics and +5 templates in Sprint 13I: cluster CPU, memory and
+    # filesystem capacity, the first cluster-scope entries in the registry.
+    assert len(registry.metrics) == 24
+    assert len(registry.templates) == 27
     assert len(registry.dashboards) == 2
     assert len(registry.content_hash) == 64
     assert registry.content_hash == load_registry().content_hash  # deterministic
