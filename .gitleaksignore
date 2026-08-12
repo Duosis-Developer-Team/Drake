@@ -72,6 +72,13 @@ cc408f0e7b11531c36c877b6c9988888faa700e9:docs/runbooks/SERVICE_HEALTH_BINDINGS.m
 # `environment.replicas-unavailable.v1`. Reviewed as identifiers, not
 # credentials. History fingerprints are commit-scoped and therefore stable;
 # only the tree ones above move as the registry grows.
+66a74a8e4023be616116152709cf61aaaa714586:packages/contracts/registry/dashboard-templates.json:generic-api-key:103
+66a74a8e4023be616116152709cf61aaaa714586:packages/contracts/registry/dashboard-templates.json:generic-api-key:113
+66a74a8e4023be616116152709cf61aaaa714586:packages/contracts/registry/query-templates.json:generic-api-key:443
+66a74a8e4023be616116152709cf61aaaa714586:packages/contracts/registry/query-templates.json:generic-api-key:570
+# The same four identifiers under the pre-squash branch commit, which is
+# still reachable while the branch exists. Both scopes are the same
+# reviewed lines; neither widens what is exempt.
 591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/dashboard-templates.json:generic-api-key:103
 591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/dashboard-templates.json:generic-api-key:113
 591bd81fde3b63713da4686ec3da9c98626c8512:packages/contracts/registry/query-templates.json:generic-api-key:443
