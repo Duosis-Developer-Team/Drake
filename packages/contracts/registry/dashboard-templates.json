@@ -112,7 +112,7 @@
               "display": "kpi",
               "queryTemplateKey": "environment.replicas-unavailable.v1",
               "reducer": "latest",
-              "unit": "replicas",
+              "unit": "count",
               "thresholds": {
                 "warn": 1,
                 "critical": 3,

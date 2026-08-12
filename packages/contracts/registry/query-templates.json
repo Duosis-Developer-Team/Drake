@@ -470,7 +470,7 @@
       },
       "output": {
         "resultType": "timeseries",
-        "unit": "replicas",
+        "unit": "count",
         "labels": []
       },
       "semantics": {

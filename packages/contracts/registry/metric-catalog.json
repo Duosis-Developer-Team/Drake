@@ -748,7 +748,7 @@
       "key": "workload.replicas_unavailable",
       "version": 1,
       "type": "gauge",
-      "unit": "replicas",
+      "unit": "count",
       "sourceType": "prometheus",
       "sourceFamily": "kube_deployment_status_replicas_unavailable",
       "allowedInputLabels": [
