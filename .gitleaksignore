@@ -8,8 +8,9 @@
 # not blind the scanner to real secrets in the same fields.
 #
 # Tree findings (line-scoped, so they MOVE when the registry grows).
-# Re-derived in Sprint 13I after the cluster-capacity entries shifted
-# every line below them. Each one is a registry identifier —
+# Re-derived again in Sprint 13F.6: the environment workload templates
+# were inserted and the template list is kept sorted, so three of the six
+# lines moved. The findings themselves are unchanged registry identifiers. Each one is a registry identifier —
 # `latency-p95-kpi`, `environment.scrape-up.v1` and friends — flagged by
 # the generic rule on entropy, verified by reading the line before it was
 # listed here. The canaries below still plant credential-shaped values in
@@ -17,9 +18,9 @@
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:125
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:128
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:143
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:214
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:244
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:332
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:250
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:322
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:449
 
 # History findings (commit-scoped):
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49
