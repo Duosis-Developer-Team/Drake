@@ -7,6 +7,20 @@
 # JSON field shapes and MUST be detected — proving these fingerprints do
 # not blind the scanner to real secrets in the same fields.
 #
+# Tree findings (line-scoped, so they MOVE when the registry grows).
+# Re-derived in Sprint 13I after the cluster-capacity entries shifted
+# every line below them. Each one is a registry identifier —
+# `latency-p95-kpi`, `environment.scrape-up.v1` and friends — flagged by
+# the generic rule on entropy, verified by reading the line before it was
+# listed here. The canaries below still plant credential-shaped values in
+# these same JSON fields and must still be caught.
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:125
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:128
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:143
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:214
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:244
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:332
+
 # History findings (commit-scoped):
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:52
@@ -17,12 +31,6 @@ b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/query-templ
 # Tracked-tree scan findings (same six lines; the tree scan copies the
 # tracked file set to /repo/.secret-scan-tree inside the scanner
 # container, so dir-mode fingerprints carry that absolute prefix):
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:49
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:52
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:67
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:138
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:49
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:137
 
 # Sprint 5 — the `hermes.pilot.v1` metric preset identifier, flagged by the
 # generic-api-key rule on entropy alone. It is a preset contract id: it is

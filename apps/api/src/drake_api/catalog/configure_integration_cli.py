@@ -26,6 +26,7 @@ import asyncio
 import uuid
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from drake_api.audit.service import AuditEventData, record_audit_event_in
 from drake_api.catalog.service import CatalogService, CatalogValidationError
@@ -39,7 +40,9 @@ from drake_api.settings import get_settings
 CONFIGURABLE_TYPES = ("prometheus",)
 
 
-async def _resolve_scope(connection, project_key: str, cluster_ref: str):
+async def _resolve_scope(
+    connection: AsyncConnection, project_key: str, cluster_ref: str
+) -> tuple[uuid.UUID | None, str]:
     """The scope the integration hangs on, and the name to report it by.
 
     A cluster-scope integration is not a nicety: Drake resolves a
@@ -146,7 +149,15 @@ def main() -> int:
         print("refused: --actor must be a Drake identity UUID")
         return 2
     try:
-        return asyncio.run(_run(args.integration_type, args.project_key, args.config_ref, actor))
+        return asyncio.run(
+            _run(
+                args.integration_type,
+                args.project_key or "",
+                args.cluster_ref or "",
+                args.config_ref,
+                actor,
+            )
+        )
     except CatalogValidationError as error:
         print(f"refused: {error}")
         return 2
