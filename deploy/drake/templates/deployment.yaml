@@ -98,6 +98,14 @@ spec:
               value: {{ .Values.github.gitopsPrEnabled | quote }}
             - name: DRAKE_GITOPS_WORKER_ENABLED
               value: {{ .Values.github.workerEnabled | quote }}
+            # Stated unconditionally, both states. A flag the chart can only
+            # turn ON is a flag that cannot be turned OFF once a values file
+            # has set it, and "absent" would then mean "whatever the image
+            # defaults to" rather than what this release decided.
+            - name: DRAKE_DEPLOYMENT_INGEST_ENABLED
+              value: {{ .Values.deployments.ingestEnabled | quote }}
+            - name: DRAKE_DEPLOYMENT_INGEST_INTERVAL_SECONDS
+              value: {{ .Values.deployments.ingestIntervalSeconds | quote }}
           envFrom:
             # Secret REFERENCES only; no value is ever rendered here.
             - secretRef:

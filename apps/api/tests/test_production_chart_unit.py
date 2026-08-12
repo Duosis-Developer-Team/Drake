@@ -548,6 +548,48 @@ def test_the_expected_production_workloads_and_nothing_else() -> None:
     ]
 
 
+def test_production_runs_the_deployment_ingest_it_has_an_agent_for() -> None:
+    """The same class of gap as the listener above, found the same way.
+
+    The ingest worker, its repository and its router were all present and
+    the agent was already reporting the inventory they read — but the chart
+    had no key that set `DRAKE_DEPLOYMENT_INGEST_ENABLED`, so the API fell
+    back to its `False` default and deployment history stayed empty in
+    production. Nothing was broken; nothing was ever asked to run.
+
+    Both states are asserted because a flag that can only be turned on is a
+    flag that cannot be turned off.
+    """
+    api = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    env = {
+        e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert env["DRAKE_DEPLOYMENT_INGEST_ENABLED"] == "true"
+    assert float(env["DRAKE_DEPLOYMENT_INGEST_INTERVAL_SECONDS"]) > 0
+
+    off = next(d for d in by_kind(render(), "Deployment") if d["metadata"]["name"] == "drake-api")
+    off_env = {
+        e["name"]: e.get("value") for e in off["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert off_env["DRAKE_DEPLOYMENT_INGEST_ENABLED"] == "false"
+
+
+def test_the_deployment_ingest_is_granted_no_new_access() -> None:
+    """It reads rows the agent already wrote; it calls nothing itself.
+
+    If enabling it ever required an egress rule, that would mean the worker
+    had started talking to a cluster or to GitHub directly — which is
+    exactly the boundary the agent exists to hold.
+    """
+    on = _policies(render_prod())["drake-api-egress"]["spec"]["egress"]
+    off = _policies(render_prod("--set", "deployments.ingestEnabled=false"))["drake-api-egress"][
+        "spec"
+    ]["egress"]
+    assert on == off, "turning the ingest on must not widen the API's egress"
+
+
 def test_every_workload_can_pull_private_images() -> None:
     docs = render_prod()
     workloads = by_kind(docs, "Deployment") + by_kind(docs, "Job")
