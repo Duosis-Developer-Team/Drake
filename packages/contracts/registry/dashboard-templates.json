@@ -3,6 +3,82 @@
   "kind": "DashboardTemplateRegistry",
   "dashboards": [
     {
+      "key": "cluster-capacity-v1",
+      "version": 1,
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "scopeTypes": [
+        "cluster"
+      ],
+      "title": "Cluster capacity",
+      "summary": "What the cluster can schedule and what it is using: CPU, memory and the fullest filesystem on any node. Host pressure, not workload demand.",
+      "sections": [
+        {
+          "key": "compute",
+          "title": "Compute",
+          "widgets": [
+            {
+              "key": "cpu-used",
+              "title": "CPU in use",
+              "display": "timeseries",
+              "queryTemplateKey": "cluster.cpu-used.v1",
+              "reducer": "latest",
+              "unit": "cores",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "CPU the cluster is consuming, excluding idle."
+            },
+            {
+              "key": "cpu-allocatable",
+              "title": "CPU schedulable",
+              "display": "kpi",
+              "queryTemplateKey": "cluster.cpu-allocatable.v1",
+              "reducer": "latest",
+              "unit": "cores",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "CPU the Ready nodes can schedule."
+            },
+            {
+              "key": "memory-used",
+              "title": "Memory in use",
+              "display": "timeseries",
+              "queryTemplateKey": "cluster.memory-used.v1",
+              "reducer": "latest",
+              "unit": "bytes",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Total memory minus what the kernel reports available."
+            },
+            {
+              "key": "memory-allocatable",
+              "title": "Memory schedulable",
+              "display": "kpi",
+              "queryTemplateKey": "cluster.memory-allocatable.v1",
+              "reducer": "latest",
+              "unit": "bytes",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Memory the Ready nodes can schedule."
+            }
+          ]
+        },
+        {
+          "key": "storage",
+          "title": "Storage",
+          "widgets": [
+            {
+              "key": "filesystem",
+              "title": "Fullest filesystem",
+              "display": "timeseries",
+              "queryTemplateKey": "cluster.filesystem-used-ratio.v1",
+              "reducer": "latest",
+              "unit": "ratio",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "The fullest real filesystem on any node; an average would hide the one about to fill."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "key": "project-environment-overview-v1",
       "version": 1,
       "title": "Environment overview",
