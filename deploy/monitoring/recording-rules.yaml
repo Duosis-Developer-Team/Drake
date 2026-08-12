@@ -141,6 +141,40 @@ groups:
             )
           )
 
+  # Why a container is NOT running, which is the question every restart
+  # count raises and none of them answers. `reason` is kept as a label —
+  # CrashLoopBackOff, ImagePullBackOff and ErrImagePull are different
+  # problems with different first moves, and collapsing them into "waiting"
+  # would throw away the only part an operator acts on.
+  - name: drake.workload-failure
+    interval: 30s
+    rules:
+      - record: drake:workload_pod:waiting_reason
+        expr: |
+          kube_pod_container_status_waiting_reason{reason!=""}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+      # Replicas the workload wants but does not have. Distinct from
+      # `replicas_desired - replicas_ready`, which is the same arithmetic
+      # done by the reader: this is what the controller itself reports, so
+      # a rollout that is mid-flight and one that is stuck look the same
+      # here and are told apart by how long the value persists.
+      - record: drake:workload:replicas_unavailable
+        expr: |
+          max by (namespace, workload_name) (
+            label_replace(
+              kube_deployment_status_replicas_unavailable,
+              "workload_name", "$1", "deployment", "(.*)"
+            )
+          )
+      # Pods that exist but are not Ready. `kube_pod_status_ready` carries a
+      # `condition` label with true/false/unknown; only the false series is
+      # a problem, and `unknown` is deliberately excluded rather than folded
+      # in — not knowing is not the same as knowing it is unready.
+      - record: drake:workload_pod:not_ready
+        expr: |
+          kube_pod_status_ready{condition="false"}
+          * on (namespace, pod) group_left(workload_name) drake:pod:workload
+
   - name: drake.workload-freshness
     interval: 30s
     rules:
