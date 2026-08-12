@@ -15,6 +15,8 @@ from alembic import command
 from alembic.config import Config
 from drake_api.catalog.service import CatalogService
 from drake_api.db import dispose_engines
+from drake_api.service_health.policy import DEFAULT_POLICY_KEY
+from drake_api.service_health.presets import DEFAULT_PRESET_KEY
 from harness_s1 import (
     S1Harness,
     build_harness,
@@ -353,8 +355,7 @@ async def test_service_capabilities_are_derived_from_evidence(engine: AsyncEngin
                    preset_key, health_policy_key, lifecycle)
                 VALUES
                   (:es, :project, :environment, :service, :cluster, 'alpha-dev',
-                   'Deployment', 'api', 'KUBERNETES_BASELINE', 'KUBERNETES_BASELINE',
-                   'active')
+                   'Deployment', 'api', :preset, :policy, 'active')
                 """
             ),
             {
@@ -363,6 +364,11 @@ async def test_service_capabilities_are_derived_from_evidence(engine: AsyncEngin
                 "environment": anchor[2],
                 "service": anchor[0],
                 "cluster": world["cluster_a"].id,
+                # The canonical keys, not literals: the table constrains their
+                # SHAPE and the application validates their membership, so a
+                # hardcoded string here would drift out of both silently.
+                "preset": DEFAULT_PRESET_KEY,
+                "policy": DEFAULT_POLICY_KEY,
             },
         )
 
