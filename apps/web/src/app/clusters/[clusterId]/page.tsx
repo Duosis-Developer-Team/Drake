@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { PageFrame } from "@/components/shell/AppShell";
+import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
+import { parseRangePreset } from "@/lib/telemetry";
 
 import {
   LifecycleBadge,
@@ -38,6 +40,9 @@ function healthSlices(rollup: HealthRollup) {
 
 export default function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
+  // The same range control the service boards use, read from the URL,
+  // so a link to a cluster at 7d opens at 7d.
+  const preset = parseRangePreset(useSearchParams().get("range"));
   const [cluster, retry] = useApi<Cluster>(`/v1/clusters/${clusterId}`);
   const [summary, retrySummary] = useApi<InventorySummary>(
     `/v1/clusters/${clusterId}/inventory/summary`,
@@ -120,6 +125,18 @@ export default function ClusterDetailPage() {
                   Browse resources
                 </Link>
               </div>
+              {/* Capacity is what the HOST can give, and it comes from the
+                  metrics backend rather than from inventory — which is why it
+                  sits above the agent's own view rather than inside it. An
+                  agent can be perfectly healthy on a node that is full. */}
+              <DashboardRenderer
+                templateKey="cluster-capacity-v1"
+                scopeType="cluster"
+                scopeId={clusterId}
+                preset={preset}
+                profile="kubernetes-service-v1"
+              />
+
               <LoadGate value={summary} retry={retrySummary}>
                 {(inventory) => (
                   <div className="space-y-4">

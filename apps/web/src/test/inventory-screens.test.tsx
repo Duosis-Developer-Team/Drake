@@ -9,6 +9,7 @@ import {
   AgentBadge,
   InventoryStateBadge,
 } from "@/components/inventory/primitives";
+import { SessionProvider } from "@/lib/session";
 import { errorBody, installFetchMock } from "@/test/mock-api";
 
 /**
@@ -168,7 +169,11 @@ describe("cluster inventory screens", () => {
       "/v1/clusters/c1": { status: 200, body: CLUSTER },
       "/v1/clusters/c1/inventory/summary": { status: 200, body: SUMMARY },
     });
-    render(<ClusterDetailPage />);
+    render(
+      <SessionProvider>
+        <ClusterDetailPage />
+      </SessionProvider>,
+    );
     await waitFor(() => expect(screen.getByTestId("agent-card")).toBeInTheDocument());
     const agentCard = within(screen.getByTestId("agent-card"));
     expect(screen.getByTestId("agent-card")).toHaveTextContent(/connected/i);
@@ -194,7 +199,11 @@ describe("cluster inventory screens", () => {
         body: errorBody("dependency_unavailable", "inventory unavailable"),
       },
     });
-    render(<ClusterDetailPage />);
+    render(
+      <SessionProvider>
+        <ClusterDetailPage />
+      </SessionProvider>,
+    );
     await waitFor(() => expect(screen.getByTestId("state-error")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });

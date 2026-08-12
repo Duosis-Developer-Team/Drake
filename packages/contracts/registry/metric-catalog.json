@@ -3,6 +3,161 @@
   "kind": "MetricCatalog",
   "metrics": [
     {
+      "key": "cluster.cpu_allocatable_cores",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_node_status_allocatable",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU the cluster's Ready nodes can schedule.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.cpu_used_cores",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_cpu_seconds_total",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU the cluster is actually consuming, excluding idle.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.filesystem_used_ratio",
+      "version": 1,
+      "type": "gauge",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_filesystem_avail_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "The fullest real filesystem on any node, as a fraction.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.memory_allocatable_bytes",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_node_status_allocatable",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory the cluster's Ready nodes can schedule.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.memory_used_bytes",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_memory_MemAvailable_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory in use across nodes: total minus what the kernel reports available.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
       "key": "service.error_ratio",
       "version": 1,
       "type": "ratio",

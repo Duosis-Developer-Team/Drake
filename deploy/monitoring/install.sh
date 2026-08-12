@@ -59,6 +59,25 @@ defaults = yaml.safe_load(
     ).stdout
 )
 scrape_configs = defaults["serverFiles"]["prometheus.yml"]["scrape_configs"]
+
+# Every series learns which cluster it came from.
+#
+# Drake resolves a cluster-scope query by injecting `cluster_ref` as a label
+# matcher, and nothing here published that label — so a capacity template
+# would have matched nothing at all. `external_labels` does NOT fix this:
+# it is attached on federation, remote-write and alerting, never on the
+# series this Prometheus stores and answers from. It has to be a scrape-time
+# relabel, on every job, or the capacity question has no answer.
+#
+# One value, because this Prometheus watches one cluster. The day it watches
+# two, this becomes a per-job value rather than a constant, and the queries
+# above keep working unchanged.
+cluster_ref = os.environ.get("DRAKE_CLUSTER_REF", "duosis-prod-1")
+for job in scrape_configs:
+    job.setdefault("relabel_configs", []).append(
+        {"target_label": "cluster_ref", "replacement": cluster_ref}
+    )
+
 for job in scrape_configs:
     if job["job_name"] != "kubernetes-service-endpoints":
         continue
