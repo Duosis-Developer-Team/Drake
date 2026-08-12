@@ -129,6 +129,54 @@ spec:
 {{- end }}
 ---
 {{/*
+Inbound to the API.
+
+There was none, and `drake-default-deny` selects every pod — so under an
+enforcing CNI even the edge could not reach the API. Nothing caught it
+because this cluster runs Flannel, which enforces no policy at all; these
+rules are intent, and intent that cannot work is worth fixing before
+something starts enforcing it.
+
+Two sources, both named by label rather than by address: the edge
+controller in this namespace, and any in-cluster sender explicitly listed —
+today, the Alertmanager that delivers notifications.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "drake.name" . }}-api-ingress
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "drake.name" . }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "drake.name" . }}
+              app.kubernetes.io/component: edge
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+    {{- range $np.apiClusterIngress }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "apiClusterIngress[].namespace is required" .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml (required "apiClusterIngress[].podSelector is required" .podSelector) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.api.port }}
+    {{- end }}
+---
+{{/*
 The API opens DNS, PostgreSQL and Redis, plus whatever outbound HTTPS the
 operator has explicitly declared. Nothing else: a default Drake calls no
 third party, so it is given no route to one.
