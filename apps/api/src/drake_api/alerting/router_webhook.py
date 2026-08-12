@@ -28,6 +28,7 @@ from drake_api.alerting import ingest
 from drake_api.alerting.model import IngestRejectedError, normalize_delivery
 from drake_api.db import get_engine
 from drake_api.settings import Settings
+from drake_api.telemetry.observations import record_provider_observation
 
 logger = logging.getLogger("drake_api.alerting.webhook")
 
@@ -80,6 +81,30 @@ async def receive(integration_key: str, request: Request) -> dict[str, Any]:
         delivery=delivery,
         now=datetime.now(UTC),
     )
+    # A delivery that authenticated and projected IS a real interaction with
+    # this integration, so it is recorded as one. Without this the row sat at
+    # `observed_state: unknown` forever while Alertmanager was demonstrably
+    # working — the projection said "never heard from" about a source that
+    # had just been heard from.
+    #
+    # Recorded regardless of how the alerts MAPPED. An unmapped alert is a
+    # gap in Drake's catalog, not a failure of the sender, and blaming the
+    # integration for it would point the operator at the wrong system.
+    #
+    # Only successes are recorded here, and the direction is why. Prometheus
+    # is polled, so silence there means Drake stopped getting answers.
+    # Alertmanager pushes, so silence means nothing is firing — which is the
+    # good case. There is no failure to observe from this end: a sender that
+    # never arrives leaves no trace to write.
+    # Never at the cost of the delivery. The alerts are already projected and
+    # committed; if this bookkeeping write fails, turning that into a 500
+    # would make Alertmanager retry work Drake has already done — the retry
+    # storm this endpoint exists to avoid, caused by a status column.
+    try:
+        await record_provider_observation(engine, str(integration_id), outcome="success")
+    except Exception:
+        logger.warning("alertmanager delivery accepted but observation not recorded")
+
     # Counts only. Never an alert name, a label, a fingerprint or anything
     # that would let a caller confirm what Drake knows about an estate.
     return {

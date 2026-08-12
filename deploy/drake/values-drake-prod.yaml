@@ -265,6 +265,19 @@ telemetry:
       allowPrivate: true
       allowPlaintext: true
 
+# ON here because this deployment has an agent enrolled and reporting fresh
+# inventory, which is the only precondition. It grants no new access: the
+# ingest reads rows the agent already wrote and calls neither Kubernetes nor
+# GitHub.
+#
+# Until this was wired, the chart had no way to set the flag at all, so the
+# API fell back to its `False` default and deployment history stayed dark in
+# production while the data it needed was already arriving. That is the same
+# failure as the missing `internalAgentApi` block above: the code was
+# present, the deployment simply never said to run it.
+deployments:
+  ingestEnabled: true
+
 github:
   enabled: true
   existingSecret: drake-github-app

@@ -77,12 +77,32 @@ export function LoadGate<T>({
   return <>{children(value.data)}</>;
 }
 
-const OPERATIONAL_KIND: Record<OperationalState, DataStateKind> = {
+/**
+ * Absence and degradation are DataStates; a capability that IS reporting is
+ * a status, not an absence.
+ *
+ * `ok` used to map to `zero`, whose own description reads "The source
+ * reported an actual value of 0." That was a placeholder waiting for live
+ * sources, and while it stood, a service with working metrics rendered a
+ * sentence that was simply false. The same conflation sat on `degraded`,
+ * which mapped to `error` — "The request did not complete" — when degraded
+ * means the opposite: it IS answering, just not well.
+ */
+const OPERATIONAL_KIND: Record<
+  Exclude<OperationalState, "ok" | "degraded">,
+  DataStateKind
+> = {
   not_configured: "not-configured",
   unknown: "unknown",
   stale: "stale",
-  degraded: "error",
-  ok: "zero", // placeholder mapping; real healthy visuals arrive with live sources
+};
+
+const OPERATIONAL_BADGE: Record<"ok" | "degraded", { status: HealthStatus; label: string }> = {
+  // "Reporting" rather than "Healthy": this says the capability is wired and
+  // answering. Whether what it reports is healthy is the signal's verdict,
+  // and belongs to the charts, not to this card.
+  ok: { status: "healthy", label: "Reporting" },
+  degraded: { status: "warning", label: "Degraded" },
 };
 
 export function OperationalGrid({
@@ -101,7 +121,14 @@ export function OperationalGrid({
         const state = states[key] ?? "unknown";
         return (
           <Card key={key} title={label}>
-            <DataState kind={OPERATIONAL_KIND[state]} />
+            {state === "ok" || state === "degraded" ? (
+              <StatusBadge
+                status={OPERATIONAL_BADGE[state].status}
+                label={OPERATIONAL_BADGE[state].label}
+              />
+            ) : (
+              <DataState kind={OPERATIONAL_KIND[state]} />
+            )}
           </Card>
         );
       })}

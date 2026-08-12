@@ -243,6 +243,24 @@ telemetry:
   #    allowPrivate: true
   #    allowPlaintext: true
 
+deployments:
+  # Deployment history: which revision of a workload has been running since
+  # when, and whether health changed across the rollout.
+  #
+  # This reads the inventory the cluster agent ALREADY reports. It makes no
+  # Kubernetes call of its own and needs no GitHub permission — the agent
+  # stays the only thing that talks to a cluster, and this only interprets
+  # what it sent. So enabling it adds no access, only interpretation.
+  #
+  # Off by default because a Drake with no agent enrolled has nothing to
+  # interpret, and a worker polling an empty table every two minutes is
+  # noise. Turn it on for any deployment where an agent is connected.
+  #
+  # The work is leased across replicas, so two API pods cannot both ingest
+  # the same cycle.
+  ingestEnabled: false
+  ingestIntervalSeconds: 120
+
 github:
   # Drake must be deployable before the real App exists. Disabled means
   # no token mint, no webhook registration, no provider call.

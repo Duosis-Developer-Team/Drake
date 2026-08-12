@@ -140,6 +140,29 @@ describe("catalog screens", () => {
     expect(screen.getByTestId("state-unknown")).not.toHaveTextContent("0");
   });
 
+  it("operational grid: a reporting capability is a status, never 'Zero'", () => {
+    // `ok` used to map to the `zero` DataState, whose own description reads
+    // "The source reported an actual value of 0." So a service with working
+    // metrics rendered a sentence that was false. The same conflation put
+    // `degraded` — which means it IS answering, just not well — behind
+    // "Query failed".
+    render(
+      <OperationalGrid
+        states={{ metrics: "ok", deployments: "degraded", logs: "not_configured" }}
+        labels={{ metrics: "Metrics", deployments: "Deployments", logs: "Logs" }}
+      />,
+    );
+    expect(screen.getByText("Reporting")).toBeInTheDocument();
+    expect(screen.getByText("Degraded")).toBeInTheDocument();
+    expect(screen.getByTestId("state-not-configured")).toBeInTheDocument();
+
+    // The two false sentences must not be on the screen at all.
+    expect(screen.queryByText(/actual value of 0/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/did not complete/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("state-zero")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("state-error")).not.toBeInTheDocument();
+  });
+
   it("search dialog: opens, queries, navigates with keyboard, closes on escape", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     installFetchMock({
