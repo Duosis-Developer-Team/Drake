@@ -4,8 +4,8 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@2d1cd85 by publish
-# run 31584122657 — the visual-density release. All three — API, web
+# Images are pinned to real digests published from main@218740f by publish
+# run 31589616911 — the visual-density release. All three — API, web
 # and migration — were built from that one commit, so they cannot drift
 # apart. Both digests were read back from the registry rather than from the
 # build log: the log also prints a tooling image's digest, and pinning that
@@ -104,11 +104,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 2d1cd85e7d18bbefac7c81985740bafdd1a194d6
+    # Source commit 218740f1b98fd0e90d489f57a29f574b788dfadf
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:2b1ee84b2ec80bfc444f291a1ab194787df324e10429cdcf7130bea62c820700"
+    digest: "sha256:3a0acff998c3efe39d66578b2067692fa04cc63c2b860a2fe86a67d94cdfc8f8"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -120,8 +120,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 2d1cd85e7d18bbefac7c81985740bafdd1a194d6
-    digest: "sha256:e4138d645d24876c26934954aaa15fa7baca9e6ab538e601ba39352ee02713aa"
+    # Source commit 218740f1b98fd0e90d489f57a29f574b788dfadf
+    digest: "sha256:1c9c21d27871184ecb05a66f8ab84dc8040a5a210ea85d58635addb43680d3b3"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -132,7 +132,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:2b1ee84b2ec80bfc444f291a1ab194787df324e10429cdcf7130bea62c820700"
+    digest: "sha256:3a0acff998c3efe39d66578b2067692fa04cc63c2b860a2fe86a67d94cdfc8f8"
   backoffLimit: 0
 
 networkPolicy:
