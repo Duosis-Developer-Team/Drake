@@ -587,6 +587,65 @@ async def list_services(
         }
 
 
+async def _service_capabilities(
+    connection: AsyncConnection, environment_service_id: uuid.UUID, settings: Settings
+) -> dict[str, str]:
+    """Capability states derived from evidence, the way clusters already do it.
+
+    These four were a hardcoded literal: every service reported all four as
+    `not_configured` forever, including services whose golden-signal charts
+    were rendering live Prometheus data on the same screen. A capability
+    panel that cannot change is not a status, it is decoration — and the one
+    thing this product sells is that the screen means what it says.
+
+    The vocabulary is deliberately the existing five, and `unknown` earns
+    its place here: it is Drake watching and not having seen yet, which is a
+    different fact from nobody having asked it to watch.
+    """
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT
+                  (SELECT count(*) FROM service_workload_bindings
+                    WHERE environment_service_id = :id AND lifecycle = 'active'),
+                  (SELECT count(*) FROM service_workload_bindings
+                    WHERE environment_service_id = :id AND lifecycle = 'active'
+                      AND resolved_resource_uid IS NOT NULL),
+                  (SELECT count(*) FROM deployment_revisions
+                    WHERE environment_service_id = :id)
+                """
+            ),
+            {"id": environment_service_id},
+        )
+    ).first()
+    bindings, resolved, revisions = (int(row[0]), int(row[1]), int(row[2])) if row else (0, 0, 0)
+
+    if revisions:
+        deployments = "ok"
+    elif settings.deployment_ingest_enabled:
+        # Enabled, but history accrues forward from the first observation —
+        # it is never back-filled from snapshots the agent already sent.
+        deployments = "unknown"
+    else:
+        deployments = "not_configured"
+
+    return {
+        # A RESOLVED binding is what the signal queries need — the binding
+        # names a workload, and `resolved_resource_uid` is inventory saying
+        # it was actually found. An unresolved binding is configuration
+        # without an object behind it, which the table's own schema already
+        # calls "not seen yet"; reporting that as `ok` would promise charts
+        # that come back empty.
+        "metrics": "ok" if resolved else ("unknown" if bindings else "not_configured"),
+        # Honest absences. Drake ingests neither today, and saying so is the
+        # correct answer rather than a gap to be papered over.
+        "logs": "not_configured",
+        "traces": "not_configured",
+        "deployments": deployments,
+    }
+
+
 @router.get("/projects/{project_id}/environments/{environment_id}/services/{service_binding_id}")
 async def get_service(
     request: Request,
@@ -641,12 +700,7 @@ async def get_service(
                 "accepted_at": row[12].isoformat(),
             },
             "version": row[13],
-            "operational": {
-                "metrics": "not_configured",
-                "logs": "not_configured",
-                "traces": "not_configured",
-                "deployments": "not_configured",
-            },
+            "operational": await _service_capabilities(connection, service_binding_id, settings),
             "as_of": _as_of(),
         }
 

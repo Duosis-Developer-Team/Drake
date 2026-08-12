@@ -299,6 +299,111 @@ async def test_service_visibility_follows_environment(engine: AsyncEngine) -> No
         assert detail["scope"]["ref"] == "alpha/dev/api"
 
 
+async def test_service_capabilities_are_derived_from_evidence(engine: AsyncEngine) -> None:
+    """The four capability states were a hardcoded literal.
+
+    Every service reported all four as `not_configured` forever — including
+    services whose golden-signal charts were rendering live Prometheus data
+    on the same screen. A panel that cannot change is decoration, and this
+    asserts that it changes for the reason it claims to.
+
+    The middle state is the interesting one: a binding that exists but whose
+    workload inventory has never resolved is configuration without an object
+    behind it. Reporting that as `ok` would promise charts that come back
+    empty, so it reports `unknown` — Drake is watching and has not seen yet.
+    """
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    alpha_id, dev_id = world["alpha"].id, world["alpha_dev"].id
+    service_binding = world["dev_api"].id
+
+    async def metrics_state() -> str:
+        async with harness.api_client() as client:
+            await harness.login(client, "user-env")
+            detail = (
+                await client.get(
+                    f"/v1/projects/{alpha_id}/environments/{dev_id}/services/{service_binding}"
+                )
+            ).json()
+            return str(detail["operational"]["metrics"])
+
+    assert await metrics_state() == "not_configured", "no binding, nothing to ask"
+
+    async with engine.begin() as connection:
+        anchor = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT es.service_id, e.project_id, es.environment_id
+                    FROM environment_services es
+                    JOIN environments e ON e.id = es.environment_id
+                    WHERE es.id = :id
+                    """
+                ),
+                {"id": service_binding},
+            )
+        ).first()
+        assert anchor is not None
+        await connection.execute(
+            text(
+                """
+                INSERT INTO service_workload_bindings
+                  (environment_service_id, project_id, environment_id, service_id,
+                   cluster_id, namespace, workload_kind, workload_name,
+                   preset_key, health_policy_key, lifecycle)
+                VALUES
+                  (:es, :project, :environment, :service, :cluster, 'alpha-dev',
+                   'Deployment', 'api', 'KUBERNETES_BASELINE', 'KUBERNETES_BASELINE',
+                   'active')
+                """
+            ),
+            {
+                "es": service_binding,
+                "project": anchor[1],
+                "environment": anchor[2],
+                "service": anchor[0],
+                "cluster": world["cluster_a"].id,
+            },
+        )
+
+    assert await metrics_state() == "unknown", "bound, but inventory has not resolved it"
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                UPDATE service_workload_bindings
+                SET resolved_resource_uid = 'uid-api', resolved_at = now()
+                WHERE environment_service_id = :id
+                """
+            ),
+            {"id": service_binding},
+        )
+
+    assert await metrics_state() == "ok", "resolved: there is a workload to query"
+
+
+async def test_capabilities_with_no_source_stay_honestly_absent(engine: AsyncEngine) -> None:
+    """Drake ingests neither logs nor traces, and says so.
+
+    This is here so that the day a source is added, the person adding it has
+    to change this test on purpose rather than discover that the screen had
+    been claiming coverage nobody built.
+    """
+    world = await seed_catalog_world(engine)
+    harness = await build_users(engine)
+    async with harness.api_client() as client:
+        await harness.login(client, "user-env")
+        detail = (
+            await client.get(
+                f"/v1/projects/{world['alpha'].id}/environments/{world['alpha_dev'].id}"
+                f"/services/{world['dev_api'].id}"
+            )
+        ).json()
+    assert detail["operational"]["logs"] == "not_configured"
+    assert detail["operational"]["traces"] == "not_configured"
+
+
 async def test_cluster_separation(engine: AsyncEngine) -> None:
     world = await seed_catalog_world(engine)
     harness = await build_users(engine)
