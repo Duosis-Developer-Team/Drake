@@ -18,6 +18,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { SectionHeader } from "@/components/ui/Panel";
+import { ErrorState, LoadingSkeleton } from "@/components/ui/states";
 import {
   KpiWidget,
   StatusWidget,
@@ -56,12 +58,16 @@ export function DashboardRenderer({
   scopeId,
   preset,
   profile,
+  showSectionHeadings = true,
 }: {
   templateKey: string;
   scopeType: "environment" | "service" | "cluster";
   scopeId: string;
   preset: RangePreset;
   profile?: string;
+  /** Off when the page already titles the section — the template's section
+   *  title and the page heading are otherwise the same words twice. */
+  showSectionHeadings?: boolean;
 }) {
   const { state: sessionState } = useSession();
   const me = sessionState.status === "authenticated" ? sessionState.me : null;
@@ -167,12 +173,10 @@ export function DashboardRenderer({
   const retry = useCallback(() => setNonce((value) => value + 1), []);
 
   if (dashboardError) {
-    return <p className="text-sm text-ink-muted">{dashboardError}</p>;
+    return <ErrorState title="Dashboard unavailable" description={dashboardError} onRetry={retry} />;
   }
   if (!dashboard) {
-    return (
-      <div aria-hidden className="h-40 animate-pulse rounded-xl border border-border bg-surface" />
-    );
+    return <LoadingSkeleton variant="chart" label="Loading dashboard definition" />;
   }
 
   return (
@@ -184,8 +188,12 @@ export function DashboardRenderer({
         if (widgets.length === 0) return null;
         return (
           <section key={section.key} aria-label={section.title}>
-            <h3 className="mb-2 text-sm font-semibold text-ink">{section.title}</h3>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {showSectionHeadings ? <SectionHeader title={section.title} /> : null}
+            <div
+              className={`grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 ${
+                showSectionHeadings ? "mt-3" : ""
+              }`}
+            >
               {widgets.map((widget) => {
                 const state = states[widget.queryTemplateKey] ?? { kind: "loading" as const };
                 const props = { widget, state, onRetry: retry };

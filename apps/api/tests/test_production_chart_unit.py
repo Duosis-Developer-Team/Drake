@@ -334,6 +334,82 @@ def test_github_key_material_is_mounted_as_files_not_env_vars() -> None:
     assert mount["readOnly"] is True
 
 
+def test_production_registers_one_alertmanager_integration_per_project() -> None:
+    """The integration decides the project, so there has to be one each.
+
+    A single shared integration would file every alert against whichever
+    project it named, and Drake's ingest would be doing exactly what its
+    design refuses: honouring a payload's claim about where it belongs.
+    """
+    docs = render_prod()
+    api = next(d for d in by_kind(docs, "Deployment") if d["metadata"]["name"] == "drake-api")
+    pod = api["spec"]["template"]["spec"]
+    env = {e["name"]: e.get("value") for e in pod["containers"][0]["env"]}
+    integrations = json.loads(env["DRAKE_ALERTMANAGER_INTEGRATIONS"])
+    assert sorted(integrations) == ["fikir-sepeti", "hermes", "logislot"]
+    for key, integration in integrations.items():
+        assert integration["project_key"] == key
+        # A REFERENCE, never the token: the file is mounted, and the path is
+        # derived so an integration cannot exist with no file behind it.
+        assert integration["webhook_token_file"] == f"/etc/drake/alertmanager/{key}"
+        # A reference and nothing else: the model has no field that could
+        # hold the material, and the rendered value must not invent one.
+        assert set(integration) == {"project_key", "display_name", "webhook_token_file"}
+    assert not [name for name in env if name.endswith(("_TOKEN", "_SECRET", "_PASSWORD"))]
+
+
+def test_the_alertmanager_tokens_are_mounted_readably() -> None:
+    """Same 0440 + fsGroup contract as the App key, for the same reason."""
+    api = next(
+        d for d in by_kind(render_prod(), "Deployment") if d["metadata"]["name"] == "drake-api"
+    )
+    pod = api["spec"]["template"]["spec"]
+    volume = next(v for v in pod["volumes"] if v["name"] == "alertmanager-tokens")
+    assert volume["secret"]["secretName"] == "drake-alertmanager-webhook"
+    assert volume["secret"]["defaultMode"] == 0o440
+    assert pod["securityContext"]["fsGroup"] == 65532
+    mount = next(
+        m for m in pod["containers"][0]["volumeMounts"] if m["name"] == "alertmanager-tokens"
+    )
+    assert mount["mountPath"] == "/etc/drake/alertmanager"
+    assert mount["readOnly"] is True
+
+
+def test_the_api_accepts_inbound_only_from_the_edge_and_alertmanager() -> None:
+    """There was no inbound policy at all, and default-deny selects every pod.
+
+    Flannel enforces nothing here, so this never showed up as an outage —
+    which is exactly why it is asserted rather than left to be discovered by
+    the first cluster that does enforce.
+    """
+    policy = next(
+        d
+        for d in by_kind(render_prod(), "NetworkPolicy")
+        if d["metadata"]["name"] == "drake-api-ingress"
+    )
+    assert policy["spec"]["policyTypes"] == ["Ingress"]
+    sources = [
+        (
+            rule["from"][0].get("namespaceSelector", {}).get("matchLabels", {}),
+            rule["from"][0].get("podSelector", {}).get("matchLabels", {}),
+            [p["port"] for p in rule["ports"]],
+        )
+        for rule in policy["spec"]["ingress"]
+    ]
+    assert (
+        {},
+        {"app.kubernetes.io/name": "drake", "app.kubernetes.io/component": "edge"},
+        [8000],
+    ) in sources
+    assert (
+        {"kubernetes.io/metadata.name": "drake-monitoring"},
+        {"app.kubernetes.io/name": "alertmanager"},
+        [8000],
+    ) in sources
+    # No address anywhere: the same lesson as the agent's egress rule.
+    assert not any("ipBlock" in t for rule in policy["spec"]["ingress"] for t in rule["from"])
+
+
 def test_production_names_its_metrics_backend_and_can_reach_it() -> None:
     """The connector and the policy that lets the API use it, together.
 

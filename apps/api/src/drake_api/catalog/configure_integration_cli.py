@@ -26,6 +26,7 @@ import asyncio
 import uuid
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from drake_api.audit.service import AuditEventData, record_audit_event_in
 from drake_api.catalog.service import CatalogService, CatalogValidationError
@@ -39,7 +40,44 @@ from drake_api.settings import get_settings
 CONFIGURABLE_TYPES = ("prometheus",)
 
 
-async def _run(integration_type: str, project_key: str, config_ref: str, actor: uuid.UUID) -> int:
+async def _resolve_scope(
+    connection: AsyncConnection, project_key: str, cluster_ref: str
+) -> tuple[uuid.UUID | None, str]:
+    """The scope the integration hangs on, and the name to report it by.
+
+    A cluster-scope integration is not a nicety: Drake resolves a
+    cluster-scope telemetry query against the CLUSTER's scope, so capacity
+    questions are answered by an integration registered there — a project's
+    one cannot serve them however well configured it is.
+    """
+    if cluster_ref:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT scope_id FROM clusters "
+                    "WHERE cluster_ref = :ref AND lifecycle = 'active'"
+                ),
+                {"ref": cluster_ref},
+            )
+        ).first()
+        return (row[0], f"cluster {cluster_ref}") if row else (None, f"cluster {cluster_ref}")
+    row = (
+        await connection.execute(
+            text("SELECT scope_id FROM projects WHERE project_key = :key AND lifecycle = 'active'"),
+            {"key": project_key},
+        )
+    ).first()
+    return (row[0], project_key) if row else (None, project_key)
+
+
+async def _run(
+    integration_type: str,
+    project_key: str,
+    cluster_ref: str,
+    config_ref: str,
+    actor: uuid.UUID,
+    create_missing: bool,
+) -> int:
     settings = get_settings()
     engine = get_engine(settings)
     async with engine.begin() as connection:
@@ -50,21 +88,13 @@ async def _run(integration_type: str, project_key: str, config_ref: str, actor: 
             print("refused: the actor identity is not a known Drake identity")
             return 2
 
-        project = (
-            await connection.execute(
-                text(
-                    "SELECT id, scope_id FROM projects "
-                    "WHERE project_key = :key AND lifecycle = 'active'"
-                ),
-                {"key": project_key},
-            )
-        ).first()
-        if project is None:
-            print(f"refused: no active project {project_key!r}")
+        scope_id, target = await _resolve_scope(connection, project_key, cluster_ref)
+        if scope_id is None:
+            print(f"refused: no active {target}")
             return 2
 
         service = CatalogService(connection, source_kind="operator")
-        changed = await service.configure_integration(integration_type, project[1], config_ref)
+        changed = await service.configure_integration(integration_type, scope_id, config_ref)
         if not changed:
             # Either it is already pointed here, or there is no such row.
             existing = (
@@ -74,13 +104,26 @@ async def _run(integration_type: str, project_key: str, config_ref: str, actor: 
                         "WHERE integration_type = :type AND scope_id = :scope "
                         "AND lifecycle = 'active'"
                     ),
-                    {"type": integration_type, "scope": project[1]},
+                    {"type": integration_type, "scope": scope_id},
                 )
             ).first()
             if existing is None:
-                print(f"refused: {project_key} has no active {integration_type} integration")
-                return 2
-            print(f"unchanged: {project_key}/{integration_type} already references {config_ref}")
+                if not create_missing:
+                    # Onboarding creates a project's integration rows; a
+                    # CLUSTER has none until someone decides it should. That
+                    # decision is a create, and `configure` is not a create —
+                    # the same split that stops a re-import from silently
+                    # disconnecting a provider.
+                    print(f"refused: {target} has no active {integration_type} integration")
+                    print("         pass --create-missing to register one at this scope")
+                    return 2
+                await service.register_integration(integration_type, scope_id)
+                if not await service.configure_integration(integration_type, scope_id, config_ref):
+                    print(f"refused: could not configure {target}/{integration_type}")
+                    return 2
+                print(f"created and configured: {target}/{integration_type} -> {config_ref}")
+                changed = True
+            print(f"unchanged: {target}/{integration_type} already references {config_ref}")
             return 0
 
         await record_audit_event_in(
@@ -91,10 +134,10 @@ async def _run(integration_type: str, project_key: str, config_ref: str, actor: 
                 action="catalog.integration.configure",
                 result="success",
                 target_type="integration",
-                target_id=f"{project_key}/{integration_type}",
+                target_id=f"{target}/{integration_type}",
                 correlation_id=correlation_id_var.get(),
                 metadata={
-                    "project_key": project_key,
+                    "scope": target,
                     "integration_type": integration_type,
                     # The NAME, which is not the address and not a secret.
                     "config_ref": config_ref,
@@ -102,14 +145,24 @@ async def _run(integration_type: str, project_key: str, config_ref: str, actor: 
                 },
             ),
         )
-    print(f"configured: {project_key}/{integration_type} -> {config_ref}")
+    print(f"configured: {target}/{integration_type} -> {config_ref}")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Connect a project integration to a connector.")
     parser.add_argument("--integration-type", required=True, choices=CONFIGURABLE_TYPES)
-    parser.add_argument("--project-key", required=True)
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--project-key")
+    parser.add_argument(
+        "--create-missing",
+        action="store_true",
+        help="register the integration at this scope if it does not exist yet",
+    )
+    scope.add_argument(
+        "--cluster-ref",
+        help="cluster-scope integration; capacity queries resolve against this scope",
+    )
     parser.add_argument("--config-ref", required=True, help="connector name, never a URL or secret")
     parser.add_argument("--actor", required=True, help="the operator's Drake identity id")
     args = parser.parse_args()
@@ -119,7 +172,16 @@ def main() -> int:
         print("refused: --actor must be a Drake identity UUID")
         return 2
     try:
-        return asyncio.run(_run(args.integration_type, args.project_key, args.config_ref, actor))
+        return asyncio.run(
+            _run(
+                args.integration_type,
+                args.project_key or "",
+                args.cluster_ref or "",
+                args.config_ref,
+                actor,
+                args.create_missing,
+            )
+        )
     except CatalogValidationError as error:
         print(f"refused: {error}")
         return 2

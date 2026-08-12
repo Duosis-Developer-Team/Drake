@@ -120,6 +120,7 @@ export function BurnTable({ rates }: { rates: BurnRate[] }) {
     );
   }
   return (
+    <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
     <table className="w-full text-left text-xs" data-testid="burn-table">
       <thead className="text-ink-muted">
         <tr>
@@ -155,6 +156,7 @@ export function BurnTable({ rates }: { rates: BurnRate[] }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 

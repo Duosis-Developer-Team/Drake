@@ -315,8 +315,12 @@ describe("service health detail", () => {
     for (const title of ["Availability", "Stability", "Resources", "Application"]) {
       expect(await screen.findByTestId(`section-${title.toLowerCase()}`)).toBeInTheDocument();
     }
+    // Ready-over-desired is a ring plus its exact digits now; the digits are
+    // what the assertion is about — a percentage alone would hide the
+    // difference between 0/0 and an unmeasured pair.
     const availability = screen.getByTestId("section-availability");
-    expect(within(availability).getByText("3 / 3")).toBeInTheDocument();
+    expect(availability).toHaveTextContent("3/3");
+    expect(within(availability).getByTestId("ring-progress")).toBeInTheDocument();
   });
 
   it("explains a service that publishes no golden signals without blaming it", async () => {

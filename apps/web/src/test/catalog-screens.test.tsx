@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ClustersPage from "@/app/clusters/page";
@@ -44,8 +44,13 @@ describe("catalog screens", () => {
     render(<ProjectsPage />);
     await waitFor(() => expect(screen.getByTestId("project-list")).toBeInTheDocument());
     expect(screen.getByText("Alpha")).toBeInTheDocument();
-    expect(screen.getByText(/2 env · 3 services/)).toBeInTheDocument();
-    expect(screen.getByText("high")).toBeInTheDocument();
+    // Counts are their own right-aligned, tabular columns now: the point of
+    // the table is that these can be compared down a column.
+    const row = screen.getByRole("row", { name: /Alpha/ });
+    expect(within(row).getByText("2")).toBeInTheDocument();
+    expect(within(row).getByText("3")).toBeInTheDocument();
+    // Badge labels are sentence case now; the state itself is unchanged.
+    expect(within(row).getByTestId("status-warning")).toHaveTextContent(/high/i);
   });
 
   it("project list: empty state is honest, not an error", async () => {

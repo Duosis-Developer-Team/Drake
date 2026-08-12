@@ -3,10 +3,18 @@
   "$id": "https://drake.duosis.com/schemas/metric-catalog-v1.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "kind", "metrics"],
+  "required": [
+    "apiVersion",
+    "kind",
+    "metrics"
+  ],
   "properties": {
-    "apiVersion": {"const": "drake.duosis.com/v1alpha1"},
-    "kind": {"const": "MetricCatalog"},
+    "apiVersion": {
+      "const": "drake.duosis.com/v1alpha1"
+    },
+    "kind": {
+      "const": "MetricCatalog"
+    },
     "metrics": {
       "type": "array",
       "minItems": 1,
@@ -30,10 +38,22 @@
           "provenance"
         ],
         "properties": {
-          "key": {"$ref": "#/$defs/stableKey"},
-          "version": {"type": "integer", "minimum": 1, "maximum": 10000},
+          "key": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
           "type": {
-            "enum": ["counter_rate", "ratio", "histogram_quantile", "gauge", "snapshot"]
+            "enum": [
+              "counter_rate",
+              "ratio",
+              "histogram_quantile",
+              "gauge",
+              "snapshot"
+            ]
           },
           "unit": {
             "enum": [
@@ -46,30 +66,82 @@
               "restarts"
             ]
           },
-          "sourceType": {"enum": ["prometheus", "snapshot"]},
-          "sourceFamily": {"$ref": "#/$defs/labelName"},
-          "quantile": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
-          "allowedInputLabels": {"$ref": "#/$defs/labelList"},
-          "allowedOutputLabels": {"$ref": "#/$defs/labelList"},
-          "forbiddenLabels": {"$ref": "#/$defs/labelList"},
-          "capability": {"enum": ["telemetry", "inventory", "tenant"]},
+          "sourceType": {
+            "enum": [
+              "prometheus",
+              "snapshot"
+            ]
+          },
+          "sourceFamily": {
+            "$ref": "#/$defs/metricFamily"
+          },
+          "quantile": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1
+          },
+          "allowedInputLabels": {
+            "$ref": "#/$defs/labelList"
+          },
+          "allowedOutputLabels": {
+            "$ref": "#/$defs/labelList"
+          },
+          "forbiddenLabels": {
+            "$ref": "#/$defs/labelList"
+          },
+          "capability": {
+            "enum": [
+              "telemetry",
+              "inventory",
+              "tenant"
+            ]
+          },
           "profiles": {
             "type": "array",
             "minItems": 1,
             "maxItems": 16,
-            "items": {"$ref": "#/$defs/stableKey"}
+            "items": {
+              "$ref": "#/$defs/stableKey"
+            }
           },
-          "lifecycle": {"enum": ["active", "deprecated"]},
-          "description": {"type": "string", "minLength": 1, "maxLength": 500},
-          "requiredMetadata": {"$ref": "#/$defs/labelList"},
+          "lifecycle": {
+            "enum": [
+              "active",
+              "deprecated"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "requiredMetadata": {
+            "$ref": "#/$defs/labelList"
+          },
           "provenance": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "ref", "revision"],
+            "required": [
+              "kind",
+              "ref",
+              "revision"
+            ],
             "properties": {
-              "kind": {"enum": ["registry"]},
-              "ref": {"type": "string", "minLength": 1, "maxLength": 120},
-              "revision": {"type": "string", "minLength": 1, "maxLength": 120}
+              "kind": {
+                "enum": [
+                  "registry"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "revision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
             }
           }
         }
@@ -88,7 +160,14 @@
     "labelList": {
       "type": "array",
       "maxItems": 24,
-      "items": {"$ref": "#/$defs/labelName"}
+      "items": {
+        "$ref": "#/$defs/labelName"
+      }
+    },
+    "metricFamily": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_:][a-zA-Z0-9_:]*$",
+      "maxLength": 200
     }
   }
 }

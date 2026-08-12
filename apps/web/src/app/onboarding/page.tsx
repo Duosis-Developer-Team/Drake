@@ -14,6 +14,7 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import { SessionBadge } from "@/components/onboarding/primitives";
@@ -121,7 +122,8 @@ function OnboardingInner() {
   const [page, retryPage] = useApi<SessionPage>("/v1/onboarding/sessions");
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-ink">Onboard a project</h1>
         <p className="text-sm text-ink-secondary">
@@ -206,6 +208,9 @@ function OnboardingInner() {
             description="Nothing in your scope is being onboarded. This is not a statement about which repositories exist."
           />
         ) : (
+          /* Its own scroller, contained: a wide table must scroll itself
+             rather than taking the page sideways with it. */
+          <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-ink-muted">
               <tr>
@@ -222,9 +227,11 @@ function OnboardingInner() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
-    </div>
+      </div>
+    </PageFrame>
   );
 }
 

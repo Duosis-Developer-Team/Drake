@@ -16,7 +16,90 @@
 # alerts nobody routes.
 
 alertmanager:
-  enabled: false
+  # On now, because Drake is its consumer: the Active incidents card reads
+  # `/v1/webhooks/alertmanager/{key}` deliveries, and with no Alertmanager
+  # there is nothing to read. It stayed off until there was one.
+  enabled: true
+
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 2Gi
+
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 256Mi}
+
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      # One group per alert name and workload, so two unhealthy workloads
+      # are two notifications rather than one that names neither.
+      group_by: ["alertname", "namespace", "workload_name"]
+      group_wait: 30s
+      group_interval: 5m
+      # Drake dedupes on an immutable fingerprint, so a repeat is cheap and
+      # keeps `last seen` honest without growing the timeline.
+      repeat_interval: 12h
+      # Platform alerts (project=drake) land here. Drake's ingest fixes the
+      # project from the integration, sees a claim it cannot honour, and
+      # records them as unmapped platform evidence — which is the truthful
+      # outcome for a failing node that belongs to nobody's service.
+      receiver: drake-platform
+      routes:
+        - matchers: ['project="hermes"']
+          receiver: drake-hermes
+        - matchers: ['project="logislot"']
+          receiver: drake-logislot
+        - matchers: ['project="fikir-sepeti"']
+          receiver: drake-fikir-sepeti
+    receivers:
+      # In-cluster, to the API Service — a notification is internal traffic
+      # and has no reason to leave the cluster and come back through the
+      # public edge. Native Alertmanager signs nothing, so the bearer token
+      # IS the authentication; it is mounted from a Secret, never inline.
+      - name: drake-platform
+        webhook_configs:
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/hermes
+            send_resolved: true
+            http_config:
+              authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/hermes}
+      - name: drake-hermes
+        webhook_configs:
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/hermes
+            send_resolved: true
+            http_config:
+              authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/hermes}
+      - name: drake-logislot
+        webhook_configs:
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/logislot
+            send_resolved: true
+            http_config:
+              authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/logislot}
+      - name: drake-fikir-sepeti
+        webhook_configs:
+          - url: http://drake-api.drake-prod.svc.cluster.local:8000/v1/webhooks/alertmanager/fikir-sepeti
+            send_resolved: true
+            http_config:
+              authorization: {type: Bearer, credentials_file: /etc/alertmanager/drake/fikir-sepeti}
+    inhibit_rules:
+      # A node that is down explains every workload on it. Without this, one
+      # node failure arrives as a page per workload.
+      - source_matchers: ['alertname="NodeNotReady"']
+        target_matchers: ['severity=~"warning|critical"']
+        equal: ["node"]
+
+  extraSecretMounts:
+    # One Secret, one key per integration. Created out of band by
+    # deploy/monitoring/webhook-tokens.sh; the same values are mounted into
+    # the API so both ends compare the same material without either holding
+    # a copy in Git or in an environment variable.
+    - name: drake-webhook-tokens
+      mountPath: /etc/alertmanager/drake
+      subPath: ""
+      secretName: drake-alertmanager-webhook
+      readOnly: true
 
 prometheus-pushgateway:
   enabled: false

@@ -3,6 +3,201 @@
   "kind": "QueryTemplateRegistry",
   "templates": [
     {
+      "key": "cluster.cpu-allocatable.v1",
+      "version": 1,
+      "metricKey": "cluster.cpu_allocatable_cores",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(kube_node_status_allocatable{resource=\"cpu\", {{matchers}} })",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "cluster.cpu-used.v1",
+      "version": 1,
+      "metricKey": "cluster.cpu_used_cores",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(rate(node_cpu_seconds_total{mode!=\"idle\", {{matchers}} }[{{window}}]))",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "cluster.filesystem-used-ratio.v1",
+      "version": 1,
+      "metricKey": "cluster.filesystem_used_ratio",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "max(1 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\", {{matchers}} } / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\", {{matchers}} }))",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "cluster.memory-allocatable.v1",
+      "version": 1,
+      "metricKey": "cluster.memory_allocatable_bytes",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(kube_node_status_allocatable{resource=\"memory\", {{matchers}} })",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "bytes",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "cluster.memory-used.v1",
+      "version": 1,
+      "metricKey": "cluster.memory_used_bytes",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum(node_memory_MemTotal_bytes{ {{matchers}} }) - sum(node_memory_MemAvailable_bytes{ {{matchers}} })",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "bytes",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
       "key": "environment.error-ratio.v1",
       "version": 1,
       "metricKey": "service.error_ratio",

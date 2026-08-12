@@ -22,9 +22,11 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { PageFrame } from "@/components/shell/AppShell";
 
 import { BurnTable, SloBadge } from "@/components/alerting/primitives";
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
+import { Gauge } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
@@ -45,7 +47,8 @@ export default function SloDetailPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <PageFrame>
+      <div className="space-y-5">
       <LoadGate value={slo} retry={retry}>
         {(data) => (
           <>
@@ -93,9 +96,44 @@ export default function SloDetailPage() {
                   />
                 ) : (
                   <div className="space-y-1" data-testid="slo-evaluation">
-                    <MetaRow label="Compliance">
-                      {formatRatio(data.evaluation.compliance_ratio)}
-                    </MetaRow>
+                    {/* An error budget is the textbook gauge: bounded by
+                        construction, and the whole question is how much of it
+                        is left. The bands are the objective's own, not
+                        invented here. */}
+                    <div className="flex flex-wrap items-center justify-around gap-3 pb-2">
+                      <Gauge
+                        label="Compliance"
+                        unit="ratio"
+                        value={data.evaluation.compliance_ratio}
+                        thresholds={{
+                          warn: data.evaluation.objective_ratio,
+                          critical: data.evaluation.objective_ratio * 0.99,
+                          direction: "below",
+                        }}
+                        caption={`objective ${formatRatio(data.evaluation.objective_ratio)}`}
+                        missingReason="not measured"
+                      />
+                      <Gauge
+                        label="Budget remaining"
+                        unit="ratio"
+                        value={
+                          data.evaluation.error_budget_total
+                            ? Math.max(
+                                0,
+                                (data.evaluation.error_budget_remaining ?? 0) /
+                                  data.evaluation.error_budget_total,
+                              )
+                            : null
+                        }
+                        thresholds={{ warn: 0.25, critical: 0.05, direction: "below" }}
+                        caption={
+                          (data.evaluation.error_budget_remaining ?? 0) < 0
+                            ? "overspent"
+                            : `${formatBudget(data.evaluation.error_budget_consumed)} consumed`
+                        }
+                        missingReason="no budget recorded"
+                      />
+                    </div>
                     <MetaRow label="Budget consumed">
                       {formatBudget(data.evaluation.error_budget_consumed)}
                     </MetaRow>
@@ -219,6 +257,7 @@ export default function SloDetailPage() {
               ) : history.data.evaluations.length === 0 ? (
                 <DataState kind="empty" title="No evaluations yet" />
               ) : (
+                <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
                 <table className="w-full text-left text-xs" data-testid="slo-history">
                   <thead className="text-ink-muted">
                     <tr>
@@ -252,11 +291,13 @@ export default function SloDetailPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </Card>
           </>
         )}
       </LoadGate>
-    </div>
+      </div>
+    </PageFrame>
   );
 }

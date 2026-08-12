@@ -4,11 +4,18 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@78b8503 by publish
-# run 31530918769. All three — API, web and migration — were built from
-# that one commit, so they cannot drift apart.
+# Images are pinned to real digests published from main@ab699b1 by publish
+# run 31593079859. All three — API, web
+# and migration — were built from that one commit, so they cannot drift
+# apart. Both digests were read back from the registry rather than from the
+# build log: the log also prints a tooling image's digest, and pinning that
+# would have deployed something else entirely.
 #
-# The digests these replaced (API `8c401467…706c`, web `5f6113ea…0076`)
+# The digests these replaced (API `2b1ee84b…0700`, web `e4138d64…13aa`)
+# named main@2d1cd85 and are what helm revision 23 served — the rollback
+# target if this one has to come back.
+#
+# Before that (API `8c401467…706c`, web `5f6113ea…0076`)
 # named main@c36f43f. The web digest was what revision 12 actually ran; the
 # API digest was NOT — revision 12 served `7b02b3fe…4341`, applied from a
 # later build than this file recorded. So this file has described the API
@@ -97,11 +104,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 78b85037a54183b75ff64409d0f6e5c8890bf85c
+    # Source commit ab699b19a77d088b83ff6a53987b60bc07c40452
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:118332df48e26303bc5cf05ff60f561c9cf4a0adafd952ca4899a92afba63c39"
+    digest: "sha256:4e771470ea1595f783373ba5658d6ab61dc29b4f65a1cf7c61df3f1afb73c8f8"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -113,8 +120,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 78b85037a54183b75ff64409d0f6e5c8890bf85c
-    digest: "sha256:491e8b3ffa08efe4af2d0b79dd55703942c58eaa950fe9859b07f85ef79d44a4"
+    # Source commit ab699b19a77d088b83ff6a53987b60bc07c40452
+    digest: "sha256:36eed8d168f277b0549c69b16282872a5af675c364b335bcd0cb483e458d8668"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -125,7 +132,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:118332df48e26303bc5cf05ff60f561c9cf4a0adafd952ca4899a92afba63c39"
+    digest: "sha256:4e771470ea1595f783373ba5658d6ab61dc29b4f65a1cf7c61df3f1afb73c8f8"
   backoffLimit: 0
 
 networkPolicy:
@@ -168,6 +175,14 @@ networkPolicy:
   # connector URL happens to name — the address is pinned for Drake's SSRF
   # check, but a policy that also depended on it would break the day the
   # Service is recreated, which is exactly what happened to the agent.
+  # Alertmanager delivers notifications to the API's webhook. In-cluster,
+  # by label — the notification never leaves the cluster to come back
+  # through the public edge.
+  apiClusterIngress:
+    - namespace: drake-monitoring
+      podSelector:
+        app.kubernetes.io/name: alertmanager
+
   apiClusterEgress:
     - namespace: drake-monitoring
       podSelector:
@@ -225,6 +240,24 @@ auth:
 # production, and an unpinned ClusterIP is the same trap the agent's egress
 # rule fell into. Both opt-ins are stated rather than defaulted — this is
 # plaintext to a private address, and each half is a decision.
+# The Alertmanager installed by deploy/monitoring/. One integration per
+# catalog project, because the integration — not the payload — decides
+# which project an alert may resolve into. Platform alerts (a failing node,
+# a dead scrape target) claim `project: drake`, match none of these, and are
+# kept as unmapped platform evidence rather than filed against a service.
+alerting:
+  existingSecret: drake-alertmanager-webhook
+  integrations:
+    hermes:
+      projectKey: hermes
+      displayName: "duosis-prod-1 Alertmanager"
+    logislot:
+      projectKey: logislot
+      displayName: "duosis-prod-1 Alertmanager"
+    fikir-sepeti:
+      projectKey: fikir-sepeti
+      displayName: "duosis-prod-1 Alertmanager"
+
 telemetry:
   connectors:
     duosis-prod-1:

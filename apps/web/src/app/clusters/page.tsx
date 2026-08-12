@@ -1,66 +1,196 @@
 "use client";
 
+/**
+ * Clusters.
+ *
+ * Connection and health are separate columns, and that is the whole design.
+ * "The agent is connected" and "the cluster is well" are different claims:
+ * an agent can be connected while its inventory is an hour stale, and a
+ * disconnected agent does not mean the cluster is unhealthy — it means Drake
+ * cannot see it. Folding those into one badge is how an operator ends up
+ * believing a silent cluster is a healthy one.
+ *
+ * The strip at the top counts what needs attention, so a fleet of forty does
+ * not have to be read row by row to find the two that are stale.
+ */
+
 import Link from "next/link";
 
-import { LifecycleBadge, LoadGate, useApi } from "@/components/catalog/primitives";
-import { AgentBadge, InventoryStateBadge } from "@/components/inventory/primitives";
-import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Panel } from "@/components/ui/Panel";
+import { CountRow } from "@/components/ui/Stat";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { RelativeTime } from "@/components/ui/identifiers";
+import { DeniedState, EmptyState, ErrorState, LoadingSkeleton } from "@/components/ui/states";
 import type { Cluster } from "@/lib/catalog";
+import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
+import { needsAttention } from "@/lib/overview";
+import { useResource } from "@/lib/useResource";
+
+/**
+ * The two axes speak the agent's vocabulary, not the integration one.
+ *
+ * `connected`/`disconnected` for the agent, `fresh`/`stale` for the sweep —
+ * the shared status map already knows both, so neither needs translating
+ * here. (An earlier version compared against `"ok"`, which the corrected type
+ * on `Cluster.operational` now proves could never match.)
+ */
+function agentTone(cluster: Cluster) {
+  return toneForHealth(cluster.operational?.agent);
+}
+
+function inventoryTone(cluster: Cluster) {
+  return toneForHealth(cluster.operational?.inventory);
+}
 
 export default function ClustersPage() {
-  const [clusters, retry] = useApi<{ clusters: Cluster[]; next_cursor: string | null }>(
+  const resource = useResource<{ clusters: Cluster[]; next_cursor: string | null }>(
     "/v1/clusters",
+    { refreshMs: 60_000 },
   );
+  const clusters = resource.data?.clusters ?? [];
+
+  const attention = clusters.filter(
+    (cluster) => needsAttention(agentTone(cluster)) || needsAttention(inventoryTone(cluster)),
+  );
+  const connected = clusters.filter((cluster) => cluster.operational?.agent === "connected");
+  const fresh = clusters.filter((cluster) => cluster.operational?.inventory === "fresh");
+
+  const columns: Column<Cluster>[] = [
+    {
+      key: "cluster",
+      header: "Cluster",
+      cell: (cluster) => (
+        <>
+          <Link
+            href={`/clusters/${cluster.id}`}
+            className="rounded font-medium text-ink hover:text-brand"
+          >
+            {cluster.display_name || cluster.cluster_ref}
+          </Link>
+          <span className="block font-mono text-micro text-ink-muted">
+            {cluster.cluster_ref}
+            {cluster.site ? ` · ${cluster.site}` : ""}
+          </span>
+        </>
+      ),
+    },
+    {
+      key: "agent",
+      header: "Agent connection",
+      cell: (cluster) => (
+        <StatusBadge
+          status={agentTone(cluster)}
+          label={humanize(cluster.operational?.agent ?? "unknown")}
+          size="compact"
+        />
+      ),
+    },
+    {
+      key: "inventory",
+      header: "Inventory",
+      cell: (cluster) => (
+        <StatusBadge
+          status={inventoryTone(cluster)}
+          label={humanize(cluster.operational?.inventory ?? "unknown")}
+          size="compact"
+        />
+      ),
+    },
+    {
+      key: "environments",
+      header: "Environments",
+      priority: "low",
+      align: "right",
+      cell: (cluster) => cluster.referenced_environments?.length ?? 0,
+    },
+    {
+      key: "lifecycle",
+      header: "Lifecycle",
+      priority: "low",
+      cell: (cluster) => (
+        <StatusBadge
+          status={cluster.lifecycle === "active" ? "success" : "neutral"}
+          label={humanize(cluster.lifecycle)}
+          size="compact"
+        />
+      ),
+    },
+    {
+      key: "observed",
+      header: "Observed",
+      align: "right",
+      cell: (cluster) => (
+        <span className="text-micro text-ink-muted">
+          <RelativeTime value={cluster.as_of} />
+        </span>
+      ),
+    },
+  ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Clusters</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
-          Cluster catalog with live agent connectivity and inventory freshness.
-          Both states come from real observation — never assumed.
-        </p>
-      </div>
-      <Card>
-        <LoadGate value={clusters} retry={retry}>
-          {(body) =>
-            body.clusters.length === 0 ? (
-              <DataState
-                kind="empty"
-                title="No clusters in your scope"
-                description="Clusters you are authorized to see will appear here."
-              />
-            ) : (
-              <ul className="divide-y divide-border" data-testid="cluster-list">
-                {body.clusters.map((cluster) => (
-                  <li key={cluster.id}>
-                    <Link
-                      href={`/clusters/${cluster.id}`}
-                      className="flex flex-wrap items-center justify-between gap-3 px-1 py-3 hover:bg-surface-sunken"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-ink">
-                          {cluster.display_name}
-                        </span>
-                        <span className="block truncate font-mono text-xs text-ink-muted">
-                          {cluster.cluster_ref}
-                          {cluster.site ? ` · ${cluster.site}` : ""}
-                        </span>
-                      </span>
-                      <span className="flex flex-wrap items-center gap-2">
-                        <AgentBadge status={cluster.operational?.agent} />
-                        <InventoryStateBadge state={cluster.operational?.inventory} />
-                        <LifecycleBadge lifecycle={cluster.lifecycle} />
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )
-          }
-        </LoadGate>
-      </Card>
-    </div>
+    <PageFrame>
+      <PageHeader
+        title="Clusters"
+        description="Agent connectivity and inventory freshness, each observed rather than assumed. A connected agent is not the same claim as a healthy cluster."
+      />
+
+      {resource.data && clusters.length > 0 ? (
+        <div className="mb-4">
+          <CountRow
+            total={{ label: "in scope", count: clusters.length }}
+            items={[
+              { key: "attention", label: "need attention", count: attention.length, tone: attention.length > 0 ? "warning" : "neutral" },
+              { key: "connected", label: "agent connected", count: connected.length, tone: "success" },
+              { key: "fresh", label: "inventory fresh", count: fresh.length, tone: "success" },
+            ]}
+          />
+        </div>
+      ) : null}
+
+      <Panel flush>
+        {resource.loading && !resource.data ? (
+          <div className="px-4 py-4">
+            <LoadingSkeleton variant="table" rows={4} label="Loading clusters" />
+          </div>
+        ) : resource.denied ? (
+          <div className="px-4 py-2">
+            <DeniedState />
+          </div>
+        ) : !resource.data ? (
+          <div className="px-4 py-2">
+            <ErrorState
+              description={resource.error ?? undefined}
+              correlationId={resource.correlationId}
+              onRetry={resource.reload}
+            />
+          </div>
+        ) : (
+          <div data-testid="cluster-list">
+            <DataTable
+              caption="Clusters in your authorized scope, with agent connection and inventory freshness"
+              rows={clusters}
+              columns={columns}
+              rowKey={(cluster) => cluster.id}
+              rowTone={(cluster) => {
+                const worst = needsAttention(agentTone(cluster))
+                  ? agentTone(cluster)
+                  : needsAttention(inventoryTone(cluster))
+                    ? inventoryTone(cluster)
+                    : null;
+                return worst ? toneSpec(worst).rail : null;
+              }}
+              emptyState={
+                <EmptyState
+                  title="No clusters in your scope"
+                  description="Clusters you are authorized to see appear here once they are registered in the catalog."
+                />
+              }
+            />
+          </div>
+        )}
+      </Panel>
+    </PageFrame>
   );
 }

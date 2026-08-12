@@ -333,12 +333,12 @@ export default function NotificationPoliciesPage() {
   useEffect(() => load(), [load]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto w-full max-w-[110rem] space-y-5 px-4 py-5 lg:px-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">
+        <h1 className="text-title font-semibold text-ink">
           Notification policies
         </h1>
-        <p className="mt-1 text-sm text-ink-secondary">
+        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
           Which incidents are routed, and to whom. A policy applies from the moment it is
           saved; it never replays incidents that already happened.
         </p>
