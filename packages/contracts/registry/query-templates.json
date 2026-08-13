@@ -525,7 +525,7 @@
       "metricKey": "workload.pods_not_ready",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(drake:workload_pod:not_ready{ {{matchers}} } > 0)",
+      "expression": "sum(drake:workload_pod:not_ready{ {{matchers}} })",
       "scopeTypes": [
         "environment"
       ],
@@ -655,12 +655,8 @@
       "permission": "telemetry.query",
       "matchers": [
         {
-          "label": "project",
-          "source": "project_key"
-        },
-        {
-          "label": "environment",
-          "source": "environment_key"
+          "label": "namespace",
+          "source": "namespace"
         }
       ],
       "parameters": {},

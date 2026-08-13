@@ -379,7 +379,8 @@
       "allowedInputLabels": [
         "project",
         "environment",
-        "service"
+        "service",
+        "namespace"
       ],
       "allowedOutputLabels": [
         "service"
@@ -394,7 +395,7 @@
         "kubernetes-service-v1"
       ],
       "lifecycle": "active",
-      "description": "Whether the service's telemetry target is being scraped (1) or not (0).",
+      "description": "Whether Prometheus is scraping the targets in this namespace. Synthesised by the scrape, not emitted by the application, so it carries no application labels.",
       "provenance": {
         "kind": "registry",
         "ref": "sprint-3",

@@ -25,6 +25,7 @@
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:562
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:646
 /repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:689
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:685
 
 # History findings (commit-scoped):
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49
