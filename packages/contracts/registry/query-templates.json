@@ -525,7 +525,7 @@
       "metricKey": "workload.pods_not_ready",
       "metricVersion": 1,
       "providerType": "prometheus",
-      "expression": "sum(drake:workload_pod:not_ready{ {{matchers}} } > 0)",
+      "expression": "sum(drake:workload_pod:not_ready{ {{matchers}} })",
       "scopeTypes": [
         "environment"
       ],
