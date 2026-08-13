@@ -84,24 +84,36 @@ export function SignedOut({
       </header>
 
       <main className="flex flex-1 items-center justify-center px-5 pb-16">
-        <div className="w-full max-w-sm rounded-panel border border-border bg-surface p-6 shadow-panel">
-          <span className={`inline-flex items-center gap-2 text-caption font-medium ${spec.text}`}>
-            <Icon className="h-4 w-4" aria-hidden />
-            {variant === "signed-out" ? "Authentication required" : spec.label}
-          </span>
-          <h1 className="mt-3 text-title font-semibold text-ink">{copy.title}</h1>
-          <p className="mt-1.5 text-body text-ink-secondary">{copy.body}</p>
-
-          {variant === "unavailable" ? null : mode === "local" ? (
-            <LocalSignIn />
-          ) : (
-            <a
-              href={loginHref}
-              className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control bg-brand px-4 text-body font-medium text-ink-inverse transition-colors hover:bg-brand-hover"
+        <div className="w-full max-w-md">
+          {/* The mark leads, at a size that reads as an identity rather than
+              as decoration. Its tone carries the variant, so the three
+              situations are distinguishable before a word is read. */}
+          <div className="flex flex-col items-center text-center">
+            <span
+              className={`inline-flex h-20 w-20 items-center justify-center rounded-full ${spec.chip}`}
             >
-              <LogIn className="h-4 w-4" aria-hidden />
-              Sign in
-            </a>
+              <Icon className="h-9 w-9" aria-hidden />
+            </span>
+            <h1 className="mt-6 text-display font-semibold tracking-tight text-ink">
+              {copy.title}
+            </h1>
+            <p className="mt-3 max-w-sm text-body text-ink-secondary">{copy.body}</p>
+          </div>
+
+          {variant === "unavailable" ? null : (
+            <div className="mt-8 rounded-panel border border-border bg-surface p-6 shadow-panel">
+              {mode === "local" ? (
+                <LocalSignIn />
+              ) : (
+                <a
+                  href={loginHref}
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-control bg-brand px-4 text-body font-medium text-ink-inverse transition-colors hover:bg-brand-hover"
+                >
+                  <LogIn className="h-4 w-4" aria-hidden />
+                  Sign in
+                </a>
+              )}
+            </div>
           )}
         </div>
       </main>

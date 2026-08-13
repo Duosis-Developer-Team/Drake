@@ -96,6 +96,19 @@ export function Sidebar({
         ) : null}
       </div>
 
+      {onToggleCollapse && collapsed ? (
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label="Expand navigation"
+          title="Expand navigation"
+          aria-expanded={false}
+          className="mx-auto mb-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          <PanelLeftOpen className="h-4 w-4" aria-hidden />
+        </button>
+      ) : null}
+
       <nav
         aria-label="Primary"
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-3"
@@ -163,18 +176,6 @@ export function Sidebar({
       </nav>
 
       <div className="shrink-0 border-t border-border">
-        {onToggleCollapse && collapsed ? (
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            aria-label="Expand navigation"
-            title="Expand navigation"
-            aria-expanded={false}
-            className="flex h-10 w-full items-center justify-center text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
-          >
-            <PanelLeftOpen className="h-4 w-4" aria-hidden />
-          </button>
-        ) : null}
         {footer}
       </div>
     </div>
