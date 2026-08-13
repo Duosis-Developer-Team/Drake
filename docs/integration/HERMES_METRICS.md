@@ -141,8 +141,13 @@ and do not add annotations to anything in it. Drake's catalog registers only
 - the exact label values each service emits
 
 We will run the three queries against production Prometheus and confirm before
-calling it done. If `up{project="hermes",environment="dev"}` returns 1, the
-target is being scraped.
+calling it done. The three queries ARE the proof.
+
+Do NOT check `up{project="hermes",environment="dev"}`. `up` is synthesised by
+Prometheus from the scrape itself, not emitted by your application, so it
+never carries your application's labels and will always come back empty.
+That is expected and is not a failure. This document said otherwise until
+the LogiSlot team caught it while verifying their own work.
 
 ---
 
