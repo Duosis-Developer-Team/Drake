@@ -75,6 +75,52 @@
               "accessibleSummary": "The fullest real filesystem on any node; an average would hide the one about to fill."
             }
           ]
+        },
+        {
+          "key": "headroom",
+          "title": "Running out",
+          "widgets": [
+            {
+              "key": "cluster-fs-free",
+              "title": "Least free filesystem",
+              "display": "kpi",
+              "queryTemplateKey": "cluster.filesystem-free-ratio.v1",
+              "reducer": "latest",
+              "unit": "ratio",
+              "thresholds": {
+                "warn": 0.2,
+                "critical": 0.1,
+                "direction": "below"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Free space on the fullest filesystem in the cluster."
+            },
+            {
+              "key": "cluster-pvc-phase",
+              "title": "Volume claims",
+              "display": "timeseries",
+              "queryTemplateKey": "cluster.pvc-by-phase.v1",
+              "reducer": "latest",
+              "unit": "count",
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Persistent volume claims by phase; a Pending claim appears as its own series."
+            },
+            {
+              "key": "cluster-cert-remaining",
+              "title": "Certificate life left",
+              "display": "kpi",
+              "queryTemplateKey": "cluster.certificate-seconds-remaining.v1",
+              "reducer": "latest",
+              "unit": "seconds",
+              "thresholds": {
+                "warn": 1209600,
+                "critical": 604800,
+                "direction": "below"
+              },
+              "emptyBehavior": "show_empty",
+              "accessibleSummary": "Time before the soonest managed certificate expires."
+            }
+          ]
         }
       ]
     },

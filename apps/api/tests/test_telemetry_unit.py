@@ -47,8 +47,11 @@ def test_authoritative_registry_loads_and_hashes() -> None:
     # +3 metrics and +3 templates for the failure signals: why a container is
     # not running, replicas missing, pods not ready. These ARE new
     # measurements — Prometheus held them and nothing in Drake read them.
-    assert len(registry.metrics) == 27
-    assert len(registry.templates) == 33
+    # +3 metrics and +3 templates for capacity headroom: filesystem free
+    # ratio, volume claims by phase, certificate life left. Things that fill
+    # up silently and are only noticed once they have run out.
+    assert len(registry.metrics) == 30
+    assert len(registry.templates) == 36
     # +1 board: cluster capacity, the first cluster-scope dashboard.
     assert len(registry.dashboards) == 3
     assert len(registry.content_hash) == 64

@@ -15,16 +15,16 @@
 # the generic rule on entropy, verified by reading the line before it was
 # listed here. The canaries below still plant credential-shaped values in
 # these same JSON fields and must still be caught.
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:103
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:113
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:171
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:174
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:189
-/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:296
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:322
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:443
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:527
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:570
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:149
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:159
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:217
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:220
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:235
+/repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:342
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:441
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:562
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:646
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:689
 
 # History findings (commit-scoped):
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49
