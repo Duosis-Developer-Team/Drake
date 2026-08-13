@@ -20,7 +20,6 @@ import { useCallback, useState } from "react";
 
 import { Sidebar, useSidebarCollapse } from "@/components/shell/Sidebar";
 import { SignedOut } from "@/components/shell/SignedOut";
-import { ThemeControl } from "@/components/shell/ThemeControl";
 import { TopBar } from "@/components/shell/TopBar";
 import { LoadingSkeleton } from "@/components/ui/states";
 import { useDismissable, useScrollLock } from "@/components/ui/overlay";
@@ -113,13 +112,18 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Scope and theme, at the bottom of the rail where settings belong. */
+/**
+ * What the rail says about the session.
+ *
+ * The theme control used to live here as well, duplicating the one in the
+ * top bar. Two controls for one setting is worse than either alone: it
+ * invites the question of whether they do the same thing.
+ */
 function ShellFooter() {
   const { state } = useSession();
   const scopeCount = state.status === "authenticated" ? Object.keys(state.me.scopes).length : 0;
   return (
-    <div className="space-y-2 px-3 py-3">
-      <ThemeControl />
+    <div className="px-3 py-3">
       <p className="text-micro text-ink-muted">
         {scopeCount === 1 ? "1 authorized scope" : `${scopeCount} authorized scopes`}
       </p>
