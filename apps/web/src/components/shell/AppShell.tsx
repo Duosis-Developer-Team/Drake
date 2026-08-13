@@ -19,6 +19,7 @@
 import { useCallback, useState } from "react";
 
 import { Sidebar, useSidebarCollapse } from "@/components/shell/Sidebar";
+import { ThemeControl } from "@/components/shell/ThemeControl";
 import { SignedOut } from "@/components/shell/SignedOut";
 import { TopBar } from "@/components/shell/TopBar";
 import { LoadingSkeleton } from "@/components/ui/states";
@@ -113,17 +114,25 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * What the rail says about the session.
+ * What the rail says about the session, plus theme on mobile only.
  *
- * The theme control used to live here as well, duplicating the one in the
- * top bar. Two controls for one setting is worse than either alone: it
- * invites the question of whether they do the same thing.
+ * The theme control appeared here AND in the top bar, so on a wide screen
+ * one setting had two controls. It is now `md:hidden` here and `hidden
+ * md:block` there: exactly one is reachable at any width.
+ *
+ * Deleting it outright was the obvious move and was wrong — the top bar
+ * hides its copy below md, so narrow screens would have had no way to
+ * change theme at all. An e2e case records that placement as deliberate:
+ * on mobile the control belongs in the drawer with the other settings.
  */
 function ShellFooter() {
   const { state } = useSession();
   const scopeCount = state.status === "authenticated" ? Object.keys(state.me.scopes).length : 0;
   return (
-    <div className="px-3 py-3">
+    <div className="space-y-2 px-3 py-3">
+      <div className="md:hidden">
+        <ThemeControl />
+      </div>
       <p className="text-micro text-ink-muted">
         {scopeCount === 1 ? "1 authorized scope" : `${scopeCount} authorized scopes`}
       </p>

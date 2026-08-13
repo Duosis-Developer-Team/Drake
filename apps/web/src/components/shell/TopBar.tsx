@@ -66,10 +66,9 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
           </Suspense>
         ) : null}
         <NotificationBell />
-        {/* Shown at every width now. It used to hide below md and the rail
-            footer carried a second copy; removing that duplicate would have
-            left narrow screens with no way to change theme at all. */}
-        <ThemeControl compact />
+        <div className="hidden md:block">
+          <ThemeControl compact />
+        </div>
         <IdentityMenu />
       </div>
     </header>
