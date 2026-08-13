@@ -23,7 +23,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { LocalSignIn } from "@/components/auth/LocalSignIn";
-import { DrakeWordmark } from "@/components/shell/Brand";
+import { DrakeMark, DrakeWordmark } from "@/components/shell/Brand";
 import { ThemeControl } from "@/components/shell/ThemeControl";
 import { toneSpec } from "@/lib/design/status";
 
@@ -89,14 +89,24 @@ export function SignedOut({
               as decoration. Its tone carries the variant, so the three
               situations are distinguishable before a word is read. */}
           <div className="flex flex-col items-center text-center">
-            <span
-              className={`inline-flex h-20 w-20 items-center justify-center rounded-full ${spec.chip}`}
-            >
-              <Icon className="h-9 w-9" aria-hidden />
-            </span>
-            <h1 className="mt-6 text-display font-semibold tracking-tight text-ink">
+            {/* The product's own mark, at a size that owns the screen. */}
+            <DrakeMark height={96} />
+
+            {/* The tone still has to be readable: signed-out, expired and
+                unavailable are three different situations and the mark says
+                nothing about which one this is. It moves to a chip under the
+                title rather than disappearing with the icon it replaced. */}
+            <h1 className="mt-8 text-display font-semibold tracking-tight text-ink">
               {copy.title}
             </h1>
+            {variant === "signed-out" ? null : (
+              <span
+                className={`mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-caption font-medium ${spec.chip}`}
+              >
+                <Icon className="h-3.5 w-3.5" aria-hidden />
+                {spec.label}
+              </span>
+            )}
             <p className="mt-3 max-w-sm text-body text-ink-secondary">{copy.body}</p>
           </div>
 
