@@ -3,6 +3,45 @@
   "kind": "QueryTemplateRegistry",
   "templates": [
     {
+      "key": "cluster.certificate-seconds-remaining.v1",
+      "version": 1,
+      "metricKey": "cluster.certificate_seconds_remaining",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "min(drake:certificate:seconds_remaining{ {{matchers}} })",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "seconds",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
       "key": "cluster.cpu-allocatable.v1",
       "version": 1,
       "metricKey": "cluster.cpu_allocatable_cores",
@@ -73,6 +112,45 @@
       "output": {
         "resultType": "timeseries",
         "unit": "cores",
+        "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "cluster.filesystem-free-ratio.v1",
+      "version": 1,
+      "metricKey": "cluster.filesystem_free_ratio",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "min(drake:node_filesystem:free_ratio{ {{matchers}} })",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "ratio",
         "labels": []
       },
       "semantics": {
@@ -191,6 +269,47 @@
         "resultType": "timeseries",
         "unit": "bytes",
         "labels": []
+      },
+      "semantics": {
+        "empty": "no_data",
+        "partial": "null_points_with_warning"
+      }
+    },
+    {
+      "key": "cluster.pvc-by-phase.v1",
+      "version": 1,
+      "metricKey": "cluster.pvc_by_phase",
+      "metricVersion": 1,
+      "providerType": "prometheus",
+      "expression": "sum by (phase) (drake:pvc:by_phase{ {{matchers}} })",
+      "scopeTypes": [
+        "cluster"
+      ],
+      "permission": "telemetry.query",
+      "matchers": [
+        {
+          "label": "cluster_ref",
+          "source": "cluster_ref"
+        }
+      ],
+      "parameters": {},
+      "budgets": {
+        "maxRangeSeconds": 86400,
+        "minStepSeconds": 30,
+        "maxSeries": 8,
+        "maxPoints": 4000,
+        "timeoutSeconds": 5
+      },
+      "cache": {
+        "freshTtlSeconds": 30,
+        "staleTtlSeconds": 900
+      },
+      "output": {
+        "resultType": "timeseries",
+        "unit": "count",
+        "labels": [
+          "phase"
+        ]
       },
       "semantics": {
         "empty": "no_data",

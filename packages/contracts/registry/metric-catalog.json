@@ -3,6 +3,40 @@
   "kind": "MetricCatalog",
   "metrics": [
     {
+      "key": "cluster.certificate_seconds_remaining",
+      "version": 1,
+      "type": "gauge",
+      "unit": "seconds",
+      "sourceType": "prometheus",
+      "sourceFamily": "certmanager_certificate_expiration_timestamp_seconds",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Time left before a managed certificate expires.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13f6",
+        "revision": "1"
+      }
+    },
+    {
       "key": "cluster.cpu_allocatable_cores",
       "version": 1,
       "type": "gauge",
@@ -61,6 +95,40 @@
       "provenance": {
         "kind": "registry",
         "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.filesystem_free_ratio",
+      "version": 1,
+      "type": "gauge",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_filesystem_avail_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Free space as a fraction of size, per real filesystem.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13f6",
         "revision": "1"
       }
     },
@@ -154,6 +222,42 @@
       "provenance": {
         "kind": "registry",
         "ref": "sprint-13i",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.pvc_by_phase",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_persistentvolumeclaim_status_phase",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "phase"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "fastapi-v1",
+        "nextjs-v1",
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Persistent volume claims, counted by the phase they are in.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "sprint-13f6",
         "revision": "1"
       }
     },

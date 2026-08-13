@@ -175,6 +175,33 @@ groups:
           kube_pod_status_ready{condition="false"}
           * on (namespace, pod) group_left(workload_name) drake:pod:workload
 
+  # Capacity that fills up silently. None of these page anyone on the day
+  # they change; they page someone on the day they run out, which is why
+  # they belong on a screen rather than in an alert alone.
+  - name: drake.cluster-capacity-headroom
+    interval: 60s
+    rules:
+      # Real filesystems only. tmpfs is memory and overlay double-counts the
+      # layer beneath it, so including either reports headroom that does not
+      # exist. Kept per-mountpoint: one full disk is a problem even when the
+      # average across a node looks comfortable.
+      - record: drake:node_filesystem:free_ratio
+        expr: |
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}
+      # By PHASE rather than as a count of failures. A count would be empty
+      # when everything is healthy, and an empty result renders as "no data"
+      # — which is the one thing this product must not confuse with zero.
+      # With the label kept, "all Bound" is a visible answer and a Pending
+      # claim arrives as its own series.
+      - record: drake:pvc:by_phase
+        expr: sum by (namespace, phase) (kube_persistentvolumeclaim_status_phase == 1)
+      # Seconds of certificate life left. Drake's own edge certificate is in
+      # here: it is renewed by cert-manager automatically, and the value of
+      # watching it is precisely that nobody looks until it has failed.
+      - record: drake:certificate:seconds_remaining
+        expr: certmanager_certificate_expiration_timestamp_seconds - time()
+
   - name: drake.workload-freshness
     interval: 30s
     rules:
