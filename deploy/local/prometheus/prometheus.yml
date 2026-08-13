@@ -1,9 +1,14 @@
 # Drake LOCAL-ONLY Prometheus configuration.
 #
 # Scrapes the deterministic fixture exporter, one job per simulated
-# service target so `up` and every series carry the bounded catalog
-# identity labels (project/environment/service). No real endpoints,
-# no credentials.
+# service target.
+#
+# `namespace` is here because a real cluster puts it on `up` and this
+# fixture did not. That gap let `environment.scrape-up.v1` match `up` on
+# project/environment — labels a real `up` never carries — and pass CI for
+# months while being empty by construction in production. Two application
+# teams found it within a day of instrumenting. A fixture that models what
+# we wish were true tests nothing.
 
 global:
   scrape_interval: 5s
@@ -14,29 +19,29 @@ scrape_configs:
     metrics_path: /metrics/alpha/dev/api
     static_configs:
       - targets: ["fixture-exporter:9464"]
-        labels: {project: alpha, environment: dev, service: api}
+        labels: {namespace: alpha-dev, project: alpha, environment: dev, service: api}
   - job_name: alpha-dev-web
     metrics_path: /metrics/alpha/dev/web
     static_configs:
       - targets: ["fixture-exporter:9464"]
-        labels: {project: alpha, environment: dev, service: web}
+        labels: {namespace: alpha-dev, project: alpha, environment: dev, service: web}
   - job_name: alpha-prod-api
     metrics_path: /metrics/alpha/prod/api
     static_configs:
       - targets: ["fixture-exporter:9464"]
-        labels: {project: alpha, environment: prod, service: api}
+        labels: {namespace: alpha-prod, project: alpha, environment: prod, service: api}
   - job_name: alpha-dev-core-api
     metrics_path: /metrics/alpha/dev/core-api
     static_configs:
       - targets: ["fixture-exporter:9464"]
-        labels: {project: alpha, environment: dev, service: core-api}
+        labels: {namespace: alpha-dev, project: alpha, environment: dev, service: core-api}
   - job_name: alpha-dev-auth-api
     metrics_path: /metrics/alpha/dev/auth-api
     static_configs:
       - targets: ["fixture-exporter:9464"]
-        labels: {project: alpha, environment: dev, service: auth-api}
+        labels: {namespace: alpha-dev, project: alpha, environment: dev, service: auth-api}
   - job_name: beta-dev-api
     metrics_path: /metrics/beta/dev/api
     static_configs:
       - targets: ["fixture-exporter:9464"]
-        labels: {project: beta, environment: dev, service: api}
+        labels: {namespace: beta-dev, project: beta, environment: dev, service: api}
