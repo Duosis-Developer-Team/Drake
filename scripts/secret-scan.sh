@@ -72,7 +72,7 @@ tree_scan() {
 import json, sys
 try:
     for f in json.load(open(sys.argv[1])):
-        print(f"  /repo/.secret-scan-tree/{f['File']}:{f['RuleID']}:{f['StartLine']}")
+        print(f"  {f['File']}:{f['RuleID']}:{f['StartLine']}")
 except Exception as error:  # a malformed report must not mask the failure
     print(f"  (report unreadable: {error})")
 REPORT
