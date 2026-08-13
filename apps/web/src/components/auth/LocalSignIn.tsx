@@ -58,7 +58,7 @@ export function LocalSignIn() {
   }
 
   return (
-    <form onSubmit={submit} noValidate className="mt-6 space-y-4 text-left">
+    <form onSubmit={submit} noValidate className="space-y-4 text-left">
       <div className="space-y-1">
         <label htmlFor={emailId} className="block text-sm font-medium text-ink">
           Email
