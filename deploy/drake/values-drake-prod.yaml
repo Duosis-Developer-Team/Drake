@@ -4,20 +4,20 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@40ad2d8 by publish
-# run 31716412894. All three — API, web
+# Images are pinned to real digests published from main@139b3d4 by publish
+# run 31719316860. All three — API, web
 # and migration — were built from that one commit, so they cannot drift
 # apart. Both digests were read back from the registry rather than from the
 # build log: the log also prints a tooling image's digest, and pinning that
 # would have deployed something else entirely.
 #
-# The digests these replaced (API `58af83d3…f91f`, web `ce22b21e…a61b`)
-# named main@66a74a8 and are what helm revision 28 served — the rollback
+# The digests these replaced (API `784942ca…9168`, web `e63ecb1c…a61b`)
+# named main@40ad2d8 and are what helm revision 29 served — the rollback
 # target if this one has to come back. Verified against the live cluster
 # before this edit rather than assumed from the previous file.
 #
-# Before that (API `44f873d8…dabb1`, web `132ee546…d851`) named main@5faff20,
-# served by revision 27.
+# Before that (API `58af83d3…f91f`, web `ce22b21e…a61b`) named main@66a74a8,
+# served by revision 28.
 #
 # Before that (API `2b1ee84b…0700`, web `e4138d64…13aa`) named main@2d1cd85,
 # served by revision 23.
@@ -111,11 +111,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 40ad2d8471229c85c4abf1635ad2272672bf6d07
+    # Source commit 139b3d4ee300e1bf4fcadec9d62b610fe9584557
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:784942caddfce466c7fb596754acbe450fb9c0409afeca2369448f9b86e39168"
+    digest: "sha256:5216abcdfffef66f6d00216192867e6b6a8e89a7361be923addae01565eb0f6b"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -127,8 +127,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 40ad2d8471229c85c4abf1635ad2272672bf6d07
-    digest: "sha256:e63ecb1c99d3e81f34fd6f39c9eeb401500a4f3903d1e1c2684075f54179a61b"
+    # Source commit 139b3d4ee300e1bf4fcadec9d62b610fe9584557
+    digest: "sha256:c2b4b90a142ca84df1026d565d0d383514d733541d3278040b80aa0662b33277"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -139,7 +139,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:784942caddfce466c7fb596754acbe450fb9c0409afeca2369448f9b86e39168"
+    digest: "sha256:5216abcdfffef66f6d00216192867e6b6a8e89a7361be923addae01565eb0f6b"
   backoffLimit: 0
 
 networkPolicy:
