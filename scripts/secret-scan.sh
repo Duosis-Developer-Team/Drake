@@ -54,8 +54,30 @@ tree_scan() {
   # Copy exactly the tracked + staged file set.
   (cd "$REPO_ROOT" && git ls-files -z | xargs -0 tar cf "$TREE_COPY_DIR/.tree.tar" --)
   (cd "$TREE_COPY_DIR" && tar xf .tree.tar && rm .tree.tar)
-  run_gitleaks dir /repo/.secret-scan-tree --config /repo/.gitleaks.toml --redact --exit-code 1 --no-banner
+  # `--report-path` so a failure is diagnosable. Without it the job prints
+  # "leaks found: 3" and nothing else, and the only way to learn WHICH lines
+  # moved is to reproduce the scan locally — which needs Docker, which a CI
+  # machine has and a laptop may not.
+  #
+  # The report holds file, rule and line: enough to re-derive an exemption,
+  # and never the matched value. `--redact` still applies.
+  if run_gitleaks dir /repo/.secret-scan-tree --config /repo/.gitleaks.toml --redact \
+      --exit-code 1 --no-banner --report-format json \
+      --report-path /repo/.secret-scan-tree/.report.json; then
+    rm -rf "$TREE_COPY_DIR"
+    return 0
+  fi
+  echo "[secret-scan] findings (fingerprints to review, values are redacted):" >&2
+  python3 - "$TREE_COPY_DIR/.report.json" >&2 <<'REPORT'
+import json, sys
+try:
+    for f in json.load(open(sys.argv[1])):
+        print(f"  /repo/.secret-scan-tree/{f['File']}:{f['RuleID']}:{f['StartLine']}")
+except Exception as error:  # a malformed report must not mask the failure
+    print(f"  (report unreadable: {error})")
+REPORT
   rm -rf "$TREE_COPY_DIR"
+  return 1
 }
 
 canary_scan() {
