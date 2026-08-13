@@ -655,12 +655,8 @@
       "permission": "telemetry.query",
       "matchers": [
         {
-          "label": "project",
-          "source": "project_key"
-        },
-        {
-          "label": "environment",
-          "source": "environment_key"
+          "label": "namespace",
+          "source": "namespace"
         }
       ],
       "parameters": {},
