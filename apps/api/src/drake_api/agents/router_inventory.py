@@ -215,6 +215,16 @@ async def list_inventory_resources(
     namespace: str | None = Query(default=None, min_length=1, max_length=63),
     health: str | None = Query(default=None, pattern="^(healthy|degraded|unhealthy|unknown)$"),
     lifecycle: str = Query(default="active", pattern="^(active|missing|all)$"),
+    # Events carry their meaning inside `status_summary`, so without these
+    # the rows were listable and not searchable: 5643 of them in production,
+    # overwhelmingly `Normal`, with the handful that matter — Failed,
+    # Unhealthy, FailedToRetrieveImagePullSecret — buried among them.
+    #
+    # Both are closed sets rather than free text. `reason` is a Kubernetes
+    # identifier, and matching it exactly keeps this a lookup rather than a
+    # search across a JSONB column.
+    event_type: str | None = Query(default=None, pattern="^(Normal|Warning)$"),
+    reason: str | None = Query(default=None, min_length=1, max_length=64, pattern="^[A-Za-z]+$"),
     search: str | None = Query(default=None, min_length=2, max_length=64),
     limit: int = Query(default=_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
     cursor: str | None = None,
@@ -243,6 +253,12 @@ async def list_inventory_resources(
         if search:
             conditions.append("name ILIKE :term ESCAPE '\\'")
             params["term"] = f"%{escape_like(search)}%"
+        if event_type is not None:
+            conditions.append("payload->'status_summary'->>'type' = :event_type")
+            params["event_type"] = event_type
+        if reason is not None:
+            conditions.append("payload->'status_summary'->>'reason' = :reason")
+            params["reason"] = reason
         if cursor:
             parts = _decode_cursor(cursor, 4)
             conditions.append(
