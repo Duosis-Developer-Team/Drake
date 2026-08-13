@@ -123,15 +123,14 @@ leave the cluster.
   path. A badly written one adds latency or drops requests. Treat this like
   any other change to a live service: normal review, normal rollout, not
   straight to production.
-- Namespaces in play: `hermes-dev` and `hermes-test`.
+- Namespaces in play: **`hermes-dev` and `hermes-test` only.**
 
-### One open question — please answer rather than guess
+### Ignore the `hermes` namespace
 
-There is also a **`hermes`** namespace in the cluster, and `core-service` runs
-there. Drake's catalog has no environment registered for it. If you instrument
-that service, tell us which `environment` value it should report and we will
-register it. If it reports an environment Drake does not know, the metrics will
-be collected and will never appear on any screen.
+There is a third namespace called plain `hermes` in the cluster. It is the old
+deployment and is not in active use, so leave it alone — do not instrument it,
+and do not add annotations to anything in it. Drake's catalog registers only
+`dev` and `test` for this project, which matches.
 
 ---
 
@@ -140,7 +139,6 @@ be collected and will never appear on any screen.
 - which services you instrumented, and which you did not, and why
 - the metrics port you chose
 - the exact label values each service emits
-- whether the `hermes` namespace question above has an answer
 
 We will run the three queries against production Prometheus and confirm before
 calling it done. If `up{project="hermes",environment="dev"}` returns 1, the
@@ -148,16 +146,16 @@ target is being scraped.
 
 ---
 
-## Two things Drake found in your namespaces
+## One thing Drake found in your active namespaces
 
-Unrelated to this task, but you may want to look independently:
+Unrelated to this task: `hermes-dev` and `hermes-test` have a handful of
+`Unhealthy` Kubernetes warning events, which usually means a readiness probe is
+failing intermittently. Worth a look, but nothing is on fire.
 
-1. **`hermes/core-service` is in `ImagePullBackOff`.** The Kubernetes event
-   explaining it says `FailedToRetrieveImagePullSecret` — the image-pull
-   secret could not be retrieved, so this is a credential/reference problem
-   rather than a missing image.
-2. A handful of `Unhealthy` warning events in `hermes-dev` and `hermes-test`,
-   which usually means readiness probes are failing intermittently.
+(Drake also reports `core-service` in `ImagePullBackOff` with
+`FailedToRetrieveImagePullSecret`. That is in the retired `hermes` namespace,
+so it is noise rather than an incident — mentioned only so it is not mistaken
+for a live problem when it shows up on a screen.)
 
 ---
 
