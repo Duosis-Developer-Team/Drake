@@ -22,10 +22,17 @@ imagePullSecrets:
 
 image:
   repository: ghcr.io/duosis-developer-team/drake-cluster-agent
-  # Source commit 68486066f345b1673cab895a04f2a916a5b8d1ce, publish run
-  # 31517960078 — the same commit and the same run that produced the API
+  # Source commit 76b3be91e43e1b6be2ffb6100b282caa44e46b4f, publish run
+  # 31890748234 — the same commit and the same run that produced the API
   # and web images this control plane runs.
-  digest: "sha256:842357ff50879c84e792050da19f15d05cc9bd9c4c2a8b90734cbc99613daaa7"
+  #
+  # This bump is the one that matters for the agent: osv-scanner reported
+  # eight advisories against Go stdlib 1.26.5, and the agent is a static Go
+  # binary running in someone else's cluster. Nothing in the API or web
+  # images carried those. The digest it replaces — `842357ff…daaa7`,
+  # main@6848606, publish run 31517960078 — is the rollback target and is
+  # what the live Deployment ran when this line was edited.
+  digest: "sha256:ed081776934c3c20107255d9aa6db2440b2e9244cff38369f98c6ed4d571564c"
   pullPolicy: IfNotPresent
 
 # Supplied at install time from the catalog row created during enrollment.
