@@ -204,8 +204,18 @@ describe("cluster inventory screens", () => {
         <ClusterDetailPage />
       </SessionProvider>,
     );
-    await waitFor(() => expect(screen.getByTestId("state-error")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    // The capacity dashboard above the summary fetches its own template, and
+    // an unmocked template is a 404 that renders a SECOND error state with a
+    // Retry of its own. Which of the two lands first is a race, so name the
+    // one under test by its message instead of assuming it is the only one.
+    const summaryError = await waitFor(() => {
+      const errorState = screen
+        .getAllByTestId("state-error")
+        .find((element) => element.textContent?.includes("inventory unavailable"));
+      if (!errorState) throw new Error("the summary error state has not rendered yet");
+      return errorState;
+    });
+    expect(within(summaryError).getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
   it("resource browser lists rows, marks missing distinctly, filters by kind", async () => {
