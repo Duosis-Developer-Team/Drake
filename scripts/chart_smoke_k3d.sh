@@ -38,7 +38,15 @@ lifecycle_on_cleanup 'rm -rf "$SMOKE_DIR"'
 lifecycle_install_traps
 
 echo "[smoke] building agent image"
-docker build -t "$IMAGE_TAG" "$REPO_ROOT/apps/cluster-agent" 2>&1 | tail -2
+# A failed build prints the compiler's complaint above buildkit's summary, so
+# `| tail -2` reported only that something failed. Keep the whole log and show
+# the end of it when — and only when — the build fails.
+mkdir -p "$SMOKE_DIR"
+if ! docker build -t "$IMAGE_TAG" "$REPO_ROOT/apps/cluster-agent" \
+    >"$SMOKE_DIR/build.log" 2>&1; then
+  tail -40 "$SMOKE_DIR/build.log" >&2
+  exit 1
+fi
 
 echo "[smoke] creating disposable k3d cluster ${CLUSTER_NAME}"
 k3d cluster delete "$CLUSTER_NAME" >/dev/null 2>&1 || true
