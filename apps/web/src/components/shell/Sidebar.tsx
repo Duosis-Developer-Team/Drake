@@ -160,8 +160,8 @@ export function Sidebar({
                           collapsed ? "h-9 justify-center px-0" : "h-9 gap-2.5 px-2.5"
                         } ${
                           isActive
-                            ? "bg-sidebar-selected font-semibold text-sidebar-text"
-                            : "text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-text"
+                            ? "bg-sidebar-selected font-semibold text-sidebar-ink"
+                            : "text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink"
                         }`}
                       >
                         {isActive ? (
