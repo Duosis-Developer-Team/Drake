@@ -130,6 +130,37 @@ test("the full-timeline dialog trap-focuses and returns focus to its trigger on 
   await expect(trigger).toBeFocused();
 });
 
+test("every timeline event's tooltip stays fully inside the 390px modal, none clipped off an edge", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+
+  await page.getByTestId("view-full-timeline").click();
+  const dialog = page.getByRole("dialog", { name: "Correlation timeline" });
+  await expect(dialog).toBeVisible();
+
+  const dots = dialog.locator('[data-testid="operational-timeline"] span.group');
+  const count = await dots.count();
+  test.skip(count === 0, "no timeline events in this environment's fixtures");
+
+  for (let i = 0; i < count; i++) {
+    const dot = dots.nth(i);
+    await dot.getByRole("link").hover();
+    const tooltip = dot.locator('[role="tooltip"]');
+    await expect(tooltip).toBeVisible();
+    const box = await tooltip.boundingBox();
+    expect(box, `event ${i}'s tooltip must have a bounding box`).not.toBeNull();
+    if (box) {
+      expect(box.x, `event ${i}'s tooltip must not clip past the left edge`).toBeGreaterThanOrEqual(0);
+      expect(
+        box.x + box.width,
+        `event ${i}'s tooltip must not clip past the right edge`,
+      ).toBeLessThanOrEqual(390);
+    }
+  }
+});
+
 for (const viewport of [
   { name: "1024px", width: 1024, height: 900, expectGrid: false },
   { name: "1280px", width: 1280, height: 900, expectGrid: true },

@@ -34,6 +34,35 @@ function formatClock(at: string): string {
   })} UTC`;
 }
 
+/** The UTC calendar day, so the axis can tell "different day" from "earlier
+ *  today" — a bare clock time reads as going backward once the window
+ *  crosses midnight. */
+function utcDateKey(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+/** An axis endpoint: a bare clock time within one day, or a dated one once
+ *  the window's start and end fall on different UTC days. */
+function formatAxisPoint(epochMs: number, includeDate: boolean): string {
+  const iso = new Date(epochMs).toISOString();
+  if (!includeDate) return formatClock(iso);
+  const day = new Date(epochMs).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+  return `${day}, ${formatClock(iso)}`;
+}
+
+/** Keeps a dot's tooltip inside the track instead of centering blindly:
+ *  a dot near either edge anchors the tooltip to that same edge, so the
+ *  tooltip extends inward rather than off the side of a narrow container. */
+function tooltipAlignmentClass(position: number): string {
+  if (position >= 80) return "right-0 left-auto translate-x-0";
+  if (position <= 20) return "left-0 translate-x-0";
+  return "left-1/2 -translate-x-1/2";
+}
+
 export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
   const [tableOpen, setTableOpen] = useState(false);
   const tableId = useId();
@@ -52,6 +81,8 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
     return ((t - min) / span) * 100;
   }
 
+  const axisSpansMultipleDays = min !== null && max !== null && utcDateKey(min) !== utcDateKey(max);
+
   return (
     <div data-testid="operational-timeline">
       {min !== null && max !== null ? (
@@ -61,8 +92,8 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
             className="flex flex-1 items-center justify-between text-micro text-ink-muted"
             data-testid="timeline-axis"
           >
-            <span>{formatClock(new Date(min).toISOString())}</span>
-            <span>{formatClock(new Date(max).toISOString())}</span>
+            <span>{formatAxisPoint(min, axisSpansMultipleDays)}</span>
+            <span>{formatAxisPoint(max, axisSpansMultipleDays)}</span>
           </div>
         </div>
       ) : null}
@@ -87,11 +118,12 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
               <div className="relative h-6 flex-1 rounded-full bg-surface-3">
                 {lane.events.map((event) => {
                   const spec = toneSpec(event.tone);
+                  const position = positionOf(event.at);
                   return (
                     <span
                       key={event.id}
                       className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
-                      style={{ left: `${positionOf(event.at)}%` }}
+                      style={{ left: `${position}%` }}
                     >
                       <Link
                         href={event.href}
@@ -101,10 +133,15 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                       {/* Visible on hover AND keyboard focus — the accessible
                           name above covers screen readers, but a sighted
                           mouse or keyboard user reading the track needs the
-                          same "what and when" without guessing from position. */}
+                          same "what and when" without guessing from position.
+                          A dot near either edge anchors the tooltip to that
+                          edge instead of centering it, so it extends inward
+                          rather than off the side of a narrow track; a
+                          bounded width with normal wrapping is the fallback
+                          for whatever that still doesn't fit. */}
                       <span
                         role="tooltip"
-                        className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-control bg-ink px-2 py-1 text-micro text-ink-inverse opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                        className={`pointer-events-none absolute bottom-full z-10 mb-1.5 max-w-[12rem] whitespace-normal rounded-control bg-ink px-2 py-1 text-micro text-ink-inverse opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${tooltipAlignmentClass(position)}`}
                       >
                         {event.label} — {formatClock(event.at)}
                       </span>
