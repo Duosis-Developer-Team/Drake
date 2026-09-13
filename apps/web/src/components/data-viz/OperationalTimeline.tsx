@@ -49,10 +49,10 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
 
   return (
     <div data-testid="operational-timeline">
-      <div className="space-y-2.5">
+      <div className="space-y-3 sm:space-y-2.5">
         {lanes.map((lane) => (
-          <div key={lane.key} className="flex items-center gap-3">
-            <span className="w-36 shrink-0 truncate text-caption text-ink-secondary">
+          <div key={lane.key} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <span className="text-caption text-ink-secondary sm:w-44 sm:shrink-0 sm:truncate" title={lane.label}>
               {lane.label}
             </span>
             {!lane.historyAvailable ? (
