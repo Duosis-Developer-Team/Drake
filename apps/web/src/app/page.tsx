@@ -29,6 +29,7 @@ import Link from "next/link";
 
 import { Donut, RingProgress } from "@/components/charts/visuals";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
+import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
@@ -40,9 +41,10 @@ import {
   LoadingSkeleton,
   NotConfiguredState,
 } from "@/components/ui/states";
-import type { AlertSummary } from "@/lib/alerting";
+import { alertListPath, type AlertInstance, type AlertSummary, type Page } from "@/lib/alerting";
 import type { CatalogContext, Cluster, IntegrationHealth } from "@/lib/catalog";
 import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
+import { deploymentListPath, type DeploymentPage } from "@/lib/deployments";
 import type { IncidentSummary } from "@/lib/incidents";
 import {
   alertItems,
@@ -54,6 +56,7 @@ import {
   tallyByTone,
   type AttentionItem,
 } from "@/lib/overview";
+import { buildTimeline } from "@/lib/view-models/timeline";
 import { buildVerdict } from "@/lib/view-models/verdict";
 import type { InventorySummary } from "@/lib/inventory";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
@@ -74,6 +77,15 @@ export default function CommandCenterPage() {
   });
   const integrations = useResource<{ integrations: IntegrationHealth[] }>(
     "/v1/integrations/health",
+    { refreshMs: REFRESH_MS },
+  );
+  // Additive reads for the correlation timeline only — already-used
+  // endpoints, not part of the verdict's own sources-answered accounting.
+  const recentAlerts = useResource<Page<AlertInstance>>(alertListPath({ window: "24h" }), {
+    refreshMs: REFRESH_MS,
+  });
+  const recentDeployments = useResource<DeploymentPage>(
+    deploymentListPath({ startedWithin: "24h" }),
     { refreshMs: REFRESH_MS },
   );
 
@@ -100,7 +112,17 @@ export default function CommandCenterPage() {
     ...(integrations.data ? integrationItems(integrations.data.integrations) : []),
   ]);
 
-  const reloadAll = () => sources.forEach(({ resource }) => resource.reload());
+  const timelineLanes = buildTimeline(
+    incidents.data?.items ?? [],
+    recentAlerts.data?.items ?? [],
+    recentDeployments.data?.items ?? [],
+  );
+
+  const reloadAll = () => {
+    sources.forEach(({ resource }) => resource.reload());
+    recentAlerts.reload();
+    recentDeployments.reload();
+  };
 
   return (
     <PageFrame width="wide">
@@ -131,6 +153,14 @@ export default function CommandCenterPage() {
         onRefresh={reloadAll}
         refreshing={refreshing}
       />
+
+      <Panel className="mt-5" data-testid="correlation-timeline">
+        <PanelHeader
+          title="Correlation timeline"
+          description="Incidents, alerts and deployments on one axis, related in time — not asserted as cause and effect."
+        />
+        <OperationalTimeline lanes={timelineLanes} />
+      </Panel>
 
       <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <NeedsAttention
