@@ -43,6 +43,14 @@ describe("buildHealthMatrix", () => {
     expect(prod?.services).toHaveLength(2);
   });
 
+  it("carries the project/environment id through, for a safe drill-down link", () => {
+    const cells = buildHealthMatrix([
+      row({ status: "healthy", project_id: "p9", environment_id: "e9" }),
+    ]);
+    expect(cells[0].projectId).toBe("p9");
+    expect(cells[0].environmentId).toBe("e9");
+  });
+
   it("a cell's tone is the worst service's tone, even when most are healthy", () => {
     const cells = buildHealthMatrix([
       row({ status: "healthy", service_key: "checkout" }),

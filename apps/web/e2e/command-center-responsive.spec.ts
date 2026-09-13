@@ -18,20 +18,65 @@ async function signIn(page: Page) {
   await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
 }
 
-test("at 390px, the attention queue precedes the full timeline in DOM order", async ({ page }) => {
+test("at 390px, the DOM order is exactly verdict, attention queue, timeline — nothing interposed", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
 
-  const order = await page.evaluate(() => {
-    const attention = document.querySelector('[data-testid="needs-attention"]');
-    const timeline = document.querySelector('[data-testid="correlation-timeline"]');
-    if (!attention || !timeline) return null;
-    // DOCUMENT_POSITION_FOLLOWING means `timeline` comes after `attention`.
-    return Boolean(
-      attention.compareDocumentPosition(timeline) & Node.DOCUMENT_POSITION_FOLLOWING,
-    );
+  // A pairwise "does A precede B" check can't catch a panel sitting between
+  // them — it only proves A comes somewhere before B. This walks the actual
+  // main-section testids in document order and asserts the whole sequence,
+  // so a panel wrongly interposed between attention and timeline fails here.
+  const testIds = ["verdict-panel", "needs-attention", "correlation-timeline"];
+  const order = await page.evaluate((ids: string[]) => {
+    const positions = ids
+      .map((id) => {
+        const el = document.querySelector(`[data-testid="${id}"]`);
+        return el ? { id, top: el.getBoundingClientRect().top + window.scrollY } : null;
+      })
+      .filter((entry): entry is { id: string; top: number } => entry !== null);
+    return positions;
+  }, testIds);
+
+  expect(order.map((entry) => entry.id), "all three sections must be present").toEqual(testIds);
+  for (let i = 1; i < order.length; i++) {
+    expect(
+      order[i].top,
+      `${order[i].id} must render after ${order[i - 1].id}, with nothing else between them`,
+    ).toBeGreaterThan(order[i - 1].top);
+  }
+
+  // Nothing else — no evidence coverage, catalog, capacity risk, or service
+  // health panel — sits between the attention queue and the timeline.
+  const attention = page.getByTestId("needs-attention");
+  const timeline = page.getByTestId("correlation-timeline");
+  const between = await page.evaluate(() => {
+    const attentionEl = document.querySelector('[data-testid="needs-attention"]');
+    const timelineEl = document.querySelector('[data-testid="correlation-timeline"]');
+    if (!attentionEl || !timelineEl) return null;
+    const others = [
+      "evidence-coverage-panel",
+      "catalog-counts",
+      "service-health-rollup",
+      "capacity-risk-panel",
+      "health-matrix-panel",
+    ];
+    return others.filter((id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      if (!el) return false;
+      const afterAttention = Boolean(
+        attentionEl.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      const beforeTimeline = Boolean(
+        el.compareDocumentPosition(timelineEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      return afterAttention && beforeTimeline;
+    });
   });
-  expect(order, "attention queue must precede the timeline in DOM order at 390px").toBe(true);
+  expect(between, "no other panel may sit between attention queue and timeline").toEqual([]);
+  await expect(attention).toBeVisible();
+  await expect(timeline).toBeVisible();
 
   // The full multi-lane track is replaced by a one-line summary at this
   // width — the "View full timeline" trigger is how the real track is

@@ -106,4 +106,30 @@ describe("OperationalTimeline", () => {
     );
     expect(screen.getByText(/no events in the selected window/i)).toBeInTheDocument();
   });
+
+  it("states the window's real start and end, not just dot position", () => {
+    render(<OperationalTimeline lanes={LANES} />);
+    const axis = screen.getByTestId("timeline-axis");
+    expect(axis).toHaveTextContent("08:00 UTC");
+    expect(axis).toHaveTextContent("09:00 UTC");
+  });
+
+  it("renders no axis when there is nothing plotted to give it a range", () => {
+    render(
+      <OperationalTimeline
+        lanes={[{ key: "alerts", label: "Alerts", historyAvailable: true, events: [] }]}
+      />,
+    );
+    expect(screen.queryByTestId("timeline-axis")).not.toBeInTheDocument();
+  });
+
+  it("shows a visible label naming the event and its time, not only an accessible name", () => {
+    render(<OperationalTimeline lanes={LANES} />);
+    const tooltip = screen.getByText("Incident opened: checkout-api — 08:00 UTC");
+    expect(tooltip).toHaveAttribute("role", "tooltip");
+    // Hidden until hovered/focused, via opacity rather than `hidden`, so it
+    // participates in layout for positioning but isn't visually announced.
+    expect(tooltip.className).toMatch(/opacity-0/);
+    expect(tooltip.className).toMatch(/group-focus-within:opacity-100/);
+  });
 });

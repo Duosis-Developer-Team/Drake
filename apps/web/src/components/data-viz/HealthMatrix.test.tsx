@@ -8,6 +8,8 @@ const CELLS: HealthMatrixCell[] = [
   {
     projectKey: "alpha",
     environmentKey: "production",
+    projectId: "p-alpha",
+    environmentId: "e-production",
     services: [
       { serviceKey: "checkout", tone: "success" },
       { serviceKey: "billing", tone: "critical" },
@@ -16,6 +18,8 @@ const CELLS: HealthMatrixCell[] = [
   {
     projectKey: "alpha",
     environmentKey: "staging",
+    projectId: "p-alpha",
+    environmentId: "e-staging",
     services: [{ serviceKey: "checkout", tone: "success" }],
   },
 ];
@@ -26,9 +30,24 @@ describe("HealthMatrix", () => {
     const disclosure = within(screen.getByTestId("health-matrix-disclosure"));
     const production = disclosure.getByText("production").closest("li");
     expect(production).not.toBeNull();
-    // The critical billing service should surface a "2" count, not hide
+    // The critical billing service should surface a "(2)" count, not hide
     // behind the healthy checkout row it's grouped with.
-    expect(within(production as HTMLElement).getByText("2")).toBeInTheDocument();
+    expect(within(production as HTMLElement).getByText("(2)")).toBeInTheDocument();
+  });
+
+  it("names the worst status as visible text, not color alone", () => {
+    render(<HealthMatrix cells={CELLS} status="ready" compact />);
+    const disclosure = within(screen.getByTestId("health-matrix-disclosure"));
+    const production = disclosure.getByText("production").closest("li");
+    expect(within(production as HTMLElement).getByText("Critical")).toBeInTheDocument();
+  });
+
+  it("a populated cell drills down into service health scoped to its project and environment", () => {
+    render(<HealthMatrix cells={CELLS} status="ready" compact />);
+    const link = screen.getByRole("link", {
+      name: /alpha \/ production: worst status critical, 2 services — open service health/i,
+    });
+    expect(link).toHaveAttribute("href", "/service-health?project_id=p-alpha&environment_id=e-production");
   });
 
   it("the compact prop renders the disclosure list", () => {

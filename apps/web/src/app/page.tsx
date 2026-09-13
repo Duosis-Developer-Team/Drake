@@ -180,21 +180,27 @@ export default function CommandCenterPage() {
     </Panel>
   );
 
-  const attentionSection = (
-    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <AttentionQueue items={attention} loading={anyLoading} />
-      <div className="flex flex-col gap-4">
-        <Panel data-testid="evidence-coverage-panel">
-          <PanelHeader
-            title="Evidence coverage"
-            description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
-          />
-          <EvidenceCoverage sources={sources} />
-        </Panel>
-        <CatalogPanel resource={context} />
-        <ServiceHealthPanel resource={services} />
-      </div>
-    </div>
+  const capacityRiskSection = (
+    <Panel flush data-testid="capacity-risk-panel">
+      <PanelHeader
+        flush
+        title="Capacity risk"
+        description="Certificate expiry and volume health, from each cluster's own inventory report."
+      />
+      <CapacityRiskBoard items={capacityRiskItems} unassessedClusters={unassessedClusters} />
+    </Panel>
+  );
+
+  const attentionQueueSection = <AttentionQueue items={attention} loading={anyLoading} />;
+
+  const evidenceCoverageSection = (
+    <Panel data-testid="evidence-coverage-panel">
+      <PanelHeader
+        title="Evidence coverage"
+        description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
+      />
+      <EvidenceCoverage sources={sources} />
+    </Panel>
   );
 
   return (
@@ -230,15 +236,23 @@ export default function CommandCenterPage() {
       <div className="mt-5 flex flex-col gap-5">
         {isNarrow ? (
           <>
-            {attentionSection}
+            {attentionQueueSection}
             {timelineSection}
             {healthMatrixSection}
+            {capacityRiskSection}
+            {evidenceCoverageSection}
           </>
         ) : (
           <>
-            {timelineSection}
-            {healthMatrixSection}
-            {attentionSection}
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+              {timelineSection}
+              {attentionQueueSection}
+            </div>
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+              {healthMatrixSection}
+              {capacityRiskSection}
+            </div>
+            {evidenceCoverageSection}
           </>
         )}
       </div>
@@ -259,15 +273,9 @@ export default function CommandCenterPage() {
         <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <FleetPanel resource={clusters} />
           <IntegrationsPanel resource={integrations} />
+          <CatalogPanel resource={context} />
+          <ServiceHealthPanel resource={services} />
         </div>
-        <Panel className="mt-4" flush data-testid="capacity-risk-panel">
-          <PanelHeader
-            flush
-            title="Capacity risk"
-            description="Certificate expiry and volume health, from each cluster's own inventory report."
-          />
-          <CapacityRiskBoard items={capacityRiskItems} unassessedClusters={unassessedClusters} />
-        </Panel>
       </div>
     </PageFrame>
   );

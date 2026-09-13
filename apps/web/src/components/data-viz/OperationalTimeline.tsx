@@ -11,6 +11,11 @@
  * "Drake cannot say". The `<details>` table repeats every plotted point as
  * a row — the same numbers, per `ChartFrame`'s own rule that a chart's
  * table is the relief for whatever the drawing cannot make legible.
+ *
+ * A dot's horizontal position is not the only way to read its time: the
+ * axis row states the window's real start and end, and hovering or
+ * keyboard-focusing a dot shows its event name and clock time in a visible
+ * label, not only in the accessible name a mouse user never sees.
  */
 
 import Link from "next/link";
@@ -49,6 +54,18 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
 
   return (
     <div data-testid="operational-timeline">
+      {min !== null && max !== null ? (
+        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+          <span className="sm:w-44 sm:shrink-0" aria-hidden />
+          <div
+            className="flex flex-1 items-center justify-between text-micro text-ink-muted"
+            data-testid="timeline-axis"
+          >
+            <span>{formatClock(new Date(min).toISOString())}</span>
+            <span>{formatClock(new Date(max).toISOString())}</span>
+          </div>
+        </div>
+      ) : null}
       <div className="space-y-3 sm:space-y-2.5">
         {lanes.map((lane) => (
           <div key={lane.key} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
@@ -71,13 +88,27 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                 {lane.events.map((event) => {
                   const spec = toneSpec(event.tone);
                   return (
-                    <Link
+                    <span
                       key={event.id}
-                      href={event.href}
-                      aria-label={`${event.label}, ${formatClock(event.at)}`}
-                      className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot}`}
+                      className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
                       style={{ left: `${positionOf(event.at)}%` }}
-                    />
+                    >
+                      <Link
+                        href={event.href}
+                        aria-label={`${event.label}, ${formatClock(event.at)}`}
+                        className={`block h-3 w-3 rounded-full ring-2 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot}`}
+                      />
+                      {/* Visible on hover AND keyboard focus — the accessible
+                          name above covers screen readers, but a sighted
+                          mouse or keyboard user reading the track needs the
+                          same "what and when" without guessing from position. */}
+                      <span
+                        role="tooltip"
+                        className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-control bg-ink px-2 py-1 text-micro text-ink-inverse opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                      >
+                        {event.label} — {formatClock(event.at)}
+                      </span>
+                    </span>
                   );
                 })}
               </div>
