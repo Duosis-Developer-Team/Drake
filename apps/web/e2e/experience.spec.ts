@@ -293,6 +293,32 @@ test("axe: no critical or serious violation on the screens people live on", asyn
   }
 });
 
+test("axe: Command Center is clean at 390px in both themes (Wave 2 responsive reflow)", async ({
+  page,
+}) => {
+  // The loop above already covers Command Center at the default (~1280px)
+  // viewport; Task 2.7's reflow only changes structure below 1024px, so that
+  // is the width this repeats the same gate at, rather than widening the
+  // shared loop above for every unrelated route.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme);
+    await page.goto("/");
+    await expect(page.locator("main")).toBeVisible();
+    const results = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .analyze();
+    const blocking = results.violations.filter(
+      (violation) => violation.impact === "critical" || violation.impact === "serious",
+    );
+    expect(
+      blocking.map((violation) => `${violation.id}: ${violation.help}`),
+      `${theme} / at 390px`,
+    ).toEqual([]);
+  }
+});
+
 test("the browser talks to Drake and to nobody else", async ({ page }) => {
   const foreign: string[] = [];
   page.on("request", (request) => {
@@ -335,6 +361,9 @@ test("the Command Center never claims health it did not measure", async ({ page 
     await expect(empty).not.toContainText(/all systems/i);
   }
 
-  // A source that could not be read shows a dash, never a zero.
-  await expect(page.getByTestId("triage-strip")).toBeVisible();
+  // The verdict panel (Wave 2, replacing the old triage strip) is always
+  // present and names how many of the page's sources actually answered —
+  // never a bare count that could be mistaken for "everything is fine".
+  await expect(page.getByTestId("verdict-panel")).toBeVisible();
+  await expect(page.getByTestId("verdict-sources")).toContainText(/sources answered/i);
 });

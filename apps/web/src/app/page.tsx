@@ -26,6 +26,7 @@
 
 import { ArrowRight, RefreshCw } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
 import { Donut, RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
@@ -38,6 +39,7 @@ import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/controls";
+import { Modal } from "@/components/ui/overlay";
 import { FreshnessIndicator, RelativeTime } from "@/components/ui/identifiers";
 import {
   DeniedState,
@@ -61,10 +63,11 @@ import {
 } from "@/lib/overview";
 import { certificateRiskItems, pvcRiskItems } from "@/lib/view-models/capacity-risk";
 import { buildHealthMatrix } from "@/lib/view-models/health-matrix";
-import { buildTimeline } from "@/lib/view-models/timeline";
+import { buildTimeline, type TimelineLane } from "@/lib/view-models/timeline";
 import { buildVerdict } from "@/lib/view-models/verdict";
 import { useClusterInventorySummaries } from "@/lib/clusterSummaries";
 import type { InventorySummary } from "@/lib/inventory";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
 import { resourceStatus, useResource, type Resource } from "@/lib/useResource";
 
@@ -145,6 +148,55 @@ export default function CommandCenterPage() {
     recentDeployments.reload();
   };
 
+  // Below 1024px the reading order becomes verdict → attention queue →
+  // timeline summary (brief §9.4): a CSS `order` utility would move what a
+  // reader SEES without moving what Tab reaches, so the DOM itself reorders
+  // here instead, driven by an actual viewport match rather than a media
+  // query the accessibility tree can't see.
+  const isNarrow = useMediaQuery("(max-width: 1023px)");
+  const [timelineDialogOpen, setTimelineDialogOpen] = useState(false);
+
+  const timelineSection = (
+    <Panel data-testid="correlation-timeline">
+      <PanelHeader
+        title="Correlation timeline"
+        description="Incidents, alerts and deployments on one axis, related in time — not asserted as cause and effect."
+      />
+      {isNarrow ? (
+        <TimelineSummary lanes={timelineLanes} onExpand={() => setTimelineDialogOpen(true)} />
+      ) : (
+        <OperationalTimeline lanes={timelineLanes} />
+      )}
+    </Panel>
+  );
+
+  const healthMatrixSection = (
+    <Panel data-testid="health-matrix-panel">
+      <PanelHeader
+        title="Health matrix"
+        description="Every project and environment, worst service first — not an aggregate, so one degraded service never hides behind the healthy ones next to it."
+      />
+      <HealthMatrix cells={buildHealthMatrix(services.data?.items ?? [])} status={resourceStatus(services)} />
+    </Panel>
+  );
+
+  const attentionSection = (
+    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <AttentionQueue items={attention} loading={anyLoading} />
+      <div className="flex flex-col gap-4">
+        <Panel data-testid="evidence-coverage-panel">
+          <PanelHeader
+            title="Evidence coverage"
+            description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
+          />
+          <EvidenceCoverage sources={sources} />
+        </Panel>
+        <CatalogPanel resource={context} />
+        <ServiceHealthPanel resource={services} />
+      </div>
+    </div>
+  );
+
   return (
     <PageFrame width="wide">
       <PageHeader
@@ -175,36 +227,29 @@ export default function CommandCenterPage() {
         refreshing={refreshing}
       />
 
-      <Panel className="mt-5" data-testid="correlation-timeline">
-        <PanelHeader
-          title="Correlation timeline"
-          description="Incidents, alerts and deployments on one axis, related in time — not asserted as cause and effect."
-        />
-        <OperationalTimeline lanes={timelineLanes} />
-      </Panel>
-
-      <Panel className="mt-5" data-testid="health-matrix-panel">
-        <PanelHeader
-          title="Health matrix"
-          description="Every project and environment, worst service first — not an aggregate, so one degraded service never hides behind the healthy ones next to it."
-        />
-        <HealthMatrix cells={buildHealthMatrix(services.data?.items ?? [])} status={resourceStatus(services)} />
-      </Panel>
-
-      <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <AttentionQueue items={attention} loading={anyLoading} />
-        <div className="flex flex-col gap-4">
-          <Panel data-testid="evidence-coverage-panel">
-            <PanelHeader
-              title="Evidence coverage"
-              description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
-            />
-            <EvidenceCoverage sources={sources} />
-          </Panel>
-          <CatalogPanel resource={context} />
-          <ServiceHealthPanel resource={services} />
-        </div>
+      <div className="mt-5 flex flex-col gap-5">
+        {isNarrow ? (
+          <>
+            {attentionSection}
+            {timelineSection}
+            {healthMatrixSection}
+          </>
+        ) : (
+          <>
+            {timelineSection}
+            {healthMatrixSection}
+            {attentionSection}
+          </>
+        )}
       </div>
+
+      <Modal
+        open={timelineDialogOpen}
+        onClose={() => setTimelineDialogOpen(false)}
+        title="Correlation timeline"
+      >
+        <OperationalTimeline lanes={timelineLanes} />
+      </Modal>
 
       <div className="mt-6">
         <SectionHeader
@@ -225,6 +270,39 @@ export default function CommandCenterPage() {
         </Panel>
       </div>
     </PageFrame>
+  );
+}
+
+/**
+ * The narrow-viewport stand-in for the full timeline track.
+ *
+ * Below 1024px the full multi-lane track competes too hard with the
+ * attention queue above it for the one thing a phone screen has little of:
+ * vertical space. This states the same facts in one line — how many events,
+ * and which lanes Drake has no history for — and opens the real
+ * `OperationalTimeline` in a dialog rather than losing it.
+ */
+function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand: () => void }) {
+  const events = lanes.flatMap((lane) => lane.events);
+  const unavailable = lanes.filter((lane) => !lane.historyAvailable);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-caption text-ink-secondary">
+        {events.length} event{events.length === 1 ? "" : "s"} across {lanes.length - unavailable.length} of{" "}
+        {lanes.length} lanes
+        {unavailable.length > 0 ? (
+          <span className="text-ink-muted"> — {unavailable.map((lane) => lane.label).join(", ")} unavailable</span>
+        ) : null}
+      </p>
+      <button
+        type="button"
+        onClick={onExpand}
+        data-testid="view-full-timeline"
+        className="shrink-0 rounded-control border border-border px-2.5 py-1 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
+      >
+        View full timeline
+      </button>
+    </div>
   );
 }
 
