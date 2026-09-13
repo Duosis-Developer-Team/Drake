@@ -7,10 +7,25 @@
  *
  * Every colour below is either sampled from the authoritative logo masters in
  * apps/web/assets/brand or derived from one of those samples and then checked
- * for contrast. The measured anchors are:
+ * for contrast. The measured anchors, per the 2026-09-13 visual/UX remake
+ * brief (docs/superpowers/specs/2026-09-13-drake-visual-ui-ux-remake-design.md
+ * §7.1), are:
  *
- *   light canvas  #f9f9fb    light ink  #074630    light accent  #02a242
- *   dark  canvas  #032821    dark  ink  #f7f9f9    dark  accent  #0ecd65
+ *   light canvas  #f2f5f2    light ink  #11231b    light forest  #0a5b3d    light serpent  #159c58
+ *   dark  canvas  #07100c    dark  ink  #eef5f1    dark  brand   #35d07f
+ *
+ * The brief's serpent, success, info, warning, critical and unknown hexes
+ * (§7.1) are #18b566 / #078a66 / #2e6fd8 / #b97809 / #d14343 / #667085; each
+ * is nudged one step darker here (to #159c58 / #06795a / #2964c2 / #986207 /
+ * #b83b3b / #5c6578) to clear WCAG AA on white and on its own soft chip —
+ * verified by `design-system.test.ts`.
+ *
+ * The sidebar is a deliberate exception: `--sidebar-*` below is declared with
+ * the SAME values in both `:root` and `.dark`. Every other surface flips with
+ * the theme; the rail stays a constant, calm, dark anchor in both themes
+ * (brief §6.2 — the PayFlow-style dark rail against a light or dark
+ * workspace), so an operator's sense of "where am I" never resets on a theme
+ * change.
  *
  * Two layers, deliberately separate:
  *
@@ -31,7 +46,7 @@
   color-scheme: light;
 
   /* Surfaces, canvas outward. */
-  --canvas: #f4f6f5;
+  --canvas: #f2f5f2;
   --surface-1: #ffffff;
   --surface-2: #f3f7f5;
   --surface-3: #ebf0ed;
@@ -42,40 +57,50 @@
   --border-subtle: #d3ddd8;
   --border-strong: #7c8e85;
 
-  --text-primary: #0c2019;
+  --text-primary: #11231b;
   --text-secondary: #48584f;
   --text-muted: #59695f;
   --text-inverse: #ffffff;
 
   /* Brand. `--brand` carries weight (buttons, active rails); `--brand-accent`
-     is the livelier green from the serpent and is used for emphasis only. */
-  --brand: #074630;
-  --brand-hover: #0a5c3f;
-  --brand-active: #05341f;
+     is the livelier serpent green and is used for emphasis only. Neither one
+     is ever synonymous with "healthy" — that is `--status-success` alone. */
+  --brand: #0a5b3d;
+  --brand-hover: #0e7350;
+  --brand-active: #073d29;
   --brand-soft: #e1f1e8;
-  --brand-accent: #02a242;
-  --focus-ring: #00843a;
+  --brand-accent: #159c58;
+  --focus-ring: #0c8f53;
 
   --chart-grid: #e7edea;
   --chart-axis: #59695f;
-  --chart-tooltip: #0c2019;
+  --chart-tooltip: #11231b;
   --chart-tooltip-text: #f7f9f9;
 
-  --status-success: #067647;
-  --status-info: #175cd3;
-  --status-warning: #b54708;
-  --status-critical: #b42318;
+  --status-success: #06795a;
+  --status-info: #2964c2;
+  --status-warning: #986207;
+  --status-critical: #b83b3b;
   --status-neutral: #4e5b64;
-  --status-unknown: #566273;
+  --status-unknown: #5c6578;
   --status-stale: #8a6410;
 
-  --status-success-soft: #e3f5ec;
-  --status-info-soft: #e6effc;
-  --status-warning-soft: #fbf0e2;
-  --status-critical-soft: #fcebe9;
+  --status-success-soft: #e1f3ec;
+  --status-info-soft: #e5eefc;
+  --status-warning-soft: #fbf0de;
+  --status-critical-soft: #fbe9e9;
   --status-neutral-soft: #eef1f0;
-  --status-unknown-soft: #eef1f4;
+  --status-unknown-soft: #edeff2;
   --status-stale-soft: #f7f0dd;
+
+  /* The obsidian rail. Same values in `.dark` below — see the header note. */
+  --sidebar-canvas: #0b1511;
+  --sidebar-surface-hover: #16231c;
+  --sidebar-surface-selected: #16281f;
+  --sidebar-border: #22322a;
+  --sidebar-text: #eaf1ec;
+  --sidebar-text-muted: #8fa398;
+  --sidebar-active-rail: #35d07f;
 
   /* Categorical chart series. Fixed order, never cycled. Validated for the
      white chart surface: CVD dE 9.2 worst adjacent pair, normal-vision 19.7.
@@ -96,28 +121,28 @@
 .dark {
   color-scheme: dark;
 
-  --canvas: #032821;
-  --surface-1: #06342b;
-  --surface-2: #0a3e33;
-  --surface-3: #0e4a3c;
-  --surface-elevated: #0a3e33;
-  --surface-hover: #0f4a3d;
-  --surface-selected: #0e4535;
+  --canvas: #07100c;
+  --surface-1: #0d1a14;
+  --surface-2: #14241c;
+  --surface-3: #1b2e23;
+  --surface-elevated: #14241c;
+  --surface-hover: #17281f;
+  --surface-selected: #123527;
 
-  --border-subtle: #18543f;
+  --border-subtle: #294034;
   --border-strong: #3e8c71;
 
-  --text-primary: #f7f9f9;
+  --text-primary: #eef5f1;
   --text-secondary: #a9c0b6;
   --text-muted: #9cb6ab;
   --text-inverse: #062018;
 
-  --brand: #0ecd65;
-  --brand-hover: #35dd84;
-  --brand-active: #0aa954;
-  --brand-soft: #0c4531;
-  --brand-accent: #0ecd65;
-  --focus-ring: #10cd68;
+  --brand: #35d07f;
+  --brand-hover: #55dc97;
+  --brand-active: #21a863;
+  --brand-soft: #123527;
+  --brand-accent: #35d07f;
+  --focus-ring: #4bdb8e;
 
   --chart-grid: #0f4034;
   --chart-axis: #9cb6ab;
@@ -139,6 +164,15 @@
   --status-neutral-soft: #1b2a2a;
   --status-unknown-soft: #1c2b2b;
   --status-stale-soft: #332816;
+
+  /* The obsidian rail, unchanged from `:root` — see the file header note. */
+  --sidebar-canvas: #0b1511;
+  --sidebar-surface-hover: #16231c;
+  --sidebar-surface-selected: #16281f;
+  --sidebar-border: #22322a;
+  --sidebar-text: #eaf1ec;
+  --sidebar-text-muted: #8fa398;
+  --sidebar-active-rail: #35d07f;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
      surface and re-validated there (CVD dE 9.4, all six clear 3:1). */
@@ -189,6 +223,15 @@
   --color-chart-grid: var(--chart-grid);
   --color-chart-axis: var(--chart-axis);
 
+  /* The obsidian rail. Theme-invariant on purpose — see the file header. */
+  --color-sidebar: var(--sidebar-canvas);
+  --color-sidebar-hover: var(--sidebar-surface-hover);
+  --color-sidebar-selected: var(--sidebar-surface-selected);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ink: var(--sidebar-text);
+  --color-sidebar-ink-muted: var(--sidebar-text-muted);
+  --color-sidebar-active-rail: var(--sidebar-active-rail);
+
   --color-healthy: var(--status-success);
   --color-info: var(--status-info);
   --color-warning: var(--status-warning);
@@ -220,16 +263,18 @@
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  /* Type scale. Monitoring density: the steps are close together on purpose,
-     and the page title is not allowed to dominate the screen. */
-  --text-display: 1.5rem;
-  --text-display--line-height: 2rem;
+  /* Type scale. Monitoring density: the steps stay close together, and the
+     page title is not allowed to dominate the screen — but per the
+     2026-09-13 remake brief §7.2 the previous scale ran small enough to slow
+     a reader down, so display/title/section each step up one notch here. */
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.25rem;
   --text-display--letter-spacing: -0.02em;
-  --text-title: 1.125rem;
-  --text-title--line-height: 1.625rem;
-  --text-title--letter-spacing: -0.011em;
-  --text-section: 0.9375rem;
-  --text-section--line-height: 1.375rem;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.75rem;
+  --text-title--letter-spacing: -0.015em;
+  --text-section: 1.0625rem;
+  --text-section--line-height: 1.5rem;
   --text-body: 0.875rem;
   --text-body--line-height: 1.375rem;
   --text-caption: 0.8125rem;
@@ -242,7 +287,16 @@
 
   --radius-control: 0.5rem;
   --radius-panel: 0.75rem;
+  /* The one dominant surface per screen — the Command Center verdict panel,
+     for instance — reads a step rounder than a standard panel (brief §7.3). */
+  --radius-canvas: 1rem;
   --radius-overlay: 1rem;
+
+  /* Sidebar rail width. 248px expanded keeps room for a full label at the
+     new type scale; 72px collapsed still fits an icon, its focus ring and
+     the collapse control without clipping (brief §7.4). */
+  --sidebar-width-expanded: 15.5rem;
+  --sidebar-width-collapsed: 4.5rem;
 
   --shadow-panel: var(--shadow-panel);
   --shadow-overlay: var(--shadow-overlay);

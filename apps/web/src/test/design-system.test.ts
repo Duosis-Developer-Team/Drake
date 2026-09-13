@@ -125,6 +125,41 @@ describe("token layer", () => {
   });
 });
 
+describe("sidebar tokens", () => {
+  // The obsidian rail (2026-09-13 remake brief §6.2) is the one deliberate
+  // exception to "every surface flips with the theme": it stays the same
+  // dark anchor in both, so these assertions run against LIGHT_TOKENS only —
+  // the equality check below is what proves DARK_TOKENS agrees.
+  const SIDEBAR_TEXT: TokenName[] = ["sidebar-text", "sidebar-text-muted"];
+  const SIDEBAR_FAMILY: TokenName[] = [
+    "sidebar-canvas",
+    "sidebar-surface-hover",
+    "sidebar-surface-selected",
+    "sidebar-border",
+    "sidebar-text",
+    "sidebar-text-muted",
+    "sidebar-active-rail",
+  ];
+
+  it("is declared identically in :root and .dark — the rail does not reflow with theme", () => {
+    for (const name of SIDEBAR_FAMILY) {
+      expect(DARK_TOKENS[name], `--${name} differs between themes`).toBe(LIGHT_TOKENS[name]);
+    }
+  });
+
+  it("sidebar text clears 4.5:1 on the sidebar canvas", () => {
+    for (const text of SIDEBAR_TEXT) {
+      const ratio = contrast(LIGHT_TOKENS[text], LIGHT_TOKENS["sidebar-canvas"]);
+      expect(ratio, `${text} on sidebar-canvas is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("the active-entry rail clears 3:1 on the sidebar canvas", () => {
+    const ratio = contrast(LIGHT_TOKENS["sidebar-active-rail"], LIGHT_TOKENS["sidebar-canvas"]);
+    expect(ratio, `sidebar-active-rail on sidebar-canvas is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe("contrast", () => {
   const SURFACES: TokenName[] = ["surface-1", "canvas", "surface-2", "surface-3"];
   const TEXT: TokenName[] = ["text-primary", "text-secondary", "text-muted"];
