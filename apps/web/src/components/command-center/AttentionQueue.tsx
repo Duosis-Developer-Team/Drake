@@ -54,13 +54,9 @@ function AttentionRow({ item }: { item: AttentionItem }) {
 export function AttentionQueue({
   items,
   loading,
-  answered,
-  unavailable,
 }: {
   items: AttentionItem[];
   loading: boolean;
-  answered: string[];
-  unavailable: { label: string; reason: string }[];
 }) {
   const groups = groupByRootCause(items);
 
@@ -93,22 +89,9 @@ export function AttentionQueue({
           <p className="text-body font-medium text-ink">Nothing is currently flagged.</p>
           <p className="mt-1 max-w-prose text-caption text-ink-secondary">
             This is not a statement that the platform is healthy — it is the result of the
-            checks below. Anything Drake has no source for cannot appear here.
+            checks below. Anything Drake has no source for cannot appear here. See Evidence
+            coverage for exactly what was checked.
           </p>
-          <dl className="mt-3 space-y-1.5 text-caption">
-            <div className="flex flex-wrap items-baseline gap-2">
-              <dt className="text-ink-muted">Checked:</dt>
-              <dd className="text-ink">{answered.join(", ") || "nothing"}</dd>
-            </div>
-            {unavailable.length > 0 ? (
-              <div className="flex flex-wrap items-baseline gap-2">
-                <dt className="text-ink-muted">Not checked:</dt>
-                <dd className="text-warning">
-                  {unavailable.map((entry) => `${entry.label} (${entry.reason})`).join(", ")}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
         </div>
       ) : (
         <ul className="divide-y divide-border" data-testid="attention-list">

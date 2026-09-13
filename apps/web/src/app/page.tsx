@@ -29,6 +29,7 @@ import Link from "next/link";
 
 import { Donut, RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
+import { EvidenceCoverage } from "@/components/command-center/EvidenceCoverage";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
 import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
 import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
@@ -105,9 +106,6 @@ export default function CommandCenterPage() {
   const anyLoading = sources.some(({ resource }) => resource.loading && !resource.data);
   const refreshing = sources.some(({ resource }) => resource.refreshing);
   const answered = sources.filter(({ resource }) => resource.data !== null);
-  const unavailable = sources.filter(
-    ({ resource }) => resource.data === null && !resource.loading,
-  );
 
   const attention = sortAttention([
     ...(incidents.data ? incidentItems(incidents.data.items) : []),
@@ -194,16 +192,15 @@ export default function CommandCenterPage() {
       </Panel>
 
       <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <AttentionQueue
-          items={attention}
-          loading={anyLoading}
-          answered={answered.map(({ label }) => label)}
-          unavailable={unavailable.map(({ label, resource }) => ({
-            label,
-            reason: resource.denied ? "permission required" : (resource.error ?? "unavailable"),
-          }))}
-        />
+        <AttentionQueue items={attention} loading={anyLoading} />
         <div className="flex flex-col gap-4">
+          <Panel data-testid="evidence-coverage-panel">
+            <PanelHeader
+              title="Evidence coverage"
+              description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
+            />
+            <EvidenceCoverage sources={sources} />
+          </Panel>
           <CatalogPanel resource={context} />
           <ServiceHealthPanel resource={services} />
         </div>

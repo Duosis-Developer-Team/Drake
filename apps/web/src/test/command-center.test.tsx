@@ -193,7 +193,13 @@ describe("Command Center", () => {
     expect(screen.getByTestId("verdict-retry-sources")).toBeInTheDocument();
 
     const empty = await screen.findByTestId("attention-empty");
-    expect(empty).toHaveTextContent(/clusters \(permission required\)/i);
+    expect(empty).toHaveTextContent(/not a statement that the platform is healthy/i);
+
+    // The denied cluster source is reported by name in Evidence coverage,
+    // not folded into the attention list's own empty-state copy.
+    const coverage = within(await screen.findByTestId("evidence-coverage"));
+    const clustersRow = coverage.getByText("Clusters").closest("li");
+    expect(clustersRow).toHaveTextContent(/permission required/i);
   });
 
   it("surfaces a cluster's own certificate_expiry_warning as a capacity risk with a countdown", async () => {
