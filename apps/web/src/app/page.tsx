@@ -30,6 +30,7 @@ import Link from "next/link";
 import { Donut, RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
+import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
 import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
@@ -56,11 +57,12 @@ import {
   sortAttention,
   tallyByTone,
 } from "@/lib/overview";
+import { buildHealthMatrix } from "@/lib/view-models/health-matrix";
 import { buildTimeline } from "@/lib/view-models/timeline";
 import { buildVerdict } from "@/lib/view-models/verdict";
 import type { InventorySummary } from "@/lib/inventory";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
-import { useResource, type Resource } from "@/lib/useResource";
+import { resourceStatus, useResource, type Resource } from "@/lib/useResource";
 
 const REFRESH_MS = 60_000;
 
@@ -160,6 +162,14 @@ export default function CommandCenterPage() {
           description="Incidents, alerts and deployments on one axis, related in time — not asserted as cause and effect."
         />
         <OperationalTimeline lanes={timelineLanes} />
+      </Panel>
+
+      <Panel className="mt-5" data-testid="health-matrix-panel">
+        <PanelHeader
+          title="Health matrix"
+          description="Every project and environment, worst service first — not an aggregate, so one degraded service never hides behind the healthy ones next to it."
+        />
+        <HealthMatrix cells={buildHealthMatrix(services.data?.items ?? [])} status={resourceStatus(services)} />
       </Panel>
 
       <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
