@@ -66,7 +66,19 @@ describe("AppShell (authenticated)", () => {
     expect(active).toHaveAttribute("aria-current", "page");
     // Weight and surface change too, so the state survives greyscale.
     expect(active.className).toMatch(/font-semibold/);
-    expect(active.className).toMatch(/bg-surface-selected/);
+    expect(active.className).toMatch(/bg-sidebar-selected/);
+  });
+
+  it("keeps the sidebar rail obsidian in both light and dark theme", async () => {
+    // The rail is the one surface that does not flip with the theme (remake
+    // brief §6.2) — everything else in the shell does.
+    await renderAuthenticated();
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toMatch(/bg-sidebar\b/);
+
+    screen.getAllByRole("radio", { name: /dark/i })[0].click();
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true));
+    expect(screen.getByTestId("sidebar").className).toMatch(/bg-sidebar\b/);
   });
 
   it("hides entries whose permissions the session does not hold", async () => {

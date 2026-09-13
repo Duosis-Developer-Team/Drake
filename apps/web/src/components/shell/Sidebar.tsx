@@ -11,6 +11,10 @@
  * The active entry is marked three ways — a rail, a surface and a weight
  * change — because on a dense screen an active state carried by colour alone
  * is easy to miss and impossible to see in greyscale.
+ *
+ * The rail is obsidian in both themes (`bg-sidebar` and its siblings, from
+ * `--sidebar-*` in globals.css) — the one deliberate exception to "every
+ * surface flips with the theme" (remake brief §6.2). It is not `bg-surface`.
  */
 
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
@@ -68,9 +72,9 @@ export function Sidebar({
   const active = activeNavHref(pathname);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
+    <div className="flex h-full min-h-0 flex-col bg-sidebar" data-testid="sidebar">
       <div
-        className={`flex h-14 shrink-0 items-center border-b border-border ${
+        className={`flex h-14 shrink-0 items-center border-b border-sidebar-border ${
           collapsed ? "justify-center px-2" : "gap-2 px-4"
         }`}
       >
@@ -80,7 +84,11 @@ export function Sidebar({
           aria-label="Drake home"
           className="flex min-w-0 items-center rounded"
         >
-          {collapsed ? <DrakeMark height={22} /> : <DrakeWordmark height={22} />}
+          {collapsed ? (
+            <DrakeMark height={22} variant="dark" />
+          ) : (
+            <DrakeWordmark height={22} variant="dark" />
+          )}
         </Link>
         {onToggleCollapse && !collapsed ? (
           <button
@@ -89,7 +97,7 @@ export function Sidebar({
             aria-label="Collapse navigation"
             title="Collapse navigation"
             aria-expanded
-            className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+            className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
           >
             <PanelLeftClose className="h-4 w-4" aria-hidden />
           </button>
@@ -103,7 +111,7 @@ export function Sidebar({
           aria-label="Expand navigation"
           title="Expand navigation"
           aria-expanded={false}
-          className="mx-auto mb-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+          className="mx-auto mb-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
         >
           <PanelLeftOpen className="h-4 w-4" aria-hidden />
         </button>
@@ -123,11 +131,14 @@ export function Sidebar({
           return (
             <div key={group.key} className="mb-4 last:mb-0">
               {collapsed ? (
-                <div aria-hidden className="mx-2 mb-2 border-t border-border first:border-0" />
+                <div
+                  aria-hidden
+                  className="mx-2 mb-2 border-t border-sidebar-border first:border-0"
+                />
               ) : (
                 <p
                   aria-hidden
-                  className="mb-1 px-2 text-micro font-semibold tracking-wide text-ink-muted uppercase"
+                  className="mb-1 px-2 text-micro font-semibold tracking-wide text-sidebar-ink-muted uppercase"
                 >
                   {group.label}
                 </p>
@@ -149,14 +160,14 @@ export function Sidebar({
                           collapsed ? "h-9 justify-center px-0" : "h-9 gap-2.5 px-2.5"
                         } ${
                           isActive
-                            ? "bg-surface-selected font-semibold text-brand"
-                            : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
+                            ? "bg-sidebar-selected font-semibold text-sidebar-text"
+                            : "text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-text"
                         }`}
                       >
                         {isActive ? (
                           <span
                             aria-hidden
-                            className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-brand"
+                            className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-sidebar-active-rail"
                           />
                         ) : null}
                         <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -175,9 +186,7 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="shrink-0 border-t border-border">
-        {footer}
-      </div>
+      <div className="shrink-0 border-t border-sidebar-border">{footer}</div>
     </div>
   );
 }

@@ -14,6 +14,11 @@
  * Both files are lossless crops of the authoritative masters (see
  * scripts/build_brand_assets.py). Nothing here tints, shadows, outlines or
  * otherwise decorates them.
+ *
+ * `variant="dark"` pins the dark-background derivative regardless of the
+ * app's own light/dark theme. The sidebar rail is obsidian in both themes
+ * (2026-09-13 remake brief §6.2), so the lockup that lives on it needs the
+ * asset built for a dark ground, not whichever one the theme class implies.
  */
 
 /** Intrinsic aspect ratios of the derivatives, from the masters' ink boxes. */
@@ -23,17 +28,23 @@ const MARK_RATIO = 415 / 248;
 export function DrakeWordmark({
   height = 26,
   className = "",
+  variant = "auto",
 }: {
   height?: number;
   className?: string;
+  variant?: "auto" | "dark";
 }) {
+  const background =
+    variant === "dark"
+      ? "bg-[url('/brand/drake-wordmark-dark.webp')]"
+      : "bg-[url('/brand/drake-wordmark-light.webp')] dark:bg-[url('/brand/drake-wordmark-dark.webp')]";
   return (
     <span
       role="img"
       aria-label="Drake"
       data-testid="drake-wordmark"
       style={{ height, width: Math.round(height * WORDMARK_RATIO) }}
-      className={`block shrink-0 bg-[url('/brand/drake-wordmark-light.webp')] bg-contain bg-left bg-no-repeat dark:bg-[url('/brand/drake-wordmark-dark.webp')] ${className}`}
+      className={`block shrink-0 bg-contain bg-left bg-no-repeat ${background} ${className}`}
     />
   );
 }
@@ -47,17 +58,23 @@ export function DrakeWordmark({
 export function DrakeMark({
   height = 26,
   className = "",
+  variant = "auto",
 }: {
   height?: number;
   className?: string;
+  variant?: "auto" | "dark";
 }) {
+  const background =
+    variant === "dark"
+      ? "bg-[url('/brand/drake-mark-dark.webp')]"
+      : "bg-[url('/brand/drake-mark-light.webp')] dark:bg-[url('/brand/drake-mark-dark.webp')]";
   return (
     <span
       role="img"
       aria-label="Drake"
       data-testid="drake-mark"
       style={{ height, width: Math.round(height * MARK_RATIO) }}
-      className={`block shrink-0 bg-[url('/brand/drake-mark-light.webp')] bg-contain bg-center bg-no-repeat dark:bg-[url('/brand/drake-mark-dark.webp')] ${className}`}
+      className={`block shrink-0 bg-contain bg-center bg-no-repeat ${background} ${className}`}
     />
   );
 }

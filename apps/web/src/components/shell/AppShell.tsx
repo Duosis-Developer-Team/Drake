@@ -75,8 +75,8 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
       </a>
 
       <aside
-        className={`sticky top-0 hidden h-screen shrink-0 self-start border-r border-border transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
-          collapsed ? "w-14" : "w-60"
+        className={`sticky top-0 hidden h-screen shrink-0 self-start border-r border-sidebar-border transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
+          collapsed ? "w-[var(--sidebar-width-collapsed)]" : "w-[var(--sidebar-width-expanded)]"
         }`}
       >
         <Sidebar
@@ -94,7 +94,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             role="dialog"
             aria-modal="true"
             aria-label="Navigation"
-            className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-border shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
+            className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-sidebar-border shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
           >
             <Sidebar onNavigate={closeDrawer} footer={<ShellFooter />} />
           </div>
@@ -124,12 +124,18 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
  * hides its copy below md, so narrow screens would have had no way to
  * change theme at all. An e2e case records that placement as deliberate:
  * on mobile the control belongs in the drawer with the other settings.
+ *
+ * The wrapping `dark` class is a local scope, not a real theme toggle: it
+ * resolves every `dark:`-aware utility underneath (the segmented control's
+ * own surface/border/text, `text-ink-muted`) to their dark values, so a
+ * light-theme session does not float a white control on the obsidian rail.
+ * `--sidebar-*` tokens are already theme-invariant and need no such scope.
  */
 function ShellFooter() {
   const { state } = useSession();
   const scopeCount = state.status === "authenticated" ? Object.keys(state.me.scopes).length : 0;
   return (
-    <div className="space-y-2 px-3 py-3">
+    <div className="dark space-y-2 px-3 py-3">
       <div className="md:hidden">
         <ThemeControl />
       </div>
