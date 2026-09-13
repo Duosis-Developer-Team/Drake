@@ -6,7 +6,17 @@ import IntegrationsPage from "@/app/integrations/page";
 import ProjectsPage from "@/app/projects/page";
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { OperationalGrid } from "@/components/catalog/primitives";
-import { errorBody, installFetchMock } from "@/test/mock-api";
+import { SessionProvider } from "@/lib/session";
+import { errorBody, installFetchMock, makeMe } from "@/test/mock-api";
+
+/** The palette needs a session to resolve page-result permissions. */
+function renderSearch() {
+  return render(
+    <SessionProvider>
+      <CatalogSearch />
+    </SessionProvider>,
+  );
+}
 
 const routerPush = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -166,6 +176,7 @@ describe("catalog screens", () => {
   it("search dialog: opens, queries, navigates with keyboard, closes on escape", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     installFetchMock({
+      "/v1/me": { status: 200, body: makeMe() },
       "/v1/catalog/search": {
         status: 200,
         body: {
@@ -178,8 +189,8 @@ describe("catalog screens", () => {
         },
       },
     });
-    render(<CatalogSearch />);
-    fireEvent.click(screen.getAllByRole("button", { name: /search catalog/i })[0]);
+    renderSearch();
+    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
     const input = await screen.findByLabelText("Search query");
     fireEvent.change(input, { target: { value: "alp" } });
     await vi.advanceTimersByTimeAsync(300);
@@ -188,7 +199,7 @@ describe("catalog screens", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
     expect(routerPush).toHaveBeenCalledWith("/projects/p1");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /search catalog/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
     fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
@@ -199,10 +210,11 @@ describe("catalog screens", () => {
   it("search dialog: empty result set says so without inventing rows", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     installFetchMock({
+      "/v1/me": { status: 200, body: makeMe() },
       "/v1/catalog/search": { status: 200, body: { results: [] } },
     });
-    render(<CatalogSearch />);
-    fireEvent.click(screen.getAllByRole("button", { name: /search catalog/i })[0]);
+    renderSearch();
+    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
     fireEvent.change(await screen.findByLabelText("Search query"), {
       target: { value: "ghost" },
     });
@@ -216,13 +228,14 @@ describe("catalog screens", () => {
   it("search dialog: error state is typed, not silent", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     installFetchMock({
+      "/v1/me": { status: 200, body: makeMe() },
       "/v1/catalog/search": {
         status: 503,
         body: errorBody("dependency_unavailable", "search unavailable"),
       },
     });
-    render(<CatalogSearch />);
-    fireEvent.click(screen.getAllByRole("button", { name: /search catalog/i })[0]);
+    renderSearch();
+    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
     fireEvent.change(await screen.findByLabelText("Search query"), {
       target: { value: "alpha" },
     });

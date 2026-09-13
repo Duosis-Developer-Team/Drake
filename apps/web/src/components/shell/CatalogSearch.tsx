@@ -1,23 +1,47 @@
 "use client";
 
 /**
- * Global catalog search: Cmd/Ctrl+K (or /) dialog, debounced authorized
- * search, keyboard navigation, screen-reader announcements. Results come
- * exclusively from the authorized /v1/catalog/search endpoint.
+ * Global command palette: Cmd/Ctrl+K (or /) dialog, keyboard navigation,
+ * screen-reader announcements.
+ *
+ * Phase 1 of the 2026-09-13 remake brief's two-phase palette (§8.1): static
+ * page/action search merges with the existing authorized catalog search.
+ * Incident/alert/deployment/SLO indexing waits on a backend search contract
+ * that does not exist yet — that is phase 2, not this component.
+ *
+ * Page results come from `NAV_ITEMS`, filtered through the same
+ * `hasPermission` check `Sidebar` uses, so the palette never offers a
+ * destination the rail itself would hide. Catalog results still come
+ * exclusively from the authorized `/v1/catalog/search` endpoint.
  */
 
-import { Search } from "lucide-react";
+import { Clock, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, apiGet } from "@/lib/api";
 import type { SearchResult } from "@/lib/catalog";
+import { NAV_ITEMS, type NavItem } from "@/lib/navigation";
+import { useSession } from "@/lib/session";
+
+const RECENT_KEY = "drake-recent-pages";
+const RECENT_LIMIT = 5;
+
+interface RecentEntry {
+  href: string;
+  label: string;
+}
 
 type SearchState =
   | { phase: "idle" }
   | { phase: "loading" }
   | { phase: "error"; message: string }
   | { phase: "ready"; results: SearchResult[] };
+
+type PaletteResult =
+  | { source: "recent"; entry: RecentEntry }
+  | { source: "page"; label: string; href: string; icon: NavItem["icon"] }
+  | { source: "catalog"; result: SearchResult };
 
 function resultHref(result: SearchResult): string {
   switch (result.kind) {
@@ -32,15 +56,85 @@ function resultHref(result: SearchResult): string {
   }
 }
 
+function paletteHref(result: PaletteResult): string {
+  switch (result.source) {
+    case "recent":
+      return result.entry.href;
+    case "page":
+      return result.href;
+    case "catalog":
+      return resultHref(result.result);
+  }
+}
+
+function paletteLabel(result: PaletteResult): string {
+  switch (result.source) {
+    case "recent":
+      return result.entry.label;
+    case "page":
+      return result.label;
+    case "catalog":
+      return result.result.display_name || result.result.key;
+  }
+}
+
+/**
+ * Recently opened destinations, most recent first.
+ *
+ * `sessionStorage`, not the server: this is a per-tab convenience, not a
+ * record of anything Drake reports on, so it never needs to survive a
+ * browser restart or sync across devices.
+ */
+function readRecent(): RecentEntry[] {
+  try {
+    const raw = sessionStorage.getItem(RECENT_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (entry): entry is RecentEntry =>
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof (entry as RecentEntry).href === "string" &&
+          typeof (entry as RecentEntry).label === "string",
+      )
+      .slice(0, RECENT_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(entry: RecentEntry): void {
+  try {
+    const next = [entry, ...readRecent().filter((existing) => existing.href !== entry.href)].slice(
+      0,
+      RECENT_LIMIT,
+    );
+    sessionStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Best effort; a lost recents list breaks nothing else.
+  }
+}
+
 export function CatalogSearch() {
   const router = useRouter();
+  const { hasPermission } = useSession();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [state, setState] = useState<SearchState>({ phase: "idle" });
   const [activeIndex, setActiveIndex] = useState(0);
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const openerRef = useRef<HTMLButtonElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const pages = useMemo(
+    () =>
+      NAV_ITEMS.filter(
+        (item) => !item.anyPermission || item.anyPermission.some((permission) => hasPermission(permission)),
+      ),
+    [hasPermission],
+  );
 
   const close = useCallback(() => {
     setOpen(false);
@@ -49,6 +143,20 @@ export function CatalogSearch() {
     setActiveIndex(0);
     openerRef.current?.focus();
   }, []);
+
+  const navigate = useCallback(
+    (result: PaletteResult) => {
+      const href = paletteHref(result);
+      if (result.source !== "recent") pushRecent({ href, label: paletteLabel(result) });
+      router.push(href);
+      close();
+    },
+    [router, close],
+  );
+
+  useEffect(() => {
+    if (open) setRecent(readRecent());
+  }, [open]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -72,6 +180,10 @@ export function CatalogSearch() {
   }, [open]);
 
   useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+
+  useEffect(() => {
     abortRef.current?.abort();
     if (query.trim().length < 2) {
       setState({ phase: "idle" });
@@ -87,7 +199,6 @@ export function CatalogSearch() {
         .then((body) => {
           if (!controller.signal.aborted) {
             setState({ phase: "ready", results: body.results });
-            setActiveIndex(0);
           }
         })
         .catch((error: unknown) => {
@@ -105,7 +216,22 @@ export function CatalogSearch() {
     };
   }, [query]);
 
-  const results = state.phase === "ready" ? state.results : [];
+  const trimmed = query.trim();
+  const pageMatches: PaletteResult[] = trimmed
+    ? pages
+        .filter((item) => item.label.toLowerCase().includes(trimmed.toLowerCase()))
+        .map((item) => ({ source: "page" as const, label: item.label, href: item.href, icon: item.icon }))
+    : [];
+  const catalogMatches: PaletteResult[] =
+    state.phase === "ready" ? state.results.map((result) => ({ source: "catalog" as const, result })) : [];
+  const recentResults: PaletteResult[] = recent.map((entry) => ({ source: "recent" as const, entry }));
+
+  const results: PaletteResult[] = trimmed ? [...pageMatches, ...catalogMatches] : recentResults;
+  const catalogAttempted = trimmed.length >= 2;
+  const showNoResults =
+    trimmed.length > 0 &&
+    pageMatches.length === 0 &&
+    (catalogAttempted ? state.phase === "ready" && catalogMatches.length === 0 : true);
 
   const onDialogKey = (event: React.KeyboardEvent) => {
     if (event.key === "Escape") {
@@ -119,9 +245,41 @@ export function CatalogSearch() {
       setActiveIndex((index) => Math.max(index - 1, 0));
     } else if (event.key === "Enter" && results[activeIndex]) {
       event.preventDefault();
-      router.push(resultHref(results[activeIndex]));
-      close();
+      navigate(results[activeIndex]);
     }
+  };
+
+  let cursor = 0;
+  const renderOption = (result: PaletteResult) => {
+    const index = cursor;
+    cursor += 1;
+    const key =
+      result.source === "catalog" ? `catalog-${result.result.kind}-${result.result.id}` : paletteHref(result);
+    return (
+      <button
+        key={key}
+        type="button"
+        role="option"
+        aria-selected={index === activeIndex}
+        onMouseEnter={() => setActiveIndex(index)}
+        onClick={() => navigate(result)}
+        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
+          index === activeIndex ? "bg-accent-soft text-accent-ink" : "text-ink hover:bg-surface-sunken"
+        }`}
+      >
+        {result.source === "recent" ? (
+          <Clock className="h-3.5 w-3.5 shrink-0 text-ink-muted" aria-hidden />
+        ) : (
+          <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-muted">
+            {result.source === "page" ? "page" : result.result.kind}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{paletteLabel(result)}</span>
+        {result.source === "catalog" && result.result.project_key && result.result.kind !== "project" ? (
+          <span className="font-mono text-[11px] text-ink-muted">{result.result.project_key}</span>
+        ) : null}
+      </button>
+    );
   };
 
   return (
@@ -131,16 +289,16 @@ export function CatalogSearch() {
         type="button"
         onClick={() => setOpen(true)}
         className="hidden h-9 w-64 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-sm text-ink-muted hover:text-ink md:flex"
-        aria-label="Search catalog"
+        aria-label="Search Drake"
       >
         <Search className="h-4 w-4" aria-hidden />
-        <span className="flex-1 text-left">Search catalog…</span>
+        <span className="flex-1 text-left">Search Drake…</span>
         <kbd className="rounded border border-border px-1.5 text-[10px]">⌘K</kbd>
       </button>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Search catalog"
+        aria-label="Search Drake"
         className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-ink-secondary hover:bg-surface-sunken md:hidden"
       >
         <Search className="h-4 w-4" aria-hidden />
@@ -150,7 +308,7 @@ export function CatalogSearch() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Catalog search"
+          aria-label="Search Drake"
           className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]"
           onKeyDown={onDialogKey}
         >
@@ -168,7 +326,7 @@ export function CatalogSearch() {
                 ref={inputRef}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search projects, environments, services, clusters…"
+                placeholder="Search pages, projects, environments, services, clusters…"
                 aria-label="Search query"
                 className="h-12 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
               />
@@ -181,56 +339,54 @@ export function CatalogSearch() {
               aria-label="Search results"
               className="max-h-80 overflow-y-auto p-2"
             >
-              {state.phase === "idle" ? (
+              {!trimmed && recentResults.length === 0 ? (
                 <p className="px-3 py-6 text-center text-sm text-ink-muted">
-                  Type at least two characters to search your authorized catalog.
+                  Type to search pages and your authorized catalog.
                 </p>
               ) : null}
-              {state.phase === "loading" ? (
-                <p role="status" className="px-3 py-6 text-center text-sm text-ink-muted">
+
+              {!trimmed && recentResults.length > 0 ? (
+                <div data-testid="palette-group-recent">
+                  <p aria-hidden className="px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-ink-muted">
+                    Recently visited
+                  </p>
+                  {recentResults.map(renderOption)}
+                </div>
+              ) : null}
+
+              {trimmed && pageMatches.length > 0 ? (
+                <div data-testid="palette-group-pages">
+                  <p aria-hidden className="px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-ink-muted">
+                    Pages
+                  </p>
+                  {pageMatches.map(renderOption)}
+                </div>
+              ) : null}
+
+              {trimmed && catalogAttempted && state.phase === "loading" ? (
+                <p role="status" className="px-3 py-3 text-center text-sm text-ink-muted">
                   Searching…
                 </p>
               ) : null}
-              {state.phase === "error" ? (
-                <p role="alert" className="px-3 py-6 text-center text-sm text-critical">
+              {trimmed && catalogAttempted && state.phase === "error" ? (
+                <p role="alert" className="px-3 py-3 text-center text-sm text-critical">
                   {state.message}
                 </p>
               ) : null}
-              {state.phase === "ready" && results.length === 0 ? (
+              {trimmed && catalogMatches.length > 0 ? (
+                <div data-testid="palette-group-catalog">
+                  <p aria-hidden className="px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-ink-muted">
+                    Catalog
+                  </p>
+                  {catalogMatches.map(renderOption)}
+                </div>
+              ) : null}
+
+              {showNoResults ? (
                 <p role="status" className="px-3 py-6 text-center text-sm text-ink-muted">
                   No authorized results.
                 </p>
               ) : null}
-              {results.map((result, index) => (
-                <button
-                  key={`${result.kind}-${result.id}`}
-                  type="button"
-                  role="option"
-                  aria-selected={index === activeIndex}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => {
-                    router.push(resultHref(result));
-                    close();
-                  }}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
-                    index === activeIndex
-                      ? "bg-accent-soft text-accent-ink"
-                      : "text-ink hover:bg-surface-sunken"
-                  }`}
-                >
-                  <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-muted">
-                    {result.kind}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">
-                    {result.display_name || result.key}
-                  </span>
-                  {result.project_key && result.kind !== "project" ? (
-                    <span className="font-mono text-[11px] text-ink-muted">
-                      {result.project_key}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
             </div>
           </div>
         </div>
