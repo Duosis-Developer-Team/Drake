@@ -125,10 +125,35 @@ describe("Command Center", () => {
     await waitFor(() => expect(screen.getByText(/Agent disconnected/)).toBeTruthy());
     expect(screen.queryByText("/58")).toBeNull();
     // A disconnected agent and a stale sweep are both things needing
-    // attention, and they are listed as two separate facts.
+    // attention, and they are listed as two separate facts — grouped
+    // together (same cluster, root-cause grouping) but neither hidden.
+    const group = within(screen.getByTestId("attention-group-cluster-c1"));
+    expect(group.getByText(/agent disconnected/i)).toBeTruthy();
+    expect(group.getByText(/inventory stale/i)).toBeTruthy();
+  });
+
+  it("never merges unrelated critical rows from different clusters into one group", async () => {
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": {
+        status: 200,
+        body: {
+          clusters: [
+            { ...cluster("disconnected", "fresh"), id: "c1", display_name: "Cluster One" },
+            { ...cluster("disconnected", "fresh"), id: "c2", display_name: "Cluster Two" },
+          ],
+        },
+      },
+      "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("disconnected") },
+      "/v1/clusters/c2/inventory/summary": { status: 200, body: summary("disconnected") },
+    });
+    render(<CommandCenterPage />);
+
+    await waitFor(() => expect(screen.getAllByText(/Agent disconnected/)).toHaveLength(2));
     const attention = within(screen.getByTestId("attention-list"));
-    expect(attention.getByText(/agent disconnected/i)).toBeTruthy();
-    expect(attention.getByText(/inventory stale/i)).toBeTruthy();
+    expect(attention.getByTestId("attention-group-cluster-c1")).toBeTruthy();
+    expect(attention.getByTestId("attention-group-cluster-c2")).toBeTruthy();
   });
 
   it("says what it checked instead of claiming the platform is healthy", async () => {
