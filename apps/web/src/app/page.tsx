@@ -5,10 +5,11 @@
  *
  * One question, answered in ten seconds: where is the problem?
  *
- * The layout follows that and nothing else. A triage strip of real counts, a
- * ranked list of the actual things that are wrong, and only then the standing
- * inventory — fleet, services, integrations, catalog. There is no hero, no
- * row of equal-sized vanity tiles, and no chart that exists to fill space.
+ * The layout follows that and nothing else. One operational verdict built
+ * from real counts, a ranked list of the actual things that are wrong, and
+ * only then the standing inventory — fleet, services, integrations, catalog.
+ * There is no hero, no row of five equal-sized KPI tiles (brief §9.3 forbids
+ * it), and no chart that exists to fill space.
  *
  * Every section is independently authorized. A caller without `cluster.view`
  * sees the fleet panel say "permission required" while the rest of the page
@@ -23,10 +24,11 @@
  * most dangerous thing a monitoring product can render.
  */
 
-import { ArrowRight, Boxes, Plug, RefreshCw, ShieldAlert, Siren, Waypoints } from "lucide-react";
+import { ArrowRight, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 import { Donut, RingProgress } from "@/components/charts/visuals";
+import { VerdictPanel } from "@/components/command-center/VerdictPanel";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
@@ -40,7 +42,7 @@ import {
 } from "@/components/ui/states";
 import type { AlertSummary } from "@/lib/alerting";
 import type { CatalogContext, Cluster, IntegrationHealth } from "@/lib/catalog";
-import { humanize, toneForHealth, toneSpec, type StatusTone } from "@/lib/design/status";
+import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
 import type { IncidentSummary } from "@/lib/incidents";
 import {
   alertItems,
@@ -52,6 +54,7 @@ import {
   tallyByTone,
   type AttentionItem,
 } from "@/lib/overview";
+import { buildVerdict } from "@/lib/view-models/verdict";
 import type { InventorySummary } from "@/lib/inventory";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
 import { useResource, type Resource } from "@/lib/useResource";
@@ -123,13 +126,10 @@ export default function CommandCenterPage() {
         }
       />
 
-      <TriageStrip
-        attention={attention}
-        incidents={incidents}
-        alerts={alerts}
-        clusters={clusters}
-        services={services}
-        integrations={integrations}
+      <VerdictPanel
+        verdict={buildVerdict(attention, sources)}
+        onRefresh={reloadAll}
+        refreshing={refreshing}
       />
 
       <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -159,174 +159,6 @@ export default function CommandCenterPage() {
         </div>
       </div>
     </PageFrame>
-  );
-}
-
-/**
- * The triage strip.
- *
- * Counts, not gauges, and each one is a link into the list it summarises. A
- * source that could not be read shows a dash and the reason — never `0`.
- */
-function TriageStrip({
-  attention,
-  incidents,
-  alerts,
-  clusters,
-  services,
-  integrations,
-}: {
-  attention: AttentionItem[];
-  incidents: Resource<{ items: IncidentSummary[]; total: number }>;
-  alerts: Resource<AlertSummary>;
-  clusters: Resource<{ clusters: Cluster[] }>;
-  services: Resource<{ items: ServiceHealthRow[] }>;
-  integrations: Resource<{ integrations: IntegrationHealth[] }>;
-}) {
-  const countBy = (origin: AttentionItem["origin"], tone?: StatusTone) =>
-    attention.filter((item) => item.origin === origin && (!tone || item.tone === tone)).length;
-
-  const tiles = [
-    {
-      key: "incidents",
-      label: "Open incidents",
-      icon: Siren,
-      href: "/incidents",
-      resource: incidents,
-      value: incidents.data?.items.filter((item) => item.state !== "resolved").length ?? null,
-      total: incidents.data?.items.length ?? null,
-      tone: countBy("incident", "critical") > 0 ? ("critical" as const) : ("neutral" as const),
-      detail: incidents.data
-        ? `${incidents.data.items.filter((item) => item.state === "acknowledged").length} acknowledged`
-        : null,
-    },
-    {
-      key: "alerts",
-      label: "Firing alerts",
-      icon: ShieldAlert,
-      href: "/alerts",
-      resource: alerts,
-      value: alerts.data?.firing ?? null,
-      total: alerts.data ? alerts.data.firing + alerts.data.silenced : null,
-      tone:
-        (alerts.data?.p1 ?? 0) > 0
-          ? ("critical" as const)
-          : (alerts.data?.p2 ?? 0) > 0
-            ? ("warning" as const)
-            : ("neutral" as const),
-      detail: alerts.data ? `P1 ${alerts.data.p1} · P2 ${alerts.data.p2}` : null,
-    },
-    {
-      key: "clusters",
-      label: "Clusters needing attention",
-      icon: Boxes,
-      href: "/clusters",
-      resource: clusters,
-      value: clusters.data ? countBy("cluster") : null,
-      total: clusters.data?.clusters.length ?? null,
-      tone: countBy("cluster") > 0 ? ("warning" as const) : ("neutral" as const),
-      detail: clusters.data ? `${clusters.data.clusters.length} in scope` : null,
-    },
-    {
-      key: "services",
-      label: "Services not healthy",
-      icon: Waypoints,
-      href: "/service-health",
-      resource: services,
-      value: services.data ? countBy("service") : null,
-      total: services.data?.items.length ?? null,
-      tone:
-        countBy("service", "critical") > 0
-          ? ("critical" as const)
-          : countBy("service") > 0
-            ? ("warning" as const)
-            : ("neutral" as const),
-      detail: services.data ? `${services.data.items.length} tracked` : null,
-    },
-    {
-      key: "integrations",
-      label: "Integrations degraded",
-      icon: Plug,
-      href: "/integrations",
-      resource: integrations,
-      value: integrations.data ? countBy("integration") : null,
-      total:
-        integrations.data?.integrations.filter(
-          (entry) => entry.configuration_state === "configured",
-        ).length ?? null,
-      tone: countBy("integration") > 0 ? ("warning" as const) : ("neutral" as const),
-      detail: integrations.data
-        ? `${integrations.data.integrations.filter((entry) => entry.configuration_state === "configured").length} configured`
-        : null,
-    },
-  ];
-
-  return (
-    <div
-      className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5"
-      data-testid="triage-strip"
-    >
-      {tiles.map((tile) => {
-        const spec = toneSpec(tile.value === 0 ? "neutral" : tile.tone);
-        const Icon = tile.icon;
-        const unreadable = tile.value === null;
-        return (
-          <Link
-            key={tile.key}
-            href={tile.href}
-            data-testid={`triage-${tile.key}`}
-            className="flex min-w-0 flex-col rounded-panel border border-border bg-surface px-3.5 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
-          >
-            <span className="flex items-center gap-1.5 text-caption text-ink-secondary">
-              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{tile.label}</span>
-            </span>
-            <span className="mt-1.5 flex items-baseline gap-2">
-              {tile.resource.loading && unreadable ? (
-                <span className="inline-block h-7 w-10 animate-pulse rounded bg-surface-3 motion-reduce:animate-none" />
-              ) : unreadable ? (
-                <span className="text-title font-semibold text-ink-muted">—</span>
-              ) : (
-                <span
-                  data-tabular
-                  className={`text-metric font-semibold ${
-                    tile.value === 0 ? "text-ink" : spec.text
-                  }`}
-                >
-                  {tile.value}
-                </span>
-              )}
-            </span>
-            {/* The share of what Drake watches that is affected. A bare count
-                cannot say whether 1 is one-of-two or one-of-four-hundred. */}
-            {!unreadable && tile.total ? (
-              <span
-                aria-hidden
-                className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-surface-3"
-              >
-                <span
-                  className={`block h-full rounded-full ${
-                    tile.value === 0 ? "bg-border-strong" : spec.dot
-                  }`}
-                  style={{
-                    width: `${Math.min(100, ((tile.value ?? 0) / tile.total) * 100)}%`,
-                  }}
-                />
-              </span>
-            ) : null}
-            <span className="mt-1 truncate text-micro text-ink-muted">
-              {unreadable
-                ? tile.resource.denied
-                  ? "permission required"
-                  : tile.resource.loading
-                    ? "loading"
-                    : "source unavailable"
-                : (tile.detail ?? "")}
-            </span>
-          </Link>
-        );
-      })}
-    </div>
   );
 }
 

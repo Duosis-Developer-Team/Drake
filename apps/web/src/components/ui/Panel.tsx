@@ -25,10 +25,16 @@ const RAIL: Partial<Record<PanelTone, string>> = {
   info: "border-l-4 border-l-info",
 };
 
+const RADIUS = {
+  panel: "rounded-panel",
+  canvas: "rounded-canvas",
+} as const;
+
 export function Panel({
   children,
   tone = "default",
   flush = false,
+  radius = "panel",
   className = "",
   "data-testid": testId,
   as: Element = "section",
@@ -38,6 +44,10 @@ export function Panel({
   tone?: PanelTone;
   /** Drop the body padding — for tables and anything edge-to-edge. */
   flush?: boolean;
+  /** `"canvas"` is the one-dominant-surface-per-screen radius (brief §7.3) —
+   *  reserved for a page's single lead panel, e.g. the Command Center
+   *  verdict. Every other caller keeps the default. */
+  radius?: keyof typeof RADIUS;
   className?: string;
   "data-testid"?: string;
   as?: "section" | "div" | "article";
@@ -52,7 +62,7 @@ export function Panel({
       // its source: a flex child defaults to `min-width: auto`, so any wrapper
       // around a wide table grows past the panel and the PAGE scrolls
       // sideways instead of the table's own scroller doing it.
-      className={`flex min-w-0 flex-col rounded-panel border border-border bg-surface shadow-panel [&>*]:min-w-0 ${
+      className={`flex min-w-0 flex-col ${RADIUS[radius]} border border-border bg-surface shadow-panel [&>*]:min-w-0 ${
         RAIL[tone] ?? ""
       } ${flush ? "" : "gap-3 p-4"} ${className}`}
       {...rest}

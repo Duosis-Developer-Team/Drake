@@ -6,8 +6,10 @@
  * agent that is not connected reports THAT instead of its last known numbers,
  * and a page with no source says what it checked rather than implying health.
  *
- * The screen was rebuilt around a triage list in Sprint 13, so the selectors
- * follow it; every claim under test is the one the previous version made.
+ * The screen was rebuilt around an attention list in Sprint 13 and around an
+ * Operational verdict panel in Wave 2 of the visual remake; the selectors
+ * follow whichever markup is current, but every claim under test is the same
+ * one the original triage strip made.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -147,9 +149,10 @@ describe("Command Center", () => {
     expect(screen.getByTestId("fleet-panel")).toHaveTextContent(/no clusters in scope/i);
   });
 
-  it("shows a dash for a source it could not read, never a zero", async () => {
-    // A zero would read as "nothing wrong here" when the truth is "you cannot
-    // see this" — the single most misleading thing the strip could render.
+  it("never claims every source answered when one was denied, never a silent zero", async () => {
+    // The old triage tile showed a dash instead of a zero for an unreadable
+    // source; the verdict panel carries the same honesty in its own words —
+    // the answered count drops, and the reason is named, never a "0".
     installFetchMock({
       ...QUIET_SOURCES,
       "/v1/catalog/context": { status: 200, body: CONTEXT },
@@ -157,8 +160,11 @@ describe("Command Center", () => {
     });
     render(<CommandCenterPage />);
 
-    const tile = await screen.findByTestId("triage-clusters");
-    await waitFor(() => expect(tile).toHaveTextContent(/permission required/i));
-    expect(tile).toHaveTextContent("—");
+    const sources = await screen.findByTestId("verdict-sources");
+    await waitFor(() => expect(sources).toHaveTextContent("4 of 5 sources answered"));
+    expect(screen.getByTestId("verdict-retry-sources")).toBeInTheDocument();
+
+    const empty = await screen.findByTestId("attention-empty");
+    expect(empty).toHaveTextContent(/clusters \(permission required\)/i);
   });
 });
