@@ -7,7 +7,7 @@
  * catalog-only behaviour (debounce, abort, keyboard nav, typed error) is
  * covered in `catalog-screens.test.tsx` and is unchanged here.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
@@ -85,7 +85,13 @@ describe("command palette: page results", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const input = await open();
     fireEvent.change(input, { target: { value: "Projects" } });
-    await vi.advanceTimersByTimeAsync(300);
+    // The debounce timer's callback kicks off a fetch whose resolution lands
+    // in a later microtask than `advanceTimersByTimeAsync` itself awaits —
+    // `act` here makes sure that downstream state update is flushed inside
+    // a tracked scope rather than warning React about an update it missed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
 
     await waitFor(() => expect(screen.getByTestId("palette-group-catalog")).toBeInTheDocument());
     expect(screen.getByTestId("palette-group-pages")).toHaveTextContent("Projects");

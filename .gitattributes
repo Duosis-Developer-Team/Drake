@@ -1,0 +1,14 @@
+# Force text handling for source files so a stray control byte (e.g. an
+# accidental literal NUL) never makes `git diff`/`git show` fall back to a
+# binary "Bin X -> Y bytes" summary, which hides the actual change from
+# review. See apps/web/src/lib/view-models/health-matrix.ts for the incident
+# this guards against.
+*.ts text
+*.tsx text
+*.js text
+*.jsx text
+*.mjs text
+*.cjs text
+*.json text
+*.css text
+*.md text
