@@ -51,15 +51,18 @@ function cluster(agent: string, inventory: string) {
   };
 }
 
-function summary(agentStatus: string) {
+function summary(
+  agentStatus: string,
+  overrides: { certificateExpiryWarning?: boolean; certificateNotAfter?: string } = {},
+) {
   return {
     cluster_id: "c1",
     agent: {
       status: agentStatus,
       agent_version: "0.4.0",
       last_heartbeat_at: "2026-08-11T00:00:00Z",
-      certificate_not_after: "2026-08-25T00:00:00Z",
-      certificate_expiry_warning: false,
+      certificate_not_after: overrides.certificateNotAfter ?? "2026-08-25T00:00:00Z",
+      certificate_expiry_warning: overrides.certificateExpiryWarning ?? false,
     },
     inventory: {
       state: agentStatus === "connected" ? "fresh" : "stale",
@@ -191,5 +194,38 @@ describe("Command Center", () => {
 
     const empty = await screen.findByTestId("attention-empty");
     expect(empty).toHaveTextContent(/clusters \(permission required\)/i);
+  });
+
+  it("surfaces a cluster's own certificate_expiry_warning as a capacity risk with a countdown", async () => {
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": { status: 200, body: { clusters: [cluster("connected", "fresh")] } },
+      "/v1/clusters/c1/inventory/summary": {
+        status: 200,
+        body: summary("connected", {
+          certificateExpiryWarning: true,
+          certificateNotAfter: "2026-09-01T00:00:00Z",
+        }),
+      },
+    });
+    render(<CommandCenterPage />);
+
+    const board = within(await screen.findByTestId("capacity-risk-board"));
+    await waitFor(() => expect(board.getByText(/certificate expiring/i)).toBeTruthy());
+    expect(board.getByTestId("countdown")).toBeTruthy();
+  });
+
+  it("reports the honest zero-risk empty state when no cluster flags certificate or PVC risk", async () => {
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": { status: 200, body: { clusters: [cluster("connected", "fresh")] } },
+      "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("connected") },
+    });
+    render(<CommandCenterPage />);
+
+    const empty = await screen.findByTestId("capacity-risk-empty");
+    expect(empty).toHaveTextContent(/no certificate or pvc risk reported by the sources checked/i);
   });
 });

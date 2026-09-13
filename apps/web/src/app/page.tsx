@@ -30,6 +30,7 @@ import Link from "next/link";
 import { Donut, RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
+import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
 import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
 import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
@@ -57,9 +58,11 @@ import {
   sortAttention,
   tallyByTone,
 } from "@/lib/overview";
+import { certificateRiskItems, pvcRiskItems } from "@/lib/view-models/capacity-risk";
 import { buildHealthMatrix } from "@/lib/view-models/health-matrix";
 import { buildTimeline } from "@/lib/view-models/timeline";
 import { buildVerdict } from "@/lib/view-models/verdict";
+import { useClusterInventorySummaries } from "@/lib/clusterSummaries";
 import type { InventorySummary } from "@/lib/inventory";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
 import { resourceStatus, useResource, type Resource } from "@/lib/useResource";
@@ -119,6 +122,24 @@ export default function CommandCenterPage() {
     recentAlerts.data?.items ?? [],
     recentDeployments.data?.items ?? [],
   );
+
+  const clusterList = clusters.data?.clusters ?? [];
+  const clusterSummaries = useClusterInventorySummaries(clusterList);
+  const resolvedSummaries = new Map(
+    [...clusterSummaries]
+      .filter(([, state]) => state.data !== null)
+      .map(([id, state]) => [id, state.data as InventorySummary]),
+  );
+  const unassessedClusters = clusterList
+    .filter((cluster) => {
+      const state = clusterSummaries.get(cluster.id);
+      return state && !state.loading && state.data === null;
+    })
+    .map((cluster) => cluster.display_name || cluster.cluster_ref);
+  const capacityRiskItems = [
+    ...certificateRiskItems(clusterList, resolvedSummaries),
+    ...pvcRiskItems(clusterList, resolvedSummaries),
+  ];
 
   const reloadAll = () => {
     sources.forEach(({ resource }) => resource.reload());
@@ -197,6 +218,14 @@ export default function CommandCenterPage() {
           <FleetPanel resource={clusters} />
           <IntegrationsPanel resource={integrations} />
         </div>
+        <Panel className="mt-4" flush data-testid="capacity-risk-panel">
+          <PanelHeader
+            flush
+            title="Capacity risk"
+            description="Certificate expiry and volume health, from each cluster's own inventory report."
+          />
+          <CapacityRiskBoard items={capacityRiskItems} unassessedClusters={unassessedClusters} />
+        </Panel>
       </div>
     </PageFrame>
   );
