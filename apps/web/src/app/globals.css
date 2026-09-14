@@ -5,27 +5,32 @@
 /*
  * Drake design tokens.
  *
- * Every colour below is either sampled from the authoritative logo masters in
- * apps/web/assets/brand or derived from one of those samples and then checked
- * for contrast. The measured anchors, per the 2026-09-13 visual/UX remake
- * brief (docs/superpowers/specs/2026-09-13-drake-visual-ui-ux-remake-design.md
- * §7.1), are:
+ * 2026-09-14 obsidian/bone/solar remake (docs/superpowers/plans/
+ * new-plan-visual-remake.md §4) retires every green in the system — brand,
+ * focus ring, active rail, chart series, "healthy" status — in favour of:
  *
- *   light canvas  #f2f5f2    light ink  #11231b    light forest  #0a5b3d    light serpent  #159c58
- *   dark  canvas  #07100c    dark  ink  #eef5f1    dark  brand   #35d07f
+ *   light canvas #EEEDEA   light ink #171614   dark canvas #11100F   ink #F5F2ED
+ *   solar accent  #F2CF55 (both themes)        obsidian rail #191816
  *
- * The brief's serpent, success, info, warning, critical and unknown hexes
- * (§7.1) are #18b566 / #078a66 / #2e6fd8 / #b97809 / #d14343 / #667085; each
- * is nudged one step darker here (to #159c58 / #06795a / #2964c2 / #986207 /
- * #b83b3b / #5c6578) to clear WCAG AA on white and on its own soft chip —
- * verified by `design-system.test.ts`.
+ * `--brand` is the one token that inverts by role rather than by hue: it is
+ * the dominant monochrome fill for primary actions, so it is near-black ink
+ * in light mode (paired with `--text-inverse`) and near-white bone in dark
+ * mode — never the solar yellow, which cannot pass 4.5:1 as body-sized text
+ * or a large fill on either theme's own surfaces. Solar yellow is reserved
+ * for `--brand-accent`/`--focus-ring` (small marks, ≥3:1 only) and the
+ * sidebar's active-item rail, exactly as the brief scopes it ("small brand
+ * detail", never a dominant fill). Every hex below was solved with the same
+ * WCAG relative-luminance formula `design-system.test.ts` checks against, so
+ * the ratios these comments claim are the ones the test enforces.
+ *
+ * "Healthy" is reassigned to a cool blue and "Information" to cobalt (brief
+ * §4.3) — status colour is now fully independent of brand colour, so nothing
+ * about "no green" ever implies "no blue for healthy is available".
  *
  * The sidebar is a deliberate exception: `--sidebar-*` below is declared with
  * the SAME values in both `:root` and `.dark`. Every other surface flips with
- * the theme; the rail stays a constant, calm, dark anchor in both themes
- * (brief §6.2 — the PayFlow-style dark rail against a light or dark
- * workspace), so an operator's sense of "where am I" never resets on a theme
- * change.
+ * the theme; the rail stays a constant obsidian anchor in both themes, so an
+ * operator's sense of "where am I" never resets on a theme change.
  *
  * Two layers, deliberately separate:
  *
@@ -37,155 +42,153 @@
  *      here invents a colour; it only gives the semantic layer class names.
  *
  * Status colours are reserved. `--status-critical` is the only red in the
- * system and never doubles as a selection, a brand accent or a chart series;
- * `--status-stale` is deliberately a lower-chroma amber so that "we have not
- * heard from this recently" never renders in the healthy green.
+ * system and never doubles as a selection, a brand accent or a chart series.
  */
 
 :root {
   color-scheme: light;
 
   /* Surfaces, canvas outward. */
-  --canvas: #f2f5f2;
-  --surface-1: #ffffff;
-  --surface-2: #f3f7f5;
-  --surface-3: #ebf0ed;
+  --canvas: #eeedea;
+  --surface-1: #faf9f7;
+  --surface-2: #f3f1ee;
+  --surface-3: #edeae5;
   --surface-elevated: #ffffff;
-  --surface-hover: #eff4f1;
-  --surface-selected: #e1f1e8;
+  --surface-hover: #f6f4f1;
+  --surface-selected: #ebe7e2;
 
-  --border-subtle: #d3ddd8;
-  --border-strong: #7c8e85;
+  --border-subtle: #ddd9d3;
+  --border-strong: #918576;
 
-  --text-primary: #11231b;
-  --text-secondary: #48584f;
-  --text-muted: #59695f;
-  --text-inverse: #ffffff;
+  --text-primary: #171614;
+  --text-secondary: #68645f;
+  --text-muted: #6d6862;
+  --text-inverse: #f5f2ed;
 
-  /* Brand. `--brand` carries weight (buttons, active rails); `--brand-accent`
-     is the livelier serpent green and is used for emphasis only. Neither one
-     is ever synonymous with "healthy" — that is `--status-success` alone. */
-  --brand: #0a5b3d;
-  --brand-hover: #0e7350;
-  --brand-active: #073d29;
-  --brand-soft: #e1f1e8;
-  --brand-accent: #159c58;
-  --focus-ring: #0c8f53;
+  /* Brand. `--brand` is the monochrome obsidian ink used for primary fills
+     and emphasis text — never the solar accent, which fails 4.5:1 at this
+     size (see file header). `--brand-accent`/`--focus-ring` carry the solar
+     hue instead, darkened just enough to clear 3:1 as a mark on this theme's
+     own bone surfaces. */
+  --brand: #171614;
+  --brand-hover: #2d2b27;
+  --brand-active: #000000;
+  --brand-soft: #f3f1ee;
+  --brand-accent: #a4820d;
+  --focus-ring: #a4820d;
 
-  --chart-grid: #e7edea;
-  --chart-axis: #59695f;
-  --chart-tooltip: #11231b;
-  --chart-tooltip-text: #f7f9f9;
+  --chart-grid: #e3e0da;
+  --chart-axis: #68645f;
+  --chart-tooltip: #191816;
+  --chart-tooltip-text: #f5f2ed;
 
-  --status-success: #06795a;
-  --status-info: #2964c2;
-  --status-warning: #986207;
-  --status-critical: #b83b3b;
-  --status-neutral: #4e5b64;
-  --status-unknown: #5c6578;
-  --status-stale: #8a6410;
+  --status-success: #2270d8;
+  --status-info: #5165e6;
+  --status-warning: #9c671c;
+  --status-critical: #df2121;
+  --status-neutral: #787169;
+  --status-unknown: #6e7278;
+  --status-stale: #8957d4;
 
-  --status-success-soft: #e1f3ec;
-  --status-info-soft: #e5eefc;
-  --status-warning-soft: #fbf0de;
-  --status-critical-soft: #fbe9e9;
-  --status-neutral-soft: #eef1f0;
-  --status-unknown-soft: #edeff2;
-  --status-stale-soft: #f7f0dd;
+  --status-success-soft: #f7fafc;
+  --status-info-soft: #f8f9fc;
+  --status-warning-soft: #fcfaf7;
+  --status-critical-soft: #fcf8f8;
+  --status-neutral-soft: #fafafa;
+  --status-unknown-soft: #f8f8f8;
+  --status-stale-soft: #faf8fc;
 
   /* The obsidian rail. Same values in `.dark` below — see the header note. */
-  --sidebar-canvas: #0b1511;
-  --sidebar-surface-hover: #16231c;
-  --sidebar-surface-selected: #16281f;
-  --sidebar-border: #22322a;
-  --sidebar-text: #eaf1ec;
-  --sidebar-text-muted: #8fa398;
-  --sidebar-active-rail: #35d07f;
+  --sidebar-canvas: #191816;
+  --sidebar-surface-hover: #21201d;
+  --sidebar-surface-selected: #272522;
+  --sidebar-border: #2c2a26;
+  --sidebar-text: #f5f2ed;
+  --sidebar-text-muted: #898071;
+  --sidebar-active-rail: #f2cf55;
 
-  /* Categorical chart series. Fixed order, never cycled. Validated for the
-     white chart surface: CVD dE 9.2 worst adjacent pair, normal-vision 19.7.
-     Slots 3 and 5 sit just under 3:1 on white, which the chart frame relieves
-     by always shipping a legend and a data-table view. */
+  /* Categorical chart series. Fixed order, never cycled. The old green slot
+     (series-3) is retired to a sky blue, distinct in hue from series-1. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
-  --series-3: #1baf7a;
+  --series-3: #1c8fd6;
   --series-4: #4a3aa7;
   --series-5: #e87ba4;
   --series-6: #b58100;
 
-  --shadow-panel: 0 1px 2px rgb(12 32 25 / 0.06), 0 1px 3px rgb(12 32 25 / 0.04);
-  --shadow-overlay: 0 12px 32px -8px rgb(12 32 25 / 0.18), 0 4px 8px -4px rgb(12 32 25 / 0.08);
-  --scrim: rgb(12 32 25 / 0.45);
+  --shadow-panel: 0 1px 2px rgb(23 22 20 / 0.06), 0 1px 3px rgb(23 22 20 / 0.04);
+  --shadow-overlay: 0 12px 32px -8px rgb(23 22 20 / 0.18), 0 4px 8px -4px rgb(23 22 20 / 0.08);
+  --scrim: rgb(23 22 20 / 0.45);
 }
 
 .dark {
   color-scheme: dark;
 
-  --canvas: #07100c;
-  --surface-1: #0d1a14;
-  --surface-2: #14241c;
-  --surface-3: #1b2e23;
-  --surface-elevated: #14241c;
-  --surface-hover: #17281f;
-  --surface-selected: #123527;
+  --canvas: #11100f;
+  --surface-1: #181715;
+  --surface-2: #292622;
+  --surface-3: #312e29;
+  --surface-elevated: #211f1c;
+  --surface-hover: #1d1c1a;
+  --surface-selected: #37332e;
 
-  --border-subtle: #294034;
-  --border-strong: #3e8c71;
+  --border-subtle: #35312c;
+  --border-strong: #6c655a;
 
-  --text-primary: #eef5f1;
-  --text-secondary: #a9c0b6;
-  --text-muted: #9cb6ab;
-  --text-inverse: #062018;
+  --text-primary: #f5f2ed;
+  --text-secondary: #c0bbb3;
+  --text-muted: #9b958e;
+  --text-inverse: #201b0c;
 
-  --brand: #35d07f;
-  --brand-hover: #55dc97;
-  --brand-active: #21a863;
-  --brand-soft: #123527;
-  --brand-accent: #35d07f;
-  --focus-ring: #4bdb8e;
+  --brand: #f5f2ed;
+  --brand-hover: #ffffff;
+  --brand-active: #e3dacc;
+  --brand-soft: #292622;
+  --brand-accent: #f2cf55;
+  --focus-ring: #f2cf55;
 
-  --chart-grid: #0f4034;
-  --chart-axis: #9cb6ab;
-  --chart-tooltip: #0e4a3c;
-  --chart-tooltip-text: #f7f9f9;
+  --chart-grid: #262320;
+  --chart-axis: #c0bbb3;
+  --chart-tooltip: #191816;
+  --chart-tooltip-text: #f5f2ed;
 
-  --status-success: #3ccb7f;
-  --status-info: #63a5fa;
-  --status-warning: #fdb022;
-  --status-critical: #f97066;
-  --status-neutral: #9aa4b2;
-  --status-unknown: #a3aebd;
-  --status-stale: #d9a441;
+  --status-success: #3c82e0;
+  --status-info: #6477e9;
+  --status-warning: #d9922e;
+  --status-critical: #e85d5d;
+  --status-neutral: #948d84;
+  --status-unknown: #7c8187;
+  --status-stale: #966ad8;
 
-  --status-success-soft: #0a3c2a;
-  --status-info-soft: #10304f;
-  --status-warning-soft: #382a0e;
-  --status-critical-soft: #3a1c1a;
-  --status-neutral-soft: #1b2a2a;
-  --status-unknown-soft: #1c2b2b;
-  --status-stale-soft: #332816;
+  --status-success-soft: #0f1823;
+  --status-info-soft: #12142b;
+  --status-warning-soft: #3b2c16;
+  --status-critical-soft: #3b1616;
+  --status-neutral-soft: #292624;
+  --status-unknown-soft: #161616;
+  --status-stale-soft: #1d122b;
 
   /* The obsidian rail, unchanged from `:root` — see the file header note. */
-  --sidebar-canvas: #0b1511;
-  --sidebar-surface-hover: #16231c;
-  --sidebar-surface-selected: #16281f;
-  --sidebar-border: #22322a;
-  --sidebar-text: #eaf1ec;
-  --sidebar-text-muted: #8fa398;
-  --sidebar-active-rail: #35d07f;
+  --sidebar-canvas: #191816;
+  --sidebar-surface-hover: #21201d;
+  --sidebar-surface-selected: #272522;
+  --sidebar-border: #2c2a26;
+  --sidebar-text: #f5f2ed;
+  --sidebar-text-muted: #898071;
+  --sidebar-active-rail: #f2cf55;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
-     surface and re-validated there (CVD dE 9.4, all six clear 3:1). */
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #9085e9;
-  --series-5: #d55181;
-  --series-6: #c98500;
+     surface and re-validated there. */
+  --series-1: #5998e5;
+  --series-2: #f59068;
+  --series-3: #43acec;
+  --series-4: #6553cb;
+  --series-5: #ef8fb3;
+  --series-6: #f2ad00;
 
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.24);
   --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.4);
-  --scrim: rgb(1 15 12 / 0.6);
+  --scrim: rgb(3 3 2 / 0.6);
 }
 
 @theme inline {
