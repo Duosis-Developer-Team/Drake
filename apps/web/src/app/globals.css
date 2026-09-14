@@ -134,16 +134,22 @@
 .dark {
   color-scheme: dark;
 
+  /* 2026-09-14 PayFlow-reference pass: the panel/canvas gap was only 2.5
+     points of L* (#101010 vs #161616) — too close for a panel to visibly
+     lift off the page the way the reference's cards do. Every surface below
+     is re-stepped for a real gap, and `surface-elevated` is corrected to
+     actually be the lightest of the family (it was, bug, darker than
+     surface-2/3) — the topmost surface reads as topmost. */
   --canvas: #101010;
-  --surface-1: #161616;
-  --surface-2: #262626;
+  --surface-1: #1e1e1e;
+  --surface-2: #282828;
   --surface-3: #2e2e2e;
-  --surface-elevated: #1f1f1f;
-  --surface-hover: #1b1b1b;
-  --surface-selected: #333333;
+  --surface-elevated: #383838;
+  --surface-hover: #232323;
+  --surface-selected: #404040;
 
   --border-subtle: #313131;
-  --border-strong: #656565;
+  --border-strong: #696969;
 
   --text-primary: #f1f1f1;
   --text-secondary: #b9b9b9;
@@ -162,13 +168,16 @@
   --chart-tooltip: #181818;
   --chart-tooltip-text: #f1f1f1;
 
-  --status-success: #3c82e0;
-  --status-info: #6376e9;
+  /* success/info/unknown/stale nudged a touch lighter (same hue) so they
+     still clear 4.5:1 against the brighter `surface-1` above — verified
+     against design-system.test.ts's WCAG formula before landing here. */
+  --status-success: #4588e1;
+  --status-info: #6c7eea;
   --status-warning: #d9922e;
   --status-critical: #e85d5d;
   --status-neutral: #8c8c8c;
-  --status-unknown: #7c8187;
-  --status-stale: #9568d8;
+  --status-unknown: #81868c;
+  --status-stale: #9b70da;
 
   --status-success-soft: #0f1823;
   --status-info-soft: #12142b;
@@ -300,13 +309,16 @@
 
   /* 2026-09-14 remake brief §12.3: panel/canvas/control radii step up a
      full tier from the previous scale — the difference between "flat admin
-     boxes" and a premium, PayFlow-grade surface is largely this number. */
-  --radius-control: 0.625rem;
-  --radius-panel: 1.125rem;
+     boxes" and a premium, PayFlow-grade surface is largely this number.
+     Stepped up again the same day against the PayFlow reference itself:
+     its cards and controls round far past a standard "rounded corner" —
+     buttons and badges read as true pills, not just softened rectangles. */
+  --radius-control: 0.875rem;
+  --radius-panel: 1.375rem;
   /* The one dominant surface per screen — the Command Center verdict panel,
      for instance — reads a step rounder than a standard panel (brief §7.3). */
-  --radius-canvas: 1.5rem;
-  --radius-overlay: 1.25rem;
+  --radius-canvas: 1.75rem;
+  --radius-overlay: 1.375rem;
 
   /* Sidebar rail width. 248px expanded keeps room for a full label at the
      new type scale; 72px collapsed still fits an icon, its focus ring and
