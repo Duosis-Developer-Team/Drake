@@ -109,18 +109,22 @@ export function VerdictPanel({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-4 border-l border-sidebar-border pl-8">
+        {/* Card-in-card: a bright surface nested in the obsidian hero, the
+            way the PayFlow reference sets its one headline metric apart
+            from the dark panel that holds it — depth from a colour jump,
+            not a border. */}
+        <div className="flex shrink-0 items-center gap-4 rounded-[1.25rem] bg-[#f1f1f1] py-4 pl-5 pr-6 shadow-overlay">
           <ProgressGauge
-            size={96}
+            size={88}
             value={verdict.sourcesTotal > 0 ? (verdict.sourcesAnswered / verdict.sourcesTotal) * 100 : 0}
             label={`${verdict.sourcesAnswered}/${verdict.sourcesTotal}`}
-            color="#5998e5"
-            trackColor="#292929"
-            textColor="#f1f1f1"
+            color="#2a78d6"
+            trackColor="#e3e3e3"
+            textColor="#161616"
             ariaLabel={`${verdict.sourcesAnswered} of ${verdict.sourcesTotal} sources answered`}
           />
-          <div className="flex flex-col items-start gap-1.5 text-micro text-sidebar-ink-muted">
-            <span data-testid="verdict-sources" className="text-caption font-medium text-sidebar-ink">
+          <div className="flex flex-col items-start gap-1.5 text-micro text-[#646464]">
+            <span data-testid="verdict-sources" className="text-caption font-semibold text-[#161616]">
               {verdict.sourcesAnswered} of {verdict.sourcesTotal} sources answered
             </span>
             {verdict.oldestSuspectEvidence ? (
@@ -135,7 +139,7 @@ export function VerdictPanel({
                 onClick={onRefresh}
                 disabled={refreshing}
                 data-testid="verdict-retry-sources"
-                className="font-medium text-sidebar-active-rail hover:underline disabled:opacity-60"
+                className="font-semibold text-[#2a78d6] hover:underline disabled:opacity-60"
               >
                 {refreshing ? "Retrying…" : "Retry unanswered sources"}
               </button>
