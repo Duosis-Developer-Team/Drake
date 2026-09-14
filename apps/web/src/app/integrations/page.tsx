@@ -7,7 +7,6 @@ import {
   Boxes,
   CircleCheck,
   DatabaseBackup,
-  Flame,
   Github,
   Layers,
   Plug,
@@ -42,11 +41,6 @@ const PROVIDERS: Record<
   { name: string; icon: LucideIcon; blurb: string }
 > = {
   github: { name: "GitHub", icon: Github, blurb: "Repository governance" },
-  prometheus: {
-    name: "Prometheus",
-    icon: Flame,
-    blurb: "Metrics and alerting",
-  },
   "cluster-agent": {
     name: "Cluster agent",
     icon: Boxes,

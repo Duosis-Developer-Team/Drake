@@ -111,7 +111,10 @@ describe("Command Center", () => {
     // Connection and freshness stay separate claims, in the agent's own words:
     // "the agent answers" and "the sweep is current" are different facts, and
     // a row that collapsed them would let a silent cluster read as a well one.
-    const row = within(fleet.getByRole("row", { name: /Duosis Production/ }));
+    // Each cluster is a list item in the card layout, not a table row.
+    const item = fleet.getByText("Duosis Production").closest("li");
+    expect(item).not.toBeNull();
+    const row = within(item as HTMLElement);
     expect(row.getByText("Connected")).toBeTruthy();
     expect(row.getByText("Fresh")).toBeTruthy();
   });
