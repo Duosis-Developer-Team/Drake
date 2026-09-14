@@ -2,18 +2,39 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import {
+  ArrowRight,
+  Building2,
+  FolderGit2,
+  GitBranch,
+  Github,
+  KeyRound,
+  Lock,
+  ShieldAlert,
+  ShieldCheck,
+  Webhook,
+} from "lucide-react";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
-import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
+import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
   InstallationBadge,
   OnboardingBadge,
   VerdictBadge,
   formatUtc,
 } from "@/components/github/primitives";
+import {
+  IconBubble,
+  InitialsBubble,
+  MetaGrid,
+  PILL_BUTTON,
+  StateCard,
+} from "@/components/features/configure/kit";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet, apiMutate } from "@/lib/api";
+import type { StatusTone } from "@/lib/design/status";
 import {
   CANDIDATE_BLOCKERS,
   fetchRepositoryCandidate,
@@ -35,6 +56,15 @@ const MISSING_INPUT_LABELS: Record<string, string> = {
   webhook_secret_reference: "Webhook secret reference",
 };
 
+const REPO_TONE: Record<string, StatusTone> = {
+  ready: "success",
+  blocked: "critical",
+  degraded: "warning",
+  validating: "info",
+  disabled: "stale",
+  discovered: "unknown",
+};
+
 export default function GitHubIntegrationPage() {
   const { hasPermission } = useSession();
   const canManage = hasPermission("integration.manage");
@@ -52,89 +82,62 @@ export default function GitHubIntegrationPage() {
   }>("/v1/integrations/github/repositories");
 
   return (
-    <div className="mx-auto w-full max-w-[110rem] space-y-5 px-4 py-5 lg:px-6">
-      <div>
-        <p className="text-xs text-ink-muted">
-          <Link href="/integrations" className="hover:text-ink">
-            Integrations
-          </Link>{" "}
-          / GitHub
-        </p>
-        <h1 className="mt-1 text-title font-semibold text-ink">
-          GitHub App integration
-        </h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          Read-only repository governance. Drake evaluates branch protection, required
-          checks and deployment gates — it never changes a repository setting.
-        </p>
-      </div>
+    <PageFrame>
+      <PageHeader
+        title="GitHub App integration"
+        description={
+          <>
+            <Link href="/integrations" className="hover:text-ink">
+              Integrations
+            </Link>{" "}
+            / GitHub — read-only repository governance; Drake never changes a repository setting.
+          </>
+        }
+      />
 
-      <LoadGate value={status} retry={retryStatus}>
-        {(data) => (
-          <ConfigurationCard status={data} />
+      <div className="space-y-6">
+        {status.state === "ready" ? (
+          <ConfigurationCard status={status.data} />
+        ) : (
+          <Panel>
+            <LoadGate value={status} retry={retryStatus}>
+              {() => null}
+            </LoadGate>
+          </Panel>
         )}
-      </LoadGate>
 
-      <section aria-labelledby="installations-heading">
-        <h2 id="installations-heading" className="mb-3 text-sm font-semibold text-ink">
-          Installations
-        </h2>
-        <Card>
-          <LoadGate value={installations} retry={retryInstallations}>
-            {(data) =>
-              data.installations.length === 0 ? (
-                <DataState
-                  kind="not-configured"
-                  title="No installation yet"
-                  description="Once the GitHub App is installed for the organization, its installation appears here."
-                />
+        <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+          <section aria-labelledby="repositories-heading" className="min-w-0 space-y-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 id="repositories-heading" className="text-[1.0625rem] font-semibold text-ink">
+                Repositories
+              </h2>
+              {repositories.state === "ready" ? (
+                <span className="text-micro text-ink-muted">
+                  {repositories.data.repositories.length} visible to you
+                </span>
+              ) : null}
+            </div>
+            {repositories.state === "ready" ? null : (
+              <Panel>
+                <LoadGate value={repositories} retry={retryRepositories}>
+                  {() => null}
+                </LoadGate>
+              </Panel>
+            )}
+            {repositories.state === "ready" ? (
+              repositories.data.repositories.length === 0 ? (
+                <Panel>
+                  <StateCard
+                    kind="empty"
+                    icon={FolderGit2}
+                    title="No repositories in your scope"
+                    description="Repositories the installation can see, and you are authorized to view, appear here."
+                  />
+                </Panel>
               ) : (
-                <ul className="divide-y divide-border" data-testid="installation-list">
-                  {data.installations.map((installation) => (
-                    <li
-                      key={installation.id}
-                      className="flex flex-wrap items-center justify-between gap-3 px-1 py-3"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-ink">
-                          {installation.account_login || "unknown account"}
-                        </span>
-                        <span className="block truncate font-mono text-xs text-ink-muted">
-                          {installation.repository_selection} ·{" "}
-                          {installation.subscribed_events.join(", ") || "no events"}
-                        </span>
-                      </span>
-                      <span className="flex flex-wrap items-center gap-2">
-                        {installation.last_error_code ? (
-                          <StatusBadge status="warning" label={installation.last_error_code} />
-                        ) : null}
-                        <InstallationBadge state={installation.state} />
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )
-            }
-          </LoadGate>
-        </Card>
-      </section>
-
-      <section aria-labelledby="repositories-heading">
-        <h2 id="repositories-heading" className="mb-3 text-sm font-semibold text-ink">
-          Repositories
-        </h2>
-        <Card>
-          <LoadGate value={repositories} retry={retryRepositories}>
-            {(data) =>
-              data.repositories.length === 0 ? (
-                <DataState
-                  kind="empty"
-                  title="No repositories in your scope"
-                  description="Repositories the installation can see, and you are authorized to view, appear here."
-                />
-              ) : (
-                <div className="space-y-4" data-testid="repository-list">
-                  {data.repositories.map((repository) => (
+                <div className="space-y-6" data-testid="repository-list">
+                  {repositories.data.repositories.map((repository) => (
                     <RepositoryCard
                       key={repository.id}
                       repository={repository}
@@ -144,10 +147,101 @@ export default function GitHubIntegrationPage() {
                   ))}
                 </div>
               )
-            }
-          </LoadGate>
-        </Card>
-      </section>
+            ) : null}
+          </section>
+
+          <Panel flush aria-labelledby="installations-heading">
+            <PanelHeader
+              flush
+              title="Installations"
+              id="installations-heading"
+              description="Organizations the App is installed on"
+            />
+            <LoadGate value={installations} retry={retryInstallations}>
+              {(data) =>
+                data.installations.length === 0 ? (
+                  <div className="px-7 py-2">
+                    <StateCard
+                      kind="not-configured"
+                      icon={Building2}
+                      title="No installation yet"
+                      description="Once the GitHub App is installed for the organization, its installation appears here."
+                    />
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-border" data-testid="installation-list">
+                    {data.installations.map((installation) => (
+                      <li
+                        key={installation.id}
+                        className="px-7 py-4 transition-colors hover:bg-surface-hover"
+                      >
+                        <div className="flex items-center gap-3">
+                          <InitialsBubble name={installation.account_login || "?"} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-body font-semibold text-ink">
+                              {installation.account_login || "unknown account"}
+                            </p>
+                            <p className="truncate text-micro text-ink-muted">
+                              {installation.repository_selection} repositories ·{" "}
+                              {installation.subscribed_events.length} events
+                            </p>
+                          </div>
+                          <InstallationBadge state={installation.state} />
+                        </div>
+                        {installation.subscribed_events.length > 0 || installation.last_error_code ? (
+                          <div className="mt-3 flex flex-wrap gap-1.5 pl-[3.25rem]">
+                            {installation.last_error_code ? (
+                              <StatusBadge status="warning" label={installation.last_error_code} size="compact" />
+                            ) : null}
+                            {installation.subscribed_events.map((event) => (
+                              <span
+                                key={event}
+                                className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-micro text-ink-secondary"
+                              >
+                                {event}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )
+              }
+            </LoadGate>
+          </Panel>
+        </div>
+      </div>
+    </PageFrame>
+  );
+}
+
+function StatTile({
+  icon,
+  tone,
+  label,
+  value,
+  detail,
+}: {
+  icon: typeof Github;
+  tone?: StatusTone;
+  label: string;
+  value: number;
+  detail?: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-full flex-col rounded-[1.25rem] bg-surface-2 p-5">
+      <IconBubble icon={icon} tone={tone ?? "neutral"} />
+      <span
+        data-tabular
+        className={`mt-5 text-[2.25rem] leading-none font-semibold tracking-[-0.03em] ${
+          tone === "critical" ? "text-critical" : "text-ink"
+        }`}
+      >
+        {value}
+      </span>
+      <span className="mt-2 text-caption font-medium text-ink-secondary">{label}</span>
+      {detail ? <div className="mt-auto pt-3">{detail}</div> : null}
     </div>
   );
 }
@@ -155,54 +249,95 @@ export default function GitHubIntegrationPage() {
 function ConfigurationCard({ status }: { status: GitHubStatus }) {
   const configured = status.configuration_state === "configured";
   return (
-    <Card title="Connection readiness" data-testid="github-status-card">
-      {configured ? (
-        <dl className="divide-y divide-border">
-          <MetaRow label="Configuration">
-            <StatusBadge status="healthy" label="configured" />
-          </MetaRow>
-          <MetaRow label="Installations">
-            <span className="font-mono text-xs">{status.installations}</span>
-          </MetaRow>
-          <MetaRow label="Repositories">
-            <span className="font-mono text-xs">{status.repositories}</span>
-          </MetaRow>
-          <MetaRow label="Blocked by a security gate">
-            <span className="flex items-center gap-2">
-              <span className="font-mono text-xs">{status.blocked_repositories}</span>
-              {status.blocked_repositories > 0 ? (
-                <StatusBadge status="critical" label="operator action required" />
-              ) : null}
+    <Panel data-testid="github-status-card">
+      <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4">
+            <span
+              aria-hidden
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-accent text-ink-inverse"
+            >
+              <Github className="h-7 w-7" />
             </span>
-          </MetaRow>
-          <MetaRow label="Subscribed events">
-            <span className="font-mono text-xs">{status.supported_events.join(", ")}</span>
-          </MetaRow>
-        </dl>
-      ) : (
-        <div className="space-y-3" data-testid="github-not-configured">
-          <DataState
-            kind="not-configured"
-            title="GitHub App is not connected yet"
-            description="Drake shows nothing here until an operator supplies the app identity and its secret references."
-          />
-          <div>
-            <p className="text-xs font-medium text-ink-muted">Waiting on the operator:</p>
-            <ul className="mt-1 space-y-1">
-              {status.missing_operator_inputs.map((item) => (
-                <li key={item} className="text-sm text-ink-secondary">
-                  • {MISSING_INPUT_LABELS[item] ?? item}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-ink-muted">
-              Secrets are supplied out of band and referenced by name; they are never
-              entered or displayed in this interface.
-            </p>
+            <div className="min-w-0">
+              <h2 className="text-[1.25rem] leading-7 font-semibold tracking-[-0.01em] text-ink">
+                Connection readiness
+              </h2>
+              <p className="text-caption text-ink-muted">GitHub App · read-only</p>
+            </div>
           </div>
+          {configured ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-caption text-ink-muted">Configuration</span>
+                <StatusBadge status="healthy" label="configured" />
+              </div>
+              <div className="mt-auto">
+                <p className="mb-2 flex items-center gap-1.5 text-micro text-ink-muted">
+                  <Webhook aria-hidden className="h-3.5 w-3.5" />
+                  Subscribed events
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {status.supported_events.map((event) => (
+                    <span
+                      key={event}
+                      className="rounded-full border border-border bg-surface-2 px-2.5 py-1 font-mono text-micro text-ink-secondary"
+                    >
+                      {event}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : null}
         </div>
-      )}
-    </Card>
+
+        {configured ? (
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-3">
+            <StatTile icon={Building2} label="Installations" value={status.installations} />
+            <StatTile icon={FolderGit2} tone="info" label="Repositories" value={status.repositories} />
+            <StatTile
+              icon={ShieldAlert}
+              tone={status.blocked_repositories > 0 ? "critical" : undefined}
+              label="Blocked by a security gate"
+              value={status.blocked_repositories}
+              detail={
+                status.blocked_repositories > 0 ? (
+                  <StatusBadge status="critical" label="operator action required" />
+                ) : (
+                  <span className="text-micro text-ink-muted">No gate is open</span>
+                )
+              }
+            />
+          </div>
+        ) : (
+          <div className="rounded-[1.25rem] bg-surface-2 p-6" data-testid="github-not-configured">
+            <StateCard
+              inline
+              kind="not-configured"
+              title="GitHub App is not connected yet"
+              description="Drake shows nothing here until an operator supplies the app identity and its secret references."
+            >
+              <ul className="mt-4 space-y-2">
+                {status.missing_operator_inputs.map((item) => (
+                  <li
+                    key={item}
+                    className="flex items-center gap-3 rounded-full bg-surface px-3 py-2 text-caption text-ink"
+                  >
+                    <KeyRound aria-hidden className="h-4 w-4 shrink-0 text-warning" />
+                    {MISSING_INPUT_LABELS[item] ?? item}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 flex items-center gap-1.5 text-micro text-ink-muted">
+                <Lock aria-hidden className="h-3.5 w-3.5" />
+                Secrets are supplied out of band and referenced by name; never shown here.
+              </p>
+            </StateCard>
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 
@@ -252,19 +387,32 @@ function RepositoryCard({
     }
   }, [csrf, loadPolicy, repository.id]);
 
+  const tone = blocked ? "critical" : (REPO_TONE[repository.onboarding_state] ?? "unknown");
+
   return (
-    <section
-      className="rounded-xl border border-border p-4"
+    // A <section>: the e2e suite finds the first card as a section inside
+    // the repository list.
+    <Panel
       aria-label={repository.full_name}
       data-testid="repository-card"
+      tone={blocked ? "critical" : "default"}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-ink">{repository.full_name}</p>
-          <p className="truncate font-mono text-xs text-ink-muted">
-            default branch: {repository.default_branch || "unknown"} ·{" "}
-            {repository.private ? "private" : "public"}
-          </p>
+        <div className="flex min-w-0 items-center gap-4">
+          <IconBubble icon={FolderGit2} tone={tone} size="lg" />
+          <div className="min-w-0">
+            <p className="truncate text-[1.0625rem] font-semibold text-ink">{repository.full_name}</p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
+              <span className="inline-flex items-center gap-1">
+                <GitBranch aria-hidden className="h-3.5 w-3.5" />
+                <span className="font-mono">default branch: {repository.default_branch || "unknown"}</span>
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Lock aria-hidden className="h-3.5 w-3.5" />
+                {repository.private ? "private" : "public"}
+              </span>
+            </p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {stale && !blocked ? <StatusBadge status="stale" label="stale" /> : null}
@@ -273,19 +421,24 @@ function RepositoryCard({
       </div>
 
       {repository.pending_reconciliation && !blocked ? (
-        <div className="mt-3" data-testid="reconciliation-required">
-          <DataState
+        <div data-testid="reconciliation-required" className="rounded-[1.25rem] bg-surface-2 p-5">
+          <StateCard
+            inline
             kind="no-data"
+            tone="warning"
             title="Reconciliation required"
-            description="A recent change could not be recorded in full, so this installation is being re-read from the provider. What is shown here may be incomplete until that finishes."
+            description="A recent change could not be recorded in full, so this installation is being re-read. What is shown may be incomplete until that finishes."
           />
         </div>
       ) : null}
 
       {blocked ? (
-        <div className="mt-3" data-testid="security-gate-warning">
-          <DataState
+        <div data-testid="security-gate-warning" className="rounded-[1.25rem] bg-critical-soft p-5">
+          <StateCard
+            inline
             kind="permission-denied"
+            icon={ShieldAlert}
+            tone="critical"
             title="Blocked by a manual security gate"
             description={
               repository.security_gate_reason ||
@@ -295,50 +448,30 @@ function RepositoryCard({
         </div>
       ) : null}
 
-      <dl className="mt-3 divide-y divide-border">
-        <MetaRow label="Last reconciliation">
-          <span className="font-mono text-xs">{formatUtc(repository.last_reconciled_at)}</span>
-        </MetaRow>
-        <MetaRow label="Last policy evaluation">
-          <span className="font-mono text-xs">
-            {formatUtc(repository.last_policy_evaluated_at)}
-          </span>
-        </MetaRow>
-        {repository.last_error_code ? (
-          <MetaRow label="Last error">
-            <span className="font-mono text-xs">{repository.last_error_code}</span>
-          </MetaRow>
-        ) : null}
-      </dl>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={loadPolicy}
-          className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
-        >
-          Show last policy result
-        </button>
-        {canManage ? (
-          <button
-            type="button"
-            onClick={reconcile}
-            disabled={busy || blocked}
-            className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken disabled:opacity-60"
-            data-testid="reconcile-button"
-          >
-            {busy ? "Evaluating…" : "Reconcile (dry run)"}
-          </button>
-        ) : null}
-        {blocked ? (
-          <span className="text-xs text-ink-muted">
-            Reconciliation stays disabled while the gate is open.
-          </span>
-        ) : null}
-      </div>
+      <MetaGrid
+        columns={repository.last_error_code ? 3 : 2}
+        items={[
+          {
+            label: "Last reconciliation",
+            value: <span className="font-mono">{formatUtc(repository.last_reconciled_at)}</span>,
+          },
+          {
+            label: "Last policy evaluation",
+            value: <span className="font-mono">{formatUtc(repository.last_policy_evaluated_at)}</span>,
+          },
+          ...(repository.last_error_code
+            ? [
+                {
+                  label: "Last error",
+                  value: <span className="font-mono text-critical">{repository.last_error_code}</span>,
+                },
+              ]
+            : []),
+        ]}
+      />
 
       {actionError ? (
-        <div className="mt-3">
+        <div className="rounded-[1.25rem] bg-critical-soft p-4">
           <DataState kind="error" description={actionError} onRetry={loadPolicy} />
         </div>
       ) : null}
@@ -356,10 +489,28 @@ function RepositoryCard({
         integration is not permission to onboard a project, and a link that
         leads somewhere the operator is refused is worse than no link.
       */}
-      <div className="mt-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={loadPolicy} className={PILL_BUTTON}>
+            <ShieldCheck aria-hidden className="h-3.5 w-3.5" />
+            Show last policy result
+          </button>
+          {canManage ? (
+            <button
+              type="button"
+              onClick={reconcile}
+              disabled={busy || blocked}
+              title={blocked ? "Reconciliation stays disabled while the gate is open." : undefined}
+              className={PILL_BUTTON}
+              data-testid="reconcile-button"
+            >
+              {busy ? "Evaluating…" : "Reconcile (dry run)"}
+            </button>
+          ) : null}
+        </div>
         <OnboardingLink repositoryId={repository.id} canOnboard={canOnboard} />
       </div>
-    </section>
+    </Panel>
   );
 }
 
@@ -401,9 +552,11 @@ function OnboardingLink({
     };
   }, [canOnboard, repositoryId]);
 
+  const note = "max-w-sm text-right text-micro text-ink-muted";
+
   if (state === "loading") {
     return (
-      <p className="text-xs text-ink-muted" data-testid="onboarding-link-loading">
+      <p className={note} data-testid="onboarding-link-loading">
         Checking whether this repository can be onboarded…
       </p>
     );
@@ -414,9 +567,8 @@ function OnboardingLink({
     // answer covers "no such repository" and "not in a scope you may act
     // in", which is the distinction the scoping is there to keep.
     return (
-      <p className="text-xs text-ink-muted" data-testid="onboarding-link-denied">
-        Onboarding this repository needs the onboarding manage permission on the scope it
-        belongs to.
+      <p className={note} data-testid="onboarding-link-denied">
+        Onboarding needs the onboarding manage permission on this repository&apos;s scope.
       </p>
     );
   }
@@ -426,16 +578,17 @@ function OnboardingLink({
       <Link
         href={`/onboarding/${candidate.active_session_id}`}
         data-testid="onboarding-link-existing"
-        className="inline-block rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+        className={PILL_BUTTON}
       >
-        Open the open onboarding session →
+        Open the open onboarding session
+        <ArrowRight aria-hidden className="h-3.5 w-3.5" />
       </Link>
     );
   }
 
   if (!candidate?.startable) {
     return (
-      <p className="text-xs text-warning" data-testid="onboarding-link-blocked">
+      <p className="max-w-sm text-right text-micro text-warning" data-testid="onboarding-link-blocked">
         {CANDIDATE_BLOCKERS[candidate?.reason_code ?? ""] ??
           "This repository cannot be onboarded right now."}
       </p>
@@ -446,9 +599,10 @@ function OnboardingLink({
     <Link
       href={`/onboarding?repository_id=${repositoryId}`}
       data-testid="onboarding-link"
-      className="inline-block rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
+      className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-caption font-medium text-ink-inverse hover:opacity-90"
     >
-      Onboard this repository →
+      Onboard this repository
+      <ArrowRight aria-hidden className="h-3.5 w-3.5" />
     </Link>
   );
 }
@@ -456,9 +610,11 @@ function OnboardingLink({
 function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
   if (snapshot.state === "never_evaluated") {
     return (
-      <div className="mt-3" data-testid="policy-never-evaluated">
-        <DataState
+      <div data-testid="policy-never-evaluated" className="rounded-[1.25rem] bg-surface-2 p-5">
+        <StateCard
+          inline
           kind="no-data"
+          icon={ShieldCheck}
           title="No policy evaluation yet"
           description="Run a dry-run reconciliation to produce the first snapshot."
         />
@@ -469,27 +625,54 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
   const other = snapshot.results.filter(
     (result) => !(result.blocking && result.verdict === "fail") && result.verdict !== "pass",
   );
+  const passed = snapshot.results.filter((result) => result.verdict === "pass").length;
   return (
-    <div className="mt-3 space-y-3" data-testid="policy-result">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-        <span>Overall:</span>
-        <VerdictBadge verdict={snapshot.overall} />
-        <span>
-          {snapshot.blocking_count ?? 0} blocking · {snapshot.unknown_count ?? 0} unknown ·
+    <div className="space-y-4 rounded-[1.25rem] border border-border p-5" data-testid="policy-result">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-body font-semibold text-ink">Policy result</span>
+          <VerdictBadge verdict={snapshot.overall} />
+          {snapshot.dry_run ? <StatusBadge status="maintenance" label="dry run" /> : null}
+        </div>
+        <span className="text-micro text-ink-muted">
           evaluated <time className="font-mono">{formatUtc(snapshot.evaluated_at)}</time>
         </span>
-        {snapshot.dry_run ? <StatusBadge status="maintenance" label="dry run" /> : null}
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Blocking", value: snapshot.blocking_count ?? 0, tone: "critical" as StatusTone },
+          { label: "Not determinable", value: snapshot.unknown_count ?? 0, tone: "unknown" as StatusTone },
+          { label: "Rules passed", value: passed, tone: "success" as StatusTone },
+        ].map((tile) => (
+          <div key={tile.label} className="rounded-2xl bg-surface-2 px-4 py-3">
+            <p className="text-micro text-ink-muted">{tile.label}</p>
+            <p
+              data-tabular
+              className={`mt-1 text-[1.5rem] leading-none font-semibold ${
+                tile.value > 0 && tile.tone === "critical" ? "text-critical" : tile.value > 0 && tile.tone === "unknown" ? "text-unknown" : "text-ink"
+              }`}
+            >
+              {tile.value}
+            </p>
+          </div>
+        ))}
       </div>
 
       {blocking.length > 0 ? (
-        <div data-testid="blocking-violations">
-          <p className="text-xs font-medium text-critical">Blocking violations</p>
-          <ul className="mt-1 space-y-2">
+        <div data-testid="blocking-violations" className="space-y-2">
+          <p className="text-micro font-medium tracking-[0.08em] text-critical uppercase">
+            Blocking violations
+          </p>
+          <ul className="space-y-2">
             {blocking.map((result) => (
-              <li key={result.rule_id} className="rounded-lg bg-critical-soft p-2">
-                <p className="text-sm font-medium text-ink">{result.title}</p>
-                <p className="text-xs text-ink-secondary">{result.observed}</p>
-                <p className="mt-1 text-xs text-ink-muted">{result.remediation}</p>
+              <li key={result.rule_id} className="flex gap-3 rounded-2xl bg-critical-soft p-4">
+                <ShieldAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-critical" />
+                <div className="min-w-0">
+                  <p className="text-body font-semibold text-ink">{result.title}</p>
+                  <p className="text-caption text-ink-secondary">{result.observed}</p>
+                  <p className="mt-1 text-caption text-ink-muted">{result.remediation}</p>
+                </div>
               </li>
             ))}
           </ul>
@@ -497,34 +680,17 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
       ) : null}
 
       {other.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs text-ink-muted">
-                <th scope="col" className="py-2 pr-3 font-medium">
-                  Rule
-                </th>
-                <th scope="col" className="py-2 pr-3 font-medium">
-                  Verdict
-                </th>
-                <th scope="col" className="py-2 font-medium">
-                  Observed
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {other.map((result) => (
-                <tr key={result.rule_id}>
-                  <td className="py-2 pr-3 font-mono text-xs">{result.rule_id}</td>
-                  <td className="py-2 pr-3">
-                    <VerdictBadge verdict={result.verdict} />
-                  </td>
-                  <td className="py-2 text-xs text-ink-secondary">{result.observed}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul className="divide-y divide-border rounded-2xl border border-border">
+          {other.map((result) => (
+            <li key={result.rule_id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+              <VerdictBadge verdict={result.verdict} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-mono text-micro text-ink">{result.rule_id}</p>
+                <p className="text-caption text-ink-secondary">{result.observed}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </div>
   );
