@@ -39,17 +39,21 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const telemetry = isTelemetryRoute(pathname);
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 lg:px-5">
+    <header className="sticky top-0 z-30 flex h-[4.5rem] shrink-0 items-center gap-3 rounded-t-[1.5rem] bg-canvas/85 px-3 backdrop-blur-md lg:rounded-t-[2rem] lg:px-8">
       <button
         type="button"
         onClick={onOpenSidebar}
         aria-label="Open navigation"
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-border text-ink-secondary transition-colors hover:bg-surface-hover lg:hidden"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover lg:hidden"
       >
         <Menu className="h-4 w-4" aria-hidden />
       </button>
 
-      <div className="hidden min-w-0 flex-1 sm:block">
+      <div className="flex shrink-0 items-center">
+        <CatalogSearch />
+      </div>
+
+      <div className="hidden min-w-0 flex-1 px-2 sm:block">
         <Breadcrumbs />
       </div>
 
@@ -59,16 +63,15 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
         the viewport and the whole page scrolled sideways.
       */}
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <CatalogSearch />
         {telemetry ? (
           <Suspense fallback={null}>
             <TimeRangeControl />
           </Suspense>
         ) : null}
-        <NotificationBell />
         <div className="hidden md:block">
           <ThemeControl compact />
         </div>
+        <NotificationBell />
         <IdentityMenu />
       </div>
     </header>

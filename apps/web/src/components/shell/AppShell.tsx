@@ -66,7 +66,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   useScrollLock(drawerOpen);
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen gap-3 bg-frame p-2 sm:p-3 lg:gap-4 lg:p-4">
       <a
         href="#main"
         className="sr-only rounded-control bg-brand px-3 py-2 text-body font-medium text-ink-inverse focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
@@ -74,8 +74,10 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
 
+      {/* PayFlow frame: the rail is its own rounded slab floating on the
+          bezel, and the page is a second, larger slab beside it. */}
       <aside
-        className={`sticky top-0 hidden h-screen shrink-0 self-start border-r border-sidebar-border transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
+        className={`sticky top-4 hidden h-[calc(100vh-2rem)] shrink-0 self-start transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
           collapsed ? "w-[var(--sidebar-width-collapsed)]" : "w-[var(--sidebar-width-expanded)]"
         }`}
       >
@@ -94,18 +96,18 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             role="dialog"
             aria-modal="true"
             aria-label="Navigation"
-            className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-sidebar-border shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
+            className="absolute inset-y-2 left-2 flex w-72 max-w-[85vw] flex-col shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
           >
             <Sidebar onNavigate={closeDrawer} footer={<ShellFooter />} />
           </div>
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col rounded-[1.5rem] border border-border bg-canvas lg:rounded-[2rem]">
         <TopBar onOpenSidebar={openDrawer} />
         {/* The sideways-scroll backstop lives on `html` in globals.css; this
             keeps a wide panel from stretching the column it sits in. */}
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 bg-canvas">
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 outline-none">
           {children}
         </main>
       </div>
@@ -133,15 +135,29 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
  */
 function ShellFooter() {
   const { state } = useSession();
-  const scopeCount = state.status === "authenticated" ? Object.keys(state.me.scopes).length : 0;
+  if (state.status !== "authenticated") return null;
+  const scopeCount = Object.keys(state.me.scopes).length;
+  const { identity } = state.me;
+  const initial = (identity.display_name || "?").charAt(0).toUpperCase();
   return (
-    <div className="dark space-y-2 px-3 py-3">
+    <div className="dark space-y-2">
       <div className="md:hidden">
         <ThemeControl />
       </div>
-      <p className="text-micro text-ink-muted">
-        {scopeCount === 1 ? "1 authorized scope" : `${scopeCount} authorized scopes`}
-      </p>
+      <div className="flex items-center gap-3 rounded-[1.25rem] border border-white/[0.06] bg-[linear-gradient(180deg,#232323,#1a1a1a)] p-2.5">
+        <span
+          aria-hidden
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f1f1f1,#9a9a9a)] text-body font-semibold text-[#161616]"
+        >
+          {initial}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-body font-medium text-sidebar-ink">{identity.display_name}</p>
+          <p className="truncate text-micro text-sidebar-ink-muted">
+            {scopeCount === 1 ? "1 authorized scope" : `${scopeCount} authorized scopes`}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -162,7 +178,7 @@ export function PageFrame({
 }) {
   const max =
     width === "wide" ? "max-w-none" : width === "narrow" ? "max-w-3xl" : "max-w-[110rem]";
-  return <div className={`mx-auto w-full px-4 py-5 lg:px-6 ${max}`}>{children}</div>;
+  return <div className={`mx-auto w-full px-4 pt-2 pb-8 lg:px-8 ${max}`}>{children}</div>;
 }
 
 /**
@@ -189,15 +205,15 @@ export function PageHeader({
   tabs?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+    <div className="mb-6">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="min-w-0 truncate text-title font-semibold text-ink">{title}</h1>
+            <h1 className="min-w-0 truncate text-[1.75rem] leading-9 font-semibold tracking-[-0.02em] text-ink">{title}</h1>
             {status}
           </div>
           {description ? (
-            <p className="mt-1 max-w-3xl text-caption text-ink-secondary">{description}</p>
+            <p className="mt-1 max-w-3xl text-body text-ink-muted">{description}</p>
           ) : null}
           {meta ? (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">

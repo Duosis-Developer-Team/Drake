@@ -27,7 +27,7 @@ const DARK_QUERY = "(prefers-color-scheme: dark)";
  * valid preferences rather than being reset.
  */
 export function parsePreference(raw: string | null | undefined): ThemePreference {
-  return raw === "light" || raw === "dark" ? raw : "system";
+  return raw === "light" || raw === "system" ? raw : "dark";
 }
 
 export function readPreference(): ThemePreference {
@@ -35,7 +35,7 @@ export function readPreference(): ThemePreference {
     return parsePreference(localStorage.getItem(THEME_STORAGE_KEY));
   } catch {
     // Storage can be blocked outright. The session still gets a theme.
-    return "system";
+    return "dark";
   }
 }
 
@@ -54,7 +54,7 @@ export function applyTheme(resolved: ResolvedTheme): void {
 
 export function writePreference(preference: ThemePreference): void {
   try {
-    if (preference === "system") localStorage.removeItem(THEME_STORAGE_KEY);
+    if (preference === "dark") localStorage.removeItem(THEME_STORAGE_KEY);
     else localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
     // Best effort; the applied class below is what the user actually sees.
@@ -83,7 +83,7 @@ export function watchSystemTheme(onChange: (theme: ResolvedTheme) => void): () =
  */
 export const THEME_INIT_SCRIPT = `(function(){try{
 var v=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});
-var p=(v==="light"||v==="dark")?v:"system";
+var p=(v==="light"||v==="system")?v:"dark";
 var d=p==="dark"||(p==="system"&&window.matchMedia(${JSON.stringify(DARK_QUERY)}).matches);
 document.documentElement.classList.toggle("dark",d);
 }catch(e){}})();`;

@@ -106,12 +106,12 @@
   --status-stale-soft: #faf8fc;
 
   /* The obsidian rail. Same values in `.dark` below — see the header note. */
-  --sidebar-canvas: #181818;
-  --sidebar-surface-hover: #202020;
-  --sidebar-surface-selected: #252525;
-  --sidebar-border: #292929;
+  --sidebar-canvas: #161616;
+  --sidebar-surface-hover: #1f1f1f;
+  --sidebar-surface-selected: #262626;
+  --sidebar-border: #232323;
   --sidebar-text: #f1f1f1;
-  --sidebar-text-muted: #818181;
+  --sidebar-text-muted: #8a8a8a;
   --sidebar-active-rail: #5998e5;
 
   /* Categorical chart series. Fixed order, never cycled. The old green slot
@@ -129,6 +129,8 @@
   --shadow-panel: 0 1px 2px rgb(23 22 20 / 0.04), 0 10px 28px -8px rgb(23 22 20 / 0.10);
   --shadow-overlay: 0 20px 48px -12px rgb(23 22 20 / 0.22), 0 8px 16px -6px rgb(23 22 20 / 0.10);
   --scrim: rgb(23 22 20 / 0.45);
+  /* PayFlow frame: the bezel the rail and the content surface sit inside. */
+  --frame: #dcdcdc;
 }
 
 .dark {
@@ -140,16 +142,16 @@
      is re-stepped for a real gap, and `surface-elevated` is corrected to
      actually be the lightest of the family (it was, bug, darker than
      surface-2/3) — the topmost surface reads as topmost. */
-  --canvas: #101010;
-  --surface-1: #1e1e1e;
-  --surface-2: #282828;
-  --surface-3: #2e2e2e;
-  --surface-elevated: #383838;
-  --surface-hover: #232323;
-  --surface-selected: #404040;
+  --canvas: #141414;
+  --surface-1: #1b1b1b;
+  --surface-2: #222222;
+  --surface-3: #292929;
+  --surface-elevated: #303030;
+  --surface-hover: #212121;
+  --surface-selected: #2c2c2c;
 
-  --border-subtle: #313131;
-  --border-strong: #696969;
+  --border-subtle: #262626;
+  --border-strong: #6a6a6a;
 
   --text-primary: #f1f1f1;
   --text-secondary: #b9b9b9;
@@ -159,13 +161,13 @@
   --brand: #f1f1f1;
   --brand-hover: #ffffff;
   --brand-active: #d7d7d7;
-  --brand-soft: #262626;
+  --brand-soft: #242424;
   --brand-accent: #5998e5;
   --focus-ring: #5998e5;
 
-  --chart-grid: #232323;
+  --chart-grid: #242424;
   --chart-axis: #b9b9b9;
-  --chart-tooltip: #181818;
+  --chart-tooltip: #0c0c0c;
   --chart-tooltip-text: #f1f1f1;
 
   /* success/info/unknown/stale nudged a touch lighter (same hue) so they
@@ -188,12 +190,12 @@
   --status-stale-soft: #1b1027;
 
   /* The obsidian rail, unchanged from `:root` — see the file header note. */
-  --sidebar-canvas: #181818;
-  --sidebar-surface-hover: #202020;
-  --sidebar-surface-selected: #252525;
-  --sidebar-border: #292929;
+  --sidebar-canvas: #161616;
+  --sidebar-surface-hover: #1f1f1f;
+  --sidebar-surface-selected: #262626;
+  --sidebar-border: #232323;
   --sidebar-text: #f1f1f1;
-  --sidebar-text-muted: #818181;
+  --sidebar-text-muted: #8a8a8a;
   --sidebar-active-rail: #5998e5;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
@@ -205,13 +207,15 @@
   --series-5: #ef8fb3;
   --series-6: #f2ad00;
 
-  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 28px -8px rgb(0 0 0 / 0.45);
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 16px 40px -20px rgb(0 0 0 / 0.7);
   --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.65), 0 8px 16px -6px rgb(0 0 0 / 0.4);
   --scrim: rgb(3 3 2 / 0.6);
+  --frame: #0a0a0a;
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
+  --color-frame: var(--frame);
   --color-surface: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
@@ -352,7 +356,7 @@ html {
 
 body {
   min-height: 100%;
-  background-color: var(--canvas);
+  background-color: var(--frame);
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

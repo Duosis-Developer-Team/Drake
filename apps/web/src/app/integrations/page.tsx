@@ -103,7 +103,7 @@ export default function IntegrationsPage() {
                 {body.integrations.map((integration) => (
                   <li
                     key={`${integration.integration_type}-${integration.scope.type}-${integration.scope.ref}`}
-                    className="flex flex-wrap items-start justify-between gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
+                    className="flex flex-wrap items-start justify-between gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">

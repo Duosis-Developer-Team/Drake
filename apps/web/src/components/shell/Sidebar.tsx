@@ -72,11 +72,12 @@ export function Sidebar({
   const active = activeNavHref(pathname);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-sidebar" data-testid="sidebar">
+    <div
+      className="flex h-full min-h-0 flex-col gap-3 rounded-[1.75rem] border border-sidebar-border bg-sidebar p-2.5"
+      data-testid="sidebar"
+    >
       <div
-        className={`flex h-14 shrink-0 items-center border-b border-sidebar-border ${
-          collapsed ? "justify-center px-2" : "gap-2 px-4"
-        }`}
+        className={`flex h-14 shrink-0 items-center ${collapsed ? "justify-center" : "gap-2 pr-1 pl-3"}`}
       >
         <Link
           href="/"
@@ -97,7 +98,7 @@ export function Sidebar({
             aria-label="Collapse navigation"
             title="Collapse navigation"
             aria-expanded
-            className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+            className="ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
           >
             <PanelLeftClose className="h-4 w-4" aria-hidden />
           </button>
@@ -111,15 +112,17 @@ export function Sidebar({
           aria-label="Expand navigation"
           title="Expand navigation"
           aria-expanded={false}
-          className="mx-auto mb-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+          className="mx-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
         >
           <PanelLeftOpen className="h-4 w-4" aria-hidden />
         </button>
       ) : null}
 
+      {/* The nav sits on its own inset slab, the way the reference groups its
+          menu — the rail reads as layered, not as a flat list on black. */}
       <nav
         aria-label="Primary"
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-3"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-[1.375rem] border border-white/[0.05] bg-[linear-gradient(180deg,#1d1d1d_0%,#171717_100%)] p-2 [scrollbar-width:none]"
       >
         {NAVIGATION.map((group) => {
           const items = group.items.filter(
@@ -129,23 +132,20 @@ export function Sidebar({
           );
           if (items.length === 0) return null;
           return (
-            <div key={group.key} className="mb-4 last:mb-0">
+            <div key={group.key} className="mb-3 last:mb-0">
               {collapsed ? (
-                <div
-                  aria-hidden
-                  className="mx-2 mb-2 border-t border-sidebar-border first:border-0"
-                />
+                <div aria-hidden className="mx-3 my-2 border-t border-sidebar-border" />
               ) : (
                 <p
                   aria-hidden
-                  className="mb-1 px-2 text-micro font-semibold tracking-wide text-sidebar-ink-muted uppercase"
+                  className="px-3 pt-2 pb-1.5 text-[0.625rem] font-semibold tracking-[0.12em] text-sidebar-ink-muted/80 uppercase"
                 >
                   {group.label}
                 </p>
               )}
               {/* The group name lives on the list, not on a heading: these sit
                   above the page's h1 and would put the outline out of order. */}
-              <ul className="space-y-0.5" aria-label={group.label}>
+              <ul className="space-y-1" aria-label={group.label}>
                 {items.map((item) => {
                   const isActive = active === item.href;
                   const Icon = item.icon;
@@ -156,21 +156,24 @@ export function Sidebar({
                         onClick={onNavigate}
                         aria-current={isActive ? "page" : undefined}
                         title={collapsed ? item.label : undefined}
-                        className={`group relative flex items-center rounded-control text-body transition-colors duration-[var(--duration-micro)] ${
-                          collapsed ? "h-9 justify-center px-0" : "h-9 gap-2.5 px-2.5"
+                        className={`group relative flex h-11 items-center rounded-full text-body transition-colors duration-[var(--duration-micro)] ${
+                          collapsed ? "justify-center" : "gap-3 pr-3 pl-1.5"
                         } ${
                           isActive
-                            ? "bg-sidebar-selected font-semibold text-sidebar-ink"
+                            ? "bg-sidebar-selected bg-[linear-gradient(90deg,rgba(255,255,255,0.11),rgba(255,255,255,0.02))] font-medium text-sidebar-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
                             : "text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink"
                         }`}
                       >
-                        {isActive ? (
-                          <span
-                            aria-hidden
-                            className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-sidebar-active-rail"
-                          />
-                        ) : null}
-                        <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                        <span
+                          aria-hidden
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+                            isActive
+                              ? "bg-[#f1f1f1] text-[#161616]"
+                              : "bg-white/[0.05] group-hover:bg-white/[0.09]"
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" aria-hidden />
+                        </span>
                         {collapsed ? (
                           <span className="sr-only">{item.label}</span>
                         ) : (
@@ -186,7 +189,7 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="shrink-0 border-t border-sidebar-border">{footer}</div>
+      {footer ? <div className="shrink-0">{footer}</div> : null}
     </div>
   );
 }

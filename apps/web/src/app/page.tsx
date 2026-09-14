@@ -36,7 +36,7 @@ import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
 import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
 import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
-import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlay";
@@ -203,6 +203,14 @@ export default function CommandCenterPage() {
     </Panel>
   );
 
+  const verdict = (
+    <VerdictPanel
+      verdict={buildVerdict(attention, sources)}
+      onRefresh={reloadAll}
+      refreshing={refreshing}
+    />
+  );
+
   return (
     <PageFrame width="wide">
       <PageHeader
@@ -227,37 +235,57 @@ export default function CommandCenterPage() {
         }
       />
 
-      <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
-        <VerdictPanel
-          verdict={buildVerdict(attention, sources)}
-          onRefresh={reloadAll}
-          refreshing={refreshing}
-        />
-      </div>
-
-      <div className="mt-5 flex flex-col gap-5">
-        {isNarrow ? (
-          <>
+      {isNarrow ? (
+        <div className="flex flex-col gap-5">
+          <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
+            {verdict}
+          </div>
+          <Reveal delay={80}>{attentionQueueSection}</Reveal>
+          <Reveal delay={140}>{timelineSection}</Reveal>
+          <Reveal delay={200}>{healthMatrixSection}</Reveal>
+          <Reveal delay={260}>{capacityRiskSection}</Reveal>
+          <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
+        </div>
+      ) : (
+        /* The reference's composition: a narrow lead column (balance card,
+           contacts, widgets) beside a wide working column (the table). */
+        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,23rem)_minmax(0,1fr)]">
+          <div className="flex min-w-0 flex-col gap-5">
+            <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
+              {verdict}
+            </div>
+            <Reveal delay={80}>
+              <Panel flush>
+                <CatalogPanel resource={context} />
+              </Panel>
+            </Reveal>
+            <Reveal delay={140}>
+              <Panel flush>
+                <ServiceHealthPanel resource={services} />
+              </Panel>
+            </Reveal>
+            <Reveal delay={200}>{capacityRiskSection}</Reveal>
+          </div>
+          <div className="flex min-w-0 flex-col gap-5">
             <Reveal delay={80}>{attentionQueueSection}</Reveal>
             <Reveal delay={140}>{timelineSection}</Reveal>
             <Reveal delay={200}>{healthMatrixSection}</Reveal>
-            <Reveal delay={260}>{capacityRiskSection}</Reveal>
-            <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
-          </>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-              <Reveal delay={80}>{timelineSection}</Reveal>
-              <Reveal delay={140}>{attentionQueueSection}</Reveal>
+            <div className="grid grid-cols-1 items-start gap-5 2xl:grid-cols-2">
+              <Reveal delay={260}>
+                <Panel flush data-testid="estate-overview">
+                  <FleetPanel resource={clusters} />
+                </Panel>
+              </Reveal>
+              <Reveal delay={320}>
+                <Panel flush>
+                  <IntegrationsPanel resource={integrations} />
+                </Panel>
+              </Reveal>
             </div>
-            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-              <Reveal delay={200}>{healthMatrixSection}</Reveal>
-              <Reveal delay={260}>{capacityRiskSection}</Reveal>
-            </div>
-            <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
-          </>
-        )}
-      </div>
+            <Reveal delay={380}>{evidenceCoverageSection}</Reveal>
+          </div>
+        </div>
+      )}
 
       <Modal
         open={timelineDialogOpen}
@@ -267,34 +295,14 @@ export default function CommandCenterPage() {
         <OperationalTimeline lanes={timelineLanes} />
       </Modal>
 
-      <div className="mt-6">
-        <SectionHeader
-          title="Standing state"
-          description="What Drake is watching, and how current each source is."
-        />
-        {/* One compact surface (brief §14.8), not four equal-weight panels:
-            a single bordered/shadowed container holding four segments, each
-            still its own authorized-independently region (a denied fleet
-            read says so right here, without dimming the catalog beside it),
-            separated by hairline dividers rather than by a gap and a second
-            shadow each. */}
-        <Panel flush data-testid="estate-overview" className="mt-3 !p-0">
-          <div className="grid grid-cols-1 lg:grid-cols-2">
-            <Reveal delay={80}>
-              <FleetPanel resource={clusters} />
-            </Reveal>
-            <Reveal delay={130} className="border-t border-border lg:border-t-0 lg:border-l">
-              <IntegrationsPanel resource={integrations} />
-            </Reveal>
-            <Reveal delay={180} className="border-t border-border">
-              <CatalogPanel resource={context} />
-            </Reveal>
-            <Reveal delay={230} className="border-t border-border lg:border-l">
-              <ServiceHealthPanel resource={services} />
-            </Reveal>
-          </div>
-        </Panel>
-      </div>
+      {isNarrow ? (
+        <div className="mt-5 flex flex-col gap-5" data-testid="estate-overview">
+          <Panel flush><FleetPanel resource={clusters} /></Panel>
+          <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
+          <Panel flush><CatalogPanel resource={context} /></Panel>
+          <Panel flush><ServiceHealthPanel resource={services} /></Panel>
+        </div>
+      ) : null}
     </PageFrame>
   );
 }
@@ -362,7 +370,7 @@ function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand:
 
 function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
   return (
-    <div data-testid="catalog-counts" className="flex min-w-0 flex-col gap-3 p-4">
+    <div data-testid="catalog-counts" className="flex min-w-0 flex-col gap-4 p-6">
       <PanelHeader title="Your catalog" description="Records you are authorized to see." />
       {resource.loading && !resource.data ? (
         <LoadingSkeleton rows={2} />
@@ -372,8 +380,9 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
         <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
       ) : (
         /* A list of counts, not term/definition pairs: a <dl> whose children
-           are links is both wrong markup and an axe violation. */
-        <ul className="grid grid-cols-3 gap-2">
+           are links is both wrong markup and an axe violation. Each count
+           is its own big-number moment, not a cell in a dense row. */
+        <ul className="grid grid-cols-3 gap-3">
           {(
             [
               ["Projects", resource.data.projects, "/projects"],
@@ -383,10 +392,10 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
           ).map(([label, count, href]) => {
             const body = (
               <>
-                <span data-tabular className="text-title font-semibold text-ink">
+                <span data-tabular className="block text-metric font-semibold text-ink">
                   {count}
                 </span>
-                <span className="mt-0.5 block text-micro text-ink-muted">{label}</span>
+                <span className="mt-1 block text-caption text-ink-muted">{label}</span>
               </>
             );
             return (
@@ -394,12 +403,12 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
                 {href ? (
                   <Link
                     href={href}
-                    className="block rounded-control px-2 py-1.5 transition-colors hover:bg-surface-hover"
+                    className="block rounded-[1rem] border border-border bg-surface-2 px-4 py-4 transition-colors hover:bg-surface-3"
                   >
                     {body}
                   </Link>
                 ) : (
-                  <span className="block px-2 py-1.5">{body}</span>
+                  <span className="block rounded-[1rem] border border-border bg-surface-2 px-4 py-4">{body}</span>
                 )}
               </li>
             );
@@ -414,7 +423,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
   const rows = resource.data?.items ?? [];
   const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
   return (
-    <div data-testid="service-health-rollup" className="flex min-w-0 flex-col gap-3 p-4">
+    <div data-testid="service-health-rollup" className="flex min-w-0 flex-col gap-4 p-6">
       <PanelHeader
         title="Service health"
         description="Every tracked service, by the state its own binding reports."
@@ -493,71 +502,46 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
           <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
         </div>
       ) : clusters.length === 0 ? (
-        <div className="px-4 py-2">
+        <div className="px-6 py-3">
           <NotConfiguredState compact title="No clusters in scope" />
         </div>
       ) : (
-        <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
-        <table className="w-full text-body" data-tabular>
-          <caption className="sr-only">
-            Clusters in your scope, with agent connection and inventory freshness
-          </caption>
-          <thead className="bg-surface-2 text-caption text-ink-secondary">
-            <tr>
-              <th scope="col" className="px-4 py-1.5 text-left font-medium">
-                Cluster
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                Agent
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                Inventory
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                Healthy / total
-              </th>
-              <th scope="col" className="px-4 py-1.5 text-right font-medium">
-                Observed
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {clusters.map((cluster) => (
-              <tr key={cluster.id} className="border-t border-border hover:bg-surface-hover">
-                <td className="px-4 py-2">
-                  <Link
-                    href={`/clusters/${cluster.id}`}
-                    className="rounded font-medium text-ink hover:text-brand"
-                  >
-                    {cluster.display_name || cluster.cluster_ref}
-                  </Link>
-                  <span className="block font-mono text-micro text-ink-muted">
-                    {cluster.cluster_ref}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
+        <ul className="divide-y divide-border" data-tabular>
+          {clusters.map((cluster) => (
+            <li
+              key={cluster.id}
+              className="flex flex-wrap items-center gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
+            >
+              <div className="min-w-0 flex-1">
+                <Link
+                  href={`/clusters/${cluster.id}`}
+                  className="font-semibold text-ink hover:text-brand"
+                >
+                  {cluster.display_name || cluster.cluster_ref}
+                </Link>
+                <span className="mt-0.5 block font-mono text-micro text-ink-muted">
+                  {cluster.cluster_ref}
+                </span>
+                <div className="mt-2 flex flex-wrap items-center gap-4">
                   <StatusDot
                     status={toneForHealth(cluster.operational?.agent)}
                     label={humanize(cluster.operational?.agent ?? "unknown")}
                   />
-                </td>
-                <td className="px-3 py-2">
                   <StatusDot
                     status={toneForHealth(cluster.operational?.inventory)}
                     label={humanize(cluster.operational?.inventory ?? "unknown")}
                   />
-                </td>
-                <td className="px-3 py-2">
-                  <FleetCounts cluster={cluster} />
-                </td>
-                <td className="px-4 py-2 text-right text-micro text-ink-muted">
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <FleetCounts cluster={cluster} />
+                <span className="text-micro text-ink-muted">
                   <RelativeTime value={cluster.as_of} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

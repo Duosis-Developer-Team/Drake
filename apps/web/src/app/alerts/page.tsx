@@ -56,7 +56,7 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
   return (
     <li
       data-testid={`alert-row-${alert.alert_name}`}
-      className="flex flex-wrap items-start gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -171,7 +171,7 @@ function AlertsInner() {
           flush
           className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
         >
-          <div className="border-b border-border px-4 py-3">
+          <div className="border-b border-border px-6 py-4">
             {/* Fixed vocabularies only. There is no free-text field here, and
                 no way to type a matcher, a regex or a PromQL fragment. */}
             <FilterBar>
@@ -193,11 +193,11 @@ function AlertsInner() {
           </div>
 
           {page.state === "loading" ? (
-            <div className="px-4 py-4">
+            <div className="px-6 py-5">
               <DataState kind="loading" />
             </div>
           ) : page.state === "error" ? (
-            <div className="px-4 py-2">
+            <div className="px-6 py-3">
               {page.notFound ? (
                 <DataState kind="permission-denied" />
               ) : (
@@ -205,7 +205,7 @@ function AlertsInner() {
               )}
             </div>
           ) : page.data.items.length === 0 ? (
-            <div className="px-4 py-2">
+            <div className="px-6 py-3">
               <DataState
                 kind="empty"
                 title="No alerts match"
@@ -221,7 +221,7 @@ function AlertsInner() {
               </ul>
               {page.data.items.some((alert) => alert.mapping_state !== "mapped") ? (
                 <div
-                  className="space-y-1.5 border-t border-border px-4 py-3"
+                  className="space-y-1.5 border-t border-border px-6 py-4"
                   data-testid="unmapped-note"
                 >
                   <p className="text-caption font-medium text-ink">Unmapped alerts</p>

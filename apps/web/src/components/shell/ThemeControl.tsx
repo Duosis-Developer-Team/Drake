@@ -32,7 +32,7 @@ const OPTIONS = [
 ];
 
 export function ThemeControl({ compact = false }: { compact?: boolean }) {
-  const [preference, setPreference] = useState<ThemePreference>("system");
+  const [preference, setPreference] = useState<ThemePreference>("dark");
 
   useEffect(() => {
     setPreference(readPreference());

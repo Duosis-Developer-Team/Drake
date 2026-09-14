@@ -16,37 +16,31 @@ import { toneSpec } from "@/lib/design/status";
 
 export type PanelTone = "default" | StatusTone;
 
+/** Status on a PayFlow-style card is a quiet tinted edge, not a thick left
+ *  rail — a 4px rail on a 24px radius bends into a crescent and reads broken. */
 const RAIL: Partial<Record<PanelTone, string>> = {
-  critical: "border-l-4 border-l-critical",
-  warning: "border-l-4 border-l-warning",
-  stale: "border-l-4 border-l-stale",
-  unknown: "border-l-4 border-l-unknown",
-  success: "border-l-4 border-l-healthy",
-  info: "border-l-4 border-l-info",
+  critical: "ring-1 ring-inset ring-critical/45",
+  warning: "ring-1 ring-inset ring-warning/40",
+  stale: "ring-1 ring-inset ring-stale/40",
+  unknown: "",
+  success: "",
+  info: "",
 };
 
 const RADIUS = {
-  panel: "rounded-panel",
-  canvas: "rounded-canvas",
+  panel: "rounded-[1.5rem]",
+  canvas: "rounded-[1.75rem]",
 } as const;
 
 export type PanelSurface = "default" | "hero";
 
-/** The obsidian rail's surface, lifted onto a panel. Theme-invariant on
- *  purpose — see globals.css's file header — so the one dominant surface per
- *  screen (the Command Center verdict) reads as a deliberate hero moment
- *  rather than just another bordered box, in both themes (brief §14.2). Its
- *  own text must use `sidebar-ink`/`sidebar-ink-muted`, never `ink`/
- *  `ink-secondary` — those track the *page* theme, not this surface's fixed
- *  obsidian one. */
+/** `hero` is the reference's dark "Total Balance" card: a lit gradient slab
+ *  meant to hold one lighter card-in-card. Theme-invariant, so its own text
+ *  must use `sidebar-ink`/`sidebar-ink-muted`. */
 const SURFACE: Record<PanelSurface, string> = {
-  // The lift on hover is subtle on purpose — a hairline of translate and a
-  // deeper shadow, never a scale — so it reads as "this surface has depth"
-  // rather than "this is a button". The hero surface skips it: it is the
-  // one fixed anchor per screen, not another hoverable tile among many.
-  default:
-    "border border-border bg-surface shadow-panel transition-[transform,box-shadow] duration-[var(--duration-control)] ease-[var(--ease-standard)] hover:-translate-y-0.5 hover:shadow-overlay",
-  hero: "border border-sidebar-border bg-sidebar shadow-overlay",
+  default: "border border-border bg-surface shadow-panel",
+  hero:
+    "border border-white/[0.07] bg-sidebar bg-[radial-gradient(120%_140%_at_0%_0%,#343434_0%,#1c1c1c_45%,#121212_100%)] shadow-overlay",
 };
 
 export function Panel({
@@ -89,7 +83,7 @@ export function Panel({
       // sideways instead of the table's own scroller doing it.
       className={`flex min-w-0 flex-col ${RADIUS[radius]} ${SURFACE[surface]} [&>*]:min-w-0 ${
         surface === "default" ? RAIL[tone] ?? "" : ""
-      } ${flush ? "" : "gap-3 p-4"} ${className}`}
+      } ${flush ? "" : "gap-5 p-6"} ${className}`}
       {...rest}
     >
       {children}
@@ -126,15 +120,15 @@ export function PanelHeader({
   return (
     <div
       className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${
-        flush ? "border-b border-border px-4 py-3" : ""
+        flush ? "border-b border-border px-6 pt-5 pb-4" : ""
       }`}
     >
       <div className="min-w-0">
-        <Heading id={id} className="text-section font-semibold text-ink">
+        <Heading id={id} className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
           {title}
         </Heading>
         {description ? (
-          <p className="mt-0.5 text-caption text-ink-secondary">{description}</p>
+          <p className="mt-0.5 text-caption text-ink-muted">{description}</p>
         ) : null}
         {meta ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
@@ -156,12 +150,12 @@ export function PanelBody({
   className?: string;
   flush?: boolean;
 }) {
-  return <div className={`min-w-0 flex-1 ${flush ? "" : "px-4 py-3"} ${className}`}>{children}</div>;
+  return <div className={`min-w-0 flex-1 ${flush ? "" : "px-6 py-4"} ${className}`}>{children}</div>;
 }
 
 export function PanelFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-t border-border px-4 py-2 text-micro text-ink-muted">{children}</div>
+    <div className="border-t border-border px-6 py-3.5 text-micro text-ink-muted">{children}</div>
   );
 }
 
@@ -183,7 +177,7 @@ export function SectionHeader({
   id?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-border pb-2">
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pb-1">
       <div className="min-w-0">
         <h2 id={id} className="text-section font-semibold text-ink">
           {title}

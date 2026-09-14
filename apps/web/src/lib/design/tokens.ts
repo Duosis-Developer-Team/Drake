@@ -74,12 +74,12 @@ const SIDEBAR_TOKENS: Pick<
   | "sidebar-text-muted"
   | "sidebar-active-rail"
 > = {
-  "sidebar-canvas": "#181818",
-  "sidebar-surface-hover": "#202020",
-  "sidebar-surface-selected": "#252525",
-  "sidebar-border": "#292929",
+  "sidebar-canvas": "#161616",
+  "sidebar-surface-hover": "#1f1f1f",
+  "sidebar-surface-selected": "#262626",
+  "sidebar-border": "#232323",
   "sidebar-text": "#f1f1f1",
-  "sidebar-text-muted": "#818181",
+  "sidebar-text-muted": "#8a8a8a",
   "sidebar-active-rail": "#5998e5",
 };
 
@@ -124,15 +124,15 @@ export const LIGHT_TOKENS: Tokens = {
 };
 
 export const DARK_TOKENS: Tokens = {
-  canvas: "#101010",
-  "surface-1": "#1e1e1e",
-  "surface-2": "#282828",
-  "surface-3": "#2e2e2e",
-  "surface-elevated": "#383838",
-  "surface-hover": "#232323",
-  "surface-selected": "#404040",
-  "border-subtle": "#313131",
-  "border-strong": "#696969",
+  canvas: "#141414",
+  "surface-1": "#1b1b1b",
+  "surface-2": "#222222",
+  "surface-3": "#292929",
+  "surface-elevated": "#303030",
+  "surface-hover": "#212121",
+  "surface-selected": "#2c2c2c",
+  "border-subtle": "#262626",
+  "border-strong": "#6a6a6a",
   "text-primary": "#f1f1f1",
   "text-secondary": "#b9b9b9",
   "text-muted": "#969696",
@@ -140,12 +140,12 @@ export const DARK_TOKENS: Tokens = {
   brand: "#f1f1f1",
   "brand-hover": "#ffffff",
   "brand-active": "#d7d7d7",
-  "brand-soft": "#262626",
+  "brand-soft": "#242424",
   "brand-accent": "#5998e5",
   "focus-ring": "#5998e5",
-  "chart-grid": "#232323",
+  "chart-grid": "#242424",
   "chart-axis": "#b9b9b9",
-  "chart-tooltip": "#181818",
+  "chart-tooltip": "#0c0c0c",
   "chart-tooltip-text": "#f1f1f1",
   "status-success": "#4588e1",
   "status-info": "#6c7eea",

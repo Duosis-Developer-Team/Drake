@@ -58,7 +58,7 @@ function SloRow({ slo }: { slo: Slo }) {
   return (
     <li
       data-testid={`slo-row-${slo.slo_key}`}
-      className="flex flex-wrap items-start gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -240,7 +240,7 @@ function SloInner() {
                   ),
               ) ? (
                 <div
-                  className="space-y-1.5 border-t border-border px-4 py-3"
+                  className="space-y-1.5 border-t border-border px-6 py-4"
                   data-testid="slo-caveats"
                 >
                   {page.data.items

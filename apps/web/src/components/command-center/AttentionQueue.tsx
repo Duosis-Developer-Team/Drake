@@ -32,7 +32,7 @@ function AttentionRow({ item }: { item: AttentionItem }) {
   return (
     <Link
       href={item.href}
-      className={`flex items-start gap-3 border-l-2 px-4 py-2.5 transition-colors hover:bg-surface-hover ${spec.rail}`}
+      className="flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-surface-hover"
     >
       <Icon aria-hidden className={`mt-0.5 h-4 w-4 shrink-0 ${spec.text}`} />
       <span className="min-w-0 flex-1">

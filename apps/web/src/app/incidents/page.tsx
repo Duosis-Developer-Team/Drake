@@ -47,7 +47,7 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
   return (
     <li
       data-testid={`incident-row-${incident.service_key}`}
-      className="flex flex-wrap items-start gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
     >
       <ToneAvatar status="critical" />
       <div className="min-w-0 flex-1">
@@ -237,7 +237,7 @@ function IncidentTable() {
               <IncidentRow key={incident.id} incident={incident} />
             ))}
           </ul>
-          <p className="border-t border-border px-4 py-3 text-micro text-ink-muted">
+          <p className="border-t border-border px-6 py-4 text-micro text-ink-muted">
             Showing {page.data.items.length} of {page.data.total} incidents in your
             authorized scope.
           </p>

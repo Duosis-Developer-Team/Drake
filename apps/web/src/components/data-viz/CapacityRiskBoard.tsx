@@ -28,7 +28,7 @@ export function CapacityRiskBoard({
   return (
     <div data-testid="capacity-risk-board">
       {ranked.length === 0 ? (
-        <p className="px-1 py-2 text-caption text-ink-secondary" data-testid="capacity-risk-empty">
+        <p className="px-6 py-5 text-caption text-ink-secondary" data-testid="capacity-risk-empty">
           No certificate or PVC risk reported by the sources checked.
         </p>
       ) : (
@@ -40,7 +40,7 @@ export function CapacityRiskBoard({
               <li key={item.key}>
                 <Link
                   href={item.href}
-                  className={`flex items-start gap-3 border-l-2 px-3 py-2.5 transition-colors hover:bg-surface-hover ${spec.rail}`}
+                  className="flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-surface-hover"
                 >
                   <Icon aria-hidden className={`mt-0.5 h-4 w-4 shrink-0 ${spec.text}`} />
                   <div className="min-w-0 flex-1">

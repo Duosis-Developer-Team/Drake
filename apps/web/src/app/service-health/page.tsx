@@ -43,7 +43,7 @@ function ServiceRow({ row }: { row: ServiceHealthRow }) {
   return (
     <li
       data-testid={`service-row-${row.service_key}`}
-      className="flex flex-wrap items-start gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -161,7 +161,7 @@ function ServiceHealthTable() {
                 <ServiceRow key={row.environment_service_id} row={row} />
               ))}
             </ul>
-            <p className="border-t border-border px-4 py-3 text-micro text-ink-muted">
+            <p className="border-t border-border px-6 py-4 text-micro text-ink-muted">
               Showing {data.items.length} of {data.total} services in your authorized scope.
             </p>
           </Panel>
