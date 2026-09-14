@@ -24,7 +24,7 @@
  * most dangerous thing a monitoring product can render.
  */
 
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, Boxes, FolderKanban, Layers, RefreshCw, Server } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
@@ -388,17 +388,20 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
         <ul className="mt-auto grid grid-cols-3 gap-3">
           {(
             [
-              ["Projects", resource.data.projects, "/projects"],
-              ["Environments", resource.data.environments, null],
-              ["Clusters", resource.data.clusters, "/clusters"],
+              ["Projects", resource.data.projects, "/projects", FolderKanban],
+              ["Environments", resource.data.environments, null, Layers],
+              ["Clusters", resource.data.clusters, "/clusters", Boxes],
             ] as const
-          ).map(([label, count, href]) => {
+          ).map(([label, count, href, TileIcon]) => {
             const body = (
               <>
-                <span data-tabular className="block text-[2.5rem] leading-none font-semibold tracking-[-0.03em] text-ink">
+                <span aria-hidden className="mb-auto flex h-10 w-10 items-center justify-center rounded-full bg-surface text-ink-secondary">
+                  <TileIcon className="h-4 w-4" />
+                </span>
+                <span data-tabular className="mt-6 block text-[2.5rem] leading-none font-semibold tracking-[-0.03em] text-ink">
                   {count}
                 </span>
-                <span className="mt-1 block text-caption text-ink-muted">{label}</span>
+                <span className="mt-1.5 block text-caption text-ink-muted">{label}</span>
               </>
             );
             return (
@@ -406,12 +409,12 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
                 {href ? (
                   <Link
                     href={href}
-                    className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 px-5 pt-10 pb-5 transition-colors hover:bg-surface-3"
+                    className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 min-h-40 px-5 pt-5 pb-5 transition-colors hover:bg-surface-3"
                   >
                     {body}
                   </Link>
                 ) : (
-                  <span className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 px-5 pt-10 pb-5">{body}</span>
+                  <span className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 min-h-40 px-5 pt-5 pb-5">{body}</span>
                 )}
               </li>
             );
@@ -446,6 +449,8 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
       ) : (
         <>
           <Donut
+            size={168}
+            thickness={18}
             label="Service health"
             centerLabel={`${rows.length}`}
             slices={tally.map((entry) => ({
@@ -513,8 +518,11 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
           {clusters.map((cluster) => (
             <li
               key={cluster.id}
-              className="flex flex-wrap items-center gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
+              className="flex flex-wrap items-center gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
             >
+              <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink-secondary">
+                <Server className="h-5 w-5" />
+              </span>
               <div className="min-w-0 flex-1">
                 <Link
                   href={`/clusters/${cluster.id}`}
@@ -525,15 +533,21 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
                 <span className="mt-0.5 block font-mono text-micro text-ink-muted">
                   {cluster.cluster_ref}
                 </span>
-                <div className="mt-2 flex flex-wrap items-center gap-4">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
+                  <span className="text-ink-muted">Agent</span>
                   <StatusDot
                     status={toneForHealth(cluster.operational?.agent)}
                     label={humanize(cluster.operational?.agent ?? "unknown")}
                   />
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
+                  <span className="text-ink-muted">Inventory</span>
                   <StatusDot
                     status={toneForHealth(cluster.operational?.inventory)}
                     label={humanize(cluster.operational?.inventory ?? "unknown")}
                   />
+                  </span>
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -669,10 +683,10 @@ function IntegrationsPanel({
       ) : (
         <>
           {all.length > 0 ? (
-            <div className="border-b border-border px-4 py-3">
+            <div className="border-b border-border px-7 py-6">
               <Donut
-                size={110}
-                thickness={12}
+                size={148}
+                thickness={16}
                 label="Integrations by state"
                 centerLabel={`${all.length}`}
                 slices={[
@@ -695,7 +709,7 @@ function IntegrationsPanel({
             {sorted.map((integration) => (
               <li
                 key={`${integration.integration_type}:${integration.scope.ref}`}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-7 py-4"
               >
                 <span className="min-w-0">
                   <span className="block truncate text-body text-ink">

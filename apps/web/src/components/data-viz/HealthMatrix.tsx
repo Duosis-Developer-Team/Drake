@@ -46,7 +46,7 @@ function Swatch({
   if (!cell) {
     return (
       <span
-        className="text-micro text-ink-muted"
+        className="flex w-full items-center justify-center rounded-[0.875rem] border border-dashed border-border py-3 text-micro text-ink-muted"
         aria-label={`${projectKey} / ${environmentKey}: no services here`}
       >
         —
@@ -60,13 +60,15 @@ function Swatch({
     <Link
       href={href}
       aria-label={`${projectKey} / ${environmentKey}: worst status ${spec.label}, ${count} service${count === 1 ? "" : "s"} — open service health`}
-      className={`inline-flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-caption font-medium transition-opacity hover:opacity-80 ${spec.chip}`}
+      className={`flex w-full items-center justify-between gap-3 rounded-[0.875rem] px-3.5 py-3 text-caption font-medium transition-[opacity,transform] hover:-translate-y-px hover:opacity-90 ${spec.chip}`}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${spec.dot}`} />
+      <span className="flex min-w-0 items-center gap-2">
+        <span aria-hidden className={`h-2.5 w-2.5 shrink-0 rounded-full ${spec.dot}`} />
         <span className="truncate">{spec.label}</span>
       </span>
-      <span className="text-micro opacity-70">({count})</span>
+      <span className="flex items-baseline gap-1">
+        <span data-tabular className="rounded-full bg-surface/70 px-2 py-0.5 text-micro font-semibold">({count})</span>
+      </span>
     </Link>
   );
 }
@@ -78,7 +80,7 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
 
   return (
     <div className="hidden overflow-x-auto xl:block" data-testid="health-matrix-grid">
-      <table className="w-full border-collapse text-caption">
+      <table className="w-full border-separate border-spacing-0 text-caption">
         <caption className="sr-only">Service health by project and environment</caption>
         <thead>
           <tr>
@@ -87,7 +89,7 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
               <th
                 key={project}
                 scope="col"
-                className="border-b border-border px-3 py-1.5 text-left font-medium text-ink-secondary"
+                className="px-2 pb-2 text-left text-micro font-semibold tracking-[0.08em] text-ink-muted uppercase"
               >
                 {project}
               </th>
@@ -97,7 +99,7 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
         <tbody>
           {environments.map((environment) => (
             <tr key={environment}>
-              <th scope="row" className="py-1.5 pr-3 text-left font-medium text-ink-secondary">
+              <th scope="row" className="py-1.5 pr-4 text-left font-medium text-ink">
                 {environment}
               </th>
               {projects.map((project) => (

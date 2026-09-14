@@ -13,7 +13,7 @@
  * rather than the free-text `context` label.
  */
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 
 import { Panel, PanelHeader } from "@/components/ui/Panel";
@@ -32,18 +32,20 @@ function AttentionRow({ item }: { item: AttentionItem }) {
   return (
     <Link
       href={item.href}
-      className="flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-surface-hover"
+      className="flex items-center gap-4 px-7 py-4 transition-colors hover:bg-surface-hover"
     >
-      <Icon aria-hidden className={`mt-0.5 h-4 w-4 shrink-0 ${spec.text}`} />
+      <span aria-hidden className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${spec.chip}`}>
+        <Icon className="h-4 w-4" />
+      </span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-body font-medium text-ink">{item.subject}</span>
-          <span className={`text-caption ${spec.text}`}>{item.state}</span>
-        </span>
+        <span className="block truncate text-body font-semibold text-ink">{item.subject}</span>
         <span className="mt-0.5 block truncate text-micro text-ink-muted">{item.context}</span>
       </span>
+      <span className={`hidden shrink-0 rounded-full px-2.5 py-1 text-micro font-medium sm:inline-flex ${spec.chip}`}>
+        {item.state}
+      </span>
       {item.asOf ? (
-        <span className="shrink-0 text-micro text-ink-muted">
+        <span className="w-14 shrink-0 text-right text-micro text-ink-muted">
           <RelativeTime value={item.asOf} />
         </span>
       ) : null}
@@ -59,6 +61,11 @@ export function AttentionQueue({
   loading: boolean;
 }) {
   const groups = groupByRootCause(items);
+  const tally = (["critical", "warning"] as const).map((tone) => ({
+    tone,
+    count: items.filter((item) => item.tone === tone).length,
+  }));
+  const otherCount = items.length - tally.reduce((sum, entry) => sum + entry.count, 0);
 
   return (
     <Panel flush data-testid="needs-attention">
@@ -80,12 +87,37 @@ export function AttentionQueue({
         }
       />
 
+      {!loading ? (
+        <div className="grid grid-cols-3 gap-3 border-b border-border px-7 py-5">
+          {[
+            ...tally.map((entry) => ({ key: entry.tone, label: toneSpec(entry.tone).label, count: entry.count, spec: toneSpec(entry.tone) })),
+            { key: "other", label: "Can't see", count: otherCount, spec: toneSpec("unknown") },
+          ].map((entry) => (
+            <div key={entry.key} className="rounded-[1rem] bg-surface-2 px-4 py-3">
+              <span className="flex items-center gap-2 text-micro text-ink-muted">
+                <span aria-hidden className={`h-2 w-2 rounded-full ${entry.spec.dot}`} />
+                {entry.label}
+              </span>
+              <span
+                data-tabular
+                className={`mt-1 block text-[1.75rem] leading-none font-semibold tracking-[-0.03em] ${entry.count > 0 ? entry.spec.text : "text-ink-muted"}`}
+              >
+                {entry.count}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {loading ? (
-        <div className="px-4 py-4">
+        <div className="px-7 py-5">
           <LoadingSkeleton variant="table" rows={4} label="Loading attention list" />
         </div>
       ) : items.length === 0 ? (
-        <div className="px-4 py-5" data-testid="attention-empty">
+        <div className="flex flex-col items-center px-7 py-10 text-center" data-testid="attention-empty">
+          <span aria-hidden className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-healthy-soft">
+            <CheckCircle2 className="h-7 w-7 text-healthy" />
+          </span>
           <p className="text-body font-medium text-ink">Nothing is currently flagged.</p>
           <p className="mt-1 max-w-prose text-caption text-ink-secondary">
             This is not a statement that the platform is healthy — it is the result of the
@@ -107,7 +139,7 @@ export function AttentionQueue({
             return (
               <li key={testId} data-testid={testId}>
                 <details open className="group">
-                  <summary className="cursor-pointer list-none px-4 py-2 text-micro text-ink-muted hover:bg-surface-hover">
+                  <summary className="cursor-pointer list-none px-7 py-2.5 text-micro text-ink-muted hover:bg-surface-hover">
                     {group.length} related signals about{" "}
                     <span className="font-medium text-ink-secondary">{group[0].subject}</span> —
                     shown together, not asserted as one cause

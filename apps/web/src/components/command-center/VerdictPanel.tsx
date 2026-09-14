@@ -59,7 +59,8 @@ export function VerdictPanel({
 
       {/* Card-in-card: the one bright surface on the screen. */}
       <div className="flex flex-1 flex-col rounded-[1.25rem] bg-[#f4f4f4] text-[#161616] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.6)]">
-        <div className="flex-1 px-6 pt-5 pb-6">
+        <div className="flex flex-1 flex-wrap items-center justify-between gap-6 px-6 pt-5 pb-6">
+          <div className="min-w-0 flex-1">
           <p className="text-caption text-[#6b6b6b]">Flagged right now</p>
           <p className="mt-1 flex items-baseline gap-2">
             <span data-tabular className={`text-[4rem] leading-none font-semibold tracking-[-0.04em] ${numberTone}`}>
@@ -106,6 +107,8 @@ export function VerdictPanel({
               </span>
             ) : null}
           </div>
+          </div>
+          <SourceRing answered={verdict.sourcesAnswered} total={verdict.sourcesTotal} />
         </div>
         <div className="grid grid-cols-2 border-t border-[#e2e2e2] text-body font-medium">
           <button
@@ -128,5 +131,37 @@ export function VerdictPanel({
         </div>
       </div>
     </Panel>
+  );
+}
+
+/** Sources answered as a ring — the share of the estate this verdict can see. */
+function SourceRing({ answered, total }: { answered: number; total: number }) {
+  const size = 132;
+  const stroke = 12;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const share = total > 0 ? answered / total : 0;
+  return (
+    <div aria-hidden className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#e2e2e2" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#161616"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${circumference * share} ${circumference}`}
+        />
+      </svg>
+      <span className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl leading-none font-semibold tracking-tight text-[#161616]">
+          {answered}/{total}
+        </span>
+        <span className="mt-1 text-micro text-[#6b6b6b]">sources</span>
+      </span>
+    </div>
   );
 }

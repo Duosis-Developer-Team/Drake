@@ -119,11 +119,11 @@ export function PanelHeader({
   const Heading = `h${level}` as const;
   return (
     <div
-      className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${
+      className={`flex items-start justify-between gap-x-4 gap-y-2 ${
         flush ? "border-b border-border px-7 pt-6 pb-5" : ""
       }`}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <Heading id={id} className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
           {title}
         </Heading>

@@ -18,11 +18,19 @@
  * label, not only in the accessible name a mouse user never sees.
  */
 
+import { Bell, HeartPulse, Rocket, Siren, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 
 import { toneSpec } from "@/lib/design/status";
 import type { TimelineLane } from "@/lib/view-models/timeline";
+
+function laneIcon(key: string): LucideIcon {
+  if (key.includes("incident")) return Siren;
+  if (key.includes("alert")) return Bell;
+  if (key.includes("deploy")) return Rocket;
+  return HeartPulse;
+}
 
 function formatClock(at: string): string {
   const date = new Date(at);
@@ -87,7 +95,7 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
     <div data-testid="operational-timeline">
       {min !== null && max !== null ? (
         <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-          <span className="sm:w-44 sm:shrink-0" aria-hidden />
+          <span className="sm:w-40 sm:shrink-0 xl:w-44" aria-hidden />
           <div
             className="flex flex-1 items-center justify-between text-micro text-ink-muted"
             data-testid="timeline-axis"
@@ -97,65 +105,82 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
           </div>
         </div>
       ) : null}
-      <div className="space-y-3 sm:space-y-2.5">
-        {lanes.map((lane) => (
-          <div key={lane.key} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-            <span className="text-caption text-ink-secondary sm:w-44 sm:shrink-0 sm:truncate" title={lane.label}>
-              {lane.label}
-            </span>
-            {!lane.historyAvailable ? (
-              <span
-                className="flex-1 text-micro text-ink-muted"
-                data-testid={`lane-unavailable-${lane.key}`}
-              >
-                History unavailable — Drake has no state-transition source for this lane yet.
+      <div className="space-y-2">
+        {lanes.map((lane) => {
+          const Icon = laneIcon(lane.key);
+          return (
+            <div
+              key={lane.key}
+              className="flex flex-col gap-2 rounded-[1rem] bg-surface-2 p-3 sm:flex-row sm:items-center sm:gap-4"
+            >
+              <span className="flex items-center gap-3 sm:w-40 sm:shrink-0 xl:w-44">
+                <span
+                  aria-hidden
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-ink-secondary"
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 truncate text-caption font-medium text-ink" title={lane.label}>
+                  {lane.label}
+                </span>
+                <span
+                  data-tabular
+                  className="ml-auto rounded-full bg-surface px-2 py-0.5 text-micro font-semibold text-ink-secondary sm:ml-0"
+                >
+                  {lane.historyAvailable ? lane.events.length : "—"}
+                </span>
               </span>
-            ) : lane.events.length === 0 ? (
-              <span className="flex-1 text-micro text-ink-muted">
-                No events in the selected window.
-              </span>
-            ) : (
-              <div className="relative h-6 flex-1 rounded-full bg-surface-3">
-                {lane.events.map((event) => {
-                  const spec = toneSpec(event.tone);
-                  const position = positionOf(event.at);
-                  return (
-                    <span
-                      key={event.id}
-                      className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
-                      style={{ left: `${position}%` }}
-                    >
-                      <Link
-                        href={event.href}
-                        aria-label={`${event.label}, ${formatClock(event.at)}`}
-                        className={`block h-3 w-3 rounded-full ring-2 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot}`}
-                      />
-                      {/* Visible on hover AND keyboard focus — the accessible
-                          name above covers screen readers, but a sighted
-                          mouse or keyboard user reading the track needs the
-                          same "what and when" without guessing from position.
-                          A dot near either edge anchors the tooltip to that
-                          edge instead of centering it, so it extends inward
-                          rather than off the side of a narrow track; a
-                          bounded width with normal wrapping is the fallback
-                          for whatever that still doesn't fit. */}
+              {!lane.historyAvailable ? (
+                <span
+                  className="block h-8 min-w-0 flex-1 truncate rounded-full border border-dashed border-border px-4 text-micro leading-[1.875rem] text-ink-muted" title="History unavailable — Drake has no state-transition source for this lane yet."
+                  data-testid={`lane-unavailable-${lane.key}`}
+                >
+                  History unavailable — Drake has no state-transition source for this lane yet.
+                </span>
+              ) : lane.events.length === 0 ? (
+                <span className="relative flex h-8 min-w-0 flex-1 items-center overflow-hidden rounded-full bg-surface px-4 text-micro text-ink-muted">
+                  <span
+                    aria-hidden
+                    className="absolute inset-x-4 top-1/2 h-px -translate-y-1/2 bg-[repeating-linear-gradient(90deg,var(--border-subtle)_0_6px,transparent_6px_12px)]"
+                  />
+                  <span className="relative truncate bg-surface pr-3">No events in the selected window.</span>
+                </span>
+              ) : (
+                <div className="relative h-8 flex-1 rounded-full bg-surface">
+                  {lane.events.map((event) => {
+                    const spec = toneSpec(event.tone);
+                    const position = positionOf(event.at);
+                    return (
                       <span
-                        role="tooltip"
-                        className={`pointer-events-none absolute bottom-full z-10 mb-1.5 max-w-[12rem] whitespace-normal rounded-control bg-ink px-2 py-1 text-micro text-ink-inverse opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${tooltipAlignmentClass(position)}`}
+                        key={event.id}
+                        className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
+                        style={{ left: `clamp(0.75rem, ${position}%, calc(100% - 0.75rem))` }}
                       >
-                        {event.label} — {formatClock(event.at)}
+                        <Link
+                          href={event.href}
+                          aria-label={`${event.label}, ${formatClock(event.at)}`}
+                          className={`block h-3.5 w-3.5 rounded-full ring-4 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot}`}
+                        />
+                        {/* Visible on hover AND keyboard focus; anchored to the
+                            near edge so it never runs off a narrow track. */}
+                        <span
+                          role="tooltip"
+                          className={`pointer-events-none absolute bottom-full z-10 mb-2 max-w-[12rem] whitespace-normal rounded-control bg-ink px-2 py-1 text-micro text-ink-inverse opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${tooltipAlignmentClass(position)}`}
+                        >
+                          {event.label} — {formatClock(event.at)}
+                        </span>
                       </span>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <details
-        className="mt-3 border-t border-border pt-2"
+        className="mt-4 border-t border-border pt-3"
         open={tableOpen}
         onToggle={(event) => setTableOpen(event.currentTarget.open)}
       >

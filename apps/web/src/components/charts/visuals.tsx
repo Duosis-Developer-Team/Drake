@@ -224,88 +224,97 @@ export function Donut({
   let offset = 0;
   const drawn = slices.filter((slice) => slice.value > 0);
 
-  return (
-    <figure className="flex min-w-0 flex-wrap items-center gap-4" data-testid="donut">
-      <svg
-        viewBox={`0 0 ${size} ${size}`}
-        width={size}
-        height={size}
-        role="img"
-        aria-label={`${label}: ${drawn.map((s) => `${s.name} ${s.value}`).join(", ")}`}
-        className="shrink-0 -rotate-90"
-      >
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="var(--surface-3)"
-          strokeWidth={thickness}
-        />
-        {drawn.map((slice) => {
-          const length = (slice.value / total) * circumference;
-          // A 2px surface gap so adjacent fills never blend into one another.
-          const gap = drawn.length > 1 ? Math.min(2, length / 2) : 0;
-          const dash = `${Math.max(0, length - gap)} ${circumference - length + gap}`;
-          const element = (
-            <circle
-              key={slice.name}
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              fill="none"
-              stroke={
-                slice.token
-                  ? `var(${slice.token})`
-                  : slice.tone
-                    ? `var(${toneSpec(slice.tone).token})`
-                    : "var(--series-1)"
-              }
-              strokeWidth={thickness}
-              strokeDasharray={dash}
-              strokeDashoffset={-offset}
-            />
-          );
-          offset += length;
-          return element;
-        })}
-      </svg>
+  const colorOf = (slice: Slice) =>
+    slice.token
+      ? `var(${slice.token})`
+      : slice.tone
+        ? `var(${toneSpec(slice.tone).token})`
+        : "var(--series-1)";
 
-      <figcaption className="min-w-0">
-        {centerLabel ? (
-          <span className="block text-title font-semibold text-ink" data-tabular>
-            {centerLabel}
-          </span>
-        ) : (
-          <span className="block text-title font-semibold text-ink" data-tabular>
-            {total}
-          </span>
-        )}
-        {legend ? (
-          <ul className="mt-1 space-y-0.5">
-            {slices.map((slice) => (
-              <li
+  return (
+    <figure className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-5" data-testid="donut">
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <svg
+          viewBox={`0 0 ${size} ${size}`}
+          width={size}
+          height={size}
+          role="img"
+          aria-label={`${label}: ${drawn.map((s) => `${s.name} ${s.value}`).join(", ")}`}
+          className="-rotate-90"
+        >
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="var(--surface-3)"
+            strokeWidth={thickness}
+          />
+          {drawn.map((slice) => {
+            const length = (slice.value / total) * circumference;
+            // A surface gap so adjacent fills never blend into one another.
+            const gap = drawn.length > 1 ? Math.min(4, length / 2) : 0;
+            const dash = `${Math.max(0, length - gap)} ${circumference - length + gap}`;
+            const element = (
+              <circle
                 key={slice.name}
-                className="flex items-center gap-1.5 text-micro text-ink-secondary"
-              >
-                <span
-                  aria-hidden
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{
-                    background: slice.token
-                      ? `var(${slice.token})`
-                      : slice.tone
-                        ? `var(${toneSpec(slice.tone).token})`
-                        : "var(--series-1)",
-                    opacity: slice.value === 0 ? 0.35 : 1,
-                  }}
-                />
-                <span className="truncate">{slice.name}</span>
-                <span data-tabular className="ml-auto pl-2 font-medium text-ink">
-                  {slice.value}
-                </span>
-              </li>
-            ))}
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                fill="none"
+                stroke={colorOf(slice)}
+                strokeWidth={thickness}
+                strokeDasharray={dash}
+                strokeDashoffset={-offset}
+                strokeLinecap={drawn.length > 1 ? "butt" : "round"}
+              />
+            );
+            offset += length;
+            return element;
+          })}
+        </svg>
+        {/* The total sits inside the ring, where the eye already is. */}
+        <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span
+            className="block text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-ink"
+            data-tabular
+          >
+            {centerLabel ?? total}
+          </span>
+          <span className="mt-1 block text-micro text-ink-muted">total</span>
+        </span>
+      </div>
+
+      <figcaption className="min-w-[10rem] flex-1">
+        {legend ? (
+          <ul className="space-y-3">
+            {slices.map((slice) => {
+              const share = total > 0 ? Math.round((slice.value / total) * 100) : 0;
+              return (
+                <li key={slice.name} className="text-caption text-ink-secondary">
+                  <span className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: colorOf(slice), opacity: slice.value === 0 ? 0.35 : 1 }}
+                    />
+                    <span className="truncate">{slice.name}</span>
+                    <span data-tabular className="ml-auto pl-2 font-semibold text-ink">
+                      {slice.value}
+                    </span>
+                    <span aria-hidden data-tabular className="w-9 text-right text-micro text-ink-muted">
+                      {share}%
+                    </span>
+                  </span>
+                  <span aria-hidden className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-surface-3">
+                    <span
+                      className="block h-full rounded-full"
+                      style={{ width: `${share}%`, background: colorOf(slice) }}
+                    />
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </figcaption>

@@ -10,6 +10,7 @@
  * absent, which would read as "no risk" when the truth is "not assessed".
  */
 
+import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 import { Countdown } from "@/components/charts/visuals";
@@ -28,9 +29,23 @@ export function CapacityRiskBoard({
   return (
     <div data-testid="capacity-risk-board">
       {ranked.length === 0 ? (
-        <p className="px-6 py-5 text-caption text-ink-secondary" data-testid="capacity-risk-empty">
-          No certificate or PVC risk reported by the sources checked.
-        </p>
+        <div className="flex flex-col items-center justify-center gap-4 px-7 py-10 text-center">
+          <span aria-hidden className="relative flex h-20 w-20 items-center justify-center">
+            <span className="absolute inset-0 rounded-full bg-healthy-soft" />
+            <span className="absolute inset-3 rounded-full border border-healthy/30 bg-surface" />
+            <ShieldCheck className="relative h-7 w-7 text-healthy" />
+          </span>
+          <div>
+            <p className="text-body font-semibold text-ink">No capacity risk in sight</p>
+            <p className="mt-1 max-w-sm text-caption text-ink-muted" data-testid="capacity-risk-empty">
+              No certificate or PVC risk reported by the sources checked.
+            </p>
+          </div>
+          <div className="flex gap-2 text-micro">
+            <span className="rounded-full bg-surface-2 px-3 py-1 text-ink-secondary">Certificates</span>
+            <span className="rounded-full bg-surface-2 px-3 py-1 text-ink-secondary">Persistent volumes</span>
+          </div>
+        </div>
       ) : (
         <ul className="divide-y divide-border">
           {ranked.map((item) => {
@@ -40,9 +55,11 @@ export function CapacityRiskBoard({
               <li key={item.key}>
                 <Link
                   href={item.href}
-                  className="flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-surface-hover"
+                  className="flex items-start gap-4 px-7 py-4 transition-colors hover:bg-surface-hover"
                 >
-                  <Icon aria-hidden className={`mt-0.5 h-4 w-4 shrink-0 ${spec.text}`} />
+                  <span aria-hidden className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${spec.chip}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       <span className="text-body font-medium text-ink">{item.clusterName}</span>
@@ -62,7 +79,7 @@ export function CapacityRiskBoard({
         </ul>
       )}
       {unassessedClusters.length > 0 ? (
-        <p className="border-t border-border px-3 py-2 text-micro text-ink-muted" data-testid="capacity-risk-unassessed">
+        <p className="border-t border-border px-7 py-3 text-micro text-ink-muted" data-testid="capacity-risk-unassessed">
           Forecast unavailable for {unassessedClusters.join(", ")} — no inventory summary reported.
         </p>
       ) : null}

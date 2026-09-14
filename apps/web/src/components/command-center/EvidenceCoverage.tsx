@@ -68,17 +68,40 @@ export function EvidenceCoverage({
   sources: readonly { key: string; label: string; resource: Resource<unknown> }[];
 }) {
   const rows = sources.map(classifySource);
+  const answered = rows.filter((row) => row.state === "configured-fresh").length;
+  const share = rows.length > 0 ? (answered / rows.length) * 100 : 0;
   return (
-    <div data-testid="evidence-coverage">
-      <ul className="divide-y divide-border">
+    <div data-testid="evidence-coverage" className="flex flex-col gap-5">
+      <div className="flex items-center gap-4">
+        <span data-tabular className="text-[2rem] leading-none font-semibold tracking-[-0.03em] text-ink">
+          {answered}
+          <span className="text-ink-muted">/{rows.length}</span>
+        </span>
+        <span className="text-caption text-ink-muted">sources answered with current data</span>
+        <span aria-hidden className="ml-auto hidden h-2 w-48 overflow-hidden rounded-full bg-surface-3 sm:block">
+          <span className="block h-full rounded-full bg-healthy" style={{ width: `${share}%` }} />
+        </span>
+      </div>
+      <ul className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {rows.map((row) => {
           const spec = toneSpec(STATE_TONE[row.state]);
           const Icon = spec.icon;
           return (
-            <li key={row.key} className="flex items-center gap-3 px-3 py-2">
-              <Icon aria-hidden className={`h-4 w-4 shrink-0 ${spec.text}`} />
-              <span className="min-w-0 flex-1 text-caption text-ink">{row.label}</span>
-              <span className={`shrink-0 text-caption ${spec.text}`}>{STATE_LABEL[row.state]}</span>
+            <li
+              key={row.key}
+              title={row.detail}
+              className="flex flex-col gap-4 rounded-[1.125rem] bg-surface-2 p-4"
+            >
+              <span className="flex items-center justify-between">
+                <span aria-hidden className={`flex h-10 w-10 items-center justify-center rounded-full ${spec.chip}`}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span aria-hidden className={`h-2 w-2 rounded-full ${spec.dot}`} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-body font-semibold text-ink">{row.label}</span>
+                <span className={`mt-0.5 block text-caption ${spec.text}`}>{STATE_LABEL[row.state]}</span>
+              </span>
             </li>
           );
         })}
