@@ -16,7 +16,12 @@ import { Suspense, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
-import { IncidentStateBadge, ReasonLabel } from "@/components/incidents/primitives";
+import {
+  IncidentKpiTile,
+  IncidentStateBadge,
+  IncidentsEmptyCard,
+  ReasonLabel,
+} from "@/components/incidents/primitives";
 import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
@@ -47,7 +52,7 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
   return (
     <li
       data-testid={`incident-row-${incident.service_key}`}
-      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
     >
       <ToneAvatar status="critical" />
       <div className="min-w-0 flex-1">
@@ -155,93 +160,76 @@ function IncidentTable() {
         </Card>
       ) : null}
 
-      {page.state === "ready" && page.data.items.length === 0 ? (
-        <Card>
-          <DataState
-            kind="empty"
-            title="No incidents"
-            description="Nothing matches these filters in your authorized scope."
-          />
-        </Card>
-      ) : null}
-
-      {page.state === "ready" && page.data.items.length > 0 ? (
-        <Panel
-          data-testid="incident-summary"
-          className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
-        >
-          <PanelHeader
-            title="In this view"
-            description="Computed from the rows on this page — not the full authorized set."
-          />
-          <div className="flex flex-wrap items-center gap-6">
-            {(
-              [
-                {
-                  label: "Open",
-                  className: "text-critical",
-                  count: page.data.items.filter((item) => item.state === "open").length,
-                },
-                {
-                  label: "Acknowledged",
-                  className: "text-warning",
-                  count: page.data.items.filter((item) => item.state === "acknowledged").length,
-                },
-                {
-                  label: "Resolved",
-                  className: "text-healthy",
-                  count: page.data.items.filter((item) => item.state === "resolved").length,
-                },
-              ] as const
-            ).map((entry) => (
-              <div key={entry.label} className="flex items-baseline gap-2">
-                <span data-tabular className={`text-metric font-semibold ${entry.className}`}>
-                  {entry.count}
-                </span>
-                <span className="text-caption text-ink-muted">{entry.label}</span>
+      {page.state === "ready" ? (
+        (() => {
+          const items = page.data.items;
+          const total = items.length;
+          const openCount = items.filter((item) => item.state === "open").length;
+          const ackCount = items.filter((item) => item.state === "acknowledged").length;
+          const resolvedCount = items.filter((item) => item.state === "resolved").length;
+          return (
+            <>
+              <div
+                className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4 motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+                data-testid="incident-summary"
+              >
+                <IncidentKpiTile label="Open" count={openCount} total={total} tone="critical" />
+                <IncidentKpiTile
+                  label="Acknowledged"
+                  count={ackCount}
+                  total={total}
+                  tone="warning"
+                />
+                <IncidentKpiTile
+                  label="Resolved"
+                  count={resolvedCount}
+                  total={total}
+                  tone="success"
+                />
+                <IncidentKpiTile label="Shown" count={total} total={total} tone="info" />
               </div>
-            ))}
-            <div className="min-w-48 flex-1">
-              <StackedBar
-                label="Incidents on this page by state"
-                segments={[
-                  {
-                    name: "Open",
-                    value: page.data.items.filter((item) => item.state === "open").length,
-                    tone: "critical",
-                  },
-                  {
-                    name: "Acknowledged",
-                    value: page.data.items.filter((item) => item.state === "acknowledged").length,
-                    tone: "warning",
-                  },
-                  {
-                    name: "Resolved",
-                    value: page.data.items.filter((item) => item.state === "resolved").length,
-                    tone: "success",
-                  },
-                ]}
-              />
-            </div>
-          </div>
-        </Panel>
-      ) : null}
 
-      {page.state === "ready" && page.data.items.length > 0 ? (
-        <Panel
-          flush
-          className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
-        >
-          <ul className="divide-y divide-border" data-testid="incident-table">
-            {page.data.items.map((incident) => (
-              <IncidentRow key={incident.id} incident={incident} />
-            ))}
-          </ul>
-          <p className="border-t border-border px-6 py-4 text-micro text-ink-muted">
-            Showing {page.data.items.length} of {page.data.total} incidents in your
-            authorized scope.
-          </p>
-        </Panel>
+              {total > 0 ? (
+                <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
+                  <PanelHeader
+                    title="Composition"
+                    description="By state, on this page — not the full authorized set."
+                  />
+                  <StackedBar
+                    label="Incidents on this page by state"
+                    segments={[
+                      { name: "Open", value: openCount, tone: "critical" },
+                      { name: "Acknowledged", value: ackCount, tone: "warning" },
+                      { name: "Resolved", value: resolvedCount, tone: "success" },
+                    ]}
+                  />
+                </Panel>
+              ) : (
+                <IncidentsEmptyCard
+                  title="No incidents"
+                  description="Nothing matches these filters in your authorized scope."
+                />
+              )}
+
+              {total > 0 ? (
+                <Panel
+                  flush
+                  className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]"
+                >
+                  <ul className="divide-y divide-border" data-testid="incident-table">
+                    {items.map((incident) => (
+                      <IncidentRow key={incident.id} incident={incident} />
+                    ))}
+                  </ul>
+                  <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
+                    Showing {items.length} of {page.data.total} incidents in your authorized
+                    scope.
+                  </p>
+                </Panel>
+              ) : null}
+            </>
+          );
+        })()
       ) : null}
     </div>
   );

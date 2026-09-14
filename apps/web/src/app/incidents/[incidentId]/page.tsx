@@ -12,10 +12,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import {
+  IncidentLifecycle,
   IncidentStateBadge,
   IncidentTimeline,
   ReasonList,
@@ -23,7 +24,7 @@ import {
 } from "@/components/incidents/primitives";
 import { HealthBadge } from "@/components/service-health/primitives";
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import {
@@ -88,172 +89,215 @@ export default function IncidentDetailPage() {
 
   return (
     <PageFrame>
-      <div className="space-y-5">
       <LoadGate value={incident} retry={retryIncident}>
-        {(detail) => (
-          <>
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-xs text-ink-muted">
-                  <Link href="/incidents" className="hover:text-ink">
-                    Incidents
-                  </Link>{" "}
-                  / <span className="font-mono">{detail.project_key}</span> /{" "}
-                  <span className="font-mono">{detail.environment_key}</span> /{" "}
-                  <span className="font-mono">{detail.service_key}</span>
-                </p>
-                <h1 className="mt-1 text-title font-semibold text-ink">
-                  {detail.title}
-                </h1>
-              </div>
-              <div className="flex items-center gap-2">
-                <SeverityBadge severity={detail.severity} />
-                <IncidentStateBadge state={detail.state} />
-              </div>
-            </div>
-
-            {notice.kind === "conflict" ? (
-              <div role="alert" data-testid="ack-conflict">
-                <DataState
-                  kind="error"
-                  title="Version conflict"
-                  description={notice.message}
-                  onRetry={refresh}
-                />
-              </div>
-            ) : null}
-            {notice.kind === "error" ? (
-              <div role="alert">
-                <DataState kind="error" description={notice.message} onRetry={refresh} />
-              </div>
-            ) : null}
-            {notice.kind === "done" ? (
-              <p role="status" data-testid="ack-notice" className="text-xs text-ink-secondary">
-                {notice.message}
-              </p>
-            ) : null}
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card title="Why it opened">
-                <ReasonList reasons={detail.opening_reasons} />
-                <div className="mt-3 border-t border-border pt-3">
-                  <p className="text-[11px] text-ink-muted">
-                    Opened after two consecutive trustworthy critical evaluations. A partial,
-                    stale, or last-known reading is never one of them.
-                  </p>
-                </div>
-              </Card>
-
-              <Card title="Current health">
-                {detail.current_health ? (
-                  <div className="space-y-2">
-                    <HealthBadge status={detail.current_health.status} />
-                    <ReasonList reasons={detail.current_health.reasons} />
-                    <p className="text-[11px] text-ink-muted">
-                      Last observed{" "}
-                      <time className="font-mono">
-                        {detail.current_health.last_observed_at ?? "—"}
-                      </time>
-                    </p>
-                    <Link
-                      href={`/service-health/${detail.binding.id}`}
-                      className="inline-block text-xs font-medium text-ink-secondary underline hover:text-ink"
-                    >
-                      Open service health
+        {(detail) => {
+          const active = detail.state !== "resolved";
+          return (
+            <div className="space-y-6">
+              <PageHeader
+                title={detail.title}
+                status={
+                  <>
+                    <SeverityBadge severity={detail.severity} />
+                    <IncidentStateBadge state={detail.state} />
+                  </>
+                }
+                meta={
+                  <>
+                    <Link href="/incidents" className="hover:text-ink">
+                      Incidents
                     </Link>
-                  </div>
-                ) : (
-                  <DataState
-                    kind="unknown"
-                    description="No health state has been recorded for this binding yet."
-                  />
-                )}
-              </Card>
-            </div>
-
-            <Card title="Context">
-              <dl className="divide-y divide-border">
-                <MetaRow label="Workload">
-                  <span className="font-mono text-xs">
-                    {detail.binding.cluster_ref}/{detail.binding.namespace}/
-                    {detail.binding.workload_kind}/{detail.binding.workload_name}
-                  </span>
-                </MetaRow>
-                <MetaRow label="Opened">
-                  <span className="font-mono text-xs">{detail.opened_at}</span>
-                </MetaRow>
-                <MetaRow label="Duration">
-                  <span className="font-mono text-xs">
-                    {formatDuration(detail.opened_at, detail.resolved_at)}
-                  </span>
-                </MetaRow>
-                <MetaRow label="Last critical">
-                  <span className="font-mono text-xs">{detail.last_critical_at}</span>
-                </MetaRow>
-                <MetaRow label="Acknowledged">
-                  <span className="text-xs">
-                    {detail.acknowledged_at ? (
-                      <>
-                        <time className="font-mono">{detail.acknowledged_at}</time>
-                        {detail.acknowledged_by
-                          ? ` · ${detail.acknowledged_by.display_name}`
-                          : null}
-                      </>
-                    ) : (
-                      <span className="italic text-ink-muted">not yet</span>
-                    )}
-                  </span>
-                </MetaRow>
-                <MetaRow label="Resolved">
-                  <span className="text-xs">
-                    {detail.resolved_at ? (
-                      <>
-                        <time className="font-mono">{detail.resolved_at}</time>
-                        {detail.resolution_source === "health_recovered"
-                          ? " · health recovered"
-                          : null}
-                      </>
-                    ) : (
-                      <span className="italic text-ink-muted">still active</span>
-                    )}
-                  </span>
-                </MetaRow>
-              </dl>
-
-              {detail.state !== "resolved" ? (
-                <div className="mt-4 border-t border-border pt-3">
-                  {detail.can_acknowledge ? (
+                    <span className="font-mono">
+                      {detail.project_key}/{detail.environment_key}/{detail.service_key}
+                    </span>
+                    <span className="font-mono">
+                      {detail.binding.cluster_ref}/{detail.binding.namespace}/
+                      {detail.binding.workload_name}
+                    </span>
+                  </>
+                }
+                actions={
+                  active && detail.can_acknowledge ? (
                     <button
                       type="button"
                       disabled={busy || detail.state === "acknowledged"}
                       onClick={() => acknowledge(detail)}
-                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-inverse disabled:opacity-50"
+                      className="rounded-full bg-accent px-5 py-2.5 text-body font-medium text-ink-inverse transition-opacity disabled:opacity-50"
                     >
                       {detail.state === "acknowledged" ? "Acknowledged" : "Acknowledge"}
                     </button>
-                  ) : (
+                  ) : undefined
+                }
+              />
+
+              {notice.kind === "conflict" ? (
+                <div role="alert" data-testid="ack-conflict">
+                  <Panel tone="critical">
                     <DataState
-                      kind="permission-denied"
-                      description="Acknowledging an incident needs incident.ack in this scope."
+                      kind="error"
+                      title="Version conflict"
+                      description={notice.message}
+                      onRetry={refresh}
                     />
-                  )}
-                  <p className="mt-2 text-[11px] text-ink-muted">
-                    Acknowledging does not close the incident. It resolves on its own after
-                    two consecutive healthy evaluations.
-                  </p>
+                  </Panel>
                 </div>
               ) : null}
-            </Card>
+              {notice.kind === "error" ? (
+                <div role="alert">
+                  <Panel tone="critical">
+                    <DataState kind="error" description={notice.message} onRetry={refresh} />
+                  </Panel>
+                </div>
+              ) : null}
+              {notice.kind === "done" ? (
+                <p
+                  role="status"
+                  data-testid="ack-notice"
+                  className="rounded-full bg-surface-2 px-4 py-2 text-caption text-ink-secondary"
+                >
+                  {notice.message}
+                </p>
+              ) : null}
 
-            <Card title="Lifecycle">
-              <LoadGate value={events} retry={retryEvents}>
-                {(payload) => <IncidentTimeline events={payload.events} />}
-              </LoadGate>
-            </Card>
-          </>
-        )}
+              {active && !detail.can_acknowledge ? (
+                <Panel>
+                  <DataState
+                    kind="permission-denied"
+                    description="Acknowledging an incident needs incident.ack in this scope."
+                  />
+                </Panel>
+              ) : null}
+
+              <Panel
+                className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+                data-testid="incident-lifecycle-panel"
+              >
+                <PanelHeader
+                  title="Lifecycle"
+                  description="Opened, acknowledged, resolved — as Drake recorded it, one honest timestamp at a time."
+                />
+                <IncidentLifecycle
+                  openedAt={detail.opened_at}
+                  acknowledgedAt={detail.acknowledged_at}
+                  resolvedAt={detail.resolved_at}
+                />
+                <p className="text-micro text-ink-muted">
+                  {active
+                    ? "Acknowledging does not close the incident. It resolves on its own after two consecutive healthy evaluations."
+                    : "Resolved — see below for how."}
+                </p>
+              </Panel>
+
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
+                  <PanelHeader
+                    title="Why it opened"
+                    description="Opened after two consecutive trustworthy critical evaluations. A partial, stale, or last-known reading is never one of them."
+                  />
+                  <ReasonList reasons={detail.opening_reasons} />
+                </Panel>
+
+                <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
+                  <PanelHeader title="Current health" />
+                  {detail.current_health ? (
+                    <div className="space-y-3">
+                      <HealthBadge status={detail.current_health.status} />
+                      <ReasonList reasons={detail.current_health.reasons} />
+                      <p className="text-micro text-ink-muted">
+                        Last observed{" "}
+                        <time className="font-mono">
+                          {detail.current_health.last_observed_at ?? "—"}
+                        </time>
+                      </p>
+                      <Link
+                        href={`/service-health/${detail.binding.id}`}
+                        className="inline-block text-caption font-medium text-ink-secondary underline hover:text-ink"
+                      >
+                        Open service health
+                      </Link>
+                    </div>
+                  ) : (
+                    <DataState
+                      kind="unknown"
+                      description="No health state has been recorded for this binding yet."
+                    />
+                  )}
+                </Panel>
+              </div>
+
+              <Panel
+                flush
+                className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:80ms]"
+              >
+                <PanelHeader
+                  flush
+                  title="Lifecycle events"
+                  description="Append-only. Nothing on this screen edits or removes an entry."
+                />
+                <div className="px-7 py-5">
+                  <LoadGate value={events} retry={retryEvents}>
+                    {(payload) => <IncidentTimeline events={payload.events} />}
+                  </LoadGate>
+                </div>
+              </Panel>
+
+              <Panel
+                flush
+                className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
+              >
+                <PanelHeader flush title="Workload & timing" />
+                <dl className="divide-y divide-border px-7 pb-2">
+                  <MetaRow label="Workload">
+                    <span className="font-mono text-xs">
+                      {detail.binding.cluster_ref}/{detail.binding.namespace}/
+                      {detail.binding.workload_kind}/{detail.binding.workload_name}
+                    </span>
+                  </MetaRow>
+                  <MetaRow label="Opened">
+                    <span className="font-mono text-xs">{detail.opened_at}</span>
+                  </MetaRow>
+                  <MetaRow label="Duration">
+                    <span className="font-mono text-xs">
+                      {formatDuration(detail.opened_at, detail.resolved_at)}
+                    </span>
+                  </MetaRow>
+                  <MetaRow label="Last critical">
+                    <span className="font-mono text-xs">{detail.last_critical_at}</span>
+                  </MetaRow>
+                  <MetaRow label="Acknowledged">
+                    <span className="text-xs">
+                      {detail.acknowledged_at ? (
+                        <>
+                          <time className="font-mono">{detail.acknowledged_at}</time>
+                          {detail.acknowledged_by
+                            ? ` · ${detail.acknowledged_by.display_name}`
+                            : null}
+                        </>
+                      ) : (
+                        <span className="italic text-ink-muted">not yet</span>
+                      )}
+                    </span>
+                  </MetaRow>
+                  <MetaRow label="Resolved">
+                    <span className="text-xs">
+                      {detail.resolved_at ? (
+                        <>
+                          <time className="font-mono">{detail.resolved_at}</time>
+                          {detail.resolution_source === "health_recovered"
+                            ? " · health recovered"
+                            : null}
+                        </>
+                      ) : (
+                        <span className="italic text-ink-muted">still active</span>
+                      )}
+                    </span>
+                  </MetaRow>
+                </dl>
+              </Panel>
+            </div>
+          );
+        }}
       </LoadGate>
-      </div>
     </PageFrame>
   );
 }

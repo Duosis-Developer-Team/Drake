@@ -14,6 +14,8 @@ import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import {
+  DeploymentKpiTile,
+  DeploymentsEmptyCard,
   EvidenceBadge,
   RolloutBadge,
   ShortRef,
@@ -53,7 +55,7 @@ function DeploymentRowView({ row }: { row: DeploymentRow }) {
   return (
     <li
       data-testid={`deployment-row-${row.workload_name}`}
-      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -161,62 +163,69 @@ function DeploymentTable() {
           )}
         </Panel>
       ) : null}
-      {page.state === "ready" && page.data.items.length === 0 ? (
-        <Panel>
-          <DataState
-            kind="empty"
-            title="No deployments"
-            description="Nothing matches these filters in your authorized scope. Drake records a revision when a cluster agent reports a workload generation."
-          />
-        </Panel>
-      ) : null}
-      {page.state === "ready" && page.data.items.length > 0 ? (
-        <Panel
-          data-testid="deployment-summary"
-          className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
-        >
-          <PanelHeader title="In this view" />
-          {/* From the rows on screen, labelled as such. `unverified` is its
-              own segment and deliberately not red: an absence of evidence is
-              not a failed rollout. */}
-          <StackedBar
-            label="Rollouts on this page by state"
-            segments={[
-              {
-                name: "Failed",
-                value: page.data.items.filter((row) => row.rollout_state === "failed").length,
-                tone: "critical",
-              },
-              {
-                name: "Degraded",
-                value: page.data.items.filter((row) => row.rollout_state === "degraded").length,
-                tone: "warning",
-              },
-              {
-                name: "Stalled",
-                value: page.data.items.filter((row) => row.rollout_state === "stalled").length,
-                tone: "warning",
-              },
-              {
-                name: "Progressing",
-                value: page.data.items.filter((row) => row.rollout_state === "progressing").length,
-                tone: "info",
-              },
-              {
-                name: "Healthy",
-                value: page.data.items.filter((row) => row.rollout_state === "healthy").length,
-                tone: "success",
-              },
-              {
-                name: "Unknown",
-                value: page.data.items.filter((row) =>
-                  ["unknown", "pending"].includes(row.rollout_state),
-                ).length,
-                tone: "unknown",
-              },
-            ]}
-          />
-        </Panel>
+      {page.state === "ready" ? (
+        (() => {
+          const items = page.data.items;
+          const total = items.length;
+          const failed = items.filter((row) => row.rollout_state === "failed").length;
+          const degraded = items.filter((row) => row.rollout_state === "degraded").length;
+          const stalled = items.filter((row) => row.rollout_state === "stalled").length;
+          const progressing = items.filter((row) => row.rollout_state === "progressing").length;
+          const healthy = items.filter((row) => row.rollout_state === "healthy").length;
+          const unknownState = items.filter((row) =>
+            ["unknown", "pending"].includes(row.rollout_state),
+          ).length;
+          const verified = items.filter((row) => row.evidence_state === "verified").length;
+          return (
+            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4 motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
+              <DeploymentKpiTile label="Healthy" count={healthy} total={total} tone="success" />
+              <DeploymentKpiTile
+                label="Failed or degraded"
+                count={failed + degraded}
+                total={total}
+                tone="critical"
+              />
+              <DeploymentKpiTile label="Stalled" count={stalled} total={total} tone="warning" />
+              <DeploymentKpiTile
+                label="Verified evidence"
+                count={verified}
+                total={total}
+                tone="info"
+              />
+              {total > 0 ? (
+                <Panel
+                  data-testid="deployment-summary"
+                  className="sm:col-span-2 xl:col-span-4 motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]"
+                >
+                  <PanelHeader
+                    title="Composition"
+                    description="Rollouts on this page, by state — not the full authorized set."
+                  />
+                  {/* `unverified` is its own segment and deliberately not
+                      red: an absence of evidence is not a failed rollout. */}
+                  <StackedBar
+                    label="Rollouts on this page by state"
+                    segments={[
+                      { name: "Failed", value: failed, tone: "critical" },
+                      { name: "Degraded", value: degraded, tone: "warning" },
+                      { name: "Stalled", value: stalled, tone: "warning" },
+                      { name: "Progressing", value: progressing, tone: "info" },
+                      { name: "Healthy", value: healthy, tone: "success" },
+                      { name: "Unknown", value: unknownState, tone: "unknown" },
+                    ]}
+                  />
+                </Panel>
+              ) : (
+                <div className="sm:col-span-2 xl:col-span-4">
+                  <DeploymentsEmptyCard
+                    title="No deployments"
+                    description="Nothing matches these filters in your authorized scope. Drake records a revision when a cluster agent reports a workload generation."
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()
       ) : null}
 
       {page.state === "ready" && page.data.items.length > 0 ? (
@@ -229,7 +238,7 @@ function DeploymentTable() {
               <DeploymentRowView key={row.id} row={row} />
             ))}
           </ul>
-          <p className="border-t border-border px-6 py-4 text-micro text-ink-muted">
+          <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
             Showing {page.data.items.length} of {page.data.total} deployments in your
             authorized scope.
           </p>

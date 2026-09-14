@@ -15,11 +15,13 @@
  * it" comes to read as "somebody handled it".
  */
 
+import { BellOff } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import {
+  AlertingKpiTile,
   CountChip,
   MappingBadge,
   PriorityBadge,
@@ -56,7 +58,7 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
   return (
     <li
       data-testid={`alert-row-${alert.alert_name}`}
-      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -120,24 +122,53 @@ function AlertsInner() {
         description="Alertmanager decides when a condition is true. Drake records what it decided, which service it belongs to, and what happened next."
       />
       <div className="space-y-5">
-        <Panel
-          data-testid="alerts-now"
-          className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
-        >
-          <PanelHeader title="Now" />
-          {summary.state === "loading" ? (
+        {summary.state === "loading" ? (
+          <Panel data-testid="alerts-now">
+            <PanelHeader title="Now" />
             <DataState kind="loading" />
-          ) : summary.state === "error" ? (
+          </Panel>
+        ) : summary.state === "error" ? (
+          <Panel data-testid="alerts-now">
+            <PanelHeader title="Now" />
             <DataState kind="error" description={summary.message} />
-          ) : (
-            <div className="flex flex-wrap items-center gap-6" data-testid="alert-summary">
-              <span className="flex items-baseline gap-2">
-                <span data-tabular className="text-metric font-semibold text-critical">
-                  {summary.data.firing}
-                </span>
-                <span className="text-caption text-ink-muted">firing</span>
-              </span>
-              <div className="min-w-48 flex-1">
+          </Panel>
+        ) : (
+          <>
+            <div
+              className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4 motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+              data-testid="alerts-now"
+            >
+              <AlertingKpiTile
+                label="Firing"
+                count={summary.data.firing}
+                total={summary.data.firing}
+                tone="critical"
+              />
+              <AlertingKpiTile
+                label="P1"
+                count={summary.data.p1}
+                total={summary.data.firing}
+                tone="critical"
+              />
+              <AlertingKpiTile
+                label="P2"
+                count={summary.data.p2}
+                total={summary.data.firing}
+                tone="warning"
+              />
+              <AlertingKpiTile
+                label="Unmapped"
+                count={summary.data.unmapped}
+                total={summary.data.firing}
+                tone="warning"
+              />
+            </div>
+
+            <Panel
+              className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]"
+            >
+              <PanelHeader title="Now" description="Priority is ordered, so the queue reads left to right." />
+              <div data-testid="alert-summary" className="space-y-3">
                 {/* Priority is ordered, so it reads left-to-right rather than
                     around a circle. "Other" is what is firing outside P1/P2 —
                     computed, not assumed, and never negative. */}
@@ -153,7 +184,7 @@ function AlertsInner() {
                     },
                   ]}
                 />
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
                   <CountChip label="Silenced" count={summary.data.silenced} tone="maintenance" />
                   <CountChip label="Unmapped" count={summary.data.unmapped} tone="warning" />
                   <CountChip
@@ -163,15 +194,15 @@ function AlertsInner() {
                   />
                 </div>
               </div>
-            </div>
-          )}
-        </Panel>
+            </Panel>
+          </>
+        )}
 
         <Panel
           flush
           className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
         >
-          <div className="border-b border-border px-6 py-4">
+          <div className="border-b border-border px-7 py-4">
             {/* Fixed vocabularies only. There is no free-text field here, and
                 no way to type a matcher, a regex or a PromQL fragment. */}
             <FilterBar>
@@ -193,11 +224,11 @@ function AlertsInner() {
           </div>
 
           {page.state === "loading" ? (
-            <div className="px-6 py-5">
+            <div className="px-7 py-5">
               <DataState kind="loading" />
             </div>
           ) : page.state === "error" ? (
-            <div className="px-6 py-3">
+            <div className="px-7 py-3">
               {page.notFound ? (
                 <DataState kind="permission-denied" />
               ) : (
@@ -205,7 +236,13 @@ function AlertsInner() {
               )}
             </div>
           ) : page.data.items.length === 0 ? (
-            <div className="px-6 py-3">
+            <div className="flex flex-col items-center gap-4 px-7 py-12 text-center">
+              <span
+                aria-hidden
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-surface-3 ring-8 ring-surface-2"
+              >
+                <BellOff className="h-6 w-6 text-ink-muted" />
+              </span>
               <DataState
                 kind="empty"
                 title="No alerts match"
@@ -221,7 +258,7 @@ function AlertsInner() {
               </ul>
               {page.data.items.some((alert) => alert.mapping_state !== "mapped") ? (
                 <div
-                  className="space-y-1.5 border-t border-border px-6 py-4"
+                  className="space-y-1.5 border-t border-border px-7 py-4"
                   data-testid="unmapped-note"
                 >
                   <p className="text-caption font-medium text-ink">Unmapped alerts</p>
