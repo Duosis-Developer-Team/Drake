@@ -316,7 +316,7 @@ export function CatalogSearch() {
             type="button"
             aria-label="Close search"
             onClick={close}
-            className="absolute inset-0 bg-black/40"
+            className="absolute inset-0 bg-[var(--scrim)]"
             tabIndex={-1}
           />
           <div className="relative w-full max-w-lg rounded-xl border border-border bg-surface shadow-xl">
