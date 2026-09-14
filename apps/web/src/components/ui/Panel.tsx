@@ -34,17 +34,12 @@ const RADIUS = {
 
 export type PanelSurface = "default" | "hero";
 
-/** `hero` is the reference's dark "Total Balance" card: a lit gradient slab
- *  meant to hold one lighter card-in-card. Its own text always uses
- *  `hero-ink`/`hero-ink-muted` — those stay legible against either gradient
- *  below — but the gradient itself follows the page theme (`--hero-from`/
- *  `--hero-to`/`--hero-border`, globals.css): a rich charcoal card on a
- *  light canvas, and the app's own accent hue tinting a deep card on a dark
- *  canvas, rather than one fixed obsidian block that goes flat and
- *  indistinguishable once the whole page is already dark. */
+/** `hero` is the one lead card a screen may have. It follows the theme like
+ *  every other card — same surface, same border — and is set apart only by a
+ *  deeper shadow, never by a colour of its own. */
 const SURFACE: Record<PanelSurface, string> = {
   default: "border border-border bg-surface shadow-panel",
-  hero: "border border-hero-border text-hero-ink bg-[linear-gradient(155deg,var(--hero-from)_0%,var(--hero-to)_100%)] shadow-[0_0_0_1px_var(--hero-ring),var(--shadow-overlay)]",
+  hero: "border border-border bg-surface text-ink shadow-overlay",
 };
 
 export function Panel({
@@ -60,10 +55,8 @@ export function Panel({
 }: {
   children: React.ReactNode;
   tone?: PanelTone;
-  /** `"hero"` swaps the surface for the theme-invariant obsidian rail
-   *  background — reserved for the one lead panel a screen is allowed
-   *  (brief §14.2/§12.4's "hero" panel level). Every other caller keeps
-   *  the default page-theme surface. */
+  /** `"hero"` is the one lead panel a screen is allowed: the same
+   *  theme-following surface with a deeper shadow. */
   surface?: PanelSurface;
   /** Drop the body padding — for tables and anything edge-to-edge. */
   flush?: boolean;

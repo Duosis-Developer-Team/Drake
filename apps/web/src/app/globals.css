@@ -135,13 +135,6 @@
   --sidebar-bubble: #f1f1f1;
   --sidebar-bubble-active: #161616;
   --sidebar-bubble-active-ink: #ffffff;
-  --hero-ink-surface: #f4f4f4;
-  /* The verdict hero card: a rich charcoal card sitting on the light canvas
-     — dark by contrast with the page around it, not a random fixed colour. */
-  --hero-from: #232323;
-  --hero-to: #121212;
-  --hero-border: rgb(255 255 255 / 0.08);
-  --hero-ring: rgb(255 255 255 / 0.05);
 }
 
 .dark {
@@ -226,27 +219,14 @@
   --sidebar-bubble: #262626;
   --sidebar-bubble-active: #f1f1f1;
   --sidebar-bubble-active-ink: #161616;
-  --hero-ink-surface: #f4f4f4;
-  /* On a dark canvas, "the darkest possible box" reads as invisible next to
-     every other dark card — the hero instead takes its identity from the
-     app's own accent hue: a deep tinted-blue gradient with a matching glow,
-     so it reads as "the important one" rather than "another black box". */
-  --hero-from: #1c2a3d;
-  --hero-to: #0d131c;
-  --hero-border: rgb(89 152 229 / 0.28);
-  --hero-ring: rgb(89 152 229 / 0.12);
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
   --color-frame: var(--frame);
-  /* The hero slab is dark in both themes, so its ink never follows the theme. */
-  --color-hero-ink: #f1f1f1;
-  --color-hero-ink-muted: #9a9a9a;
-  --color-hero-from: var(--hero-from);
-  --color-hero-to: var(--hero-to);
-  --color-hero-border: var(--hero-border);
-  --color-hero-ring: var(--hero-ring);
+  /* The lead card follows the theme like every other card. */
+  --color-hero-ink: var(--text-primary);
+  --color-hero-ink-muted: var(--text-muted);
   --color-sidebar-nav: var(--sidebar-nav);
   --color-sidebar-bubble: var(--sidebar-bubble);
   --color-sidebar-bubble-active: var(--sidebar-bubble-active);
