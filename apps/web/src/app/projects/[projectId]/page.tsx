@@ -3,11 +3,17 @@
 /**
  * Project detail.
  *
- * Order follows what an operator wants: what is this and is it well
- * (identity + capabilities), then the live signals, then the standing
- * inventory of environments and dependencies.
+ * Order follows what an operator wants: what is this and is it well (a top
+ * verdict, separate from criticality), then the environment/service
+ * topology that verdict is drawn from, then the live signals, then the
+ * standing record — capabilities, dependencies, owners, repository,
+ * provenance — that changes far less often than any of the above.
  *
- * Two distinctions this page exists to keep:
+ * Three distinctions this page exists to keep:
+ *
+ *   Criticality is not health. The top verdict names what Drake has
+ *   actually observed across this project's environments; the criticality
+ *   badge next to it is a recorded judgement that does not move with it.
  *
  *   Managed dependencies are not workloads. A provider-run database has no
  *   Deployment, no replicas and nothing to restart, and listing it among
@@ -24,6 +30,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense } from "react";
 
+import { ProjectTopology } from "@/components/features/catalog/ProjectTopology";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { ProjectMetricsSection } from "@/components/telemetry/ProjectMetricsSection";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
@@ -38,8 +45,10 @@ import {
 } from "@/components/ui/states";
 import type { Environment, Project, ProjectDependency } from "@/lib/catalog";
 import { useCrumbLabel } from "@/lib/crumbs";
-import { humanize, toneForHealth, type StatusTone } from "@/lib/design/status";
+import { compareTone, humanize, toneForHealth, toneSpec, type StatusTone } from "@/lib/design/status";
+import { serviceHealthListPath, type ServiceHealthPage } from "@/lib/serviceHealth";
 import { useResource } from "@/lib/useResource";
+import { buildProjectTopology } from "@/lib/view-models/scope-health";
 
 const CAPABILITY_LABELS: Record<string, string> = {
   telemetry: "Telemetry",
@@ -147,6 +156,9 @@ export default function ProjectOverviewPage() {
   const environments = useResource<{ environments: Environment[]; next_cursor: string | null }>(
     `/v1/projects/${projectId}/environments`,
   );
+  const services = useResource<ServiceHealthPage>(
+    serviceHealthListPath({ projectId, limit: 100, offset: 0 }),
+  );
   useCrumbLabel(projectId, project.data?.project_key);
 
   if (project.loading && !project.data) {
@@ -186,12 +198,28 @@ export default function ProjectOverviewPage() {
   const managed = data.dependencies?.filter((d) => d.dependency_class !== "in_cluster") ?? [];
   const inCluster = data.dependencies?.filter((d) => d.dependency_class === "in_cluster") ?? [];
 
+  const servicesComplete = Boolean(services.data) && services.data!.total <= services.data!.items.length;
+  const topology = buildProjectTopology(
+    projectId,
+    environments.data?.environments ?? [],
+    services.data?.items ?? [],
+    servicesComplete,
+  );
+  const worstTone: StatusTone =
+    topology.length > 0
+      ? topology.reduce((worst, lane) => (compareTone(lane.tone, worst) < 0 ? lane.tone : worst), topology[0].tone)
+      : "unknown";
+
   return (
     <PageFrame width="wide">
       <PageHeader
         title={data.display_name}
         status={
           <>
+            <StatusBadge
+              status={worstTone}
+              label={`${toneSpec(worstTone).label} across observed environments`}
+            />
             <StatusBadge
               status={CRITICALITY_TONE[data.criticality] ?? "neutral"}
               label={`${humanize(data.criticality)} criticality`}
@@ -224,48 +252,36 @@ export default function ProjectOverviewPage() {
         }
       />
 
-      <Panel data-testid="operational-grid" className="mb-5">
-        <PanelHeader
-          title="Capabilities"
-          description="What Drake can currently observe for this project. A capability that is not configured is an absence, not a fault."
-          level={2}
+      <div className="mb-6">
+        <SectionHeader
+          title="Environments"
+          description="One lane per environment; every service inside it, worst first. A service with no evidence is unassessed, never healthy."
         />
-        <ul className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-          {Object.entries(CAPABILITY_LABELS).map(([key, label]) => {
-            const state = data.operational?.[key] ?? "unknown";
-            // A capability that reports something has somewhere to report it,
-            // and saying "Ok" without a way through is a dead end. Absences
-            // stay unlinked on purpose: there is nothing to go and look at.
-            const href = state === "not_configured" ? null : CAPABILITY_HREF[key]?.(projectId);
-            const body = (
-              <>
-                <span className="text-caption text-ink-secondary">{label}</span>
-                <StatusBadge
-                  status={toneForHealth(state === "ok" ? "healthy" : state)}
-                  label={humanize(state)}
-                  size="compact"
-                />
-              </>
-            );
-            return (
-              <li key={key}>
-                {href ? (
-                  <Link
-                    href={href}
-                    className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2 transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                  >
-                    {body}
-                  </Link>
-                ) : (
-                  <div className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2">
-                    {body}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </Panel>
+        <div className="mt-3" data-testid="environment-list">
+          {environments.loading && !environments.data ? (
+            <LoadingSkeleton variant="table" rows={3} />
+          ) : environments.denied ? (
+            <DeniedState compact />
+          ) : !environments.data ? (
+            <ErrorState compact description={environments.error ?? undefined} onRetry={environments.reload} />
+          ) : environments.data.environments.length === 0 ? (
+            <EmptyState compact title="No environments in your scope" />
+          ) : (
+            <ProjectTopology lanes={topology} />
+          )}
+        </div>
+        {services.data && !servicesComplete ? (
+          <p className="mt-3 flex flex-wrap items-center gap-2 text-caption text-ink-muted">
+            <StatusBadge status="unknown" label="Evidence incomplete" size="compact" />
+            <Link
+              href={`/service-health?project_id=${projectId}`}
+              className="underline hover:text-ink"
+            >
+              View full service health
+            </Link>
+          </p>
+        ) : null}
+      </div>
 
       <Suspense fallback={<LoadingSkeleton variant="chart" label="Loading metrics" />}>
         {/* The Telemetry capability card links here, so the target has to exist. */}
@@ -276,66 +292,55 @@ export default function ProjectOverviewPage() {
 
       <div className="mt-6">
         <SectionHeader
-          title="Composition"
-          description="The environments Drake runs for this project, and the dependencies it does not."
+          title="Standing state"
+          description="What Drake has on record for this project: capabilities, dependencies, and catalog provenance."
         />
         <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Panel flush>
-            <PanelHeader flush title="Environments" level={3} />
-            {environments.loading && !environments.data ? (
-              <div className="px-4 py-3">
-                <LoadingSkeleton variant="table" rows={3} />
-              </div>
-            ) : environments.denied ? (
-              <div className="px-4 py-2">
-                <DeniedState compact />
-              </div>
-            ) : !environments.data ? (
-              <div className="px-4 py-2">
-                <ErrorState
-                  compact
-                  description={environments.error ?? undefined}
-                  onRetry={environments.reload}
-                />
-              </div>
-            ) : environments.data.environments.length === 0 ? (
-              <div className="px-4 py-2">
-                <EmptyState compact title="No environments in your scope" />
-              </div>
-            ) : (
-              <ul className="divide-y divide-border" data-testid="environment-list">
-                {environments.data.environments.map((environment) => (
-                  <li key={environment.id}>
-                    <Link
-                      href={`/projects/${projectId}/environments/${environment.id}`}
-                      className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-surface-hover"
-                    >
-                      <span className="min-w-0">
-                        <span className="block text-body font-medium text-ink">
-                          {environment.environment_key}
-                        </span>
-                        <span className="block truncate font-mono text-micro text-ink-muted">
-                          {environment.runtime}
-                          {environment.cluster
-                            ? ` · ${environment.cluster.ref}/${environment.namespace}`
-                            : environment.hosting_provider
-                              ? ` · ${environment.hosting_provider}`
-                              : ""}
-                        </span>
-                      </span>
+          <div className="flex flex-col gap-4">
+            <Panel data-testid="operational-grid">
+              <PanelHeader
+                title="Capabilities"
+                description="What Drake can currently observe for this project. A capability that is not configured is an absence, not a fault."
+                level={3}
+              />
+              <ul className="grid grid-cols-2 gap-2">
+                {Object.entries(CAPABILITY_LABELS).map(([key, label]) => {
+                  const state = data.operational?.[key] ?? "unknown";
+                  // A capability that reports something has somewhere to
+                  // report it, and saying "Ok" without a way through is a
+                  // dead end. Absences stay unlinked on purpose: there is
+                  // nothing to go and look at.
+                  const href = state === "not_configured" ? null : CAPABILITY_HREF[key]?.(projectId);
+                  const body = (
+                    <>
+                      <span className="text-caption text-ink-secondary">{label}</span>
                       <StatusBadge
-                        status={CRITICALITY_TONE[environment.criticality] ?? "neutral"}
-                        label={humanize(environment.criticality)}
+                        status={toneForHealth(state === "ok" ? "healthy" : state)}
+                        label={humanize(state)}
                         size="compact"
                       />
-                    </Link>
-                  </li>
-                ))}
+                    </>
+                  );
+                  return (
+                    <li key={key}>
+                      {href ? (
+                        <Link
+                          href={href}
+                          className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2 transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        >
+                          {body}
+                        </Link>
+                      ) : (
+                        <div className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2">
+                          {body}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
-            )}
-          </Panel>
+            </Panel>
 
-          <div className="flex flex-col gap-4">
             {managed.length > 0 ? (
               <Panel flush>
                 <PanelHeader
@@ -375,32 +380,32 @@ export default function ProjectOverviewPage() {
                 </ul>
               </Panel>
             ) : null}
-
-            <Panel>
-              <PanelHeader title="Catalog record" level={3} />
-              <dl>
-                <MetaRow label="Tenant model">
-                  <InlineCode>{data.tenant_model}</InlineCode>
-                </MetaRow>
-                <MetaRow label="Owners">
-                  {data.owners && data.owners.length > 0
-                    ? data.owners.map((owner) => `${owner.team} (${owner.role})`).join(", ")
-                    : "—"}
-                </MetaRow>
-                <MetaRow label="Source">
-                  <InlineCode>
-                    {data.source.kind}:{data.source.ref}
-                  </InlineCode>
-                </MetaRow>
-                <MetaRow label="Revision">
-                  <InlineCode>{data.source.revision}</InlineCode>
-                </MetaRow>
-                <MetaRow label="Catalog version">
-                  <span data-tabular>v{data.version}</span>
-                </MetaRow>
-              </dl>
-            </Panel>
           </div>
+
+          <Panel>
+            <PanelHeader title="Catalog record" level={3} />
+            <dl>
+              <MetaRow label="Tenant model">
+                <InlineCode>{data.tenant_model}</InlineCode>
+              </MetaRow>
+              <MetaRow label="Owners">
+                {data.owners && data.owners.length > 0
+                  ? data.owners.map((owner) => `${owner.team} (${owner.role})`).join(", ")
+                  : "—"}
+              </MetaRow>
+              <MetaRow label="Source">
+                <InlineCode>
+                  {data.source.kind}:{data.source.ref}
+                </InlineCode>
+              </MetaRow>
+              <MetaRow label="Revision">
+                <InlineCode>{data.source.revision}</InlineCode>
+              </MetaRow>
+              <MetaRow label="Catalog version">
+                <span data-tabular>v{data.version}</span>
+              </MetaRow>
+            </dl>
+          </Panel>
         </div>
       </div>
     </PageFrame>

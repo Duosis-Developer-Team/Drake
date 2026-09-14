@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ClustersPage from "@/app/clusters/page";
 import IntegrationsPage from "@/app/integrations/page";
+import ProjectOverviewPage from "@/app/projects/[projectId]/page";
 import ProjectsPage from "@/app/projects/page";
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { OperationalGrid } from "@/components/catalog/primitives";
@@ -81,6 +82,22 @@ const SECOND_PROJECT = {
   project_key: "beta",
   display_name: "Beta",
   criticality: "low",
+};
+
+const ENVIRONMENT = {
+  id: "env-1",
+  environment_key: "prod",
+  runtime: "kubernetes",
+  branch: "main",
+  criticality: "high",
+  namespace: "default",
+  lifecycle: "active",
+  cluster: { ref: "cluster-a", display_name: "Cluster A" },
+  hosting_provider: null,
+  version: 1,
+  scope: { type: "environment", ref: "env-1" },
+  source: { kind: "fixture", ref: "fixture:env-1", revision: "v1", accepted_at: "2026-08-06T00:00:00Z" },
+  as_of: "2026-08-06T00:00:00Z",
 };
 
 function serviceRow(status: string) {
@@ -278,6 +295,84 @@ describe("catalog screens", () => {
     const row = await table.findByRole("row", { name: /Alpha/ });
     await waitFor(() => expect(within(row).getByText(/Unassessed/)).toBeInTheDocument());
     expect(within(row).queryByText(/healthy/i)).not.toBeInTheDocument();
+  });
+
+  it("project detail: names worst observed health separately from the recorded criticality", async () => {
+    installFetchMock({
+      "/v1/me": { status: 200, body: makeMe() },
+      "/v1/projects/p1": { status: 200, body: PROJECT },
+      "/v1/projects/p1/environments": {
+        status: 200,
+        body: { environments: [ENVIRONMENT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [serviceRow("critical")], total: 1, limit: 100, offset: 0 },
+      },
+    });
+    render(
+      <SessionProvider>
+        <ProjectOverviewPage />
+      </SessionProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument());
+    expect(screen.getByText("High criticality")).toBeInTheDocument();
+    expect(screen.getByText(/Critical across observed environments/)).toBeInTheDocument();
+  });
+
+  it("project detail: the environment topology lists a working service link", async () => {
+    installFetchMock({
+      "/v1/me": { status: 200, body: makeMe() },
+      "/v1/projects/p1": { status: 200, body: PROJECT },
+      "/v1/projects/p1/environments": {
+        status: 200,
+        body: { environments: [ENVIRONMENT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [serviceRow("healthy")], total: 1, limit: 100, offset: 0 },
+      },
+    });
+    render(
+      <SessionProvider>
+        <ProjectOverviewPage />
+      </SessionProvider>,
+    );
+    const lanes = await screen.findByTestId("environment-list");
+    expect(within(lanes).getByRole("heading", { name: /prod/i })).toBeInTheDocument();
+    const link = within(lanes).getByRole("link", { name: /checkout/i });
+    expect(link).toHaveAttribute("href", "/projects/p1/environments/env-1/services/es-1");
+  });
+
+  it("project detail: an incomplete service page says so and links to full service health", async () => {
+    installFetchMock({
+      "/v1/me": { status: 200, body: makeMe() },
+      "/v1/projects/p1": { status: 200, body: PROJECT },
+      "/v1/projects/p1/environments": {
+        status: 200,
+        body: { environments: [ENVIRONMENT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [serviceRow("healthy")], total: 50, limit: 100, offset: 0 },
+      },
+    });
+    render(
+      <SessionProvider>
+        <ProjectOverviewPage />
+      </SessionProvider>,
+    );
+    // The topology lane for env-1 also reads "Evidence incomplete" in its own
+    // header badge, agreeing with the page-level note — both are honest
+    // about the same partial load, so presence is checked without assuming
+    // a single match.
+    await waitFor(() =>
+      expect(screen.getAllByText("Evidence incomplete").length).toBeGreaterThan(0),
+    );
+    expect(screen.getByRole("link", { name: /view full service health/i })).toHaveAttribute(
+      "href",
+      "/service-health?project_id=p1",
+    );
   });
 
   it("clusters: empty scope stays empty (no fabricated inventory)", async () => {
