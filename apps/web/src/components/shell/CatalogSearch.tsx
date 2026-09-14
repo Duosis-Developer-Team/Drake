@@ -316,10 +316,10 @@ export function CatalogSearch() {
             type="button"
             aria-label="Close search"
             onClick={close}
-            className="absolute inset-0 bg-[var(--scrim)]"
+            className="absolute inset-0 bg-[var(--scrim)] motion-safe:animate-[fade-in_140ms_ease-out]"
             tabIndex={-1}
           />
-          <div className="relative w-full max-w-lg rounded-xl border border-border bg-surface shadow-xl">
+          <div className="relative w-full max-w-lg rounded-overlay border border-border bg-surface shadow-overlay motion-safe:animate-[scale-in_180ms_var(--ease-entrance)]">
             <div className="flex items-center gap-2 border-b border-border px-4">
               <Search className="h-4 w-4 text-ink-muted" aria-hidden />
               <input
