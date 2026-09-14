@@ -280,14 +280,31 @@ export const SIGNAL_LABELS: Record<string, string> = {
   "application.golden_signals": "Application golden signals",
 };
 
+export interface ServiceHealthFilters {
+  projectId?: string;
+  environmentId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** The one place that builds a `/v1/service-health/services` query — every
+ * caller shares it so a filter can never drift between two screens. */
+export function serviceHealthListPath(filters: ServiceHealthFilters = {}): string {
+  const query = new URLSearchParams();
+  if (filters.projectId) query.set("project_id", filters.projectId);
+  if (filters.environmentId) query.set("environment_id", filters.environmentId);
+  if (filters.limit) query.set("limit", String(filters.limit));
+  if (filters.offset) query.set("offset", String(filters.offset));
+  const suffix = query.toString();
+  return suffix ? `/v1/service-health/services?${suffix}` : "/v1/service-health/services";
+}
+
 export async function fetchServiceHealthList(
   params: { environmentId?: string; projectId?: string } = {},
 ): Promise<ServiceHealthPage> {
-  const query = new URLSearchParams();
-  if (params.environmentId) query.set("environment_id", params.environmentId);
-  if (params.projectId) query.set("project_id", params.projectId);
-  const suffix = query.toString() ? `?${query}` : "";
-  return apiGet<ServiceHealthPage>(`/v1/service-health/services${suffix}`);
+  return apiGet<ServiceHealthPage>(
+    serviceHealthListPath({ projectId: params.projectId, environmentId: params.environmentId }),
+  );
 }
 
 export async function fetchBindingOptions(params: {

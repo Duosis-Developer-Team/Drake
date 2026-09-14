@@ -21,17 +21,12 @@ import {
 import { ValueChip } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
-import { formatAge, type ServiceHealthPage, type ServiceHealthRow } from "@/lib/serviceHealth";
-
-function listPath(params: URLSearchParams): string {
-  const query = new URLSearchParams();
-  const environmentId = params.get("environment_id");
-  const projectId = params.get("project_id");
-  if (environmentId) query.set("environment_id", environmentId);
-  if (projectId) query.set("project_id", projectId);
-  const suffix = query.toString() ? `?${query}` : "";
-  return `/v1/service-health/services${suffix}`;
-}
+import {
+  formatAge,
+  serviceHealthListPath,
+  type ServiceHealthPage,
+  type ServiceHealthRow,
+} from "@/lib/serviceHealth";
 
 /** The pressure bands the platform already judges utilisation by. */
 const UTILISATION = { warn: 0.8, critical: 0.9, direction: "above" as const };
@@ -128,7 +123,12 @@ function ServiceRow({ row }: { row: ServiceHealthRow }) {
 
 function ServiceHealthTable() {
   const params = useSearchParams();
-  const [page, retry] = useApi<ServiceHealthPage>(listPath(params));
+  const [page, retry] = useApi<ServiceHealthPage>(
+    serviceHealthListPath({
+      projectId: params.get("project_id") ?? undefined,
+      environmentId: params.get("environment_id") ?? undefined,
+    }),
+  );
 
   return (
     <LoadGate value={page} retry={retry}>
