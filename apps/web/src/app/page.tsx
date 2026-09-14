@@ -28,7 +28,7 @@ import { ArrowRight, Boxes, FolderKanban, Layers, RefreshCw, Server } from "luci
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
-import { Donut, RingProgress } from "@/components/charts/visuals";
+import { RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
 import { EvidenceCoverage } from "@/components/command-center/EvidenceCoverage";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
@@ -383,9 +383,11 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
         <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
       ) : (
         /* A list of counts, not term/definition pairs: a <dl> whose children
-           are links is both wrong markup and an axe violation. Each count
-           is its own big-number moment, not a cell in a dense row. */
-        <ul className="mt-auto grid grid-cols-3 gap-3">
+           are links is both wrong markup and an axe violation. Drawn as the
+           chain the estate actually is — projects hold environments, which
+           run on clusters. */
+        <ul className="relative my-auto grid grid-cols-3 gap-2">
+          <span aria-hidden className="absolute top-[1.375rem] right-[16%] left-[16%] h-px bg-[repeating-linear-gradient(90deg,var(--border-strong)_0_4px,transparent_4px_8px)] opacity-60" />
           {(
             [
               ["Projects", resource.data.projects, "/projects", FolderKanban],
@@ -395,26 +397,23 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
           ).map(([label, count, href, TileIcon]) => {
             const body = (
               <>
-                <span aria-hidden className="mb-auto flex h-10 w-10 items-center justify-center rounded-full bg-surface text-ink-secondary">
-                  <TileIcon className="h-4 w-4" />
+                <span aria-hidden className="relative mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-panel transition-transform group-hover:scale-105">
+                  <TileIcon className="h-[1.125rem] w-[1.125rem]" />
                 </span>
-                <span data-tabular className="mt-6 block text-[2.5rem] leading-none font-semibold tracking-[-0.03em] text-ink">
+                <span data-tabular className="mt-3 block text-center text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-ink">
                   {count}
                 </span>
-                <span className="mt-1.5 block text-caption text-ink-muted">{label}</span>
+                <span className="mt-1 block text-center text-caption text-ink-muted">{label}</span>
               </>
             );
             return (
               <li key={label}>
                 {href ? (
-                  <Link
-                    href={href}
-                    className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 min-h-40 px-5 pt-5 pb-5 transition-colors hover:bg-surface-3"
-                  >
+                  <Link href={href} className="group block rounded-[1rem] py-1 transition-colors hover:bg-surface-hover">
                     {body}
                   </Link>
                 ) : (
-                  <span className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 min-h-40 px-5 pt-5 pb-5">{body}</span>
+                  <span className="group block py-1">{body}</span>
                 )}
               </li>
             );
@@ -448,20 +447,58 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
         />
       ) : (
         <>
-          <Donut
-            size={168}
-            thickness={18}
-            label="Service health"
-            centerLabel={`${rows.length}`}
-            slices={tally.map((entry) => ({
-              name: toneSpec(entry.tone).label,
-              value: entry.count,
-              tone: entry.tone,
-            }))}
-          />
+          <div className="flex items-end justify-between gap-4">
+            <p>
+              <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
+                {rows.length}
+              </span>
+              <span className="ml-2 text-caption text-ink-muted">services</span>
+            </p>
+            <p className="text-right text-caption text-ink-muted">
+              <span data-tabular className="font-semibold text-ink">
+                {tally.find((entry) => entry.tone === "success")?.count ?? 0}
+              </span>{" "}
+              reporting healthy
+            </p>
+          </div>
+          {/* One tile per service, coloured by its own reported state: at
+              this scale a count you can literally see beats a pie. */}
+          <ul
+            aria-label={`Service health: ${tally.map((entry) => `${toneSpec(entry.tone).label} ${entry.count}`).join(", ")}`}
+            className="grid grid-cols-[repeat(auto-fill,minmax(1.75rem,1fr))] gap-1.5"
+          >
+            {[...rows]
+              .sort((x, y) => toneSpec(toneForHealth(x.health.status)).label.localeCompare(toneSpec(toneForHealth(y.health.status)).label))
+              .map((row) => {
+                const rowSpec = toneSpec(toneForHealth(row.health.status));
+                const name = row.display_name || row.service_key;
+                return (
+                  <li key={row.environment_service_id}>
+                    <Link
+                      href={`/service-health?project_id=${encodeURIComponent(row.project_id)}&environment_id=${encodeURIComponent(row.environment_id)}`}
+                      title={`${name} · ${row.project_key}/${row.environment_key} · ${rowSpec.label}`}
+                      aria-label={`${name}, ${rowSpec.label}`}
+                      className={`block aspect-square rounded-[0.5rem] transition-transform hover:scale-110 ${rowSpec.chip}`}
+                    />
+                  </li>
+                );
+              })}
+          </ul>
+          <ul className="flex flex-wrap gap-2">
+            {tally.map((entry) => (
+              <li
+                key={entry.tone}
+                className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary"
+              >
+                <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec(entry.tone).dot}`} />
+                {toneSpec(entry.tone).label}
+                <span data-tabular className="font-semibold text-ink">{entry.count}</span>
+              </li>
+            ))}
+          </ul>
           <Link
             href="/service-health"
-            className="inline-flex items-center gap-1 rounded text-caption font-medium text-brand hover:underline"
+            className="mt-auto inline-flex items-center gap-1 self-start rounded-full border border-border px-3.5 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
           >
             Open service health
             <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -684,25 +721,54 @@ function IntegrationsPanel({
         <>
           {all.length > 0 ? (
             <div className="border-b border-border px-7 py-6">
-              <Donut
-                size={148}
-                thickness={16}
-                label="Integrations by state"
-                centerLabel={`${all.length}`}
-                slices={[
-                  {
-                    name: "Reporting ok",
-                    value: configured.filter((entry) => entry.observed_state === "ok").length,
-                    tone: "success",
-                  },
-                  {
-                    name: "Degraded",
-                    value: configured.filter((entry) => entry.observed_state !== "ok").length,
-                    tone: "warning",
-                  },
-                  { name: "Not connected", value: notConfigured, tone: "not-applicable" },
-                ]}
-              />
+              <div className="flex items-end justify-between gap-4">
+                <p>
+                  <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
+                    {configured.length}
+                  </span>
+                  <span className="text-2xl font-semibold tracking-tight text-ink-muted">/{all.length}</span>
+                  <span className="ml-2 text-caption text-ink-muted">connected</span>
+                </p>
+                <span className="text-caption text-ink-muted">
+                  <span data-tabular className="font-semibold text-ink">
+                    {configured.filter((entry) => entry.observed_state === "ok").length}
+                  </span>{" "}
+                  reporting ok
+                </span>
+              </div>
+              {/* Every provider as an avatar: connected ones lit with their
+                  state ring, the rest visibly dormant — not a grey pie. */}
+              <ul className="mt-5 flex flex-wrap gap-3" aria-label="Integrations by state">
+                {[...configured, ...all.filter((entry) => entry.configuration_state !== "configured")].map((entry) => {
+                  const isConfigured = entry.configuration_state === "configured";
+                  const entrySpec = toneSpec(isConfigured ? toneForHealth(entry.observed_state) : "not-applicable");
+                  const name = humanize(entry.integration_type);
+                  return (
+                    <li
+                      key={`${entry.integration_type}:${entry.scope.ref}`}
+                      title={`${name} — ${isConfigured ? humanize(entry.observed_state) : "not connected"}`}
+                      className="relative"
+                    >
+                      <span
+                        className={`flex h-12 w-12 items-center justify-center rounded-full text-caption font-semibold ${
+                          isConfigured
+                            ? "bg-brand text-ink-inverse shadow-panel"
+                            : "border border-dashed border-border bg-surface-2 text-ink-muted"
+                        }`}
+                      >
+                        {name.slice(0, 2)}
+                      </span>
+                      <span
+                        aria-hidden
+                        className={`absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-surface ${isConfigured ? entrySpec.dot : "bg-surface-3"}`}
+                      />
+                      <span className="sr-only">
+                        {name}: {isConfigured ? humanize(entry.observed_state) : "not connected"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           ) : null}
           <ul className="divide-y divide-border">

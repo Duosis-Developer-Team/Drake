@@ -17,7 +17,7 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
-import { SloBadge } from "@/components/alerting/primitives";
+import { AlertingEmptyCard, AlertingKpiTile, SloBadge } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
 import { Donut } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
@@ -58,7 +58,7 @@ function SloRow({ slo }: { slo: Slo }) {
   return (
     <li
       data-testid={`slo-row-${slo.slo_key}`}
-      className="flex flex-wrap items-start gap-4 px-6 py-5 transition-colors hover:bg-surface-hover"
+      className="flex flex-wrap items-start gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -153,72 +153,67 @@ function SloInner() {
               <DataState kind="error" description={page.message} onRetry={retry} />
             )}
           </Panel>
-        ) : page.data.items.length === 0 ? (
-          <Panel>
-            <DataState
-              kind="empty"
-              title="No objectives in scope"
-              description="No service level objective is configured for anything you can see."
-            />
-          </Panel>
         ) : (
-          <>
-            {/* insufficient_data and not_configured stay OUT of the healthy
-                wedge: nothing was measured, and a green slice for an
-                unmeasured objective is the most misleading thing here. */}
-            <Panel
-              data-testid="slo-overview"
-              className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
-            >
-              <PanelHeader
-                title="Objectives on this page"
-                description="By verdict — a page, not the whole authorized set."
-              />
-              <Donut
-                size={132}
-                thickness={14}
-                label="Objectives on this page by verdict"
-                centerLabel={`${page.data.items.length}`}
-                slices={[
-                  {
-                    name: "Meeting",
-                    value: page.data.items.filter((slo) => slo.evaluation?.status === "healthy")
-                      .length,
-                    tone: "success",
-                  },
-                  {
-                    name: "Burning fast",
-                    value: page.data.items.filter((slo) => slo.evaluation?.status === "warning")
-                      .length,
-                    tone: "warning",
-                  },
-                  {
-                    name: "Breached",
-                    value: page.data.items.filter((slo) =>
-                      ["critical", "exhausted", "query_failed"].includes(
-                        slo.evaluation?.status ?? "",
-                      ),
-                    ).length,
-                    tone: "critical",
-                  },
-                  {
-                    name: "Stale",
-                    value: page.data.items.filter((slo) => slo.evaluation?.status === "stale")
-                      .length,
-                    tone: "stale",
-                  },
-                  {
-                    name: "Never measured",
-                    value: page.data.items.filter(
-                      (slo) =>
-                        !slo.evaluation ||
-                        ["insufficient_data", "not_configured"].includes(slo.evaluation.status),
-                    ).length,
-                    tone: "unknown",
-                  },
-                ]}
-              />
-            </Panel>
+          (() => {
+            const items = page.data.items;
+            const total = items.length;
+            const meeting = items.filter((slo) => slo.evaluation?.status === "healthy").length;
+            const burning = items.filter((slo) => slo.evaluation?.status === "warning").length;
+            const breached = items.filter((slo) =>
+              ["critical", "exhausted", "query_failed"].includes(slo.evaluation?.status ?? ""),
+            ).length;
+            const stale = items.filter((slo) => slo.evaluation?.status === "stale").length;
+            const neverMeasured = items.filter(
+              (slo) =>
+                !slo.evaluation ||
+                ["insufficient_data", "not_configured"].includes(slo.evaluation.status),
+            ).length;
+            return (
+              <>
+                <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4 motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
+                  <AlertingKpiTile label="Meeting" count={meeting} total={total} tone="success" />
+                  <AlertingKpiTile label="Burning fast" count={burning} total={total} tone="warning" />
+                  <AlertingKpiTile label="Breached" count={breached} total={total} tone="critical" />
+                  <AlertingKpiTile
+                    label="Never measured"
+                    count={neverMeasured}
+                    total={total}
+                    tone="unknown"
+                  />
+                </div>
+
+                {total === 0 ? (
+                  <AlertingEmptyCard
+                    title="No objectives in scope"
+                    description="No service level objective is configured for anything you can see."
+                  />
+                ) : (
+                  <>
+                  {/* insufficient_data and not_configured stay OUT of the healthy
+                      wedge: nothing was measured, and a green slice for an
+                      unmeasured objective is the most misleading thing here. */}
+                  <Panel
+                    data-testid="slo-overview"
+                    className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+                  >
+                    <PanelHeader
+                      title="Objectives on this page"
+                      description="By verdict — a page, not the whole authorized set."
+                    />
+                    <Donut
+                      size={132}
+                      thickness={14}
+                      label="Objectives on this page by verdict"
+                      centerLabel={`${total}`}
+                      slices={[
+                        { name: "Meeting", value: meeting, tone: "success" },
+                        { name: "Burning fast", value: burning, tone: "warning" },
+                        { name: "Breached", value: breached, tone: "critical" },
+                        { name: "Stale", value: stale, tone: "stale" },
+                        { name: "Never measured", value: neverMeasured, tone: "unknown" },
+                      ]}
+                    />
+                  </Panel>
 
             <Panel
               flush
@@ -240,7 +235,7 @@ function SloInner() {
                   ),
               ) ? (
                 <div
-                  className="space-y-1.5 border-t border-border px-6 py-4"
+                  className="space-y-1.5 border-t border-border px-7 py-4"
                   data-testid="slo-caveats"
                 >
                   {page.data.items
@@ -269,7 +264,11 @@ function SloInner() {
                 </div>
               ) : null}
             </Panel>
-          </>
+                  </>
+                )}
+              </>
+            );
+          })()
         )}
       </div>
     </PageFrame>
