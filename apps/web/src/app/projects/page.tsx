@@ -291,7 +291,10 @@ function ProjectsInner() {
 
       <div className="space-y-4">
         {model.items.length > 0 ? (
-          <Panel data-testid="projects-risk">
+          <Panel
+            data-testid="projects-risk"
+            className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+          >
             <PanelHeader
               title="Portfolio risk"
               description="Criticality is a recorded judgement; health is what service-health evidence has actually observed. A project with no observed services is unassessed, never healthy."
@@ -305,7 +308,10 @@ function ProjectsInner() {
           </Panel>
         ) : null}
 
-        <Panel flush>
+        <Panel
+          flush
+          className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:70ms]"
+        >
           <div className="border-b border-border px-4 py-3">
             <FilterBar
               summary={

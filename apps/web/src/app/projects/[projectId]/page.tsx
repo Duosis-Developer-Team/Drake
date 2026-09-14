@@ -255,7 +255,10 @@ export default function ProjectOverviewPage() {
           title="Environments"
           description="One lane per environment; every service inside it, worst first. A service with no evidence is unassessed, never healthy."
         />
-        <div className="mt-3" data-testid="environment-list">
+        <div
+          className="mt-3 motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+          data-testid="environment-list"
+        >
           {environments.loading && !environments.data ? (
             <LoadingSkeleton variant="table" rows={3} />
           ) : environments.denied ? (
@@ -294,7 +297,7 @@ export default function ProjectOverviewPage() {
           description="What Drake has on record for this project: capabilities, dependencies, and catalog provenance."
         />
         <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards]">
             <Panel data-testid="operational-grid">
               <PanelHeader
                 title="Capabilities"
@@ -380,7 +383,7 @@ export default function ProjectOverviewPage() {
             ) : null}
           </div>
 
-          <Panel>
+          <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]">
             <PanelHeader title="Catalog record" level={3} />
             <dl>
               <MetaRow label="Tenant model">
