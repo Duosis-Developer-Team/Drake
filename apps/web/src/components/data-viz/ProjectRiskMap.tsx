@@ -75,7 +75,7 @@ function ToneHeaderButton({
       onClick={onToggle}
       aria-pressed={active}
       className={`rounded-control px-1.5 py-1 text-xs font-medium transition-colors ${
-        active ? "bg-accent text-white" : "text-ink-secondary hover:bg-surface-sunken"
+        active ? "bg-accent text-ink-inverse" : "text-ink-secondary hover:bg-surface-sunken"
       }`}
     >
       {spec.label}

@@ -285,7 +285,7 @@ function PolicyForm({
         <button
           type="submit"
           disabled={!canManage || busy || !complete}
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-inverse disabled:opacity-50"
         >
           {existing ? "Save changes" : "Create policy"}
         </button>

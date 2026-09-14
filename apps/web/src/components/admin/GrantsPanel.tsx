@@ -376,7 +376,7 @@ function CreateGrantForm({
           <button
             type="submit"
             disabled={submitting}
-            className="h-9 rounded-lg bg-accent px-5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="h-9 rounded-lg bg-accent px-5 text-sm font-medium text-ink-inverse hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Creating…" : "Create grant"}
           </button>

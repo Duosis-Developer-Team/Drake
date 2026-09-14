@@ -161,7 +161,7 @@ export default function NotificationsPage() {
                 onClick={() => setUnreadOnly(option.key)}
                 className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                   unreadOnly === option.key
-                    ? "bg-accent text-white"
+                    ? "bg-accent text-ink-inverse"
                     : "text-ink-secondary hover:bg-surface-sunken"
                 }`}
               >

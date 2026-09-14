@@ -29,7 +29,7 @@ export function IdentityMenu() {
         >
           {initial}
         </span>
-        <span className="hidden max-w-32 truncate text-sm text-ink sm:block">
+        <span className="hidden max-w-32 truncate text-sm text-ink lg:block">
           {identity.display_name}
         </span>
       </button>

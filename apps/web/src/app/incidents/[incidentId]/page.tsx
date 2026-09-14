@@ -227,7 +227,7 @@ export default function IncidentDetailPage() {
                       type="button"
                       disabled={busy || detail.state === "acknowledged"}
                       onClick={() => acknowledge(detail)}
-                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-inverse disabled:opacity-50"
                     >
                       {detail.state === "acknowledged" ? "Acknowledged" : "Acknowledge"}
                     </button>

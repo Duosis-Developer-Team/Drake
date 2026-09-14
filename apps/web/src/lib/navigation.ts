@@ -2,9 +2,9 @@
  * Primary navigation.
  *
  * Grouped by what an operator is doing, not by which sprint shipped the
- * screen: Overview is where you start, Observe is where you look at what the
- * platform is doing, Operate is where you act on it, and Manage is
- * configuration and governance.
+ * screen: Overview is where you start, Estate is what you look at (the
+ * platform's own inventory), Operations is where you act on what estate
+ * surfaces, and Configuration is governance and setup.
  *
  * Every entry points at a route that exists. The "coming in a later sprint"
  * placeholders that used to sit here — Tenants, Catalog & Templates — are
@@ -55,8 +55,8 @@ export const NAVIGATION: NavGroup[] = [
     items: [{ label: "Command Center", href: "/", icon: LayoutDashboard }],
   },
   {
-    key: "observe",
-    label: "Observe",
+    key: "estate",
+    label: "Estate",
     items: [
       {
         label: "Projects",
@@ -89,8 +89,8 @@ export const NAVIGATION: NavGroup[] = [
     ],
   },
   {
-    key: "operate",
-    label: "Operate",
+    key: "operations",
+    label: "Operations",
     items: [
       {
         label: "Incidents",
@@ -123,8 +123,8 @@ export const NAVIGATION: NavGroup[] = [
     ],
   },
   {
-    key: "manage",
-    label: "Manage",
+    key: "configuration",
+    label: "Configuration",
     items: [
       {
         label: "Onboard project",

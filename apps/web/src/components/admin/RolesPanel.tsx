@@ -167,7 +167,7 @@ export function RolesPanel() {
           />
           <button
             type="submit"
-            className="h-9 rounded-lg bg-accent px-4 text-sm font-medium text-white hover:opacity-90"
+            className="h-9 rounded-lg bg-accent px-4 text-sm font-medium text-ink-inverse hover:opacity-90"
           >
             Create
           </button>
@@ -235,7 +235,7 @@ export function RolesPanel() {
                 <button
                   type="button"
                   onClick={() => void savePermissions()}
-                  className="h-9 rounded-lg bg-accent px-4 text-sm font-medium text-white hover:opacity-90"
+                  className="h-9 rounded-lg bg-accent px-4 text-sm font-medium text-ink-inverse hover:opacity-90"
                 >
                   Save permissions
                 </button>

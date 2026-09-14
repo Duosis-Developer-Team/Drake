@@ -51,7 +51,7 @@ export function RangeSelector({
           aria-pressed={value === range}
           className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
             value === range
-              ? "bg-accent text-white"
+              ? "bg-accent text-ink-inverse"
               : "text-ink-secondary hover:bg-surface-sunken"
           }`}
         >
