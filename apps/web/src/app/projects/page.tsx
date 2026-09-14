@@ -312,7 +312,7 @@ function ProjectsInner() {
           flush
           className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:70ms]"
         >
-          <div className="border-b border-border px-4 py-3">
+          <div className="border-b border-border px-7 py-4">
             <FilterBar
               summary={
                 projectsCollection.loading && projects.length === 0
@@ -356,15 +356,15 @@ function ProjectsInner() {
           </div>
 
           {projectsCollection.loading && projects.length === 0 ? (
-            <div className="px-4 py-4">
+            <div className="px-7 py-5">
               <LoadingSkeleton variant="table" rows={4} label="Loading projects" />
             </div>
           ) : projectsCollection.denied ? (
-            <div className="px-4 py-2">
+            <div className="px-7 py-4">
               <DeniedState />
             </div>
           ) : projects.length === 0 && projectsCollection.error ? (
-            <div className="px-4 py-2">
+            <div className="px-7 py-4">
               <ErrorState
                 description={projectsCollection.error ?? undefined}
                 correlationId={projectsCollection.correlationId}
@@ -392,7 +392,7 @@ function ProjectsInner() {
                 />
               </div>
               {!projectsCollection.complete || !servicesCollection.complete ? (
-                <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
+                <div className="flex flex-wrap gap-2 border-t border-border px-7 py-4">
                   {!projectsCollection.complete ? (
                     <Button
                       onClick={projectsCollection.loadMore}

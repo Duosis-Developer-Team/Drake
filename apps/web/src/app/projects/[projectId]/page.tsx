@@ -102,7 +102,7 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
 function DependencyRow({ dependency }: { dependency: ProjectDependency }) {
   const notApplicable = dependency.workload_applicability === "not_applicable";
   return (
-    <li className="px-4 py-3">
+    <li className="px-7 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-body font-medium text-ink">{dependency.display_name}</span>
         <span className="flex items-center gap-1.5">
@@ -368,7 +368,7 @@ export default function ProjectOverviewPage() {
                 />
                 <ul className="divide-y divide-border" data-testid="in-cluster-dependency-list">
                   {inCluster.map((dependency) => (
-                    <li key={dependency.id} className="px-4 py-3">
+                    <li key={dependency.id} className="px-7 py-4">
                       <span className="block text-body font-medium text-ink">
                         {dependency.display_name}
                       </span>
