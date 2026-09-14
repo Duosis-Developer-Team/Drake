@@ -272,20 +272,28 @@ export default function CommandCenterPage() {
           title="Standing state"
           description="What Drake is watching, and how current each source is."
         />
-        <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Reveal delay={80}>
-            <FleetPanel resource={clusters} />
-          </Reveal>
-          <Reveal delay={130}>
-            <IntegrationsPanel resource={integrations} />
-          </Reveal>
-          <Reveal delay={180}>
-            <CatalogPanel resource={context} />
-          </Reveal>
-          <Reveal delay={230}>
-            <ServiceHealthPanel resource={services} />
-          </Reveal>
-        </div>
+        {/* One compact surface (brief §14.8), not four equal-weight panels:
+            a single bordered/shadowed container holding four segments, each
+            still its own authorized-independently region (a denied fleet
+            read says so right here, without dimming the catalog beside it),
+            separated by hairline dividers rather than by a gap and a second
+            shadow each. */}
+        <Panel flush data-testid="estate-overview" className="mt-3 !p-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2">
+            <Reveal delay={80}>
+              <FleetPanel resource={clusters} />
+            </Reveal>
+            <Reveal delay={130} className="border-t border-border lg:border-t-0 lg:border-l">
+              <IntegrationsPanel resource={integrations} />
+            </Reveal>
+            <Reveal delay={180} className="border-t border-border">
+              <CatalogPanel resource={context} />
+            </Reveal>
+            <Reveal delay={230} className="border-t border-border lg:border-l">
+              <ServiceHealthPanel resource={services} />
+            </Reveal>
+          </div>
+        </Panel>
       </div>
     </PageFrame>
   );
@@ -297,12 +305,21 @@ export default function CommandCenterPage() {
  * re-triggered on data refresh (this wraps the section once, not per render
  * of its contents). `backwards` holds each panel at its `from` frame until
  * its own delay elapses, so a later panel never flashes at full opacity
- * before its turn.
+ * before its turn. `className` carries layout concerns (grid dividers) that
+ * belong to the caller's arrangement, not to the entrance itself.
  */
-function Reveal({ delay = 0, children }: { delay?: number; children: ReactNode }) {
+function Reveal({
+  delay = 0,
+  className = "",
+  children,
+}: {
+  delay?: number;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <div
-      className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards]"
+      className={`min-w-0 motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] ${className}`}
       style={{ animationDelay: `${delay}ms` }}
     >
       {children}
@@ -345,7 +362,7 @@ function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand:
 
 function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
   return (
-    <Panel data-testid="catalog-counts">
+    <div data-testid="catalog-counts" className="flex min-w-0 flex-col gap-3 p-4">
       <PanelHeader title="Your catalog" description="Records you are authorized to see." />
       {resource.loading && !resource.data ? (
         <LoadingSkeleton rows={2} />
@@ -389,7 +406,7 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
           })}
         </ul>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -397,7 +414,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
   const rows = resource.data?.items ?? [];
   const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
   return (
-    <Panel data-testid="service-health-rollup">
+    <div data-testid="service-health-rollup" className="flex min-w-0 flex-col gap-3 p-4">
       <PanelHeader
         title="Service health"
         description="Every tracked service, by the state its own binding reports."
@@ -434,7 +451,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
           </Link>
         </>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -449,7 +466,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
 function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> }) {
   const clusters = resource.data?.clusters ?? [];
   return (
-    <Panel flush data-testid="fleet-panel">
+    <div data-testid="fleet-panel" className="flex min-w-0 flex-col">
       <PanelHeader
         flush
         title="Cluster fleet"
@@ -542,7 +559,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
         </table>
         </div>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -636,7 +653,7 @@ function IntegrationsPanel({
   );
 
   return (
-    <Panel flush data-testid="integrations-panel">
+    <div data-testid="integrations-panel" className="flex min-w-0 flex-col">
       <PanelHeader
         flush
         title="Integrations"
@@ -732,6 +749,6 @@ function IntegrationsPanel({
           ) : null}
         </>
       )}
-    </Panel>
+    </div>
   );
 }

@@ -40,7 +40,12 @@ export type PanelSurface = "default" | "hero";
  *  `ink-secondary` — those track the *page* theme, not this surface's fixed
  *  obsidian one. */
 const SURFACE: Record<PanelSurface, string> = {
-  default: "border border-border bg-surface shadow-panel",
+  // The lift on hover is subtle on purpose — a hairline of translate and a
+  // deeper shadow, never a scale — so it reads as "this surface has depth"
+  // rather than "this is a button". The hero surface skips it: it is the
+  // one fixed anchor per screen, not another hoverable tile among many.
+  default:
+    "border border-border bg-surface shadow-panel transition-[transform,box-shadow] duration-[var(--duration-control)] ease-[var(--ease-standard)] hover:-translate-y-0.5 hover:shadow-overlay",
   hero: "border border-sidebar-border bg-sidebar shadow-overlay",
 };
 
