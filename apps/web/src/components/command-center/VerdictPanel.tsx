@@ -10,6 +10,7 @@
  */
 import Link from "next/link";
 
+import { ProgressGauge } from "@/components/charts/GaugeChart";
 import { RelativeTime } from "@/components/ui/identifiers";
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec } from "@/lib/design/status";
@@ -55,7 +56,7 @@ export function VerdictPanel({
             <p
               data-testid="verdict-headline"
               style={{ textWrap: "balance" }}
-              className={`text-4xl font-semibold tracking-tight ${heroTone[worstTone]}`}
+              className={`text-5xl font-semibold tracking-tight ${heroTone[worstTone]}`}
             >
               {verdict.headline}
             </p>
@@ -108,27 +109,38 @@ export function VerdictPanel({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5 border-l border-sidebar-border pl-8 text-micro text-sidebar-ink-muted">
-          <span data-testid="verdict-sources" className="text-caption font-medium text-sidebar-ink">
-            {verdict.sourcesAnswered} of {verdict.sourcesTotal} sources answered
-          </span>
-          {verdict.oldestSuspectEvidence ? (
-            <span data-testid="verdict-oldest-evidence">
-              oldest: {verdict.oldestSuspectEvidence.label}{" "}
-              <RelativeTime value={verdict.oldestSuspectEvidence.asOf} />
+        <div className="flex shrink-0 items-center gap-4 border-l border-sidebar-border pl-8">
+          <ProgressGauge
+            size={96}
+            value={verdict.sourcesTotal > 0 ? (verdict.sourcesAnswered / verdict.sourcesTotal) * 100 : 0}
+            label={`${verdict.sourcesAnswered}/${verdict.sourcesTotal}`}
+            color="#f2cf55"
+            trackColor="#292929"
+            textColor="#f1f1f1"
+            ariaLabel={`${verdict.sourcesAnswered} of ${verdict.sourcesTotal} sources answered`}
+          />
+          <div className="flex flex-col items-start gap-1.5 text-micro text-sidebar-ink-muted">
+            <span data-testid="verdict-sources" className="text-caption font-medium text-sidebar-ink">
+              {verdict.sourcesAnswered} of {verdict.sourcesTotal} sources answered
             </span>
-          ) : null}
-          {!allSourcesAnswered ? (
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={refreshing}
-              data-testid="verdict-retry-sources"
-              className="font-medium text-sidebar-active-rail hover:underline disabled:opacity-60"
-            >
-              {refreshing ? "Retrying…" : "Retry unanswered sources"}
-            </button>
-          ) : null}
+            {verdict.oldestSuspectEvidence ? (
+              <span data-testid="verdict-oldest-evidence">
+                oldest: {verdict.oldestSuspectEvidence.label}{" "}
+                <RelativeTime value={verdict.oldestSuspectEvidence.asOf} />
+              </span>
+            ) : null}
+            {!allSourcesAnswered ? (
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+                data-testid="verdict-retry-sources"
+                className="font-medium text-sidebar-active-rail hover:underline disabled:opacity-60"
+              >
+                {refreshing ? "Retrying…" : "Retry unanswered sources"}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </Panel>

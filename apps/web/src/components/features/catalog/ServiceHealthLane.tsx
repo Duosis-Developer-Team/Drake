@@ -13,7 +13,7 @@
 
 import Link from "next/link";
 
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import { StatusBadge, ToneAvatar } from "@/components/ui/StatusBadge";
 import type { ServiceLaneModel } from "@/lib/view-models/scope-health";
 
 function BindingSummary({ binding }: { binding: ServiceLaneModel["binding"] }) {
@@ -42,13 +42,16 @@ export function ServiceHealthLane({ services }: { services: ServiceLaneModel[] }
         <li key={service.id}>
           <Link
             href={service.href}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-control px-1 py-1.5 transition-colors hover:bg-surface-hover"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-control px-2 py-2 transition-colors hover:bg-surface-hover"
           >
-            <span className="min-w-0">
-              <span className="block truncate text-body font-medium text-ink">
-                {service.displayName}
+            <span className="flex min-w-0 items-center gap-3">
+              <ToneAvatar status={service.tone} size="compact" />
+              <span className="min-w-0">
+                <span className="block truncate text-body font-medium text-ink">
+                  {service.displayName}
+                </span>
+                <BindingSummary binding={service.binding} />
               </span>
-              <BindingSummary binding={service.binding} />
             </span>
             <span className="flex items-center gap-1.5">
               {service.partial ? (

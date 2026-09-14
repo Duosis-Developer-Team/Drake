@@ -32,7 +32,7 @@
  */
 
 import * as echarts from "echarts/core";
-import { BarChart, CustomChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
+import { BarChart, CustomChart, GaugeChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
 import {
   DatasetComponent,
   GridComponent,
@@ -51,6 +51,7 @@ import type { EChartsOption } from "@/components/charts/options";
 echarts.use([
   BarChart,
   CustomChart,
+  GaugeChart,
   HeatmapChart,
   LineChart,
   PieChart,
