@@ -15,14 +15,15 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
 import { Donut } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { FilterBar, Select } from "@/components/ui/controls";
 import {
   SLO_EXPLANATIONS,
   formatAge,
@@ -35,9 +36,6 @@ import {
   type SloStatus,
 } from "@/lib/alerting";
 
-const SELECT_CLASS =
-  "rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-ink";
-
 const STATES: SloStatus[] = [
   "healthy",
   "warning",
@@ -49,67 +47,70 @@ const STATES: SloStatus[] = [
   "not_configured",
 ];
 
+/**
+ * One objective, as a card: name and target lead, then compliance and
+ * budget as the two numbers this whole screen exists to keep apart — each
+ * its own stat rather than two more grid columns competing with the badge.
+ */
 function SloRow({ slo }: { slo: Slo }) {
   const evaluation = slo.evaluation;
   const activeBurn = evaluation?.burn_rates.find((rate) => rate.active) ?? null;
   return (
-    <tr className="border-t border-border align-top" data-testid={`slo-row-${slo.slo_key}`}>
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
-          <Link
-            href={`/slo/${slo.id}`}
-            className="text-sm font-medium text-ink hover:underline"
-          >
+    <li
+      data-testid={`slo-row-${slo.slo_key}`}
+      className="flex flex-wrap items-start gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/slo/${slo.id}`} className="text-body font-semibold text-ink hover:underline">
             {slo.display_name}
           </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
-            {[slo.project_key, slo.environment_key, slo.service_key]
-              .filter(Boolean)
-              .join("/")}{" "}
-            · {slo.indicator}
-          </span>
+          {evaluation ? (
+            <SloBadge status={evaluation.status} />
+          ) : (
+            /* Never "healthy" for something nobody has measured. */
+            <span className="text-caption italic text-ink-muted">not evaluated</span>
+          )}
+          {activeBurn ? (
+            <StatusBadge
+              status={activeBurn.severity === "critical" ? "critical" : "warning"}
+              label={`${activeBurn.factor}× ${activeBurn.name}`}
+              size="compact"
+            />
+          ) : null}
         </div>
-      </td>
-      <td className="py-2.5 pr-3 text-sm text-ink">
-        {formatRatio(slo.objective_ratio)}
-        <div className="text-[11px] text-ink-muted">
-          over {formatWindow(slo.window_seconds)}
-        </div>
-      </td>
-      <td className="py-2.5 pr-3">
-        {evaluation ? (
-          <SloBadge status={evaluation.status} />
-        ) : (
-          /* Never "healthy" for something nobody has measured. */
-          <span className="text-[11px] italic text-ink-muted">not evaluated</span>
-        )}
-      </td>
-      <td className="py-2.5 pr-3 text-sm text-ink">
-        {formatRatio(evaluation?.compliance_ratio ?? null)}
-      </td>
-      <td className="py-2.5 pr-3 text-sm">
-        <span
-          className={
-            (evaluation?.error_budget_remaining ?? 0) < 0 ? "text-critical" : "text-ink"
-          }
-        >
-          {formatBudget(evaluation?.error_budget_remaining ?? null)}
+        <span className="mt-1 block font-mono text-micro text-ink-muted">
+          {[slo.project_key, slo.environment_key, slo.service_key].filter(Boolean).join("/")} ·{" "}
+          {slo.indicator}
         </span>
-      </td>
-      <td className="py-2.5 pr-3">
-        {activeBurn ? (
-          <StatusBadge
-            status={activeBurn.severity === "critical" ? "critical" : "warning"}
-            label={`${activeBurn.factor}× ${activeBurn.name}`}
-          />
-        ) : (
-          <span className="text-[11px] text-ink-muted">not burning</span>
-        )}
-      </td>
-      <td className="py-2.5 text-xs text-ink-secondary">
-        {evaluation ? formatAge(evaluation.evaluated_for) : "—"}
-      </td>
-    </tr>
+        <span className="mt-1 block text-caption text-ink-secondary">
+          Target {formatRatio(slo.objective_ratio)} over {formatWindow(slo.window_seconds)}
+          {!activeBurn ? <span className="text-ink-muted"> · not burning</span> : null}
+        </span>
+      </div>
+      <div className="flex shrink-0 items-start gap-6 text-right">
+        <div>
+          <span data-tabular className="block text-title font-semibold text-ink">
+            {formatRatio(evaluation?.compliance_ratio ?? null)}
+          </span>
+          <span className="text-micro text-ink-muted">compliance</span>
+        </div>
+        <div>
+          <span
+            data-tabular
+            className={`block text-title font-semibold ${
+              (evaluation?.error_budget_remaining ?? 0) < 0 ? "text-critical" : "text-ink"
+            }`}
+          >
+            {formatBudget(evaluation?.error_budget_remaining ?? null)}
+          </span>
+          <span className="text-micro text-ink-muted">budget left</span>
+        </div>
+        <span className="text-micro text-ink-muted">
+          {evaluation ? formatAge(evaluation.evaluated_for) : "—"}
+        </span>
+      </div>
+    </li>
   );
 }
 
@@ -119,55 +120,63 @@ function SloInner() {
 
   return (
     <PageFrame>
+      <PageHeader
+        title="Service objectives"
+        description="What was promised, what was measured, and how much room is left before the promise is broken."
+      />
       <div className="space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-ink">Service objectives</h1>
-        <p className="text-sm text-ink-secondary">
-          What was promised, what was measured, and how much room is left before the
-          promise is broken.
-        </p>
-      </header>
-
-      <Card title="Objectives">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <select
-            aria-label="SLO state"
-            className={SELECT_CLASS}
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-          >
-            <option value="">Any state</option>
-            {STATES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Panel
+          data-testid="slo-filters"
+          className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+        >
+          <FilterBar>
+            <Select
+              label="State"
+              hideLabel={false}
+              value={status}
+              placeholder="Any state"
+              options={STATES.map((value) => ({ value, label: value }))}
+              onChange={setStatus}
+            />
+          </FilterBar>
+        </Panel>
 
         {page.state === "loading" ? (
-          <DataState kind="loading" />
+          <Panel>
+            <DataState kind="loading" />
+          </Panel>
         ) : page.state === "error" ? (
-          page.notFound ? (
-            <DataState kind="permission-denied" />
-          ) : (
-            <DataState kind="error" description={page.message} onRetry={retry} />
-          )
+          <Panel>
+            {page.notFound ? (
+              <DataState kind="permission-denied" />
+            ) : (
+              <DataState kind="error" description={page.message} onRetry={retry} />
+            )}
+          </Panel>
         ) : page.data.items.length === 0 ? (
-          <DataState
-            kind="empty"
-            title="No objectives in scope"
-            description="No service level objective is configured for anything you can see."
-          />
+          <Panel>
+            <DataState
+              kind="empty"
+              title="No objectives in scope"
+              description="No service level objective is configured for anything you can see."
+            />
+          </Panel>
         ) : (
           <>
             {/* insufficient_data and not_configured stay OUT of the healthy
                 wedge: nothing was measured, and a green slice for an
                 unmeasured objective is the most misleading thing here. */}
-            <div className="mb-4 border-b border-border pb-4">
+            <Panel
+              data-testid="slo-overview"
+              className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+            >
+              <PanelHeader
+                title="Objectives on this page"
+                description="By verdict — a page, not the whole authorized set."
+              />
               <Donut
-                size={116}
-                thickness={13}
+                size={132}
+                thickness={14}
                 label="Objectives on this page by verdict"
                 centerLabel={`${page.data.items.length}`}
                 slices={[
@@ -209,66 +218,59 @@ function SloInner() {
                   },
                 ]}
               />
-            </div>
-            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-ink-muted">
-                <tr>
-                  <th className="pb-2 pr-3 font-medium">Objective</th>
-                  <th className="pb-2 pr-3 font-medium">Target</th>
-                  <th className="pb-2 pr-3 font-medium">State</th>
-                  <th className="pb-2 pr-3 font-medium">Compliance</th>
-                  <th className="pb-2 pr-3 font-medium">Budget left</th>
-                  <th className="pb-2 pr-3 font-medium">Burn</th>
-                  <th className="pb-2 font-medium">Evaluated</th>
-                </tr>
-              </thead>
-              <tbody>
+            </Panel>
+
+            <Panel
+              flush
+              className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
+            >
+              <ul className="divide-y divide-border">
                 {page.data.items.map((slo) => (
                   <SloRow key={slo.id} slo={slo} />
                 ))}
-              </tbody>
-            </table>
-            </div>
+              </ul>
 
-            {/* Anything that is not a measurement is explained in words, so
-                nobody reads a dash as a zero. */}
-            {page.data.items.some(
-              (slo) =>
-                slo.evaluation === null ||
-                ["insufficient_data", "stale", "query_failed", "not_configured"].includes(
-                  slo.evaluation.status,
-                ),
-            ) ? (
-              <div className="mt-4 space-y-1.5" data-testid="slo-caveats">
-                {page.data.items
-                  .filter(
-                    (slo) =>
-                      slo.evaluation !== null &&
-                      [
-                        "insufficient_data",
-                        "stale",
-                        "query_failed",
-                        "not_configured",
-                      ].includes(slo.evaluation.status),
-                  )
-                  .map((slo) => (
-                    <p key={slo.id} className="text-xs text-ink-secondary">
-                      <span className="font-medium text-ink">{slo.display_name}</span>{" "}
-                      — {SLO_EXPLANATIONS[slo.evaluation!.status]}
+              {/* Anything that is not a measurement is explained in words, so
+                  nobody reads a dash as a zero. */}
+              {page.data.items.some(
+                (slo) =>
+                  slo.evaluation === null ||
+                  ["insufficient_data", "stale", "query_failed", "not_configured"].includes(
+                    slo.evaluation.status,
+                  ),
+              ) ? (
+                <div
+                  className="space-y-1.5 border-t border-border px-4 py-3"
+                  data-testid="slo-caveats"
+                >
+                  {page.data.items
+                    .filter(
+                      (slo) =>
+                        slo.evaluation !== null &&
+                        [
+                          "insufficient_data",
+                          "stale",
+                          "query_failed",
+                          "not_configured",
+                        ].includes(slo.evaluation.status),
+                    )
+                    .map((slo) => (
+                      <p key={slo.id} className="text-caption text-ink-secondary">
+                        <span className="font-medium text-ink">{slo.display_name}</span>{" "}
+                        — {SLO_EXPLANATIONS[slo.evaluation!.status]}
+                      </p>
+                    ))}
+                  {page.data.items.some((slo) => slo.evaluation === null) ? (
+                    <p className="text-caption text-ink-secondary">
+                      Objectives marked <span className="italic">not evaluated</span> have
+                      never been measured. That is not the same as meeting the target.
                     </p>
-                  ))}
-                {page.data.items.some((slo) => slo.evaluation === null) ? (
-                  <p className="text-xs text-ink-secondary">
-                    Objectives marked <span className="italic">not evaluated</span> have
-                    never been measured. That is not the same as meeting the target.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
+                  ) : null}
+                </div>
+              ) : null}
+            </Panel>
           </>
         )}
-      </Card>
       </div>
     </PageFrame>
   );
