@@ -56,20 +56,20 @@
 
   /* Surfaces, canvas outward. True neutral grey (R=G=B) — not the brief's
      warm bone cast, overridden per direction. */
-  --canvas: #f5f5f5;
+  --canvas: #ebebeb;
   --surface-1: #ffffff;
-  --surface-2: #f4f4f4;
-  --surface-3: #ececec;
+  --surface-2: #f1f1f1;
+  --surface-3: #e4e4e4;
   --surface-elevated: #ffffff;
-  --surface-hover: #efefef;
-  --surface-selected: #e4e4e4;
+  --surface-hover: #f3f3f3;
+  --surface-selected: #e6e6e6;
 
-  --border-subtle: #dcdcdc;
-  --border-strong: #7d7d7d;
+  --border-subtle: #d6d6d6;
+  --border-strong: #767676;
 
   --text-primary: #161616;
-  --text-secondary: #646464;
-  --text-muted: #686868;
+  --text-secondary: #555555;
+  --text-muted: #626262;
   --text-inverse: #f1f1f1;
 
   /* Brand. `--brand` is the monochrome obsidian ink used for primary fills
@@ -84,32 +84,32 @@
   --brand-accent: #2a78d6;
   --focus-ring: #2a78d6;
 
-  --chart-grid: #dfdfdf;
+  --chart-grid: #e4e4e4;
   --chart-axis: #646464;
   --chart-tooltip: #181818;
   --chart-tooltip-text: #f1f1f1;
 
-  --status-success: #2270d8;
-  --status-info: #5165e6;
-  --status-warning: #9c671c;
-  --status-critical: #df2121;
-  --status-neutral: #727272;
-  --status-unknown: #6e7278;
-  --status-stale: #8957d4;
+  --status-success: #1d62c0;
+  --status-info: #4556d4;
+  --status-warning: #86560f;
+  --status-critical: #c41c1c;
+  --status-neutral: #606060;
+  --status-unknown: #5d6168;
+  --status-stale: #7646c0;
 
-  --status-success-soft: #f7fafc;
-  --status-info-soft: #f8f9fc;
-  --status-warning-soft: #fcfaf7;
-  --status-critical-soft: #fcf8f8;
-  --status-neutral-soft: #f9f9f9;
-  --status-unknown-soft: #f8f8f8;
-  --status-stale-soft: #faf8fc;
+  --status-success-soft: #e6effb;
+  --status-info-soft: #eceefd;
+  --status-warning-soft: #f9eedd;
+  --status-critical-soft: #fbe7e7;
+  --status-neutral-soft: #eeeeee;
+  --status-unknown-soft: #edeef0;
+  --status-stale-soft: #f1eafb;
 
   /* The obsidian rail. Same values in `.dark` below — see the header note. */
-  --sidebar-canvas: #fbfbfb;
-  --sidebar-surface-hover: #f0f0f0;
-  --sidebar-surface-selected: #ececec;
-  --sidebar-border: #e6e6e6;
+  --sidebar-canvas: #fafafa;
+  --sidebar-surface-hover: #efefef;
+  --sidebar-surface-selected: #e8e8e8;
+  --sidebar-border: #dedede;
   --sidebar-text: #161616;
   --sidebar-text-muted: #666666;
   --sidebar-active-rail: #2a78d6;
@@ -130,9 +130,9 @@
   --shadow-overlay: 0 20px 48px -12px rgb(23 22 20 / 0.22), 0 8px 16px -6px rgb(23 22 20 / 0.10);
   --scrim: rgb(23 22 20 / 0.45);
   /* PayFlow frame: the bezel the rail and the content surface sit inside. */
-  --frame: #e2e2e2;
+  --frame: #d4d4d4;
   --sidebar-nav: #ffffff;
-  --sidebar-bubble: #f1f1f1;
+  --sidebar-bubble: #efefef;
   --sidebar-bubble-active: #161616;
   --sidebar-bubble-active-ink: #ffffff;
 }
@@ -146,20 +146,20 @@
      is re-stepped for a real gap, and `surface-elevated` is corrected to
      actually be the lightest of the family (it was, bug, darker than
      surface-2/3) — the topmost surface reads as topmost. */
-  --canvas: #0f0f0f;
+  --canvas: #080808;
   --surface-1: #1c1c1c;
-  --surface-2: #272727;
-  --surface-3: #333333;
-  --surface-elevated: #3c3c3c;
-  --surface-hover: #292929;
-  --surface-selected: #3a3a3a;
+  --surface-2: #2a2a2a;
+  --surface-3: #363636;
+  --surface-elevated: #404040;
+  --surface-hover: #2e2e2e;
+  --surface-selected: #3c3c3c;
 
-  --border-subtle: #383838;
-  --border-strong: #7e7e7e;
+  --border-subtle: #3a3a3a;
+  --border-strong: #808080;
 
   --text-primary: #f1f1f1;
-  --text-secondary: #b9b9b9;
-  --text-muted: #9e9e9e;
+  --text-secondary: #c2c2c2;
+  --text-muted: #a3a3a3;
   --text-inverse: #161616;
 
   --brand: #f1f1f1;
@@ -169,7 +169,7 @@
   --brand-accent: #5998e5;
   --focus-ring: #5998e5;
 
-  --chart-grid: #2a2a2a;
+  --chart-grid: #303030;
   --chart-axis: #b9b9b9;
   --chart-tooltip: #0c0c0c;
   --chart-tooltip-text: #f1f1f1;
@@ -177,27 +177,27 @@
   /* success/info/unknown/stale nudged a touch lighter (same hue) so they
      still clear 4.5:1 against the brighter `surface-1` above — verified
      against design-system.test.ts's WCAG formula before landing here. */
-  --status-success: #4588e1;
-  --status-info: #6c7eea;
+  --status-success: #5b98ea;
+  --status-info: #8391f1;
   --status-warning: #d9922e;
-  --status-critical: #e85d5d;
-  --status-neutral: #8c8c8c;
-  --status-unknown: #81868c;
-  --status-stale: #9b70da;
+  --status-critical: #f07272;
+  --status-neutral: #a0a0a0;
+  --status-unknown: #9ba0a7;
+  --status-stale: #af89e6;
 
-  --status-success-soft: #0f1823;
-  --status-info-soft: #12142b;
+  --status-success-soft: #13233a;
+  --status-info-soft: #191c3d;
   --status-warning-soft: #3b2c16;
-  --status-critical-soft: #3b1616;
-  --status-neutral-soft: #232323;
-  --status-unknown-soft: #161616;
-  --status-stale-soft: #1b1027;
+  --status-critical-soft: #3f1a1a;
+  --status-neutral-soft: #2c2c2c;
+  --status-unknown-soft: #2a2d31;
+  --status-stale-soft: #2a1a40;
 
   /* The obsidian rail, unchanged from `:root` — see the file header note. */
-  --sidebar-canvas: #161616;
-  --sidebar-surface-hover: #222222;
-  --sidebar-surface-selected: #2a2a2a;
-  --sidebar-border: #242424;
+  --sidebar-canvas: #121212;
+  --sidebar-surface-hover: #262626;
+  --sidebar-surface-selected: #303030;
+  --sidebar-border: #2a2a2a;
   --sidebar-text: #f1f1f1;
   --sidebar-text-muted: #8f8f8f;
   --sidebar-active-rail: #5998e5;
@@ -214,9 +214,9 @@
   --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 16px 40px -20px rgb(0 0 0 / 0.7);
   --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.65), 0 8px 16px -6px rgb(0 0 0 / 0.4);
   --scrim: rgb(3 3 2 / 0.6);
-  --frame: #050505;
-  --sidebar-nav: #1e1e1e;
-  --sidebar-bubble: #262626;
+  --frame: #000000;
+  --sidebar-nav: #1c1c1c;
+  --sidebar-bubble: #2a2a2a;
   --sidebar-bubble-active: #f1f1f1;
   --sidebar-bubble-active-ink: #161616;
 }
