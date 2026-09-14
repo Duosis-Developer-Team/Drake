@@ -30,6 +30,22 @@ describe("useProgressiveCollection", () => {
     expect(result.current.complete).toBe(true);
   });
 
+  it("never reports complete:true after a first-page fetch fails", async () => {
+    installFetchMock({
+      "/page-1": { status: 500, body: { error: { code: "error", message: "boom" } } },
+    });
+    const { result } = renderHook(() =>
+      useProgressiveCollection<StringPage, string>({ firstPath: "/page-1", pageToSlice }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // Nothing loaded and nothing known to be missing either — `complete`
+    // must never default to true just because there is no known next page.
+    expect(result.current.items).toEqual([]);
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.complete).toBe(false);
+  });
+
   it("retains first-page rows and reports complete:false after a later-page failure", async () => {
     installFetchMock({
       "/page-1": { status: 200, body: { items: ["a"], next: "/page-2" } },

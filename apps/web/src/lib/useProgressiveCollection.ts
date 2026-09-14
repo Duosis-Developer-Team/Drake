@@ -166,7 +166,10 @@ export function useProgressiveCollection<Page, Item>(options: {
   return {
     items,
     total,
-    complete: nextPath === null,
+    // A missing next page is only proof of completeness when the first page
+    // actually succeeded — an errored fetch must never be read as "nothing
+    // more exists".
+    complete: nextPath === null && error === null,
     loading,
     refreshing,
     loadingMore,
