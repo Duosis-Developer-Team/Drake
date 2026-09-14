@@ -60,11 +60,13 @@ function Swatch({
     <Link
       href={href}
       aria-label={`${projectKey} / ${environmentKey}: worst status ${spec.label}, ${count} service${count === 1 ? "" : "s"} — open service health`}
-      className="-mx-1 -my-0.5 inline-flex items-center gap-1.5 rounded-control px-1 py-0.5 transition-colors hover:bg-surface-hover"
+      className={`inline-flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-caption font-medium transition-opacity hover:opacity-80 ${spec.chip}`}
     >
-      <span aria-hidden className={`h-3 w-3 shrink-0 rounded-sm ${spec.dot}`} />
-      <span className="text-caption text-ink">{spec.label}</span>
-      <span className="text-micro text-ink-muted">({count})</span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${spec.dot}`} />
+        <span className="truncate">{spec.label}</span>
+      </span>
+      <span className="text-micro opacity-70">({count})</span>
     </Link>
   );
 }
@@ -95,14 +97,11 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
         <tbody>
           {environments.map((environment) => (
             <tr key={environment}>
-              <th
-                scope="row"
-                className="border-b border-border py-1.5 pr-3 text-left font-medium text-ink-secondary"
-              >
+              <th scope="row" className="py-1.5 pr-3 text-left font-medium text-ink-secondary">
                 {environment}
               </th>
               {projects.map((project) => (
-                <td key={project} className="border-b border-border px-3 py-1.5">
+                <td key={project} className="px-1.5 py-1.5">
                   <Swatch
                     cell={byKey.get(cellKey(project, environment))}
                     projectKey={project}

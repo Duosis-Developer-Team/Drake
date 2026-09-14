@@ -30,9 +30,24 @@ const RADIUS = {
   canvas: "rounded-canvas",
 } as const;
 
+export type PanelSurface = "default" | "hero";
+
+/** The obsidian rail's surface, lifted onto a panel. Theme-invariant on
+ *  purpose — see globals.css's file header — so the one dominant surface per
+ *  screen (the Command Center verdict) reads as a deliberate hero moment
+ *  rather than just another bordered box, in both themes (brief §14.2). Its
+ *  own text must use `sidebar-ink`/`sidebar-ink-muted`, never `ink`/
+ *  `ink-secondary` — those track the *page* theme, not this surface's fixed
+ *  obsidian one. */
+const SURFACE: Record<PanelSurface, string> = {
+  default: "border border-border bg-surface shadow-panel",
+  hero: "border border-sidebar-border bg-sidebar shadow-overlay",
+};
+
 export function Panel({
   children,
   tone = "default",
+  surface = "default",
   flush = false,
   radius = "panel",
   className = "",
@@ -42,6 +57,11 @@ export function Panel({
 }: {
   children: React.ReactNode;
   tone?: PanelTone;
+  /** `"hero"` swaps the surface for the theme-invariant obsidian rail
+   *  background — reserved for the one lead panel a screen is allowed
+   *  (brief §14.2/§12.4's "hero" panel level). Every other caller keeps
+   *  the default page-theme surface. */
+  surface?: PanelSurface;
   /** Drop the body padding — for tables and anything edge-to-edge. */
   flush?: boolean;
   /** `"canvas"` is the one-dominant-surface-per-screen radius (brief §7.3) —
@@ -62,8 +82,8 @@ export function Panel({
       // its source: a flex child defaults to `min-width: auto`, so any wrapper
       // around a wide table grows past the panel and the PAGE scrolls
       // sideways instead of the table's own scroller doing it.
-      className={`flex min-w-0 flex-col ${RADIUS[radius]} border border-border bg-surface shadow-panel [&>*]:min-w-0 ${
-        RAIL[tone] ?? ""
+      className={`flex min-w-0 flex-col ${RADIUS[radius]} ${SURFACE[surface]} [&>*]:min-w-0 ${
+        surface === "default" ? RAIL[tone] ?? "" : ""
       } ${flush ? "" : "gap-3 p-4"} ${className}`}
       {...rest}
     >

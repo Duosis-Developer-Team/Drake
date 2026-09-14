@@ -120,23 +120,30 @@ function Grid({
         <tbody>
           {criticalities.map((criticality) => (
             <tr key={criticality}>
-              <th
-                scope="row"
-                className="border-b border-border py-1.5 pr-3 text-left font-medium text-ink-secondary"
-              >
+              <th scope="row" className="py-1.5 pr-3 text-left font-medium text-ink-secondary">
                 {CRITICALITY_LABELS[criticality]}
               </th>
-              {tones.map((tone) => (
-                <td key={tone} className="border-b border-border px-3 py-1.5 align-top">
-                  <div className="flex flex-col gap-1">
-                    {items
-                      .filter((item) => item.criticality === criticality && item.tone === tone)
-                      .map((item) => (
-                        <ProjectLink key={item.projectId} item={item} />
-                      ))}
-                  </div>
-                </td>
-              ))}
+              {tones.map((tone) => {
+                const cellItems = items.filter(
+                  (item) => item.criticality === criticality && item.tone === tone,
+                );
+                const bg = toneSpec(tone).chip.split(" ")[0];
+                return (
+                  <td key={tone} className="px-1.5 py-1.5 align-top">
+                    {cellItems.length > 0 ? (
+                      <div className={`flex flex-col gap-1 rounded-lg p-2 ${bg}`}>
+                        {cellItems.map((item) => (
+                          <ProjectLink key={item.projectId} item={item} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-2 py-2 text-micro text-ink-muted">
+                        —
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

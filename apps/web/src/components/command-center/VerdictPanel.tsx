@@ -30,39 +30,59 @@ export function VerdictPanel({
   const { projects, services, clusters } = verdict.affectedScope;
   const allSourcesAnswered = verdict.sourcesAnswered >= verdict.sourcesTotal;
 
+  // The hero surface is theme-invariant obsidian (Panel's `surface="hero"`),
+  // so every status colour used against it must be the "on dark" reading
+  // regardless of the page's own light/dark theme — the dark-theme tone
+  // tokens are chosen for contrast on this exact obsidian background.
+  const heroTone: Record<typeof worstTone, string> = {
+    critical: "text-[#f97066]",
+    warning: "text-[#fdb022]",
+    success: "text-sidebar-ink",
+  };
+
   return (
     <Panel
       radius="canvas"
+      surface="hero"
       tone={worstTone === "success" ? "default" : worstTone}
       data-testid="verdict-panel"
+      className="min-h-60 justify-center !p-8"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <Icon aria-hidden className={`mt-1 h-6 w-6 shrink-0 ${spec.text}`} />
+      <div className="flex flex-wrap items-center justify-between gap-8">
+        <div className="flex min-w-0 max-w-2xl items-start gap-4">
+          <Icon aria-hidden className={`mt-1 h-8 w-8 shrink-0 ${heroTone[worstTone]}`} />
           <div className="min-w-0">
             <p
               data-testid="verdict-headline"
               style={{ textWrap: "balance" }}
-              className={`text-display font-semibold ${worstTone === "success" ? "text-ink" : spec.text}`}
+              className={`text-4xl font-semibold tracking-tight ${heroTone[worstTone]}`}
             >
               {verdict.headline}
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption">
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2">
               {verdict.criticalCount > 0 ? (
-                <span data-testid="verdict-critical-count" className="font-medium text-critical">
-                  {verdict.criticalCount} critical
+                <span data-testid="verdict-critical-count" className="flex items-baseline gap-1.5">
+                  <span className="text-metric font-semibold text-[#f97066]">
+                    {verdict.criticalCount}
+                  </span>
+                  <span className="text-caption text-sidebar-ink-muted">critical</span>
                 </span>
               ) : null}
               {verdict.warningCount > 0 ? (
-                <span data-testid="verdict-warning-count" className="font-medium text-warning">
-                  {verdict.warningCount} warning{verdict.warningCount === 1 ? "" : "s"}
+                <span data-testid="verdict-warning-count" className="flex items-baseline gap-1.5">
+                  <span className="text-metric font-semibold text-[#fdb022]">
+                    {verdict.warningCount}
+                  </span>
+                  <span className="text-caption text-sidebar-ink-muted">
+                    warning{verdict.warningCount === 1 ? "" : "s"}
+                  </span>
                 </span>
               ) : null}
               {projects > 0 ? (
                 <Link
                   href="/projects"
                   data-testid="verdict-scope-projects"
-                  className="text-ink-secondary hover:text-ink hover:underline"
+                  className="text-caption text-sidebar-ink-muted hover:text-sidebar-ink hover:underline"
                 >
                   {projects} project{projects === 1 ? "" : "s"}
                 </Link>
@@ -71,7 +91,7 @@ export function VerdictPanel({
                 <Link
                   href="/service-health"
                   data-testid="verdict-scope-services"
-                  className="text-ink-secondary hover:text-ink hover:underline"
+                  className="text-caption text-sidebar-ink-muted hover:text-sidebar-ink hover:underline"
                 >
                   {services} service{services === 1 ? "" : "s"}
                 </Link>
@@ -80,7 +100,7 @@ export function VerdictPanel({
                 <Link
                   href="/clusters"
                   data-testid="verdict-scope-clusters"
-                  className="text-ink-secondary hover:text-ink hover:underline"
+                  className="text-caption text-sidebar-ink-muted hover:text-sidebar-ink hover:underline"
                 >
                   {clusters} cluster{clusters === 1 ? "" : "s"}
                 </Link>
@@ -88,8 +108,8 @@ export function VerdictPanel({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1 text-micro text-ink-muted">
-          <span data-testid="verdict-sources">
+        <div className="flex shrink-0 flex-col items-end gap-1.5 border-l border-sidebar-border pl-8 text-micro text-sidebar-ink-muted">
+          <span data-testid="verdict-sources" className="text-caption font-medium text-sidebar-ink">
             {verdict.sourcesAnswered} of {verdict.sourcesTotal} sources answered
           </span>
           {verdict.oldestSuspectEvidence ? (
@@ -104,7 +124,7 @@ export function VerdictPanel({
               onClick={onRefresh}
               disabled={refreshing}
               data-testid="verdict-retry-sources"
-              className="font-medium text-brand hover:underline disabled:opacity-60"
+              className="font-medium text-sidebar-active-rail hover:underline disabled:opacity-60"
             >
               {refreshing ? "Retrying…" : "Retry unanswered sources"}
             </button>
