@@ -15,18 +15,26 @@
  *
  * Repository provenance is present on every row but deliberately quiet — it
  * is how you verify a project is what it claims, not the headline.
+ *
+ * Criticality and health are two different axes, never merged into one
+ * score: the table's Criticality column is a recorded judgement, the Health
+ * column is what service-health evidence actually observed, and the
+ * portfolio risk map above the table plots both together. Neither
+ * collection auto-loads past the backend's page size — every extra page is
+ * a `Load more` a person asked for, and the filter and summary copy say so
+ * plainly while either collection is still partial.
  */
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
-import { CompositionBar } from "@/components/charts/InlineBars";
+import { ProjectRiskMap } from "@/components/data-viz/ProjectRiskMap";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { FilterBar, SearchInput, Select } from "@/components/ui/controls";
+import { Button, FilterBar, SearchInput, Select } from "@/components/ui/controls";
 import { RelativeTime } from "@/components/ui/identifiers";
 import {
   DeniedState,
@@ -36,7 +44,9 @@ import {
 } from "@/components/ui/states";
 import type { Project } from "@/lib/catalog";
 import { humanize, type StatusTone } from "@/lib/design/status";
-import { useResource } from "@/lib/useResource";
+import { serviceHealthListPath, type ServiceHealthPage, type ServiceHealthRow } from "@/lib/serviceHealth";
+import { useProgressiveCollection, type PageSlice } from "@/lib/useProgressiveCollection";
+import { buildPortfolioRisk, type ProjectRiskItem } from "@/lib/view-models/portfolio-risk";
 
 /** Criticality is an ordered business judgement, not a health state. */
 const CRITICALITY_TONE: Record<string, StatusTone> = {
@@ -59,12 +69,51 @@ const CRITICALITY_OPTIONS = [
   { value: "low", label: "Low" },
 ];
 
+const PAGE_SIZE = 100;
+
+interface ProjectsPageResponse {
+  projects: Project[];
+  next_cursor: string | null;
+}
+
+function projectsPath(
+  filters: { lifecycle: string; search: string; criticality: string },
+  cursor?: string,
+): string {
+  const params = new URLSearchParams({ lifecycle: filters.lifecycle, limit: String(PAGE_SIZE) });
+  if (filters.search.length >= 2) params.set("search", filters.search);
+  if (filters.criticality) params.set("criticality", filters.criticality);
+  if (cursor) params.set("cursor", cursor);
+  return `/v1/projects?${params.toString()}`;
+}
+
+function serviceHealthSlice(
+  page: ServiceHealthPage,
+  loadedCount: number,
+): PageSlice<ServiceHealthRow> {
+  const loaded = loadedCount + page.items.length;
+  return {
+    items: page.items,
+    nextPath: loaded < page.total ? serviceHealthListPath({ limit: PAGE_SIZE, offset: loaded }) : null,
+    total: page.total,
+  };
+}
+
+/** `risk` matches either a shared status tone or one of the two evidence
+ * states the tone vocabulary alone cannot distinguish (`unassessed` and
+ * `incomplete` both display as the `unknown` tone). */
+function matchesRisk(item: ProjectRiskItem, risk: string): boolean {
+  if (risk === "unassessed" || risk === "incomplete") return item.evidence === risk;
+  return item.tone === risk;
+}
+
 function ProjectsInner() {
   const router = useRouter();
   const params = useSearchParams();
   const search = params.get("search") ?? "";
   const lifecycle = params.get("lifecycle") ?? "active";
   const criticality = params.get("criticality") ?? "";
+  const risk = params.get("risk");
   const [draft, setDraft] = useState(search);
 
   // Debounced: the search parameter is what drives the request, and typing
@@ -78,16 +127,19 @@ function ProjectsInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft]);
 
-  const query = useMemo(() => {
-    const next = new URLSearchParams({ lifecycle });
-    if (search.length >= 2) next.set("search", search);
-    if (criticality) next.set("criticality", criticality);
-    return next.toString();
-  }, [search, lifecycle, criticality]);
+  const filters = { lifecycle, search, criticality };
+  const projectsCollection = useProgressiveCollection<ProjectsPageResponse, Project>({
+    firstPath: projectsPath(filters),
+    pageToSlice: (page): PageSlice<Project> => ({
+      items: page.projects,
+      nextPath: page.next_cursor ? projectsPath(filters, page.next_cursor) : null,
+    }),
+  });
 
-  const resource = useResource<{ projects: Project[]; next_cursor: string | null }>(
-    `/v1/projects?${query}`,
-  );
+  const servicesCollection = useProgressiveCollection<ServiceHealthPage, ServiceHealthRow>({
+    firstPath: serviceHealthListPath({ limit: PAGE_SIZE }),
+    pageToSlice: serviceHealthSlice,
+  });
 
   function updateParams(updates: Record<string, string>) {
     const next = new URLSearchParams(params.toString());
@@ -98,8 +150,35 @@ function ProjectsInner() {
     router.replace(`/projects?${next.toString()}`, { scroll: false });
   }
 
-  const projects = resource.data?.projects ?? [];
-  const filtered = search.length > 0 || criticality !== "" || lifecycle !== "active";
+  const projects = projectsCollection.items;
+  const filtered = search.length > 0 || criticality !== "" || lifecycle !== "active" || Boolean(risk);
+
+  const model = useMemo(
+    () =>
+      buildPortfolioRisk(projects, servicesCollection.items, {
+        projects: projectsCollection.complete,
+        services: servicesCollection.complete,
+        servicesTotal: servicesCollection.total,
+      }),
+    [
+      projects,
+      projectsCollection.complete,
+      servicesCollection.items,
+      servicesCollection.complete,
+      servicesCollection.total,
+    ],
+  );
+  const riskByProjectId = useMemo(
+    () => new Map(model.items.map((item) => [item.projectId, item])),
+    [model.items],
+  );
+
+  const visibleProjects = risk
+    ? projects.filter((project) => {
+        const item = riskByProjectId.get(project.id);
+        return item ? matchesRisk(item, risk) : false;
+      })
+    : projects;
 
   const columns: Column<Project>[] = [
     {
@@ -123,10 +202,21 @@ function ProjectsInner() {
       cell: (project) => (
         <StatusBadge
           status={CRITICALITY_TONE[project.criticality] ?? "neutral"}
-          label={humanize(project.criticality)}
+          label={`${humanize(project.criticality)} criticality`}
           size="compact"
         />
       ),
+    },
+    {
+      key: "health",
+      header: "Health",
+      cell: (project) => {
+        const item = riskByProjectId.get(project.id);
+        if (!item) return <span className="text-micro text-ink-muted">—</span>;
+        return (
+          <StatusBadge status={item.tone} label={`${item.healthLabel} health`} size="compact" />
+        );
+      },
     },
     {
       key: "lifecycle",
@@ -176,12 +266,6 @@ function ProjectsInner() {
     },
   ];
 
-  const byCriticality = CRITICALITY_OPTIONS.map((option) => ({
-    name: option.label,
-    value: projects.filter((project) => project.criticality === option.value).length,
-    tone: CRITICALITY_TONE[option.value],
-  })).filter((entry) => entry.value > 0);
-
   return (
     <PageFrame>
       <PageHeader
@@ -197,20 +281,27 @@ function ProjectsInner() {
               <span>
                 {projects.reduce((sum, project) => sum + project.counts.services, 0)} services
               </span>
+              {!projectsCollection.complete ? (
+                <StatusBadge status="unknown" label="Partial view" size="compact" />
+              ) : null}
             </>
           ) : undefined
         }
       />
 
       <div className="space-y-4">
-        {projects.length > 1 ? (
-          <Panel data-testid="projects-summary">
+        {model.items.length > 0 ? (
+          <Panel data-testid="projects-risk">
             <PanelHeader
-              title="Criticality mix"
-              description="How the projects in this view are classified. Criticality is a recorded judgement, not a measured state."
+              title="Portfolio risk"
+              description="Criticality is a recorded judgement; health is what service-health evidence has actually observed. A project with no observed services is unassessed, never healthy."
               level={2}
             />
-            <CompositionBar label="Projects by criticality" segments={byCriticality} />
+            <ProjectRiskMap
+              model={model}
+              activeTone={risk}
+              onToneChange={(tone) => updateParams({ risk: tone ?? "" })}
+            />
           </Panel>
         ) : null}
 
@@ -218,11 +309,13 @@ function ProjectsInner() {
           <div className="border-b border-border px-4 py-3">
             <FilterBar
               summary={
-                resource.data
-                  ? `${projects.length} project${projects.length === 1 ? "" : "s"}${
-                      filtered ? " matching" : ""
-                    }`
-                  : undefined
+                projectsCollection.loading && projects.length === 0
+                  ? undefined
+                  : risk && !model.complete
+                    ? `Filtered within ${projects.length} loaded project${projects.length === 1 ? "" : "s"}`
+                    : `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}${
+                        filtered ? " matching" : ""
+                      }`
               }
               onReset={
                 filtered
@@ -256,41 +349,66 @@ function ProjectsInner() {
             </FilterBar>
           </div>
 
-          {resource.loading && !resource.data ? (
+          {projectsCollection.loading && projects.length === 0 ? (
             <div className="px-4 py-4">
               <LoadingSkeleton variant="table" rows={4} label="Loading projects" />
             </div>
-          ) : resource.denied ? (
+          ) : projectsCollection.denied ? (
             <div className="px-4 py-2">
               <DeniedState />
             </div>
-          ) : !resource.data ? (
+          ) : projects.length === 0 && projectsCollection.error ? (
             <div className="px-4 py-2">
               <ErrorState
-                description={resource.error ?? undefined}
-                correlationId={resource.correlationId}
-                onRetry={resource.reload}
+                description={projectsCollection.error ?? undefined}
+                correlationId={projectsCollection.correlationId}
+                onRetry={projectsCollection.reload}
               />
             </div>
           ) : (
-            <div data-testid="project-list">
-              <DataTable
-                caption="Projects in your authorized scope"
-                rows={projects}
-                columns={columns}
-                rowKey={(project) => project.id}
-                emptyState={
-                  <EmptyState
-                    title={filtered ? "No projects match these filters" : "No projects in your scope"}
-                    description={
-                      filtered
-                        ? "Clear the filters to see everything you are authorized for."
-                        : "Projects you are authorized to see will appear here once they are onboarded."
-                    }
-                  />
-                }
-              />
-            </div>
+            <>
+              <div data-testid="project-list">
+                <DataTable
+                  caption="Projects in your authorized scope"
+                  rows={visibleProjects}
+                  columns={columns}
+                  rowKey={(project) => project.id}
+                  emptyState={
+                    <EmptyState
+                      title={filtered ? "No projects match these filters" : "No projects in your scope"}
+                      description={
+                        filtered
+                          ? "Clear the filters to see everything you are authorized for."
+                          : "Projects you are authorized to see will appear here once they are onboarded."
+                      }
+                    />
+                  }
+                />
+              </div>
+              {!projectsCollection.complete || !servicesCollection.complete ? (
+                <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
+                  {!projectsCollection.complete ? (
+                    <Button
+                      onClick={projectsCollection.loadMore}
+                      disabled={projectsCollection.loadingMore}
+                      size="compact"
+                    >
+                      {projectsCollection.loadingMore ? "Loading…" : "Load more projects"}
+                    </Button>
+                  ) : null}
+                  {!servicesCollection.complete ? (
+                    <Button
+                      onClick={servicesCollection.loadMore}
+                      disabled={servicesCollection.loadingMore}
+                      size="compact"
+                      variant="secondary"
+                    >
+                      {servicesCollection.loadingMore ? "Loading…" : "Load more evidence"}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
           )}
         </Panel>
       </div>

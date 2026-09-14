@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ClustersPage from "@/app/clusters/page";
 import IntegrationsPage from "@/app/integrations/page";
@@ -19,12 +19,46 @@ function renderSearch() {
 }
 
 const routerPush = vi.fn();
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/projects",
-  useRouter: () => ({ push: routerPush, replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-  useParams: () => ({ projectId: "p1", environmentId: "e1", serviceId: "s1" }),
+const routerReplace = vi.fn();
+
+/**
+ * A stateful router mock for the Projects page's URL-backed filters
+ * (`risk=`, in this file). A mock whose `replace` threw the new query away
+ * would make every filter look broken here while working perfectly in the
+ * browser, so this one reflects it back through `useSearchParams` and
+ * notifies subscribers, the way Next does — same pattern as
+ * `inventory-screens.test.tsx`.
+ */
+const { routerState, listeners } = vi.hoisted(() => ({
+  routerState: { params: new URLSearchParams() },
+  listeners: new Set<() => void>(),
 }));
+
+vi.mock("next/navigation", async () => {
+  const react = await import("react");
+  return {
+    usePathname: () => "/projects",
+    useRouter: () => ({
+      push: routerPush,
+      replace: (href: string) => {
+        routerReplace(href);
+        const query = href.includes("?") ? href.slice(href.indexOf("?") + 1) : "";
+        routerState.params = new URLSearchParams(query);
+        listeners.forEach((listener) => listener());
+      },
+    }),
+    useSearchParams: () =>
+      react.useSyncExternalStore(
+        (onChange: () => void) => {
+          listeners.add(onChange);
+          return () => listeners.delete(onChange);
+        },
+        () => routerState.params,
+        () => routerState.params,
+      ),
+    useParams: () => ({ projectId: "p1", environmentId: "e1", serviceId: "s1" }),
+  };
+});
 
 const PROJECT = {
   id: "p1",
@@ -41,7 +75,46 @@ const PROJECT = {
   as_of: "2026-08-06T00:00:00Z",
 };
 
+const SECOND_PROJECT = {
+  ...PROJECT,
+  id: "p2",
+  project_key: "beta",
+  display_name: "Beta",
+  criticality: "low",
+};
+
+function serviceRow(status: string) {
+  return {
+    environment_service_id: "es-1",
+    project_id: "p1",
+    project_key: "alpha",
+    environment_id: "env-1",
+    environment_key: "prod",
+    service_key: "checkout",
+    display_name: null,
+    component: null,
+    binding: null,
+    health: {
+      status,
+      computed_at: "2026-08-06T00:00:00Z",
+      newest_sample_at: null,
+      freshness_age_seconds: null,
+      partial: false,
+      served_from_last_good: false,
+      reasons: [],
+      availability: {},
+      stability: {},
+      resources: {},
+    },
+  };
+}
+
 describe("catalog screens", () => {
+  beforeEach(() => {
+    routerState.params = new URLSearchParams();
+    routerPush.mockClear();
+    routerReplace.mockClear();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("project list: success renders real catalog rows with badges", async () => {
@@ -53,10 +126,13 @@ describe("catalog screens", () => {
     });
     render(<ProjectsPage />);
     await waitFor(() => expect(screen.getByTestId("project-list")).toBeInTheDocument());
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    // The portfolio risk map above the table also names this project, so
+    // the row lookup is scoped to the table, not the whole page.
+    const table = within(screen.getByTestId("project-list"));
+    const row = table.getByRole("row", { name: /Alpha/ });
+    expect(within(row).getByText("Alpha")).toBeInTheDocument();
     // Counts are their own right-aligned, tabular columns now: the point of
     // the table is that these can be compared down a column.
-    const row = screen.getByRole("row", { name: /Alpha/ });
     expect(within(row).getByText("2")).toBeInTheDocument();
     expect(within(row).getByText("3")).toBeInTheDocument();
     // Badge labels are sentence case now; the state itself is unchanged.
@@ -92,6 +168,116 @@ describe("catalog screens", () => {
     await waitFor(() => expect(screen.getByTestId("state-error")).toBeInTheDocument());
     expect(screen.getByText(/corr-cat-123/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("project list: recorded criticality and observed health are shown independently, never conflated", async () => {
+    installFetchMock({
+      "/v1/projects": {
+        status: 200,
+        body: { projects: [PROJECT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [serviceRow("critical")], total: 1, limit: 100, offset: 0 },
+      },
+    });
+    render(<ProjectsPage />);
+    await screen.findByTestId("project-list");
+    const table = within(screen.getByTestId("project-list"));
+    const row = await table.findByRole("row", { name: /Alpha/ });
+    await waitFor(() => expect(within(row).getByText("High criticality")).toBeInTheDocument());
+    expect(within(row).getByText("Critical health")).toBeInTheDocument();
+  });
+
+  it("project list: an incomplete project collection is marked Partial view", async () => {
+    installFetchMock({
+      "/v1/projects": {
+        status: 200,
+        body: { projects: [PROJECT], next_cursor: "next", as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [], total: 0, limit: 100, offset: 0 },
+      },
+    });
+    render(<ProjectsPage />);
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0));
+    expect(screen.getByText("Partial view")).toBeInTheDocument();
+  });
+
+  it("project list: clicking the risk map's critical group filters the table through ?risk=critical", async () => {
+    installFetchMock({
+      "/v1/projects": {
+        status: 200,
+        body: { projects: [PROJECT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [serviceRow("critical")], total: 1, limit: 100, offset: 0 },
+      },
+    });
+    render(<ProjectsPage />);
+    // Both the risk map and the table name this project, so presence is
+    // checked without assuming a single match.
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0));
+    fireEvent.click(await screen.findByRole("button", { name: "Critical" }));
+    await waitFor(() => expect(routerReplace).toHaveBeenCalled());
+    const lastHref = routerReplace.mock.calls.at(-1)?.[0] as string;
+    expect(new URL(lastHref, "http://test").searchParams.get("risk")).toBe("critical");
+  });
+
+  it("project list: Load more projects fetches the next page only after the button is clicked", async () => {
+    let projectCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/v1/projects")) {
+          projectCalls += 1;
+          const body = url.includes("cursor=next")
+            ? { projects: [SECOND_PROJECT], next_cursor: null, as_of: "now" }
+            : { projects: [PROJECT], next_cursor: "next", as_of: "now" };
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (url.startsWith("/v1/service-health/services")) {
+          return new Response(JSON.stringify({ items: [], total: 0, limit: 100, offset: 0 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    render(<ProjectsPage />);
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0));
+    expect(projectCalls).toBe(1);
+    expect(screen.queryAllByText("Beta").length).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /load more projects/i }));
+    await waitFor(() => expect(screen.getAllByText("Beta").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
+  });
+
+  it("project list: zero matched services is Unassessed, never a healthy badge", async () => {
+    installFetchMock({
+      "/v1/projects": {
+        status: 200,
+        body: { projects: [PROJECT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [], total: 0, limit: 100, offset: 0 },
+      },
+    });
+    render(<ProjectsPage />);
+    await screen.findByTestId("project-list");
+    const table = within(screen.getByTestId("project-list"));
+    const row = await table.findByRole("row", { name: /Alpha/ });
+    await waitFor(() => expect(within(row).getByText(/Unassessed/)).toBeInTheDocument());
+    expect(within(row).queryByText(/healthy/i)).not.toBeInTheDocument();
   });
 
   it("clusters: empty scope stays empty (no fabricated inventory)", async () => {
