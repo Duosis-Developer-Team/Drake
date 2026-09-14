@@ -476,17 +476,17 @@ export function SplitBar({
             ? `${label}: ${formatUnit(used, unit)} used of ${formatUnit(total, unit)}`
             : `${label}: not measured`
         }
-        className="mt-1 flex h-5 w-full overflow-hidden rounded bg-surface-3"
+        className="mt-1.5 flex h-6 w-full overflow-hidden rounded-full bg-surface-3"
       >
         {known ? (
           <>
             <span
-              className={`flex items-center justify-end px-1.5 text-micro font-medium ${spec.chip}`}
+              className={`flex items-center justify-end px-2 text-micro font-medium ${spec.chip}`}
               style={{ width: `${Math.max(percent, 0)}%` }}
             >
               {percent > 22 ? formatUnit(used, unit) : ""}
             </span>
-            <span className="flex flex-1 items-center px-1.5 text-micro text-ink-muted">
+            <span className="flex flex-1 items-center px-2 text-micro text-ink-muted">
               {100 - percent > 22 ? `${formatUnit(total - used, unit)} free` : ""}
             </span>
           </>
@@ -605,7 +605,7 @@ export function ToneCounters({
         return (
           <span
             key={item.label}
-            className={`inline-flex items-baseline gap-1.5 rounded px-2 py-0.5 ${
+            className={`inline-flex items-baseline gap-1.5 rounded-full px-2.5 py-1 ${
               item.count === 0 ? "bg-surface-3 text-ink-muted" : spec.chip
             } ${size === "compact" ? "text-micro" : "text-caption"}`}
           >
@@ -657,7 +657,7 @@ export function StackedBar({
       <div
         role="img"
         aria-label={`${label}: ${drawn.map((s) => `${s.name} ${s.value}`).join(", ")}`}
-        className="flex w-full gap-0.5 overflow-hidden rounded"
+        className="flex w-full gap-1 overflow-hidden rounded-full"
         style={{ height }}
       >
         {drawn.map((segment) => {
@@ -670,7 +670,7 @@ export function StackedBar({
           return (
             <span
               key={segment.name}
-              className="flex items-center justify-center text-micro font-semibold"
+              className="flex items-center justify-center rounded-full text-micro font-semibold"
               style={{
                 width: `${share}%`,
                 background: colour,
@@ -684,32 +684,33 @@ export function StackedBar({
         })}
       </div>
       {legend ? (
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          {segments.map((segment) => (
-            <li
-              key={segment.name}
-              className={`flex items-center gap-1.5 text-micro ${
-                segment.value === 0 ? "text-ink-muted" : "text-ink-secondary"
-              }`}
-            >
-              <span
-                aria-hidden
-                className="h-2 w-2 shrink-0 rounded-full"
-                style={{
-                  background: segment.token
-                    ? `var(${segment.token})`
-                    : segment.tone
-                      ? `var(${toneSpec(segment.tone).token})`
-                      : "var(--series-1)",
-                  opacity: segment.value === 0 ? 0.35 : 1,
-                }}
-              />
-              {segment.name}
-              <span data-tabular className="font-medium text-ink">
-                {segment.value}
-              </span>
-            </li>
-          ))}
+        <ul className="mt-3 space-y-2">
+          {segments.map((segment) => {
+            const share = total > 0 ? Math.round((segment.value / total) * 100) : 0;
+            const colour = segment.token
+              ? `var(${segment.token})`
+              : segment.tone
+                ? `var(${toneSpec(segment.tone).token})`
+                : "var(--series-1)";
+            return (
+              <li key={segment.name} className="text-micro text-ink-secondary">
+                <span className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: colour, opacity: segment.value === 0 ? 0.35 : 1 }}
+                  />
+                  <span className="truncate">{segment.name}</span>
+                  <span data-tabular className="ml-auto pl-2 font-semibold text-ink">
+                    {segment.value}
+                  </span>
+                  <span aria-hidden data-tabular className="w-8 text-right text-ink-muted">
+                    {share}%
+                  </span>
+                </span>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
