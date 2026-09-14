@@ -26,7 +26,7 @@
 
 import { ArrowRight, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Donut, RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
@@ -227,32 +227,34 @@ export default function CommandCenterPage() {
         }
       />
 
-      <VerdictPanel
-        verdict={buildVerdict(attention, sources)}
-        onRefresh={reloadAll}
-        refreshing={refreshing}
-      />
+      <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
+        <VerdictPanel
+          verdict={buildVerdict(attention, sources)}
+          onRefresh={reloadAll}
+          refreshing={refreshing}
+        />
+      </div>
 
       <div className="mt-5 flex flex-col gap-5">
         {isNarrow ? (
           <>
-            {attentionQueueSection}
-            {timelineSection}
-            {healthMatrixSection}
-            {capacityRiskSection}
-            {evidenceCoverageSection}
+            <Reveal delay={80}>{attentionQueueSection}</Reveal>
+            <Reveal delay={140}>{timelineSection}</Reveal>
+            <Reveal delay={200}>{healthMatrixSection}</Reveal>
+            <Reveal delay={260}>{capacityRiskSection}</Reveal>
+            <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
           </>
         ) : (
           <>
             <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-              {timelineSection}
-              {attentionQueueSection}
+              <Reveal delay={80}>{timelineSection}</Reveal>
+              <Reveal delay={140}>{attentionQueueSection}</Reveal>
             </div>
             <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-              {healthMatrixSection}
-              {capacityRiskSection}
+              <Reveal delay={200}>{healthMatrixSection}</Reveal>
+              <Reveal delay={260}>{capacityRiskSection}</Reveal>
             </div>
-            {evidenceCoverageSection}
+            <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
           </>
         )}
       </div>
@@ -271,13 +273,40 @@ export default function CommandCenterPage() {
           description="What Drake is watching, and how current each source is."
         />
         <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <FleetPanel resource={clusters} />
-          <IntegrationsPanel resource={integrations} />
-          <CatalogPanel resource={context} />
-          <ServiceHealthPanel resource={services} />
+          <Reveal delay={80}>
+            <FleetPanel resource={clusters} />
+          </Reveal>
+          <Reveal delay={130}>
+            <IntegrationsPanel resource={integrations} />
+          </Reveal>
+          <Reveal delay={180}>
+            <CatalogPanel resource={context} />
+          </Reveal>
+          <Reveal delay={230}>
+            <ServiceHealthPanel resource={services} />
+          </Reveal>
         </div>
       </div>
     </PageFrame>
+  );
+}
+
+/**
+ * A panel's entrance. One fade+rise pass, staggered by `delay` so a grid of
+ * panels arrives as a cascade rather than a flat pop — never a loop, never
+ * re-triggered on data refresh (this wraps the section once, not per render
+ * of its contents). `backwards` holds each panel at its `from` frame until
+ * its own delay elapses, so a later panel never flashes at full opacity
+ * before its turn.
+ */
+function Reveal({ delay = 0, children }: { delay?: number; children: ReactNode }) {
+  return (
+    <div
+      className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards]"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      {children}
+    </div>
   );
 }
 
