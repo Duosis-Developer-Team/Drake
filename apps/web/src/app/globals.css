@@ -5,12 +5,16 @@
 /*
  * Drake design tokens.
  *
- * 2026-09-14 obsidian/bone/solar remake (docs/superpowers/plans/
+ * 2026-09-14 obsidian/neutral/solar remake (docs/superpowers/plans/
  * new-plan-visual-remake.md §4) retires every green in the system — brand,
  * focus ring, active rail, chart series, "healthy" status — in favour of:
  *
- *   light canvas #EEEDEA   light ink #171614   dark canvas #11100F   ink #F5F2ED
- *   solar accent  #F2CF55 (both themes)        obsidian rail #191816
+ *   light canvas #ECECEC   light ink #161616   dark canvas #101010   ink #F1F1F1
+ *   solar accent  #F2CF55 (both themes)        obsidian rail #181818
+ *
+ * Every neutral above is true grey (R=G=B) rather than the brief's own warm
+ * bone/obsidian cast — an explicit correction over the brief's literal hexes:
+ * neutral means neutral, not tinted.
  *
  * `--brand` is the one token that inverts by role rather than by hue: it is
  * the dominant monochrome fill for primary actions, so it is near-black ink
@@ -48,45 +52,46 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces, canvas outward. */
-  --canvas: #eeedea;
-  --surface-1: #faf9f7;
-  --surface-2: #f3f1ee;
-  --surface-3: #edeae5;
+  /* Surfaces, canvas outward. True neutral grey (R=G=B) — not the brief's
+     warm bone cast, overridden per direction. */
+  --canvas: #ececec;
+  --surface-1: #f9f9f9;
+  --surface-2: #f1f1f1;
+  --surface-3: #e9e9e9;
   --surface-elevated: #ffffff;
-  --surface-hover: #f6f4f1;
-  --surface-selected: #ebe7e2;
+  --surface-hover: #f4f4f4;
+  --surface-selected: #e7e7e7;
 
-  --border-subtle: #ddd9d3;
-  --border-strong: #918576;
+  --border-subtle: #d8d8d8;
+  --border-strong: #868686;
 
-  --text-primary: #171614;
-  --text-secondary: #68645f;
-  --text-muted: #6d6862;
-  --text-inverse: #f5f2ed;
+  --text-primary: #161616;
+  --text-secondary: #646464;
+  --text-muted: #686868;
+  --text-inverse: #f1f1f1;
 
   /* Brand. `--brand` is the monochrome obsidian ink used for primary fills
      and emphasis text — never the solar accent, which fails 4.5:1 at this
      size (see file header). `--brand-accent`/`--focus-ring` carry the solar
      hue instead, darkened just enough to clear 3:1 as a mark on this theme's
-     own bone surfaces. */
-  --brand: #171614;
-  --brand-hover: #2d2b27;
+     own neutral surfaces. */
+  --brand: #161616;
+  --brand-hover: #2a2a2a;
   --brand-active: #000000;
-  --brand-soft: #f3f1ee;
-  --brand-accent: #a4820d;
-  --focus-ring: #a4820d;
+  --brand-soft: #f1f1f1;
+  --brand-accent: #a3820d;
+  --focus-ring: #a3820d;
 
-  --chart-grid: #e3e0da;
-  --chart-axis: #68645f;
-  --chart-tooltip: #191816;
-  --chart-tooltip-text: #f5f2ed;
+  --chart-grid: #dfdfdf;
+  --chart-axis: #646464;
+  --chart-tooltip: #181818;
+  --chart-tooltip-text: #f1f1f1;
 
   --status-success: #2270d8;
   --status-info: #5165e6;
   --status-warning: #9c671c;
   --status-critical: #df2121;
-  --status-neutral: #787169;
+  --status-neutral: #727272;
   --status-unknown: #6e7278;
   --status-stale: #8957d4;
 
@@ -94,17 +99,17 @@
   --status-info-soft: #f8f9fc;
   --status-warning-soft: #fcfaf7;
   --status-critical-soft: #fcf8f8;
-  --status-neutral-soft: #fafafa;
+  --status-neutral-soft: #f9f9f9;
   --status-unknown-soft: #f8f8f8;
   --status-stale-soft: #faf8fc;
 
   /* The obsidian rail. Same values in `.dark` below — see the header note. */
-  --sidebar-canvas: #191816;
-  --sidebar-surface-hover: #21201d;
-  --sidebar-surface-selected: #272522;
-  --sidebar-border: #2c2a26;
-  --sidebar-text: #f5f2ed;
-  --sidebar-text-muted: #898071;
+  --sidebar-canvas: #181818;
+  --sidebar-surface-hover: #202020;
+  --sidebar-surface-selected: #252525;
+  --sidebar-border: #292929;
+  --sidebar-text: #f1f1f1;
+  --sidebar-text-muted: #818181;
   --sidebar-active-rail: #f2cf55;
 
   /* Categorical chart series. Fixed order, never cycled. The old green slot
@@ -116,65 +121,68 @@
   --series-5: #e87ba4;
   --series-6: #b58100;
 
-  --shadow-panel: 0 1px 2px rgb(23 22 20 / 0.06), 0 1px 3px rgb(23 22 20 / 0.04);
-  --shadow-overlay: 0 12px 32px -8px rgb(23 22 20 / 0.18), 0 4px 8px -4px rgb(23 22 20 / 0.08);
+  /* A soft, wide-blur elevation rather than a hairline — the difference
+     between a bordered box and a surface that visibly lifts off the canvas
+     (remake brief: PayFlow-grade depth, not a flat admin panel). */
+  --shadow-panel: 0 1px 2px rgb(23 22 20 / 0.04), 0 10px 28px -8px rgb(23 22 20 / 0.10);
+  --shadow-overlay: 0 20px 48px -12px rgb(23 22 20 / 0.22), 0 8px 16px -6px rgb(23 22 20 / 0.10);
   --scrim: rgb(23 22 20 / 0.45);
 }
 
 .dark {
   color-scheme: dark;
 
-  --canvas: #11100f;
-  --surface-1: #181715;
-  --surface-2: #292622;
-  --surface-3: #312e29;
-  --surface-elevated: #211f1c;
-  --surface-hover: #1d1c1a;
-  --surface-selected: #37332e;
+  --canvas: #101010;
+  --surface-1: #161616;
+  --surface-2: #262626;
+  --surface-3: #2e2e2e;
+  --surface-elevated: #1f1f1f;
+  --surface-hover: #1b1b1b;
+  --surface-selected: #333333;
 
-  --border-subtle: #35312c;
-  --border-strong: #6c655a;
+  --border-subtle: #313131;
+  --border-strong: #656565;
 
-  --text-primary: #f5f2ed;
-  --text-secondary: #c0bbb3;
-  --text-muted: #9b958e;
-  --text-inverse: #201b0c;
+  --text-primary: #f1f1f1;
+  --text-secondary: #b9b9b9;
+  --text-muted: #969696;
+  --text-inverse: #161616;
 
-  --brand: #f5f2ed;
+  --brand: #f1f1f1;
   --brand-hover: #ffffff;
-  --brand-active: #e3dacc;
-  --brand-soft: #292622;
+  --brand-active: #d7d7d7;
+  --brand-soft: #262626;
   --brand-accent: #f2cf55;
   --focus-ring: #f2cf55;
 
-  --chart-grid: #262320;
-  --chart-axis: #c0bbb3;
-  --chart-tooltip: #191816;
-  --chart-tooltip-text: #f5f2ed;
+  --chart-grid: #232323;
+  --chart-axis: #b9b9b9;
+  --chart-tooltip: #181818;
+  --chart-tooltip-text: #f1f1f1;
 
   --status-success: #3c82e0;
-  --status-info: #6477e9;
+  --status-info: #6376e9;
   --status-warning: #d9922e;
   --status-critical: #e85d5d;
-  --status-neutral: #948d84;
+  --status-neutral: #8c8c8c;
   --status-unknown: #7c8187;
-  --status-stale: #966ad8;
+  --status-stale: #9568d8;
 
   --status-success-soft: #0f1823;
   --status-info-soft: #12142b;
   --status-warning-soft: #3b2c16;
   --status-critical-soft: #3b1616;
-  --status-neutral-soft: #292624;
+  --status-neutral-soft: #232323;
   --status-unknown-soft: #161616;
-  --status-stale-soft: #1d122b;
+  --status-stale-soft: #1b1027;
 
   /* The obsidian rail, unchanged from `:root` — see the file header note. */
-  --sidebar-canvas: #191816;
-  --sidebar-surface-hover: #21201d;
-  --sidebar-surface-selected: #272522;
-  --sidebar-border: #2c2a26;
-  --sidebar-text: #f5f2ed;
-  --sidebar-text-muted: #898071;
+  --sidebar-canvas: #181818;
+  --sidebar-surface-hover: #202020;
+  --sidebar-surface-selected: #252525;
+  --sidebar-border: #292929;
+  --sidebar-text: #f1f1f1;
+  --sidebar-text-muted: #818181;
   --sidebar-active-rail: #f2cf55;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
@@ -186,8 +194,8 @@
   --series-5: #ef8fb3;
   --series-6: #f2ad00;
 
-  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.24);
-  --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.4);
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 28px -8px rgb(0 0 0 / 0.45);
+  --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.65), 0 8px 16px -6px rgb(0 0 0 / 0.4);
   --scrim: rgb(3 3 2 / 0.6);
 }
 
@@ -284,16 +292,19 @@
   --text-caption--line-height: 1.25rem;
   --text-micro: 0.6875rem;
   --text-micro--line-height: 1rem;
-  --text-metric: 1.75rem;
-  --text-metric--line-height: 2rem;
+  --text-metric: 2rem;
+  --text-metric--line-height: 2.25rem;
   --text-metric--letter-spacing: -0.02em;
 
-  --radius-control: 0.5rem;
-  --radius-panel: 0.75rem;
+  /* 2026-09-14 remake brief §12.3: panel/canvas/control radii step up a
+     full tier from the previous scale — the difference between "flat admin
+     boxes" and a premium, PayFlow-grade surface is largely this number. */
+  --radius-control: 0.625rem;
+  --radius-panel: 1.125rem;
   /* The one dominant surface per screen — the Command Center verdict panel,
      for instance — reads a step rounder than a standard panel (brief §7.3). */
-  --radius-canvas: 1rem;
-  --radius-overlay: 1rem;
+  --radius-canvas: 1.5rem;
+  --radius-overlay: 1.25rem;
 
   /* Sidebar rail width. 248px expanded keeps room for a full label at the
      new type scale; 72px collapsed still fits an icon, its focus ring and
