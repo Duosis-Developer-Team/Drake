@@ -10,7 +10,7 @@
  * focus ring, active rail, chart series, "healthy" status — in favour of:
  *
  *   light canvas #ECECEC   light ink #161616   dark canvas #101010   ink #F1F1F1
- *   solar accent  #F2CF55 (both themes)        obsidian rail #181818
+ *   cool accent   #2A78D6 light / #5998E5 dark  obsidian rail #181818
  *
  * Every neutral above is true grey (R=G=B) rather than the brief's own warm
  * bone/obsidian cast — an explicit correction over the brief's literal hexes:
@@ -19,11 +19,13 @@
  * `--brand` is the one token that inverts by role rather than by hue: it is
  * the dominant monochrome fill for primary actions, so it is near-black ink
  * in light mode (paired with `--text-inverse`) and near-white bone in dark
- * mode — never the solar yellow, which cannot pass 4.5:1 as body-sized text
- * or a large fill on either theme's own surfaces. Solar yellow is reserved
- * for `--brand-accent`/`--focus-ring` (small marks, ≥3:1 only) and the
- * sidebar's active-item rail, exactly as the brief scopes it ("small brand
- * detail", never a dominant fill). Every hex below was solved with the same
+ * mode — never a saturated colour, which cannot pass 4.5:1 as body-sized text
+ * or a large fill on either theme's own surfaces. The brief's original solar
+ * yellow accent read as cheap against a true neutral grey, not premium — a
+ * direct correction: the accent is a cool blue instead, the same hue already
+ * used for `--series-1`, reserved for `--brand-accent`/`--focus-ring` (small
+ * marks, ≥3:1 only) and the sidebar's active-item rail, exactly as the brief
+ * scopes it ("small brand detail", never a dominant fill). Every hex below was solved with the same
  * WCAG relative-luminance formula `design-system.test.ts` checks against, so
  * the ratios these comments claim are the ones the test enforces.
  *
@@ -71,16 +73,16 @@
   --text-inverse: #f1f1f1;
 
   /* Brand. `--brand` is the monochrome obsidian ink used for primary fills
-     and emphasis text — never the solar accent, which fails 4.5:1 at this
-     size (see file header). `--brand-accent`/`--focus-ring` carry the solar
-     hue instead, darkened just enough to clear 3:1 as a mark on this theme's
-     own neutral surfaces. */
+     and emphasis text — never a saturated accent, which fails 4.5:1 at this
+     size (see file header). `--brand-accent`/`--focus-ring` carry the cool
+     blue hue instead (same family as `--series-1`), comfortably clearing
+     3:1 as a mark on this theme's own neutral surfaces. */
   --brand: #161616;
   --brand-hover: #2a2a2a;
   --brand-active: #000000;
   --brand-soft: #f1f1f1;
-  --brand-accent: #a3820d;
-  --focus-ring: #a3820d;
+  --brand-accent: #2a78d6;
+  --focus-ring: #2a78d6;
 
   --chart-grid: #dfdfdf;
   --chart-axis: #646464;
@@ -110,7 +112,7 @@
   --sidebar-border: #292929;
   --sidebar-text: #f1f1f1;
   --sidebar-text-muted: #818181;
-  --sidebar-active-rail: #f2cf55;
+  --sidebar-active-rail: #5998e5;
 
   /* Categorical chart series. Fixed order, never cycled. The old green slot
      (series-3) is retired to a sky blue, distinct in hue from series-1. */
@@ -152,8 +154,8 @@
   --brand-hover: #ffffff;
   --brand-active: #d7d7d7;
   --brand-soft: #262626;
-  --brand-accent: #f2cf55;
-  --focus-ring: #f2cf55;
+  --brand-accent: #5998e5;
+  --focus-ring: #5998e5;
 
   --chart-grid: #232323;
   --chart-axis: #b9b9b9;
@@ -183,7 +185,7 @@
   --sidebar-border: #292929;
   --sidebar-text: #f1f1f1;
   --sidebar-text-muted: #818181;
-  --sidebar-active-rail: #f2cf55;
+  --sidebar-active-rail: #5998e5;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
      surface and re-validated there. */

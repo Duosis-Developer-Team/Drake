@@ -80,7 +80,7 @@ const SIDEBAR_TOKENS: Pick<
   "sidebar-border": "#292929",
   "sidebar-text": "#f1f1f1",
   "sidebar-text-muted": "#818181",
-  "sidebar-active-rail": "#f2cf55",
+  "sidebar-active-rail": "#5998e5",
 };
 
 export const LIGHT_TOKENS: Tokens = {
@@ -101,8 +101,8 @@ export const LIGHT_TOKENS: Tokens = {
   "brand-hover": "#2a2a2a",
   "brand-active": "#000000",
   "brand-soft": "#f1f1f1",
-  "brand-accent": "#a3820d",
-  "focus-ring": "#a3820d",
+  "brand-accent": "#2a78d6",
+  "focus-ring": "#2a78d6",
   "chart-grid": "#dfdfdf",
   "chart-axis": "#646464",
   "chart-tooltip": "#181818",
@@ -141,8 +141,8 @@ export const DARK_TOKENS: Tokens = {
   "brand-hover": "#ffffff",
   "brand-active": "#d7d7d7",
   "brand-soft": "#262626",
-  "brand-accent": "#f2cf55",
-  "focus-ring": "#f2cf55",
+  "brand-accent": "#5998e5",
+  "focus-ring": "#5998e5",
   "chart-grid": "#232323",
   "chart-axis": "#b9b9b9",
   "chart-tooltip": "#181818",

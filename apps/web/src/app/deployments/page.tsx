@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
 import {
@@ -21,7 +21,8 @@ import {
 } from "@/components/deployments/primitives";
 import { StackedBar } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { FilterBar, Select } from "@/components/ui/controls";
 import {
   deploymentListPath,
   formatDuration,
@@ -30,9 +31,6 @@ import {
   type EvidenceState,
   type RolloutState,
 } from "@/lib/deployments";
-
-const SELECT_CLASS =
-  "rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-ink";
 
 const ROLLOUT_STATES: RolloutState[] = [
   "pending",
@@ -46,64 +44,61 @@ const ROLLOUT_STATES: RolloutState[] = [
 const EVIDENCE_STATES: EvidenceState[] = ["verified", "partial", "unverified", "conflict"];
 const WINDOWS = ["24h", "7d", "30d"];
 
+/**
+ * One deployment, as a card: workload identity leads, rollout/evidence
+ * state read as chips beside it, and the provenance chain (digest, commit,
+ * ready count, duration, post-rollout health) trails as a scannable strip.
+ */
 function DeploymentRowView({ row }: { row: DeploymentRow }) {
   return (
-    <tr
-      className="border-t border-border align-top"
+    <li
       data-testid={`deployment-row-${row.workload_name}`}
+      className="flex flex-wrap items-start gap-4 px-4 py-4 transition-colors hover:bg-surface-hover"
     >
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href={`/deployments/${row.id}`}
-            className="text-sm font-medium text-ink hover:underline"
+            className="text-body font-semibold text-ink hover:underline"
           >
             {row.workload_name}
           </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
-            {row.cluster.cluster_ref}/{row.namespace} · {row.workload_kind}
-          </span>
-          {row.project_key ? (
-            <span className="font-mono text-[11px] text-ink-muted">
-              {row.project_key}/{row.environment_key}/{row.service_key}
-            </span>
-          ) : (
-            <span className="text-[11px] italic text-ink-muted">not bound to a service</span>
-          )}
+          <span className="font-mono text-caption text-ink-muted">#{row.revision}</span>
+          <RolloutBadge state={row.rollout_state} />
+          <EvidenceBadge state={row.evidence_state} />
         </div>
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap font-mono text-xs text-ink">
-        #{row.revision}
-      </td>
-      <td className="py-2.5 pr-3">
-        <RolloutBadge state={row.rollout_state} />
+        <span className="mt-1 block font-mono text-micro text-ink-muted">
+          {row.cluster.cluster_ref}/{row.namespace} · {row.workload_kind}
+        </span>
+        {row.project_key ? (
+          <span className="block font-mono text-micro text-ink-muted">
+            {row.project_key}/{row.environment_key}/{row.service_key}
+          </span>
+        ) : (
+          <span className="block text-micro italic text-ink-muted">not bound to a service</span>
+        )}
         {row.rollout_reason ? (
-          <span className="mt-1 block text-[11px] text-ink-muted">{row.rollout_reason}</span>
+          <span className="mt-1 block text-caption text-ink-secondary">{row.rollout_reason}</span>
         ) : null}
-      </td>
-      <td className="py-2.5 pr-3">
-        <EvidenceBadge state={row.evidence_state} />
-      </td>
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-0.5">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
           <ShortRef value={row.short_digest} label="image digest" />
           <ShortRef value={row.short_commit} label="commit" />
         </div>
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap font-mono text-xs text-ink">
-        {row.replicas.ready ?? "—"} / {row.replicas.desired ?? "—"}
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
-        {formatDuration(row.rollout_started_at, row.rollout_completed_at)}
-      </td>
-      <td className="py-2.5">
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1.5 text-right">
+        <span className="font-mono text-body text-ink" data-tabular>
+          {row.replicas.ready ?? "—"} / {row.replicas.desired ?? "—"}
+        </span>
+        <span className="text-micro text-ink-muted">
+          {formatDuration(row.rollout_started_at, row.rollout_completed_at)}
+        </span>
         {row.health_comparison ? (
           <VerdictBadge verdict={row.health_comparison.verdict} />
         ) : (
-          <span className="text-[11px] italic text-ink-muted">not compared yet</span>
+          <span className="text-micro italic text-ink-muted">not compared yet</span>
         )}
-      </td>
-    </tr>
+      </div>
+    </li>
   );
 }
 
@@ -122,57 +117,40 @@ function DeploymentTable() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters">
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Rollout
-          <select
-            className={SELECT_CLASS}
-            value={rolloutState}
-            onChange={(event) => setRolloutState(event.target.value as RolloutState | "")}
-          >
-            <option value="">Any</option>
-            {ROLLOUT_STATES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Evidence
-          <select
-            className={SELECT_CLASS}
-            value={evidenceState}
-            onChange={(event) => setEvidenceState(event.target.value as EvidenceState | "")}
-          >
-            <option value="">Any</option>
-            {EVIDENCE_STATES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Started within
-          <select
-            className={SELECT_CLASS}
-            value={startedWithin}
-            onChange={(event) => setStartedWithin(event.target.value)}
-          >
-            <option value="">Any time</option>
-            {WINDOWS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <Panel
+        data-testid="deployment-filters"
+        className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+      >
+        <div role="group" aria-label="Filters">
+          <FilterBar>
+            <Select
+              label="Rollout"
+              value={rolloutState}
+              placeholder="Any"
+              options={ROLLOUT_STATES.map((value) => ({ value, label: value }))}
+              onChange={(value) => setRolloutState(value as RolloutState | "")}
+            />
+            <Select
+              label="Evidence"
+              value={evidenceState}
+              placeholder="Any"
+              options={EVIDENCE_STATES.map((value) => ({ value, label: value }))}
+              onChange={(value) => setEvidenceState(value as EvidenceState | "")}
+            />
+            <Select
+              label="Started within"
+              value={startedWithin}
+              placeholder="Any time"
+              options={WINDOWS.map((value) => ({ value, label: value }))}
+              onChange={setStartedWithin}
+            />
+          </FilterBar>
+        </div>
+      </Panel>
 
       {page.state === "loading" ? <DataState kind="loading" /> : null}
       {page.state === "error" ? (
-        <Card>
+        <Panel>
           {page.notFound ? (
             <DataState
               kind="permission-denied"
@@ -181,19 +159,23 @@ function DeploymentTable() {
           ) : (
             <DataState kind="error" description={page.message} onRetry={retry} />
           )}
-        </Card>
+        </Panel>
       ) : null}
       {page.state === "ready" && page.data.items.length === 0 ? (
-        <Card>
+        <Panel>
           <DataState
             kind="empty"
             title="No deployments"
             description="Nothing matches these filters in your authorized scope. Drake records a revision when a cluster agent reports a workload generation."
           />
-        </Card>
+        </Panel>
       ) : null}
       {page.state === "ready" && page.data.items.length > 0 ? (
-        <Card title="In this view">
+        <Panel
+          data-testid="deployment-summary"
+          className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+        >
+          <PanelHeader title="In this view" />
           {/* From the rows on screen, labelled as such. `unverified` is its
               own segment and deliberately not red: an absence of evidence is
               not a failed rollout. */}
@@ -234,37 +216,24 @@ function DeploymentTable() {
               },
             ]}
           />
-        </Card>
+        </Panel>
       ) : null}
 
       {page.state === "ready" && page.data.items.length > 0 ? (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left" data-testid="deployment-table">
-              <thead>
-                <tr className="text-caption text-ink-secondary">
-                  <th className="pb-2 pr-3 font-medium">Workload</th>
-                  <th className="pb-2 pr-3 font-medium">Revision</th>
-                  <th className="pb-2 pr-3 font-medium">Rollout</th>
-                  <th className="pb-2 pr-3 font-medium">Evidence</th>
-                  <th className="pb-2 pr-3 font-medium">Digest / commit</th>
-                  <th className="pb-2 pr-3 font-medium">Ready</th>
-                  <th className="pb-2 pr-3 font-medium">Duration</th>
-                  <th className="pb-2 font-medium">Health after</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.data.items.map((row) => (
-                  <DeploymentRowView key={row.id} row={row} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-[11px] text-ink-muted">
+        <Panel
+          flush
+          className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
+        >
+          <ul className="divide-y divide-border" data-testid="deployment-table">
+            {page.data.items.map((row) => (
+              <DeploymentRowView key={row.id} row={row} />
+            ))}
+          </ul>
+          <p className="border-t border-border px-4 py-3 text-micro text-ink-muted">
             Showing {page.data.items.length} of {page.data.total} deployments in your
             authorized scope.
           </p>
-        </Card>
+        </Panel>
       ) : null}
     </div>
   );
@@ -273,18 +242,14 @@ function DeploymentTable() {
 export default function DeploymentsPage() {
   return (
     <PageFrame>
+      <PageHeader
+        title="Deployments"
+        description="One row per observed workload revision. Evidence says how much of the commit → workflow → digest → workload chain Drake actually saw; anything less than the whole chain is never shown as verified."
+      />
       <div className="space-y-5">
-      <div>
-        <h1 className="text-title font-semibold text-ink">Deployments</h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          One row per observed workload revision. Evidence says how much of the commit →
-          workflow → digest → workload chain Drake actually saw; anything less than the
-          whole chain is never shown as verified.
-        </p>
-      </div>
-      <Suspense fallback={<DataState kind="loading" />}>
-        <DeploymentTable />
-      </Suspense>
+        <Suspense fallback={<DataState kind="loading" />}>
+          <DeploymentTable />
+        </Suspense>
       </div>
     </PageFrame>
   );

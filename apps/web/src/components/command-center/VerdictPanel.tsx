@@ -114,7 +114,7 @@ export function VerdictPanel({
             size={96}
             value={verdict.sourcesTotal > 0 ? (verdict.sourcesAnswered / verdict.sourcesTotal) * 100 : 0}
             label={`${verdict.sourcesAnswered}/${verdict.sourcesTotal}`}
-            color="#f2cf55"
+            color="#5998e5"
             trackColor="#292929"
             textColor="#f1f1f1"
             ariaLabel={`${verdict.sourcesAnswered} of ${verdict.sourcesTotal} sources answered`}
