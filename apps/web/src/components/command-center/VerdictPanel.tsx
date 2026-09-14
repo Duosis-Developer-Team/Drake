@@ -35,16 +35,16 @@ export function VerdictPanel({
       surface="hero"
       tone={worstTone === "success" ? "default" : worstTone}
       data-testid="verdict-panel"
-      className="!gap-0 !p-2"
+      className="!gap-0 !p-2.5"
     >
-      <div className="flex items-start justify-between gap-3 px-4 pt-3 pb-4">
+      <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-5">
         <div className="min-w-0">
-          <p className="text-[1.0625rem] font-medium text-sidebar-ink">Operational verdict</p>
-          <p className="text-micro text-sidebar-ink-muted">Across your authorized scope</p>
+          <p className="text-[1.0625rem] font-medium text-hero-ink">Operational verdict</p>
+          <p className="text-micro text-hero-ink-muted">Across your authorized scope</p>
         </div>
         <span
           data-testid="verdict-sources"
-          className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-caption font-medium text-sidebar-ink"
+          className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-caption font-medium text-hero-ink"
         >
           <span
             aria-hidden
@@ -58,11 +58,11 @@ export function VerdictPanel({
       </div>
 
       {/* Card-in-card: the one bright surface on the screen. */}
-      <div className="rounded-[1.25rem] bg-[#f4f4f4] text-[#161616] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.6)]">
-        <div className="px-5 pt-4 pb-5">
+      <div className="flex flex-1 flex-col rounded-[1.25rem] bg-[#f4f4f4] text-[#161616] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.6)]">
+        <div className="flex-1 px-6 pt-5 pb-6">
           <p className="text-caption text-[#6b6b6b]">Flagged right now</p>
           <p className="mt-1 flex items-baseline gap-2">
-            <span data-tabular className={`text-[3.25rem] leading-none font-semibold tracking-[-0.04em] ${numberTone}`}>
+            <span data-tabular className={`text-[4rem] leading-none font-semibold tracking-[-0.04em] ${numberTone}`}>
               {flagged}
             </span>
           </p>

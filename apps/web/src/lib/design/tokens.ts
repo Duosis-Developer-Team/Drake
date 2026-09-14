@@ -62,36 +62,16 @@ export type TokenName = (typeof TOKEN_NAMES)[number];
 export type Tokens = Record<TokenName, string>;
 export type ThemeMode = "light" | "dark";
 
-/** The obsidian rail. Identical in `LIGHT_TOKENS` and `DARK_TOKENS` — see
- *  `globals.css`'s file header for why the sidebar does not flip with theme. */
-const SIDEBAR_TOKENS: Pick<
-  Tokens,
-  | "sidebar-canvas"
-  | "sidebar-surface-hover"
-  | "sidebar-surface-selected"
-  | "sidebar-border"
-  | "sidebar-text"
-  | "sidebar-text-muted"
-  | "sidebar-active-rail"
-> = {
-  "sidebar-canvas": "#161616",
-  "sidebar-surface-hover": "#1f1f1f",
-  "sidebar-surface-selected": "#262626",
-  "sidebar-border": "#232323",
-  "sidebar-text": "#f1f1f1",
-  "sidebar-text-muted": "#8a8a8a",
-  "sidebar-active-rail": "#5998e5",
-};
 
 export const LIGHT_TOKENS: Tokens = {
-  canvas: "#ececec",
-  "surface-1": "#f9f9f9",
-  "surface-2": "#f1f1f1",
-  "surface-3": "#e9e9e9",
+  canvas: "#f5f5f5",
+  "surface-1": "#ffffff",
+  "surface-2": "#f4f4f4",
+  "surface-3": "#ececec",
   "surface-elevated": "#ffffff",
-  "surface-hover": "#f4f4f4",
-  "surface-selected": "#e7e7e7",
-  "border-subtle": "#d8d8d8",
+  "surface-hover": "#f8f8f8",
+  "surface-selected": "#ebebeb",
+  "border-subtle": "#e5e5e5",
   "border-strong": "#868686",
   "text-primary": "#161616",
   "text-secondary": "#646464",
@@ -114,7 +94,13 @@ export const LIGHT_TOKENS: Tokens = {
   "status-neutral": "#727272",
   "status-unknown": "#6e7278",
   "status-stale": "#8957d4",
-  ...SIDEBAR_TOKENS,
+  "sidebar-canvas": "#fbfbfb",
+  "sidebar-surface-hover": "#f0f0f0",
+  "sidebar-surface-selected": "#ececec",
+  "sidebar-border": "#e6e6e6",
+  "sidebar-text": "#161616",
+  "sidebar-text-muted": "#666666",
+  "sidebar-active-rail": "#2a78d6",
   "series-1": "#2a78d6",
   "series-2": "#eb6834",
   "series-3": "#1c8fd6",
@@ -124,14 +110,14 @@ export const LIGHT_TOKENS: Tokens = {
 };
 
 export const DARK_TOKENS: Tokens = {
-  canvas: "#141414",
-  "surface-1": "#1b1b1b",
-  "surface-2": "#222222",
-  "surface-3": "#292929",
-  "surface-elevated": "#303030",
-  "surface-hover": "#212121",
-  "surface-selected": "#2c2c2c",
-  "border-subtle": "#262626",
+  canvas: "#0f0f0f",
+  "surface-1": "#1c1c1c",
+  "surface-2": "#262626",
+  "surface-3": "#2e2e2e",
+  "surface-elevated": "#343434",
+  "surface-hover": "#232323",
+  "surface-selected": "#303030",
+  "border-subtle": "#2a2a2a",
   "border-strong": "#6a6a6a",
   "text-primary": "#f1f1f1",
   "text-secondary": "#b9b9b9",
@@ -143,7 +129,7 @@ export const DARK_TOKENS: Tokens = {
   "brand-soft": "#242424",
   "brand-accent": "#5998e5",
   "focus-ring": "#5998e5",
-  "chart-grid": "#242424",
+  "chart-grid": "#2a2a2a",
   "chart-axis": "#b9b9b9",
   "chart-tooltip": "#0c0c0c",
   "chart-tooltip-text": "#f1f1f1",
@@ -154,7 +140,13 @@ export const DARK_TOKENS: Tokens = {
   "status-neutral": "#8c8c8c",
   "status-unknown": "#81868c",
   "status-stale": "#9b70da",
-  ...SIDEBAR_TOKENS,
+  "sidebar-canvas": "#161616",
+  "sidebar-surface-hover": "#222222",
+  "sidebar-surface-selected": "#2a2a2a",
+  "sidebar-border": "#242424",
+  "sidebar-text": "#f1f1f1",
+  "sidebar-text-muted": "#8f8f8f",
+  "sidebar-active-rail": "#5998e5",
   "series-1": "#5998e5",
   "series-2": "#f59068",
   "series-3": "#43acec",

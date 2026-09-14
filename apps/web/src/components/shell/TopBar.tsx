@@ -39,7 +39,7 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const telemetry = isTelemetryRoute(pathname);
 
   return (
-    <header className="sticky top-0 z-30 flex h-[4.5rem] shrink-0 items-center gap-3 rounded-t-[1.5rem] bg-canvas/85 px-3 backdrop-blur-md lg:rounded-t-[2rem] lg:px-8">
+    <header className="sticky top-0 z-30 flex h-[4.5rem] shrink-0 items-center gap-3 rounded-t-[1.5rem] bg-canvas/85 px-3 backdrop-blur-md lg:rounded-t-[2rem] lg:px-10">
       <button
         type="button"
         onClick={onOpenSidebar}

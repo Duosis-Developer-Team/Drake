@@ -103,7 +103,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col rounded-[1.5rem] border border-border bg-canvas lg:rounded-[2rem]">
+      <div className="flex min-w-0 flex-1 flex-col rounded-[1.5rem] border border-border bg-canvas lg:rounded-[2rem] shadow-panel">
         <TopBar onOpenSidebar={openDrawer} />
         {/* The sideways-scroll backstop lives on `html` in globals.css; this
             keeps a wide panel from stretching the column it sits in. */}
@@ -140,14 +140,14 @@ function ShellFooter() {
   const { identity } = state.me;
   const initial = (identity.display_name || "?").charAt(0).toUpperCase();
   return (
-    <div className="dark space-y-2">
+    <div className="space-y-2">
       <div className="md:hidden">
         <ThemeControl />
       </div>
-      <div className="flex items-center gap-3 rounded-[1.25rem] border border-white/[0.06] bg-[linear-gradient(180deg,#232323,#1a1a1a)] p-2.5">
+      <div className="flex items-center gap-3 rounded-[1.25rem] border border-sidebar-border bg-sidebar-nav p-2.5">
         <span
           aria-hidden
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f1f1f1,#9a9a9a)] text-body font-semibold text-[#161616]"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sidebar-bubble-active text-body font-semibold text-sidebar-bubble-active-ink"
         >
           {initial}
         </span>
@@ -178,7 +178,7 @@ export function PageFrame({
 }) {
   const max =
     width === "wide" ? "max-w-none" : width === "narrow" ? "max-w-3xl" : "max-w-[110rem]";
-  return <div className={`mx-auto w-full px-4 pt-2 pb-8 lg:px-8 ${max}`}>{children}</div>;
+  return <div className={`mx-auto w-full px-4 pt-4 pb-12 lg:px-10 ${max}`}>{children}</div>;
 }
 
 /**
@@ -205,7 +205,7 @@ export function PageHeader({
   tabs?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-8">
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

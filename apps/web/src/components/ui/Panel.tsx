@@ -36,11 +36,11 @@ export type PanelSurface = "default" | "hero";
 
 /** `hero` is the reference's dark "Total Balance" card: a lit gradient slab
  *  meant to hold one lighter card-in-card. Theme-invariant, so its own text
- *  must use `sidebar-ink`/`sidebar-ink-muted`. */
+ *  must use `hero-ink`/`hero-ink-muted`. */
 const SURFACE: Record<PanelSurface, string> = {
   default: "border border-border bg-surface shadow-panel",
   hero:
-    "border border-white/[0.07] bg-sidebar bg-[radial-gradient(120%_140%_at_0%_0%,#343434_0%,#1c1c1c_45%,#121212_100%)] shadow-overlay",
+    "border border-white/[0.07] bg-[#141414] text-hero-ink bg-[radial-gradient(120%_140%_at_0%_0%,#343434_0%,#1c1c1c_45%,#121212_100%)] shadow-overlay",
 };
 
 export function Panel({
@@ -83,7 +83,7 @@ export function Panel({
       // sideways instead of the table's own scroller doing it.
       className={`flex min-w-0 flex-col ${RADIUS[radius]} ${SURFACE[surface]} [&>*]:min-w-0 ${
         surface === "default" ? RAIL[tone] ?? "" : ""
-      } ${flush ? "" : "gap-5 p-6"} ${className}`}
+      } ${flush ? "" : "gap-6 p-7"} ${className}`}
       {...rest}
     >
       {children}
@@ -120,7 +120,7 @@ export function PanelHeader({
   return (
     <div
       className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${
-        flush ? "border-b border-border px-6 pt-5 pb-4" : ""
+        flush ? "border-b border-border px-7 pt-6 pb-5" : ""
       }`}
     >
       <div className="min-w-0">
@@ -150,12 +150,12 @@ export function PanelBody({
   className?: string;
   flush?: boolean;
 }) {
-  return <div className={`min-w-0 flex-1 ${flush ? "" : "px-6 py-4"} ${className}`}>{children}</div>;
+  return <div className={`min-w-0 flex-1 ${flush ? "" : "px-7 py-5"} ${className}`}>{children}</div>;
 }
 
 export function PanelFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-t border-border px-6 py-3.5 text-micro text-ink-muted">{children}</div>
+    <div className="border-t border-border px-7 py-4 text-micro text-ink-muted">{children}</div>
   );
 }
 

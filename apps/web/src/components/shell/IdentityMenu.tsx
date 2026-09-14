@@ -25,7 +25,7 @@ export function IdentityMenu() {
       >
         <span
           aria-hidden
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f1f1f1,#9a9a9a)] text-xs font-semibold text-[#161616]"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-xs font-semibold text-ink-inverse"
         >
           {initial}
         </span>

@@ -236,7 +236,7 @@ export default function CommandCenterPage() {
       />
 
       {isNarrow ? (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-6">
           <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
             {verdict}
           </div>
@@ -247,43 +247,46 @@ export default function CommandCenterPage() {
           <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
         </div>
       ) : (
-        /* The reference's composition: a narrow lead column (balance card,
-           contacts, widgets) beside a wide working column (the table). */
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,23rem)_minmax(0,1fr)]">
-          <div className="flex min-w-0 flex-col gap-5">
-            <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
+        /* Wide, airy rows: the lead verdict beside two summary cards, then
+           the working panels two-up at full height, never squeezed into a
+           narrow side column. */
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="h-full motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards] lg:col-span-2 2xl:col-span-1 [&>*]:h-full">
               {verdict}
             </div>
-            <Reveal delay={80}>
-              <Panel flush>
-                <CatalogPanel resource={context} />
-              </Panel>
-            </Reveal>
-            <Reveal delay={140}>
+            <Reveal delay={80} className="[&>*]:h-full">
               <Panel flush>
                 <ServiceHealthPanel resource={services} />
               </Panel>
             </Reveal>
-            <Reveal delay={200}>{capacityRiskSection}</Reveal>
+            <Reveal delay={140} className="[&>*]:h-full">
+              <Panel flush>
+                <CatalogPanel resource={context} />
+              </Panel>
+            </Reveal>
           </div>
-          <div className="flex min-w-0 flex-col gap-5">
-            <Reveal delay={80}>{attentionQueueSection}</Reveal>
-            <Reveal delay={140}>{timelineSection}</Reveal>
-            <Reveal delay={200}>{healthMatrixSection}</Reveal>
-            <div className="grid grid-cols-1 items-start gap-5 2xl:grid-cols-2">
-              <Reveal delay={260}>
-                <Panel flush data-testid="estate-overview">
-                  <FleetPanel resource={clusters} />
-                </Panel>
-              </Reveal>
-              <Reveal delay={320}>
-                <Panel flush>
-                  <IntegrationsPanel resource={integrations} />
-                </Panel>
-              </Reveal>
-            </div>
-            <Reveal delay={380}>{evidenceCoverageSection}</Reveal>
+          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+            <Reveal delay={200} className="[&>*]:h-full">{attentionQueueSection}</Reveal>
+            <Reveal delay={260} className="[&>*]:h-full">{timelineSection}</Reveal>
           </div>
+          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+            <Reveal delay={320} className="[&>*]:h-full">{healthMatrixSection}</Reveal>
+            <Reveal delay={380} className="[&>*]:h-full">{capacityRiskSection}</Reveal>
+          </div>
+          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+            <Reveal delay={440} className="[&>*]:h-full">
+              <Panel flush data-testid="estate-overview">
+                <FleetPanel resource={clusters} />
+              </Panel>
+            </Reveal>
+            <Reveal delay={500} className="[&>*]:h-full">
+              <Panel flush>
+                <IntegrationsPanel resource={integrations} />
+              </Panel>
+            </Reveal>
+          </div>
+          <Reveal delay={560}>{evidenceCoverageSection}</Reveal>
         </div>
       )}
 
@@ -296,7 +299,7 @@ export default function CommandCenterPage() {
       </Modal>
 
       {isNarrow ? (
-        <div className="mt-5 flex flex-col gap-5" data-testid="estate-overview">
+        <div className="mt-6 flex flex-col gap-6" data-testid="estate-overview">
           <Panel flush><FleetPanel resource={clusters} /></Panel>
           <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
           <Panel flush><CatalogPanel resource={context} /></Panel>
@@ -370,7 +373,7 @@ function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand:
 
 function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
   return (
-    <div data-testid="catalog-counts" className="flex min-w-0 flex-col gap-4 p-6">
+    <div data-testid="catalog-counts" className="flex h-full min-w-0 flex-col gap-6 p-7">
       <PanelHeader title="Your catalog" description="Records you are authorized to see." />
       {resource.loading && !resource.data ? (
         <LoadingSkeleton rows={2} />
@@ -382,7 +385,7 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
         /* A list of counts, not term/definition pairs: a <dl> whose children
            are links is both wrong markup and an axe violation. Each count
            is its own big-number moment, not a cell in a dense row. */
-        <ul className="grid grid-cols-3 gap-3">
+        <ul className="mt-auto grid grid-cols-3 gap-3">
           {(
             [
               ["Projects", resource.data.projects, "/projects"],
@@ -392,7 +395,7 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
           ).map(([label, count, href]) => {
             const body = (
               <>
-                <span data-tabular className="block text-metric font-semibold text-ink">
+                <span data-tabular className="block text-[2.5rem] leading-none font-semibold tracking-[-0.03em] text-ink">
                   {count}
                 </span>
                 <span className="mt-1 block text-caption text-ink-muted">{label}</span>
@@ -403,12 +406,12 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
                 {href ? (
                   <Link
                     href={href}
-                    className="block rounded-[1rem] border border-border bg-surface-2 px-4 py-4 transition-colors hover:bg-surface-3"
+                    className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 px-5 pt-10 pb-5 transition-colors hover:bg-surface-3"
                   >
                     {body}
                   </Link>
                 ) : (
-                  <span className="block rounded-[1rem] border border-border bg-surface-2 px-4 py-4">{body}</span>
+                  <span className="flex h-full flex-col justify-end rounded-[1.125rem] bg-surface-2 px-5 pt-10 pb-5">{body}</span>
                 )}
               </li>
             );
@@ -423,7 +426,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
   const rows = resource.data?.items ?? [];
   const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
   return (
-    <div data-testid="service-health-rollup" className="flex min-w-0 flex-col gap-4 p-6">
+    <div data-testid="service-health-rollup" className="flex h-full min-w-0 flex-col gap-6 p-7">
       <PanelHeader
         title="Service health"
         description="Every tracked service, by the state its own binding reports."

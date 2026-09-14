@@ -56,15 +56,15 @@
 
   /* Surfaces, canvas outward. True neutral grey (R=G=B) — not the brief's
      warm bone cast, overridden per direction. */
-  --canvas: #ececec;
-  --surface-1: #f9f9f9;
-  --surface-2: #f1f1f1;
-  --surface-3: #e9e9e9;
+  --canvas: #f5f5f5;
+  --surface-1: #ffffff;
+  --surface-2: #f4f4f4;
+  --surface-3: #ececec;
   --surface-elevated: #ffffff;
-  --surface-hover: #f4f4f4;
-  --surface-selected: #e7e7e7;
+  --surface-hover: #f8f8f8;
+  --surface-selected: #ebebeb;
 
-  --border-subtle: #d8d8d8;
+  --border-subtle: #e5e5e5;
   --border-strong: #868686;
 
   --text-primary: #161616;
@@ -106,13 +106,13 @@
   --status-stale-soft: #faf8fc;
 
   /* The obsidian rail. Same values in `.dark` below — see the header note. */
-  --sidebar-canvas: #161616;
-  --sidebar-surface-hover: #1f1f1f;
-  --sidebar-surface-selected: #262626;
-  --sidebar-border: #232323;
-  --sidebar-text: #f1f1f1;
-  --sidebar-text-muted: #8a8a8a;
-  --sidebar-active-rail: #5998e5;
+  --sidebar-canvas: #fbfbfb;
+  --sidebar-surface-hover: #f0f0f0;
+  --sidebar-surface-selected: #ececec;
+  --sidebar-border: #e6e6e6;
+  --sidebar-text: #161616;
+  --sidebar-text-muted: #666666;
+  --sidebar-active-rail: #2a78d6;
 
   /* Categorical chart series. Fixed order, never cycled. The old green slot
      (series-3) is retired to a sky blue, distinct in hue from series-1. */
@@ -130,7 +130,12 @@
   --shadow-overlay: 0 20px 48px -12px rgb(23 22 20 / 0.22), 0 8px 16px -6px rgb(23 22 20 / 0.10);
   --scrim: rgb(23 22 20 / 0.45);
   /* PayFlow frame: the bezel the rail and the content surface sit inside. */
-  --frame: #dcdcdc;
+  --frame: #e2e2e2;
+  --sidebar-nav: #ffffff;
+  --sidebar-bubble: #f1f1f1;
+  --sidebar-bubble-active: #161616;
+  --sidebar-bubble-active-ink: #ffffff;
+  --hero-ink-surface: #f4f4f4;
 }
 
 .dark {
@@ -142,15 +147,15 @@
      is re-stepped for a real gap, and `surface-elevated` is corrected to
      actually be the lightest of the family (it was, bug, darker than
      surface-2/3) — the topmost surface reads as topmost. */
-  --canvas: #141414;
-  --surface-1: #1b1b1b;
-  --surface-2: #222222;
-  --surface-3: #292929;
-  --surface-elevated: #303030;
-  --surface-hover: #212121;
-  --surface-selected: #2c2c2c;
+  --canvas: #0f0f0f;
+  --surface-1: #1c1c1c;
+  --surface-2: #262626;
+  --surface-3: #2e2e2e;
+  --surface-elevated: #343434;
+  --surface-hover: #232323;
+  --surface-selected: #303030;
 
-  --border-subtle: #262626;
+  --border-subtle: #2a2a2a;
   --border-strong: #6a6a6a;
 
   --text-primary: #f1f1f1;
@@ -165,7 +170,7 @@
   --brand-accent: #5998e5;
   --focus-ring: #5998e5;
 
-  --chart-grid: #242424;
+  --chart-grid: #2a2a2a;
   --chart-axis: #b9b9b9;
   --chart-tooltip: #0c0c0c;
   --chart-tooltip-text: #f1f1f1;
@@ -191,11 +196,11 @@
 
   /* The obsidian rail, unchanged from `:root` — see the file header note. */
   --sidebar-canvas: #161616;
-  --sidebar-surface-hover: #1f1f1f;
-  --sidebar-surface-selected: #262626;
-  --sidebar-border: #232323;
+  --sidebar-surface-hover: #222222;
+  --sidebar-surface-selected: #2a2a2a;
+  --sidebar-border: #242424;
   --sidebar-text: #f1f1f1;
-  --sidebar-text-muted: #8a8a8a;
+  --sidebar-text-muted: #8f8f8f;
   --sidebar-active-rail: #5998e5;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
@@ -210,12 +215,24 @@
   --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 16px 40px -20px rgb(0 0 0 / 0.7);
   --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.65), 0 8px 16px -6px rgb(0 0 0 / 0.4);
   --scrim: rgb(3 3 2 / 0.6);
-  --frame: #0a0a0a;
+  --frame: #050505;
+  --sidebar-nav: #1e1e1e;
+  --sidebar-bubble: #262626;
+  --sidebar-bubble-active: #f1f1f1;
+  --sidebar-bubble-active-ink: #161616;
+  --hero-ink-surface: #f4f4f4;
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
   --color-frame: var(--frame);
+  /* The hero slab is dark in both themes, so its ink never follows the theme. */
+  --color-hero-ink: #f1f1f1;
+  --color-hero-ink-muted: #9a9a9a;
+  --color-sidebar-nav: var(--sidebar-nav);
+  --color-sidebar-bubble: var(--sidebar-bubble);
+  --color-sidebar-bubble-active: var(--sidebar-bubble-active);
+  --color-sidebar-bubble-active-ink: var(--sidebar-bubble-active-ink);
   --color-surface: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);

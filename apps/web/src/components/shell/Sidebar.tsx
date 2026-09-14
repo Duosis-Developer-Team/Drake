@@ -86,9 +86,9 @@ export function Sidebar({
           className="flex min-w-0 items-center rounded"
         >
           {collapsed ? (
-            <DrakeMark height={22} variant="dark" />
+            <DrakeMark height={22} />
           ) : (
-            <DrakeWordmark height={22} variant="dark" />
+            <DrakeWordmark height={22} />
           )}
         </Link>
         {onToggleCollapse && !collapsed ? (
@@ -122,7 +122,7 @@ export function Sidebar({
           menu — the rail reads as layered, not as a flat list on black. */}
       <nav
         aria-label="Primary"
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-[1.375rem] border border-white/[0.05] bg-[linear-gradient(180deg,#1d1d1d_0%,#171717_100%)] p-2 [scrollbar-width:none]"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-[1.375rem] border border-sidebar-border bg-sidebar-nav p-2 [scrollbar-width:none]"
       >
         {NAVIGATION.map((group) => {
           const items = group.items.filter(
@@ -138,7 +138,7 @@ export function Sidebar({
               ) : (
                 <p
                   aria-hidden
-                  className="px-3 pt-2 pb-1.5 text-[0.625rem] font-semibold tracking-[0.12em] text-sidebar-ink-muted/80 uppercase"
+                  className="px-3 pt-2 pb-1.5 text-[0.625rem] font-semibold tracking-[0.12em] text-sidebar-ink-muted uppercase"
                 >
                   {group.label}
                 </p>
@@ -160,7 +160,7 @@ export function Sidebar({
                           collapsed ? "justify-center" : "gap-3 pr-3 pl-1.5"
                         } ${
                           isActive
-                            ? "bg-sidebar-selected bg-[linear-gradient(90deg,rgba(255,255,255,0.11),rgba(255,255,255,0.02))] font-medium text-sidebar-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                            ? "bg-sidebar-selected font-semibold text-sidebar-ink"
                             : "text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink"
                         }`}
                       >
@@ -168,8 +168,8 @@ export function Sidebar({
                           aria-hidden
                           className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
                             isActive
-                              ? "bg-[#f1f1f1] text-[#161616]"
-                              : "bg-white/[0.05] group-hover:bg-white/[0.09]"
+                              ? "bg-sidebar-bubble-active text-sidebar-bubble-active-ink"
+                              : "bg-sidebar-bubble"
                           }`}
                         >
                           <Icon className="h-4 w-4" aria-hidden />
