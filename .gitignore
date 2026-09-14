@@ -78,3 +78,6 @@ tmp/
 
 # --- Disposable local-preview Alertmanager webhook token (manual, throwaway) ---
 /.e2e-alertmanager/
+
+# --- Local git worktrees for isolated plan execution ---
+/.worktrees/
