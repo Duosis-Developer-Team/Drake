@@ -12,6 +12,7 @@ import Link from "next/link";
 
 import { RelativeTime } from "@/components/ui/identifiers";
 import { Panel } from "@/components/ui/Panel";
+import { toneSpec } from "@/lib/design/status";
 import type { OperationalVerdict } from "@/lib/view-models/verdict";
 
 export function VerdictPanel({
@@ -28,6 +29,13 @@ export function VerdictPanel({
   const allSourcesAnswered = verdict.sourcesAnswered >= verdict.sourcesTotal;
   const flagged = verdict.criticalCount + verdict.warningCount;
   const numberTone = { critical: "text-[#d92d20]", warning: "text-[#b54708]", success: "text-[#161616]" }[worstTone];
+  const spec = toneSpec(worstTone);
+  const StatusIcon = spec.icon;
+  const badgeTone = {
+    critical: "bg-[#e85d5d]/15 text-[#ff8080]",
+    warning: "bg-[#fdb022]/15 text-[#fdb022]",
+    success: "bg-white/10 text-hero-ink",
+  }[worstTone];
 
   return (
     <Panel
@@ -38,9 +46,14 @@ export function VerdictPanel({
       className="!gap-0 !p-2.5"
     >
       <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-5">
-        <div className="min-w-0">
-          <p className="text-[1.0625rem] font-medium text-hero-ink">Operational verdict</p>
-          <p className="text-micro text-hero-ink-muted">Across your authorized scope</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <span aria-hidden className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${badgeTone}`}>
+            <StatusIcon className="h-[1.125rem] w-[1.125rem]" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[1.0625rem] font-medium text-hero-ink">Operational verdict</p>
+            <p className="text-micro text-hero-ink-muted">Across your authorized scope</p>
+          </div>
         </div>
         <span
           data-testid="verdict-sources"
@@ -108,7 +121,11 @@ export function VerdictPanel({
             ) : null}
           </div>
           </div>
-          <SourceRing answered={verdict.sourcesAnswered} total={verdict.sourcesTotal} />
+          <SourceRing
+            answered={verdict.sourcesAnswered}
+            total={verdict.sourcesTotal}
+            complete={allSourcesAnswered}
+          />
         </div>
         <div className="grid grid-cols-2 border-t border-[#e2e2e2] text-body font-medium">
           <button
@@ -134,30 +151,45 @@ export function VerdictPanel({
   );
 }
 
-/** Sources answered as a ring — the share of the estate this verdict can see. */
-function SourceRing({ answered, total }: { answered: number; total: number }) {
-  const size = 132;
-  const stroke = 12;
+/**
+ * Sources answered as a ring — the share of the estate this verdict can see.
+ *
+ * Coloured with the app's own accent (`--brand-accent`, resolved live from
+ * the current theme) rather than a fixed hex: the same ring reads as "part
+ * of this product" in both themes instead of a colour that only happened to
+ * work against one of them.
+ */
+function SourceRing({
+  answered,
+  total,
+  complete,
+}: {
+  answered: number;
+  total: number;
+  complete: boolean;
+}) {
+  const size = 128;
+  const stroke = 11;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const share = total > 0 ? answered / total : 0;
   return (
     <div aria-hidden className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#e2e2e2" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#e6e6e6" strokeWidth={stroke} />
         <circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="#161616"
+          stroke={complete ? "var(--brand-accent)" : "#fdb022"}
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={`${circumference * share} ${circumference}`}
         />
       </svg>
       <span className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl leading-none font-semibold tracking-tight text-[#161616]">
+        <span data-tabular className="text-2xl leading-none font-semibold tracking-tight text-[#161616]">
           {answered}/{total}
         </span>
         <span className="mt-1 text-micro text-[#6b6b6b]">sources</span>

@@ -35,12 +35,16 @@ const RADIUS = {
 export type PanelSurface = "default" | "hero";
 
 /** `hero` is the reference's dark "Total Balance" card: a lit gradient slab
- *  meant to hold one lighter card-in-card. Theme-invariant, so its own text
- *  must use `hero-ink`/`hero-ink-muted`. */
+ *  meant to hold one lighter card-in-card. Its own text always uses
+ *  `hero-ink`/`hero-ink-muted` — those stay legible against either gradient
+ *  below — but the gradient itself follows the page theme (`--hero-from`/
+ *  `--hero-to`/`--hero-border`, globals.css): a rich charcoal card on a
+ *  light canvas, and the app's own accent hue tinting a deep card on a dark
+ *  canvas, rather than one fixed obsidian block that goes flat and
+ *  indistinguishable once the whole page is already dark. */
 const SURFACE: Record<PanelSurface, string> = {
   default: "border border-border bg-surface shadow-panel",
-  hero:
-    "border border-white/[0.07] bg-[#141414] text-hero-ink bg-[radial-gradient(120%_140%_at_0%_0%,#343434_0%,#1c1c1c_45%,#121212_100%)] shadow-overlay",
+  hero: "border border-hero-border text-hero-ink bg-[linear-gradient(155deg,var(--hero-from)_0%,var(--hero-to)_100%)] shadow-[0_0_0_1px_var(--hero-ring),var(--shadow-overlay)]",
 };
 
 export function Panel({
