@@ -317,7 +317,11 @@ describe("catalog screens", () => {
     );
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument());
     expect(screen.getByText("High criticality")).toBeInTheDocument();
-    expect(screen.getByText(/Critical across observed environments/)).toBeInTheDocument();
+    expect(screen.getByText("Observed health")).toBeInTheDocument();
+    // The topology lane's own critical service also reads "Critical" — both
+    // are honest about the same signal, so presence is checked without
+    // assuming a single match.
+    expect(screen.getAllByText("Critical").length).toBeGreaterThan(0);
   });
 
   it("project detail: the environment topology lists a working service link", async () => {

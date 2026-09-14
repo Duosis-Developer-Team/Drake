@@ -65,7 +65,7 @@ test("owner: full catalog walk — projects → overview → environment → ser
   await expect(grid.getByText("Healthy")).toHaveCount(0);
 
   await page.getByTestId("environment-list").getByText("dev", { exact: true }).click();
-  await expect(page.getByRole("heading", { name: "dev" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "dev", level: 1 })).toBeVisible();
   await expect(page.getByText("cluster-a / alpha-dev")).toBeVisible();
 
   await page.getByTestId("service-list").getByText("core-api").click();
@@ -108,7 +108,7 @@ test("narrow environment user: only own environment/service; siblings 404", asyn
   // Sibling environment via forged URL → honest not-found state.
   const projectUrl = page.url();
   await environments.getByText("dev", { exact: true }).click();
-  await expect(page.getByRole("heading", { name: "dev" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "dev", level: 1 })).toBeVisible();
   const devUrl = page.url();
   // Forge: replace the environment id with a random UUID (sibling stand-in).
   const forged = devUrl.replace(/environments\/[0-9a-f-]+/, "environments/00000000-0000-4000-8000-000000000000");
@@ -196,6 +196,49 @@ test("integration health: safe fields for owner, empty for narrow env user", asy
   await signInAs(page, "user-env");
   await page.goto("/integrations");
   await expect(page.getByTestId("state-empty")).toBeVisible();
+});
+
+test("owner: the portfolio risk map's health filter round-trips through the URL, survives Back, and never overwrites criticality", async ({
+  page,
+}) => {
+  await signInAs(page, "user-owner");
+  await page.getByRole("link", { name: "Projects", exact: true }).click();
+  await expect(page.getByTestId("project-risk-map")).toBeVisible();
+
+  // Neither fixture project has a bound workload in this lightweight stack,
+  // so "Not applicable" is the one real, unmocked non-success tone group
+  // available here (see inventory-exploration.spec.ts's header comment).
+  await page.getByRole("button", { name: "Not applicable" }).click();
+  await expect(page).toHaveURL(/risk=not-applicable/);
+
+  const list = page.getByTestId("project-list");
+  const alphaRow = list.getByRole("row", { name: /Alpha/ });
+  await expect(alphaRow).toBeVisible();
+  await expect(alphaRow.getByText("High criticality")).toBeVisible();
+
+  await list.getByText("Alpha", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
+  // The health filter that got us here must not have rewritten the
+  // project's own recorded criticality.
+  await expect(page.getByText("High criticality")).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/risk=not-applicable/);
+  await expect(page.getByTestId("project-risk-map")).toBeVisible();
+});
+
+test("narrow environment user: project topology shows only the authorized environment", async ({
+  page,
+}) => {
+  await signInAs(page, "user-env");
+  await page.getByRole("link", { name: "Projects", exact: true }).click();
+  await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
+
+  const topology = page.getByTestId("environment-list");
+  await expect(topology).toBeVisible();
+  await expect(topology.getByRole("heading", { name: "dev" })).toBeVisible();
+  await expect(topology.getByRole("heading", { name: "test" })).toHaveCount(0);
 });
 
 test("catalog accessibility smoke: no critical violations", async ({ page }) => {
