@@ -216,7 +216,7 @@ export default function ProjectOverviewPage() {
         title={data.display_name}
         status={
           <>
-            <span className="text-caption text-ink-muted">Observed health</span>
+            <span className="text-caption text-ink-muted">Measured health</span>
             <StatusBadge status={worstTone} label={toneSpec(worstTone).label} />
             <StatusBadge
               status={CRITICALITY_TONE[data.criticality] ?? "neutral"}

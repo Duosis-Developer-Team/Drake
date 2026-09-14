@@ -317,7 +317,7 @@ describe("catalog screens", () => {
     );
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument());
     expect(screen.getByText("High criticality")).toBeInTheDocument();
-    expect(screen.getByText("Observed health")).toBeInTheDocument();
+    expect(screen.getByText("Measured health")).toBeInTheDocument();
     // The topology lane's own critical service also reads "Critical" — both
     // are honest about the same signal, so presence is checked without
     // assuming a single match.
