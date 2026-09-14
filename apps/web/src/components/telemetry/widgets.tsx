@@ -24,23 +24,22 @@
  * was never fetched would be fabricated.
  */
 
+import { Activity, CircleSlash, Gauge as GaugeIcon, MinusCircle } from "lucide-react";
+
 import { TimeSeriesChart, type TimeSeries } from "@/components/charts/TimeSeriesChart";
 import type { ChartStatus } from "@/components/charts/ChartFrame";
-import { Panel, PanelHeader } from "@/components/ui/Panel";
-import { Stat } from "@/components/ui/Stat";
-import { HealthIndicator } from "@/components/ui/StatusBadge";
+import { Sparkline } from "@/components/charts/visuals";
+import { IconBubble, TileState } from "@/components/catalog/visuals";
 import { FreshnessIndicator } from "@/components/ui/identifiers";
 import {
   DeniedState,
   ErrorState,
   LoadingSkeleton,
-  NoDataState,
-  NotConfiguredState,
   PartialBanner,
   StaleBanner,
 } from "@/components/ui/states";
-import { Sparkline } from "@/components/charts/visuals";
-import { toneForThreshold } from "@/lib/design/status";
+import { formatUnit } from "@/lib/design/format";
+import { thresholdLabel, toneForThreshold, toneSpec } from "@/lib/design/status";
 import type { DashboardWidget, TelemetryEnvelope, TelemetrySeries } from "@/lib/telemetry";
 import { formatValue, reduceEnvelope } from "@/lib/telemetry";
 
@@ -78,6 +77,18 @@ function chartStatus(state: WidgetState): ChartStatus {
 }
 
 /**
+ * Whether a timeseries widget has a real series to draw.
+ *
+ * Only then does it earn a full-width chart; every other answer — loading,
+ * empty, not configured, failed — is a sentence, and a sentence belongs in a
+ * tile beside its siblings rather than in a 1000px-wide empty frame. Stale
+ * data IS drawable, and keeps its chart and its stale banner.
+ */
+export function hasDrawableSeries(state: WidgetState): boolean {
+  return chartStatus(state) === "ready";
+}
+
+/**
  * The words for each failure.
  *
  * Separate from `chartStatus` because the chart frame only has one error
@@ -96,7 +107,14 @@ function failureDescription(state: WidgetState): string | undefined {
   }
 }
 
-/** The non-success frame shared by the KPI and status widgets. */
+/** A formatted measurement split into its number and its unit, so the number
+ *  can be set large and the unit beside it rather than wrapping under it. */
+function splitMeasure(text: string): { number: string; unit: string } {
+  const match = /^([-+]?[\d.,]+)\s*(.*)$/.exec(text);
+  return match ? { number: match[1], unit: match[2] } : { number: text, unit: "" };
+}
+
+/** The tile frame shared by KPI, status and not-yet-drawable chart widgets. */
 function WidgetShell({
   widget,
   state,
@@ -112,61 +130,79 @@ function WidgetShell({
 }) {
   const correlationId = "correlationId" in state ? state.correlationId : undefined;
   return (
-    <Panel data-testid={`widget-${widget.key}`} aria-label={widget.title} className="gap-2">
-      <PanelHeader
-        title={widget.title}
-        level={3}
-        meta={
-          <>
-            <span>{widget.unit.replace(/_/g, " ")}</span>
-            {state.kind === "ready" ? (
-              <FreshnessIndicator
-                asOf={state.envelope.as_of}
-                state={state.envelope.data_state === "stale" ? "stale" : "fresh"}
-              />
-            ) : null}
-            {meta}
-          </>
-        }
-      />
-      {state.kind === "loading" ? <LoadingSkeleton rows={2} label={widget.title} /> : null}
-      {state.kind === "denied" ? <DeniedState compact /> : null}
-      {state.kind === "throttled" || state.kind === "unavailable" || state.kind === "error" ? (
-        <ErrorState
-          compact
-          title={state.kind === "throttled" ? "Query limit reached" : undefined}
-          description={failureDescription(state)}
-          correlationId={correlationId}
-          onRetry={onRetry}
-        />
-      ) : null}
-      {state.kind === "ready" ? (
-        <>
-          {state.envelope.data_state === "stale" ? (
-            <StaleBanner
+    <section
+      data-testid={`widget-${widget.key}`}
+      aria-label={widget.title}
+      className="flex h-full min-w-0 flex-col gap-4 rounded-[1.5rem] border border-border bg-surface p-6 shadow-panel"
+    >
+      <div className="min-w-0">
+        <h3 className="truncate text-body font-semibold text-ink" title={widget.title}>
+          {widget.title}
+        </h3>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
+          <span>{widget.unit.replace(/_/g, " ")}</span>
+          {state.kind === "ready" ? (
+            <FreshnessIndicator
               asOf={state.envelope.as_of}
-              description={
-                state.envelope.data_range
-                  ? `These values cover ${state.envelope.data_range.from} to ${state.envelope.data_range.to}, not the window you asked for.`
-                  : undefined
-              }
-              source={state.envelope.source_type}
+              state={state.envelope.data_state === "stale" ? "stale" : "fresh"}
             />
           ) : null}
-          {state.envelope.partial ? <PartialBanner /> : null}
-          {state.envelope.data_state === "not_configured" ? (
-            <NotConfiguredState
-              compact
-              description="No telemetry source is configured for this scope."
-            />
-          ) : state.envelope.data_state === "empty" || state.envelope.series.length === 0 ? (
-            <NoDataState compact />
-          ) : (
-            children(state.envelope)
-          )}
-        </>
-      ) : null}
-    </Panel>
+          {meta}
+        </div>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col justify-end">
+        {state.kind === "loading" ? <LoadingSkeleton rows={2} label={widget.title} /> : null}
+        {state.kind === "denied" ? <DeniedState compact /> : null}
+        {state.kind === "throttled" || state.kind === "unavailable" || state.kind === "error" ? (
+          <ErrorState
+            compact
+            title={state.kind === "throttled" ? "Query limit reached" : undefined}
+            description={failureDescription(state)}
+            correlationId={correlationId}
+            onRetry={onRetry}
+          />
+        ) : null}
+        {state.kind === "ready" ? (
+          <>
+            {state.envelope.data_state === "stale" ? (
+              <div className="mb-3">
+                <StaleBanner
+                  asOf={state.envelope.as_of}
+                  description={
+                    state.envelope.data_range
+                      ? `These values cover ${state.envelope.data_range.from} to ${state.envelope.data_range.to}, not the window you asked for.`
+                      : undefined
+                  }
+                  source={state.envelope.source_type}
+                />
+              </div>
+            ) : null}
+            {state.envelope.partial ? (
+              <div className="mb-3">
+                <PartialBanner />
+              </div>
+            ) : null}
+            {state.envelope.data_state === "not_configured" ? (
+              <TileState
+                icon={CircleSlash}
+                testId="state-not-configured"
+                title="Not configured"
+                description="No telemetry source for this scope."
+              />
+            ) : state.envelope.data_state === "empty" || state.envelope.series.length === 0 ? (
+              <TileState
+                icon={MinusCircle}
+                testId="state-no-data"
+                title="No data in this window"
+                description="No samples returned — not a zero."
+              />
+            ) : (
+              children(state.envelope)
+            )}
+          </>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -184,41 +220,66 @@ export function KpiWidget({
       widget={widget}
       state={state}
       onRetry={onRetry}
-      meta={<span>{widget.reducer} over the window</span>}
     >
       {(envelope) => {
         const value = reduceEnvelope(envelope, widget.reducer);
+        const thresholds = widget.thresholds ?? null;
+        const tone = toneForThreshold(value, thresholds);
+        const spec = toneSpec(tone);
+        const ToneIcon = spec.icon;
+        const missing = value === null || Number.isNaN(value);
+        const { number, unit } = splitMeasure(formatUnit(value, widget.unit));
         // The series is already here — the shape of the window costs nothing
         // and answers "is this rising" before the reader opens the chart.
-        const shape =
-          envelope.series[0]?.points.map(([, sample]) => sample) ?? [];
+        const shape = envelope.series[0]?.points.map(([, sample]) => sample) ?? [];
         return (
-          <>
-            <div className="flex items-end justify-between gap-3">
-              <Stat
-                bare
-                label={<span className="sr-only">{widget.title}</span>}
-                value={value}
-                unit={widget.unit}
-                thresholds={widget.thresholds ?? null}
-                size="large"
-                missingReason="The source returned no usable sample in this window."
-              />
-              {shape.length > 1 ? (
+          <div data-testid="stat" className="flex min-w-0 flex-col gap-3">
+            <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+              <span
+                data-tabular
+                className={`text-[2.25rem] leading-none font-semibold tracking-[-0.03em] ${
+                  missing ? "text-ink-muted" : "text-ink"
+                }`}
+              >
+                {number}
+              </span>
+              {unit ? <span className="text-body font-medium text-ink-muted">{unit}</span> : null}
+            </p>
+            <p className="-mt-1 text-micro text-ink-muted">{widget.reducer} over the window</p>
+            {shape.length > 1 ? (
+              <div className="min-w-0 [&_svg]:h-9 [&_svg]:w-full">
                 <Sparkline
                   points={shape}
+                  width={240}
+                  height={36}
                   label={`${widget.title} over the window`}
-                  tone={toneForThreshold(value, widget.thresholds ?? null)}
+                  tone={tone}
                 />
-              ) : null}
-            </div>
+              </div>
+            ) : null}
+            {missing ? (
+              <p className="text-micro text-ink-muted">
+                The source returned no usable sample in this window.
+              </p>
+            ) : thresholds ? (
+              <span
+                className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-micro font-medium ${spec.chip}`}
+              >
+                <ToneIcon aria-hidden className="h-3 w-3" />
+                {thresholdLabel(tone, true)}
+              </span>
+            ) : (
+              <span className="self-start rounded-full bg-surface-2 px-2.5 py-1 text-micro text-ink-muted">
+                {thresholdLabel(tone, false)}
+              </span>
+            )}
             <p className="sr-only">
               {widget.accessibleSummary ?? widget.title}: {formatValue(value, widget.unit)}
               {widget.thresholds
                 ? `, ${toneForThreshold(value, widget.thresholds)} against its threshold`
                 : ""}
             </p>
-          </>
+          </div>
         );
       }}
     </WidgetShell>
@@ -248,16 +309,21 @@ export function StatusWidget({
         const value = reduceEnvelope(envelope, "latest");
         const unknown = value === null;
         const up = !unknown && value >= 1;
+        const tone = unknown ? "unknown" : up ? "success" : "critical";
         return (
-          <HealthIndicator
-            status={unknown ? "unknown" : up ? "success" : "critical"}
-            label={unknown ? "Unknown" : up ? "Being scraped" : "Not being scraped"}
-            detail={
-              unknown
-                ? "No sample arrived, so Drake cannot say whether this target is scraped."
-                : undefined
-            }
-          />
+          <div className="flex items-center gap-3">
+            <IconBubble icon={up ? Activity : GaugeIcon} tone={tone} size="large" />
+            <span className="min-w-0">
+              <span className={`block text-[1.125rem] leading-6 font-semibold ${toneSpec(tone).text}`}>
+                {unknown ? "Unknown" : up ? "Being scraped" : "Not being scraped"}
+              </span>
+              <span className="block text-caption text-ink-muted">
+                {unknown
+                  ? "No sample arrived, so Drake cannot say whether this target is scraped."
+                  : "Latest scrape sample in this window"}
+              </span>
+            </span>
+          </div>
         );
       }}
     </WidgetShell>
@@ -281,6 +347,16 @@ export function TimeseriesWidget({
     points: entry.points.map(([ts, value]) => [ts * 1000, value] as [number, number | null]),
   }));
 
+  if (!hasDrawableSeries(state)) {
+    // Nothing to plot: the same tile every other widget uses, with the
+    // honest reason in it. `children` is never reached for these states.
+    return (
+      <WidgetShell widget={widget} state={state} onRetry={onRetry}>
+        {() => null}
+      </WidgetShell>
+    );
+  }
+
   return (
     <div data-testid={`widget-${widget.key}`}>
       <TimeSeriesChart
@@ -293,6 +369,8 @@ export function TimeseriesWidget({
         freshness={envelope?.data_state === "stale" ? "stale" : "fresh"}
         partial={envelope?.partial}
         thresholds={widget.thresholds ?? null}
+        area={series.length === 1}
+        height={240}
         correlationId={"correlationId" in state ? state.correlationId : undefined}
         onRetry={onRetry}
         emptyDescription={

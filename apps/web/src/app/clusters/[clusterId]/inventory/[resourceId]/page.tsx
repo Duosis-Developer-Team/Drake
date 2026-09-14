@@ -1,34 +1,126 @@
 "use client";
 
+/**
+ * One inventory resource.
+ *
+ * Health leads — with the reason codes that produced it — then how the
+ * resource was observed, the bounded spec/status summaries, its conditions,
+ * and the allowlisted labels, annotations and owners last.
+ */
+
+import {
+  Activity,
+  Boxes,
+  CalendarClock,
+  ChevronRight,
+  Eye,
+  GitBranch,
+  ListChecks,
+  RefreshCw,
+  Tag,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { PageFrame } from "@/components/shell/AppShell";
 
-import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
+import { useApi } from "@/components/catalog/primitives";
+import {
+  DefinitionGrid,
+  IconBubble,
+  PillLink,
+  ScreenGate,
+  StatTile,
+  StateCard,
+} from "@/components/clusters/primitives";
 import {
   HealthBadge,
   InventoryStateBadge,
   formatUtc,
 } from "@/components/inventory/primitives";
-import { DataState } from "@/components/state/DataState";
-import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { RelativeTime } from "@/components/ui/identifiers";
+import { humanize, toneForHealth } from "@/lib/design/status";
 import type { InventoryResourceDetail } from "@/lib/inventory";
 
-function BoundedMap({ entries }: { entries: Record<string, string> }) {
+/** Allowlisted key/value pairs, as pills. */
+function BoundedMap({
+  entries,
+  empty,
+}: {
+  entries: Record<string, string>;
+  empty: string;
+}) {
   const pairs = Object.entries(entries);
   if (pairs.length === 0) {
-    return <p className="text-sm italic text-ink-muted">None recorded.</p>;
+    return (
+      <p className="rounded-[1rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
+        {empty}
+      </p>
+    );
   }
   return (
-    <ul className="space-y-1">
+    <ul className="flex flex-wrap gap-2">
       {pairs.map(([key, value]) => (
-        <li key={key} className="break-all font-mono text-xs text-ink">
+        <li
+          key={key}
+          className="max-w-full rounded-full border border-border bg-surface-2 px-3 py-1.5 font-mono text-micro break-all text-ink"
+        >
           <span className="text-ink-muted">{key}=</span>
           {value}
         </li>
       ))}
     </ul>
+  );
+}
+
+/** True/False/Unknown, as the same status tones as everything else — a
+ *  condition's `status` is a Kubernetes tri-state, not a status word, so it
+ *  gets mapped once here rather than reusing `toneForHealth`. */
+function conditionTone(status: string) {
+  if (status === "True") return "success" as const;
+  if (status === "False") return "critical" as const;
+  return "unknown" as const;
+}
+
+/** A bounded summary map as a definition grid, or a designed absence. */
+function SummaryPanel({
+  title,
+  icon,
+  entries,
+  empty,
+}: {
+  title: string;
+  icon: LucideIcon;
+  entries: Record<string, string | number | boolean | null>;
+  empty: string;
+}) {
+  const pairs = Object.entries(entries);
+  return (
+    <Panel className="h-full">
+      <div className="flex items-center gap-3">
+        <IconBubble icon={icon} />
+        <PanelHeader
+          title={title}
+          description="Bounded — allowlisted fields only"
+        />
+      </div>
+      {pairs.length === 0 ? (
+        <p className="rounded-[1rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
+          {empty}
+        </p>
+      ) : (
+        <DefinitionGrid
+          items={pairs.map(([key, value]) => ({
+            label: key,
+            value: (
+              <span className="font-mono text-caption">{String(value)}</span>
+            ),
+          }))}
+        />
+      )}
+    </Panel>
   );
 }
 
@@ -43,200 +135,320 @@ export default function InventoryResourcePage() {
 
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <LoadGate value={resource} retry={retry}>
+      <ScreenGate
+        value={resource}
+        retry={retry}
+        notFound={
+          <StateCard
+            testId="state-not-found"
+            icon={Boxes}
+            tone="not-applicable"
+            title="Not found"
+            description="This resource does not exist in your authorized scope."
+            action={
+              <PillLink
+                LinkComponent={Link}
+                href={`/clusters/${clusterId}/inventory`}
+              >
+                Back to inventory
+              </PillLink>
+            }
+          />
+        }
+      >
         {(data) => (
           <>
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-xs text-ink-muted">
-                  <Link href="/clusters" className="hover:text-ink">
-                    Clusters
-                  </Link>{" "}
-                  /{" "}
-                  <Link href={`/clusters/${clusterId}`} className="hover:text-ink">
-                    Detail
-                  </Link>{" "}
-                  /{" "}
-                  <Link
-                    href={`/clusters/${clusterId}/inventory`}
-                    className="hover:text-ink"
-                  >
-                    Inventory
-                  </Link>{" "}
-                  / <span className="font-mono">{data.kind}</span>
+            <nav
+              aria-label="Breadcrumb"
+              className="mb-3 flex min-w-0 flex-wrap items-center gap-1.5 text-micro text-ink-muted"
+            >
+              <Link href="/clusters" className="rounded hover:text-ink">
+                Clusters
+              </Link>
+              <ChevronRight aria-hidden className="h-3 w-3" />
+              <Link
+                href={`/clusters/${clusterId}`}
+                className="max-w-[12rem] truncate rounded font-mono hover:text-ink"
+              >
+                {clusterId}
+              </Link>
+              <ChevronRight aria-hidden className="h-3 w-3" />
+              <Link
+                href={`/clusters/${clusterId}/inventory`}
+                className="rounded hover:text-ink"
+              >
+                Inventory
+              </Link>
+              <ChevronRight aria-hidden className="h-3 w-3" />
+              <span className="font-mono text-ink-secondary">{data.kind}</span>
+            </nav>
+
+            <PageHeader
+              title={<span className="break-all">{data.name}</span>}
+              description={`${data.namespace ? `${data.namespace} · ` : ""}${data.kind}${
+                data.api_group ? ` · ${data.api_group}/${data.api_version}` : ""
+              }`}
+              status={
+                <>
+                  <HealthBadge health={data.health} />
+                  {data.lifecycle === "missing" ? (
+                    <StatusBadge status="stale" label="missing" />
+                  ) : null}
+                </>
+              }
+            />
+
+            <div className="page-grid mb-6">
+              <StatTile
+                icon={Activity}
+                tone={toneForHealth(data.health)}
+                label="Health"
+                value={
+                  <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+                    {humanize(data.health)}
+                  </span>
+                }
+              >
+                <p className="text-micro text-ink-muted">
+                  {data.health_reasons.length === 0
+                    ? "No adverse signals"
+                    : `${data.health_reasons.length} reason${data.health_reasons.length === 1 ? "" : "s"} recorded`}
                 </p>
-                <h1 className="mt-1 break-all text-title font-semibold text-ink">
-                  {data.name}
-                </h1>
-                <p className="mt-1 font-mono text-xs text-ink-muted">
-                  {data.namespace ? `${data.namespace} · ` : ""}
-                  {data.kind}
-                  {data.api_group ? ` · ${data.api_group}/${data.api_version}` : ""}
+              </StatTile>
+              <StatTile
+                icon={RefreshCw}
+                tone={toneForHealth(data.inventory.state)}
+                label="Inventory sweep"
+                value={
+                  <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+                    {humanize(data.inventory.state)}
+                  </span>
+                }
+              >
+                <p className="text-micro text-ink-muted">
+                  {data.lifecycle === "missing"
+                    ? "Gone from the cluster, still listed"
+                    : "Present in the last sweep"}
                 </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <HealthBadge health={data.health} />
-                {data.lifecycle === "missing" ? (
-                  <StatusBadge status="stale" label="missing" />
-                ) : null}
-              </div>
+              </StatTile>
+              <StatTile
+                icon={CalendarClock}
+                label="First seen"
+                value={
+                  <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+                    <RelativeTime value={data.first_seen_at} />
+                  </span>
+                }
+              >
+                <p className="font-mono text-micro text-ink-muted">
+                  {formatUtc(data.first_seen_at)}
+                </p>
+              </StatTile>
+              <StatTile
+                icon={Eye}
+                label="Last seen"
+                value={
+                  <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+                    <RelativeTime value={data.last_seen_at} />
+                  </span>
+                }
+              >
+                <p className="font-mono text-micro text-ink-muted">
+                  {formatUtc(data.last_seen_at)}
+                </p>
+              </StatTile>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card title="Health" data-testid="health-card">
-                <div className="space-y-2">
-                  <HealthBadge health={data.health} />
-                  {data.health_reasons.length > 0 ? (
-                    <ul className="space-y-1" data-testid="health-reasons">
-                      {data.health_reasons.map((reason) => (
-                        <li key={reason} className="font-mono text-xs text-ink-secondary">
+            <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
+              <Panel data-testid="health-card" className="h-full">
+                <PanelHeader
+                  title="Health"
+                  description="Reason codes behind the derived health"
+                  actions={<HealthBadge health={data.health} />}
+                />
+                {data.health_reasons.length > 0 ? (
+                  <ul className="space-y-2" data-testid="health-reasons">
+                    {data.health_reasons.map((reason) => (
+                      <li
+                        key={reason}
+                        className="flex items-center gap-3 rounded-[1rem] bg-surface-2 px-4 py-3"
+                      >
+                        <IconBubble
+                          icon={Activity}
+                          tone={toneForHealth(data.health)}
+                          size="small"
+                        />
+                        <span className="font-mono text-caption text-ink">
                           {reason}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-ink-secondary">
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-[1rem] bg-surface-2 px-4 py-3">
+                    <IconBubble icon={Activity} tone="success" size="small" />
+                    <p className="text-caption text-ink-secondary">
                       No adverse signals in the observed status.
                     </p>
-                  )}
-                </div>
-              </Card>
+                  </div>
+                )}
+              </Panel>
 
-              <Card title="Observation" data-testid="observation-card">
-                <dl className="divide-y divide-border">
-                  <MetaRow label="Inventory state">
-                    <InventoryStateBadge state={data.inventory.state} />
-                  </MetaRow>
-                  <MetaRow label="First seen">
-                    <span className="font-mono text-xs">{formatUtc(data.first_seen_at)}</span>
-                  </MetaRow>
-                  <MetaRow label="Last seen">
-                    <span className="font-mono text-xs">{formatUtc(data.last_seen_at)}</span>
-                  </MetaRow>
-                  <MetaRow label="Observed at (source)">
-                    <span className="font-mono text-xs">{formatUtc(data.observed_at)}</span>
-                  </MetaRow>
-                  <MetaRow label="UID">
-                    <span className="break-all font-mono text-xs">{data.uid}</span>
-                  </MetaRow>
-                  <MetaRow label="Source">
-                    <span className="font-mono text-xs">{data.provenance.source}</span>
-                  </MetaRow>
-                </dl>
-              </Card>
+              <Panel data-testid="observation-card" className="h-full">
+                <PanelHeader
+                  title="Observation"
+                  description="Where and when this was seen"
+                />
+                <DefinitionGrid
+                  items={[
+                    {
+                      label: "Observed at (source)",
+                      value: (
+                        <span className="font-mono text-caption">
+                          {formatUtc(data.observed_at)}
+                        </span>
+                      ),
+                    },
+                    {
+                      label: "Source",
+                      value: (
+                        <span className="font-mono text-caption">
+                          {data.provenance.source}
+                        </span>
+                      ),
+                    },
+                    {
+                      label: "Inventory sweep",
+                      value: (
+                        <InventoryStateBadge state={data.inventory.state} />
+                      ),
+                    },
+                    {
+                      label: "UID",
+                      value: (
+                        <span className="font-mono text-micro break-all">
+                          {data.uid}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              </Panel>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card title="Spec summary (bounded)">
-                {Object.keys(data.spec_summary).length === 0 ? (
-                  <p className="text-sm italic text-ink-muted">No summarized spec fields.</p>
-                ) : (
-                  <dl className="divide-y divide-border">
-                    {Object.entries(data.spec_summary).map(([key, value]) => (
-                      <MetaRow key={key} label={key}>
-                        <span className="font-mono text-xs">{String(value)}</span>
-                      </MetaRow>
-                    ))}
-                  </dl>
-                )}
-              </Card>
-              <Card title="Status summary (bounded)">
-                {Object.keys(data.status_summary).length === 0 ? (
-                  <p className="text-sm italic text-ink-muted">
-                    No summarized status fields.
-                  </p>
-                ) : (
-                  <dl className="divide-y divide-border">
-                    {Object.entries(data.status_summary).map(([key, value]) => (
-                      <MetaRow key={key} label={key}>
-                        <span className="font-mono text-xs">{String(value)}</span>
-                      </MetaRow>
-                    ))}
-                  </dl>
-                )}
-              </Card>
+            <div className="mt-6 grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
+              <SummaryPanel
+                title="Spec summary"
+                icon={ListChecks}
+                entries={data.spec_summary}
+                empty="No summarized spec fields."
+              />
+              <SummaryPanel
+                title="Status summary"
+                icon={Activity}
+                entries={data.status_summary}
+                empty="No summarized status fields."
+              />
             </div>
 
-            <Card title="Conditions">
+            <Panel flush className="mt-6">
+              <PanelHeader
+                flush
+                title="Conditions"
+                meta={
+                  <span data-tabular>{data.conditions.length} reported</span>
+                }
+              />
               {data.conditions.length === 0 ? (
-                <DataState
-                  kind="no-data"
-                  title="No conditions reported"
+                <StateCard
+                  compact
+                  testId="conditions-empty"
+                  icon={ListChecks}
+                  title="No conditions"
                   description="The source object carries no status conditions."
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-xl text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-xs text-ink-muted">
-                        <th scope="col" className="py-2 pr-3 font-medium">
-                          Type
-                        </th>
-                        <th scope="col" className="py-2 pr-3 font-medium">
-                          Status
-                        </th>
-                        <th scope="col" className="py-2 pr-3 font-medium">
-                          Reason
-                        </th>
-                        <th scope="col" className="py-2 font-medium">
-                          Message
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {data.conditions.map((condition) => (
-                        <tr key={condition.type}>
-                          <td className="py-2 pr-3 font-mono text-xs">{condition.type}</td>
-                          <td className="py-2 pr-3 font-mono text-xs">
-                            {condition.status}
-                          </td>
-                          <td className="py-2 pr-3 font-mono text-xs">
-                            {condition.reason ?? "—"}
-                          </td>
-                          <td className="py-2 text-xs text-ink-secondary">
-                            {condition.message ?? "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ul className="divide-y divide-border">
+                  {data.conditions.map((condition) => (
+                    <li
+                      key={condition.type}
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 px-7 py-4 transition-colors hover:bg-surface-hover"
+                    >
+                      <IconBubble
+                        icon={ListChecks}
+                        tone={conditionTone(condition.status)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-caption font-semibold text-ink">
+                          {condition.type}
+                        </p>
+                        {condition.reason || condition.message ? (
+                          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-caption text-ink-muted">
+                            {condition.reason ? (
+                              <span className="font-mono text-micro text-ink-secondary">
+                                {condition.reason}
+                              </span>
+                            ) : null}
+                            {condition.message ? (
+                              <span>{condition.message}</span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                      </div>
+                      <StatusBadge
+                        status={conditionTone(condition.status)}
+                        label={condition.status}
+                        size="compact"
+                      />
+                    </li>
+                  ))}
+                </ul>
               )}
-            </Card>
+            </Panel>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card title="Labels (allowlisted)">
-                <BoundedMap entries={data.labels} />
-              </Card>
-              <Card title="Annotations (allowlisted)">
-                <BoundedMap entries={data.annotations} />
-              </Card>
+            <div className="mt-6 grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
+              <Panel className="h-full">
+                <div className="flex items-center gap-3">
+                  <IconBubble icon={Tag} />
+                  <PanelHeader title="Labels" description="Allowlisted" />
+                </div>
+                <BoundedMap entries={data.labels} empty="None recorded." />
+              </Panel>
+              <Panel className="h-full">
+                <div className="flex items-center gap-3">
+                  <IconBubble icon={Tag} />
+                  <PanelHeader title="Annotations" description="Allowlisted" />
+                </div>
+                <BoundedMap entries={data.annotations} empty="None recorded." />
+              </Panel>
             </div>
 
             {data.owners.length > 0 ? (
-              <Card title="Owners">
+              <Panel flush className="mt-6">
+                <PanelHeader flush title="Owners" />
                 <ul className="divide-y divide-border">
                   {data.owners.map((owner) => (
                     <li
                       key={owner.uid}
-                      className="flex flex-wrap items-center justify-between gap-2 px-1 py-2"
+                      className="flex flex-wrap items-center gap-x-4 gap-y-1 px-7 py-4"
                     >
-                      <span className="font-mono text-xs text-ink">
-                        {owner.kind}/{owner.name}
-                      </span>
-                      <span className="break-all font-mono text-xs text-ink-muted">
-                        {owner.uid}
+                      <IconBubble icon={GitBranch} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-mono text-caption font-semibold text-ink">
+                          {owner.kind}/{owner.name}
+                        </span>
+                        <span className="mt-0.5 block font-mono text-micro break-all text-ink-muted">
+                          {owner.uid}
+                        </span>
                       </span>
                     </li>
                   ))}
                 </ul>
-              </Card>
+              </Panel>
             ) : null}
           </>
         )}
-      </LoadGate>
-      </div>
+      </ScreenGate>
     </PageFrame>
   );
 }

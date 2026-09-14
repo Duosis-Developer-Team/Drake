@@ -185,6 +185,45 @@ export function alertItems(summary: AlertSummary): AttentionItem[] {
   return items;
 }
 
+/**
+ * The entity a row is actually about, for display grouping only.
+ *
+ * A cluster's agent-disconnected row and its inventory-stale row carry
+ * different `context` strings ("cluster connection" vs "cluster inventory")
+ * because they are different claims — grouping still puts them together
+ * since both are about the same cluster, so this reads the cluster id out
+ * of the row's own `key` rather than trusting `context` to match.
+ */
+export function rootCauseKeyOf(item: AttentionItem): string {
+  if (item.origin === "cluster") {
+    const id = item.key.slice(item.key.indexOf(":") + 1);
+    return `cluster:${id}`;
+  }
+  return item.key;
+}
+
+/**
+ * Groups rows that share an underlying entity — a display convenience only,
+ * never a causality claim. Two rows in one group means "look at these
+ * together", not "these are the same problem"; a group with one row is not
+ * wrapped in any grouping chrome, so a lone critical fact never gains an
+ * extra layer to be hidden behind. Order is preserved from the input, so
+ * `sortAttention`'s worst-first ordering survives grouping.
+ */
+export function groupByRootCause(items: AttentionItem[]): AttentionItem[][] {
+  const order: string[] = [];
+  const groups = new Map<string, AttentionItem[]>();
+  for (const item of items) {
+    const key = rootCauseKeyOf(item);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(item);
+  }
+  return order.map((key) => groups.get(key)!);
+}
+
 /** Worst first, then newest first inside a tone. */
 export function sortAttention(items: AttentionItem[]): AttentionItem[] {
   return [...items].sort(

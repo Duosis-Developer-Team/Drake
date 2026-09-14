@@ -63,11 +63,18 @@ export interface ToneSpec {
   label: string;
 }
 
+/**
+ * `chip`'s soft fill sits close in lightness to the panels it's drawn on —
+ * darkening it further to "pop" would cross under the 4.5:1 text-on-chip
+ * floor `design-system.test.ts` enforces, and there is no headroom left to
+ * spend. A tone-coloured border (3:1 territory, not 4.5:1) buys the same
+ * "this is a pill, not plain text" definition without touching that budget.
+ */
 export const TONES: Record<StatusTone, ToneSpec> = {
   success: {
     icon: CheckCircle2,
     text: "text-healthy",
-    chip: "bg-healthy-soft text-healthy",
+    chip: "bg-healthy-soft text-healthy border border-healthy/35",
     dot: "bg-healthy",
     rail: "border-healthy",
     token: "--status-success",
@@ -76,7 +83,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   info: {
     icon: Info,
     text: "text-info",
-    chip: "bg-info-soft text-info",
+    chip: "bg-info-soft text-info border border-info/35",
     dot: "bg-info",
     rail: "border-info",
     token: "--status-info",
@@ -85,7 +92,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   warning: {
     icon: AlertTriangle,
     text: "text-warning",
-    chip: "bg-warning-soft text-warning",
+    chip: "bg-warning-soft text-warning border border-warning/35",
     dot: "bg-warning",
     rail: "border-warning",
     token: "--status-warning",
@@ -94,7 +101,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   critical: {
     icon: XCircle,
     text: "text-critical",
-    chip: "bg-critical-soft text-critical",
+    chip: "bg-critical-soft text-critical border border-critical/35",
     dot: "bg-critical",
     rail: "border-critical",
     token: "--status-critical",
@@ -103,7 +110,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   neutral: {
     icon: MinusCircle,
     text: "text-neutral",
-    chip: "bg-neutral-soft text-neutral",
+    chip: "bg-neutral-soft text-neutral border border-neutral/35",
     dot: "bg-neutral",
     rail: "border-neutral",
     token: "--status-neutral",
@@ -112,7 +119,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   unknown: {
     icon: HelpCircle,
     text: "text-unknown",
-    chip: "bg-unknown-soft text-unknown",
+    chip: "bg-unknown-soft text-unknown border border-unknown/35",
     dot: "bg-unknown",
     rail: "border-unknown",
     token: "--status-unknown",
@@ -121,7 +128,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   stale: {
     icon: Clock,
     text: "text-stale",
-    chip: "bg-stale-soft text-stale",
+    chip: "bg-stale-soft text-stale border border-stale/35",
     dot: "bg-stale",
     rail: "border-stale",
     token: "--status-stale",
@@ -130,7 +137,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   pending: {
     icon: Loader,
     text: "text-info",
-    chip: "bg-info-soft text-info",
+    chip: "bg-info-soft text-info border border-info/35",
     dot: "bg-info",
     rail: "border-info",
     token: "--status-info",
@@ -139,7 +146,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   "not-applicable": {
     icon: CircleSlash,
     text: "text-ink-muted",
-    chip: "bg-surface-3 text-ink-muted",
+    chip: "bg-surface-3 text-ink-muted border border-border-strong/30",
     dot: "bg-ink-muted",
     rail: "border-border",
     token: "--text-muted",
@@ -148,7 +155,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
   denied: {
     icon: Ban,
     text: "text-ink-muted",
-    chip: "bg-surface-3 text-ink-muted",
+    chip: "bg-surface-3 text-ink-muted border border-border-strong/30",
     dot: "bg-ink-muted",
     rail: "border-border",
     token: "--text-muted",

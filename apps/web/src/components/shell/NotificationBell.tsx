@@ -42,13 +42,13 @@ export function NotificationBell() {
       href="/notifications"
       aria-label={label}
       data-testid="notification-bell"
-      className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-ink-secondary hover:bg-surface-sunken"
+      className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
     >
       <Bell className="h-4 w-4" aria-hidden />
       {unread && unread > 0 ? (
         <span
           data-testid="unread-badge"
-          className="absolute -right-1 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-critical px-1 text-[10px] font-semibold text-white"
+          className="absolute -right-0.5 -top-0.5 inline-flex min-w-4 items-center justify-center rounded-full bg-critical px-1 text-[10px] font-semibold text-white ring-2 ring-canvas"
         >
           {unread > 99 ? "99+" : unread}
         </span>

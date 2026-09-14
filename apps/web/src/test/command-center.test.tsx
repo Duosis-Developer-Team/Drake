@@ -6,8 +6,10 @@
  * agent that is not connected reports THAT instead of its last known numbers,
  * and a page with no source says what it checked rather than implying health.
  *
- * The screen was rebuilt around a triage list in Sprint 13, so the selectors
- * follow it; every claim under test is the one the previous version made.
+ * The screen was rebuilt around an attention list in Sprint 13 and around an
+ * Operational verdict panel in Wave 2 of the visual remake; the selectors
+ * follow whichever markup is current, but every claim under test is the same
+ * one the original triage strip made.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,15 +51,18 @@ function cluster(agent: string, inventory: string) {
   };
 }
 
-function summary(agentStatus: string) {
+function summary(
+  agentStatus: string,
+  overrides: { certificateExpiryWarning?: boolean; certificateNotAfter?: string } = {},
+) {
   return {
     cluster_id: "c1",
     agent: {
       status: agentStatus,
       agent_version: "0.4.0",
       last_heartbeat_at: "2026-08-11T00:00:00Z",
-      certificate_not_after: "2026-08-25T00:00:00Z",
-      certificate_expiry_warning: false,
+      certificate_not_after: overrides.certificateNotAfter ?? "2026-08-25T00:00:00Z",
+      certificate_expiry_warning: overrides.certificateExpiryWarning ?? false,
     },
     inventory: {
       state: agentStatus === "connected" ? "fresh" : "stale",
@@ -106,7 +111,10 @@ describe("Command Center", () => {
     // Connection and freshness stay separate claims, in the agent's own words:
     // "the agent answers" and "the sweep is current" are different facts, and
     // a row that collapsed them would let a silent cluster read as a well one.
-    const row = within(fleet.getByRole("row", { name: /Duosis Production/ }));
+    // Each cluster is a list item in the card layout, not a table row.
+    const item = fleet.getByText("Duosis Production").closest("li");
+    expect(item).not.toBeNull();
+    const row = within(item as HTMLElement);
     expect(row.getByText("Connected")).toBeTruthy();
     expect(row.getByText("Fresh")).toBeTruthy();
   });
@@ -123,10 +131,35 @@ describe("Command Center", () => {
     await waitFor(() => expect(screen.getByText(/Agent disconnected/)).toBeTruthy());
     expect(screen.queryByText("/58")).toBeNull();
     // A disconnected agent and a stale sweep are both things needing
-    // attention, and they are listed as two separate facts.
+    // attention, and they are listed as two separate facts — grouped
+    // together (same cluster, root-cause grouping) but neither hidden.
+    const group = within(screen.getByTestId("attention-group-cluster-c1"));
+    expect(group.getByText(/agent disconnected/i)).toBeTruthy();
+    expect(group.getByText(/inventory stale/i)).toBeTruthy();
+  });
+
+  it("never merges unrelated critical rows from different clusters into one group", async () => {
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": {
+        status: 200,
+        body: {
+          clusters: [
+            { ...cluster("disconnected", "fresh"), id: "c1", display_name: "Cluster One" },
+            { ...cluster("disconnected", "fresh"), id: "c2", display_name: "Cluster Two" },
+          ],
+        },
+      },
+      "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("disconnected") },
+      "/v1/clusters/c2/inventory/summary": { status: 200, body: summary("disconnected") },
+    });
+    render(<CommandCenterPage />);
+
+    await waitFor(() => expect(screen.getAllByText(/Agent disconnected/)).toHaveLength(2));
     const attention = within(screen.getByTestId("attention-list"));
-    expect(attention.getByText(/agent disconnected/i)).toBeTruthy();
-    expect(attention.getByText(/inventory stale/i)).toBeTruthy();
+    expect(attention.getByTestId("attention-group-cluster-c1")).toBeTruthy();
+    expect(attention.getByTestId("attention-group-cluster-c2")).toBeTruthy();
   });
 
   it("says what it checked instead of claiming the platform is healthy", async () => {
@@ -147,9 +180,10 @@ describe("Command Center", () => {
     expect(screen.getByTestId("fleet-panel")).toHaveTextContent(/no clusters in scope/i);
   });
 
-  it("shows a dash for a source it could not read, never a zero", async () => {
-    // A zero would read as "nothing wrong here" when the truth is "you cannot
-    // see this" — the single most misleading thing the strip could render.
+  it("never claims every source answered when one was denied, never a silent zero", async () => {
+    // The old triage tile showed a dash instead of a zero for an unreadable
+    // source; the verdict panel carries the same honesty in its own words —
+    // the answered count drops, and the reason is named, never a "0".
     installFetchMock({
       ...QUIET_SOURCES,
       "/v1/catalog/context": { status: 200, body: CONTEXT },
@@ -157,8 +191,50 @@ describe("Command Center", () => {
     });
     render(<CommandCenterPage />);
 
-    const tile = await screen.findByTestId("triage-clusters");
-    await waitFor(() => expect(tile).toHaveTextContent(/permission required/i));
-    expect(tile).toHaveTextContent("—");
+    const sources = await screen.findByTestId("verdict-sources");
+    await waitFor(() => expect(sources).toHaveTextContent("4 of 5 sources answered"));
+    expect(screen.getByTestId("verdict-retry-sources")).toBeInTheDocument();
+
+    const empty = await screen.findByTestId("attention-empty");
+    expect(empty).toHaveTextContent(/not a statement that the platform is healthy/i);
+
+    // The denied cluster source is reported by name in Evidence coverage,
+    // not folded into the attention list's own empty-state copy.
+    const coverage = within(await screen.findByTestId("evidence-coverage"));
+    const clustersRow = coverage.getByText("Clusters").closest("li");
+    expect(clustersRow).toHaveTextContent(/permission required/i);
+  });
+
+  it("surfaces a cluster's own certificate_expiry_warning as a capacity risk with a countdown", async () => {
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": { status: 200, body: { clusters: [cluster("connected", "fresh")] } },
+      "/v1/clusters/c1/inventory/summary": {
+        status: 200,
+        body: summary("connected", {
+          certificateExpiryWarning: true,
+          certificateNotAfter: "2026-09-01T00:00:00Z",
+        }),
+      },
+    });
+    render(<CommandCenterPage />);
+
+    const board = within(await screen.findByTestId("capacity-risk-board"));
+    await waitFor(() => expect(board.getByText(/certificate expiring/i)).toBeTruthy());
+    expect(board.getByTestId("countdown")).toBeTruthy();
+  });
+
+  it("reports the honest zero-risk empty state when no cluster flags certificate or PVC risk", async () => {
+    installFetchMock({
+      ...QUIET_SOURCES,
+      "/v1/catalog/context": { status: 200, body: CONTEXT },
+      "/v1/clusters": { status: 200, body: { clusters: [cluster("connected", "fresh")] } },
+      "/v1/clusters/c1/inventory/summary": { status: 200, body: summary("connected") },
+    });
+    render(<CommandCenterPage />);
+
+    const empty = await screen.findByTestId("capacity-risk-empty");
+    expect(empty).toHaveTextContent(/no certificate or pvc risk reported by the sources checked/i);
   });
 });

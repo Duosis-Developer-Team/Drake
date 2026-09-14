@@ -26,7 +26,7 @@ import { PageFrame } from "@/components/shell/AppShell";
 
 import { BurnTable, SloBadge } from "@/components/alerting/primitives";
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
-import { Gauge } from "@/components/charts/visuals";
+import { Gauge, Sparkline } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
 import {
@@ -257,6 +257,21 @@ export default function SloDetailPage() {
               ) : history.data.evaluations.length === 0 ? (
                 <DataState kind="empty" title="No evaluations yet" />
               ) : (
+                <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Sparkline
+                    label="Compliance across recorded evaluations"
+                    tone="info"
+                    width={160}
+                    height={32}
+                    points={[...history.data.evaluations]
+                      .sort((a, b) => a.evaluated_for.localeCompare(b.evaluated_for))
+                      .map((evaluation) => evaluation.compliance_ratio)}
+                  />
+                  <span className="text-caption text-ink-muted">
+                    Compliance, oldest to most recent
+                  </span>
+                </div>
                 <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
                 <table className="w-full text-left text-xs" data-testid="slo-history">
                   <thead className="text-ink-muted">
@@ -291,6 +306,7 @@ export default function SloDetailPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
                 </div>
               )}
             </Card>

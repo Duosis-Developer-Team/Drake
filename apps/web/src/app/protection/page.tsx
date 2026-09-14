@@ -4,24 +4,44 @@
  * Protection Center.
  *
  * The list answers one question per row: is there a usable copy, and has
- * anyone proved it can be restored. They are separate columns because they
+ * anyone proved it can be restored. They are separate chips because they
  * are separate facts — collapsing them is how "the backup job is green"
  * becomes "we are safe".
  */
 
+import {
+  AlertTriangle,
+  ChevronRight,
+  Database,
+  History,
+  RefreshCw,
+  ShieldCheck,
+  ShieldOff,
+  Shield,
+} from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
+import { Donut } from "@/components/charts/visuals";
+import {
+  FactChip,
+  IconBubble,
+  KpiTile,
+  PillSelect,
+  StateCard,
+} from "@/components/protection/kit";
 import {
   BackupBadge,
   RecoverabilityBadge,
+  overallTone,
 } from "@/components/protection/primitives";
-import { Donut } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import {
+  BACKUP_LABELS,
+  RECOVERABILITY_LABELS,
   REASON_LABELS,
   formatAge,
   formatWindow,
@@ -32,9 +52,6 @@ import {
   type ProtectionSummary,
   type RecoverabilityState,
 } from "@/lib/protection";
-
-const SELECT_CLASS =
-  "rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-ink";
 
 const BACKUP_STATES: BackupState[] = [
   "protected",
@@ -50,63 +67,256 @@ const RECOVERABILITY_STATES: RecoverabilityState[] = [
   "unknown",
 ];
 
+function SummaryStats({ summary }: { summary: ProtectionSummary }) {
+  const total = summary.total_policies;
+  const protectedCount = summary.backup.protected ?? 0;
+  const needsAttention =
+    (summary.backup.at_risk ?? 0) +
+    (summary.backup.overdue ?? 0) +
+    (summary.backup.failed ?? 0);
+  const unverified = summary.recoverability.unverified ?? 0;
+  const verified = summary.recoverability.verified ?? 0;
+  return (
+    <div className="page-grid" data-testid="protection-stats">
+      <KpiTile
+        icon={Shield}
+        label="Policies"
+        value={total}
+        caption={`${verified} with a verified restore`}
+        part={verified}
+        whole={total}
+        tone="info"
+      />
+      <KpiTile
+        icon={ShieldCheck}
+        label="Protected"
+        value={protectedCount}
+        tone="success"
+        part={protectedCount}
+        whole={total}
+        caption={`of ${total} ${total === 1 ? "policy" : "policies"}`}
+      />
+      <KpiTile
+        icon={AlertTriangle}
+        label="Needs attention"
+        value={needsAttention}
+        tone={(summary.backup.failed ?? 0) > 0 ? "critical" : "warning"}
+        part={needsAttention}
+        whole={total}
+        caption="At risk, overdue or failed"
+      />
+      <KpiTile
+        icon={History}
+        label="Never restore-tested"
+        value={unverified}
+        tone="unknown"
+        part={unverified}
+        whole={total}
+        caption="A backup nobody restored is unproven"
+      />
+    </div>
+  );
+}
+
+/** The ring placeholder a breakdown shows before anything reports. */
+function EmptyBreakdown({ message }: { message: string }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-5"
+      data-testid="donut-empty"
+    >
+      <span
+        aria-hidden
+        className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full border-[12px] border-surface-3"
+      >
+        <span data-tabular className="text-title font-semibold text-ink-muted">
+          0
+        </span>
+      </span>
+      <p className="min-w-[10rem] flex-1 text-caption text-ink-muted">
+        {message}
+      </p>
+    </div>
+  );
+}
+
+function Breakdowns({ summary }: { summary: ProtectionSummary }) {
+  const backup = [
+    {
+      name: "Protected",
+      value: summary.backup.protected ?? 0,
+      tone: "success" as const,
+    },
+    {
+      name: "At risk",
+      value: summary.backup.at_risk ?? 0,
+      tone: "warning" as const,
+    },
+    {
+      name: "Overdue",
+      value: summary.backup.overdue ?? 0,
+      tone: "warning" as const,
+    },
+    {
+      name: "Failed",
+      value: summary.backup.failed ?? 0,
+      tone: "critical" as const,
+    },
+    {
+      name: "Unknown",
+      value: summary.backup.unknown ?? 0,
+      tone: "unknown" as const,
+    },
+  ];
+  const restore = [
+    {
+      name: "Verified",
+      value: summary.recoverability.verified ?? 0,
+      tone: "success" as const,
+    },
+    {
+      name: "Never verified",
+      value: summary.recoverability.unverified ?? 0,
+      tone: "unknown" as const,
+    },
+    {
+      name: "Failed",
+      value: summary.recoverability.failed ?? 0,
+      tone: "critical" as const,
+    },
+    {
+      name: "Unknown",
+      value: summary.recoverability.unknown ?? 0,
+      tone: "unknown" as const,
+    },
+  ];
+  const sum = (slices: { value: number }[]) =>
+    slices.reduce((total, slice) => total + slice.value, 0);
+  return (
+    <div className="page-aside" data-testid="protection-summary">
+      {/* Two separate questions, so two separate donuts. "Backed up" and
+          "provably restorable" are not the same claim, and a policy can
+          be the first without ever having been the second. */}
+      <Panel>
+        <PanelHeader
+          title="Backup state"
+          description="By freshest backup outcome."
+        />
+        {sum(backup) === 0 ? (
+          <EmptyBreakdown message="No policy reports a backup state yet." />
+        ) : (
+          <Donut
+            size={120}
+            thickness={14}
+            label="Policies by backup state"
+            slices={backup}
+          />
+        )}
+      </Panel>
+      <Panel>
+        <PanelHeader
+          title="Restore evidence"
+          description="Whether a restore was ever proven."
+        />
+        {sum(restore) === 0 ? (
+          <EmptyBreakdown message="No restore drill has been recorded." />
+        ) : (
+          <Donut
+            size={120}
+            thickness={14}
+            label="Policies by restore evidence"
+            slices={restore}
+          />
+        )}
+      </Panel>
+    </div>
+  );
+}
+
 function PolicyRow({ policy }: { policy: ProtectionPolicy }) {
   const evaluation = policy.evaluation;
+  const reason =
+    evaluation && evaluation.reasons.length > 0
+      ? (REASON_LABELS[evaluation.reasons[0]] ?? evaluation.reasons[0])
+      : null;
   return (
-    <tr
-      className="border-t border-border align-top"
+    <li
+      className="group relative flex flex-wrap items-center gap-x-5 gap-y-3 px-7 py-5 transition-colors hover:bg-surface-hover"
       data-testid={`protection-row-${policy.store_key}`}
     >
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
-          <Link
-            href={`/protection/${policy.id}`}
-            className="text-sm font-medium text-ink hover:underline"
-          >
-            {policy.display_name}
-          </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
-            {policy.project_key}
-            {policy.environment_key ? `/${policy.environment_key}` : ""} ·{" "}
-            {policy.store_key}
+      <IconBubble
+        icon={Database}
+        tone={evaluation ? overallTone(evaluation.overall_state) : "unknown"}
+      />
+      <div className="min-w-0 flex-1 basis-64">
+        <Link
+          href={`/protection/${policy.id}`}
+          className="text-body font-semibold text-ink after:absolute after:inset-0 after:content-['']"
+        >
+          {policy.display_name}
+        </Link>
+        <span className="mt-0.5 block truncate font-mono text-micro text-ink-muted">
+          {policy.project_key}
+          {policy.environment_key ? `/${policy.environment_key}` : ""} ·{" "}
+          {policy.store_key}
+        </span>
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <FactChip label="Last success">
+            {formatAge(evaluation?.last_success_at ?? null)}
+          </FactChip>
+          <FactChip label="RPO">
+            <span>{formatWindow(policy.rpo_seconds)}</span>
+          </FactChip>
+          <FactChip label="Offsite">
+            {policy.requires_offsite ? "required" : "not required"}
+          </FactChip>
+          <FactChip label="Last restore">
+            {formatAge(evaluation?.last_restore_at ?? null)}
+          </FactChip>
+          <FactChip label="Reporter">
+            {formatAge(evaluation?.reporter_seen_at ?? null)}
+          </FactChip>
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="flex items-center gap-1.5">
+            <span className="text-micro text-ink-muted">Backup</span>
+            {evaluation ? (
+              <BackupBadge state={evaluation.backup_state} />
+            ) : (
+              <span className="rounded-full bg-surface-3 px-2.5 py-0.5 text-caption text-ink-muted italic">
+                not evaluated
+              </span>
+            )}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-micro text-ink-muted">Restore</span>
+            {evaluation ? (
+              <RecoverabilityBadge state={evaluation.recoverability_state} />
+            ) : (
+              <span className="rounded-full bg-surface-3 px-2.5 py-0.5 text-caption text-ink-muted italic">
+                not evaluated
+              </span>
+            )}
           </span>
         </div>
-      </td>
-      <td className="py-2.5 pr-3">
-        {evaluation ? (
-          <BackupBadge state={evaluation.backup_state} />
-        ) : (
-          <span className="text-[11px] italic text-ink-muted">not evaluated</span>
-        )}
-      </td>
-      <td className="py-2.5 pr-3">
-        {evaluation ? (
-          <RecoverabilityBadge state={evaluation.recoverability_state} />
-        ) : (
-          <span className="text-[11px] italic text-ink-muted">not evaluated</span>
-        )}
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
-        {formatAge(evaluation?.last_success_at ?? null)}
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap font-mono text-xs text-ink-secondary">
-        {formatWindow(policy.rpo_seconds)}
-      </td>
-      <td className="py-2.5 pr-3 text-[11px] text-ink-secondary">
-        {policy.requires_offsite ? "required" : "not required"}
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
-        {formatAge(evaluation?.last_restore_at ?? null)}
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
-        {formatAge(evaluation?.reporter_seen_at ?? null)}
-      </td>
-      <td className="py-2.5 text-[11px] text-ink-secondary">
-        {evaluation && evaluation.reasons.length > 0
-          ? (REASON_LABELS[evaluation.reasons[0]] ?? evaluation.reasons[0])
-          : "—"}
-      </td>
-    </tr>
+        <span className="flex items-center gap-1 text-caption text-ink-secondary">
+          {reason ? (
+            <>
+              <AlertTriangle aria-hidden className="h-3.5 w-3.5 text-warning" />
+              <span>{reason}</span>
+            </>
+          ) : (
+            <span className="text-ink-muted">No open reason</span>
+          )}
+        </span>
+      </div>
+      <ChevronRight
+        aria-hidden
+        className="hidden h-4 w-4 shrink-0 text-ink-muted transition-transform group-hover:translate-x-0.5 md:block"
+      />
+    </li>
   );
 }
 
@@ -115,7 +325,9 @@ function ProtectionTable() {
   const [recoverabilityState, setRecoverabilityState] = useState<
     RecoverabilityState | ""
   >("");
-  const [offsiteState, setOffsiteState] = useState<"present" | "missing" | "">("");
+  const [offsiteState, setOffsiteState] = useState<"present" | "missing" | "">(
+    "",
+  );
 
   const [summary] = useApi<ProtectionSummary>("/v1/protection/summary");
   const [page, retry] = useApi<ProtectionPage>(
@@ -125,169 +337,136 @@ function ProtectionTable() {
       offsiteState: offsiteState || undefined,
     }),
   );
+  const filtered = Boolean(backupState || recoverabilityState || offsiteState);
 
-  return (
-    <div className="space-y-4">
-      {summary.state === "ready" ? (
-        <div
-          className="grid grid-cols-1 gap-4 rounded-panel border border-border bg-surface p-4 sm:grid-cols-2"
-          data-testid="protection-summary"
-        >
-          {/* Two separate questions, so two separate donuts. "Backed up" and
-              "provably restorable" are not the same claim, and a policy can
-              be the first without ever having been the second. */}
-          <div className="min-w-0">
-            <p className="mb-2 text-caption font-medium text-ink">Backup state</p>
-            <Donut
-              size={112}
-              thickness={13}
-              label="Policies by backup state"
-              slices={[
-                { name: "Protected", value: summary.data.backup.protected ?? 0, tone: "success" },
-                { name: "At risk", value: summary.data.backup.at_risk ?? 0, tone: "warning" },
-                { name: "Overdue", value: summary.data.backup.overdue ?? 0, tone: "warning" },
-                { name: "Failed", value: summary.data.backup.failed ?? 0, tone: "critical" },
-                { name: "Unknown", value: summary.data.backup.unknown ?? 0, tone: "unknown" },
-              ]}
-              emptyMessage="No policy reports a backup state yet."
-            />
-          </div>
-          <div className="min-w-0">
-            <p className="mb-2 text-caption font-medium text-ink">Restore evidence</p>
-            <Donut
-              size={112}
-              thickness={13}
-              label="Policies by restore evidence"
-              slices={[
-                {
-                  name: "Verified",
-                  value: summary.data.recoverability.verified ?? 0,
-                  tone: "success",
-                },
-                {
-                  name: "Never verified",
-                  value: summary.data.recoverability.unverified ?? 0,
-                  tone: "unknown",
-                },
-                {
-                  name: "Failed",
-                  value: summary.data.recoverability.failed ?? 0,
-                  tone: "critical",
-                },
-                {
-                  name: "Unknown",
-                  value: summary.data.recoverability.unknown ?? 0,
-                  tone: "unknown",
-                },
-              ]}
-              emptyMessage="No restore drill has been recorded."
-            />
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters">
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Backup
-          <select
-            className={SELECT_CLASS}
-            value={backupState}
-            onChange={(event) => setBackupState(event.target.value as BackupState | "")}
+  const list = (
+    <div className="page-main">
+      <div
+        className="flex flex-wrap items-center gap-2"
+        role="group"
+        aria-label="Filters"
+      >
+        <PillSelect
+          label="Backup"
+          value={backupState}
+          placeholder="Any"
+          onChange={(value) => setBackupState(value)}
+          options={BACKUP_STATES.map((value) => ({
+            value,
+            label: BACKUP_LABELS[value],
+          }))}
+        />
+        <PillSelect
+          label="Recoverability"
+          value={recoverabilityState}
+          placeholder="Any"
+          onChange={(value) => setRecoverabilityState(value)}
+          options={RECOVERABILITY_STATES.map((value) => ({
+            value,
+            label: RECOVERABILITY_LABELS[value],
+          }))}
+        />
+        <PillSelect
+          label="Offsite"
+          value={offsiteState}
+          placeholder="Any"
+          onChange={(value) => setOffsiteState(value)}
+          options={[
+            { value: "present", label: "Present" },
+            { value: "missing", label: "Missing" },
+          ]}
+        />
+        {filtered ? (
+          <button
+            type="button"
+            onClick={() => {
+              setBackupState("");
+              setRecoverabilityState("");
+              setOffsiteState("");
+            }}
+            className="h-10 rounded-full px-4 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
           >
-            <option value="">Any</option>
-            {BACKUP_STATES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Recoverability
-          <select
-            className={SELECT_CLASS}
-            value={recoverabilityState}
-            onChange={(event) =>
-              setRecoverabilityState(event.target.value as RecoverabilityState | "")
-            }
-          >
-            <option value="">Any</option>
-            {RECOVERABILITY_STATES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Offsite
-          <select
-            className={SELECT_CLASS}
-            value={offsiteState}
-            onChange={(event) =>
-              setOffsiteState(event.target.value as "present" | "missing" | "")
-            }
-          >
-            <option value="">Any</option>
-            <option value="present">Present</option>
-            <option value="missing">Missing</option>
-          </select>
-        </label>
+            Clear filters
+          </button>
+        ) : null}
+        {page.state === "ready" ? (
+          <span data-tabular className="ml-auto text-caption text-ink-muted">
+            Showing {page.data.items.length} of {page.data.total}
+          </span>
+        ) : null}
       </div>
 
-      {page.state === "loading" ? <DataState kind="loading" /> : null}
+      {page.state === "loading" ? (
+        <Panel>
+          <DataState kind="loading" />
+        </Panel>
+      ) : null}
       {page.state === "error" ? (
-        <Card>
+        <Panel>
           {page.notFound ? (
-            <DataState
+            <StateCard
               kind="permission-denied"
               description="Viewing protection posture needs protection.view in this scope."
             />
           ) : (
-            <DataState kind="error" description={page.message} onRetry={retry} />
+            <StateCard
+              kind="error"
+              description={page.message}
+              action={
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
+                >
+                  <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+                  Retry
+                </button>
+              }
+            />
           )}
-        </Card>
+        </Panel>
       ) : null}
       {page.state === "ready" && page.data.items.length === 0 ? (
-        <Card>
-          <DataState
+        <Panel className="flex-1 justify-center">
+          <StateCard
             kind="empty"
+            icon={ShieldOff}
             title="No protection policies"
-            description="Nothing matches these filters in your authorized scope. Drake shows a policy once a registered connector reports one."
+            description="Nothing matches in your authorized scope. A policy appears once a registered connector reports one."
           />
-        </Card>
+        </Panel>
       ) : null}
 
       {page.state === "ready" && page.data.items.length > 0 ? (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left" data-testid="protection-table">
-              <thead>
-                <tr className="text-caption text-ink-secondary">
-                  <th className="pb-2 pr-3 font-medium">Store</th>
-                  <th className="pb-2 pr-3 font-medium">Backup</th>
-                  <th className="pb-2 pr-3 font-medium">Recoverability</th>
-                  <th className="pb-2 pr-3 font-medium">Last success</th>
-                  <th className="pb-2 pr-3 font-medium">RPO</th>
-                  <th className="pb-2 pr-3 font-medium">Offsite</th>
-                  <th className="pb-2 pr-3 font-medium">Last restore</th>
-                  <th className="pb-2 pr-3 font-medium">Reporter</th>
-                  <th className="pb-2 font-medium">Top reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.data.items.map((policy) => (
-                  <PolicyRow key={policy.id} policy={policy} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-[11px] text-ink-muted">
-            Showing {page.data.items.length} of {page.data.total} policies in your
-            authorized scope.
-          </p>
-        </Card>
+        <Panel flush>
+          <PanelHeader
+            flush
+            title="Policies"
+            description="Backup and restore evidence per store, in your authorized scope."
+          />
+          <ul className="divide-y divide-border" data-testid="protection-table">
+            {page.data.items.map((policy) => (
+              <PolicyRow key={policy.id} policy={policy} />
+            ))}
+          </ul>
+        </Panel>
       ) : null}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-6">
+      {summary.state === "ready" ? (
+        <SummaryStats summary={summary.data} />
+      ) : null}
+      {summary.state === "ready" ? (
+        <div className="page-split">
+          {list}
+          <Breakdowns summary={summary.data} />
+        </div>
+      ) : (
+        list
+      )}
     </div>
   );
 }
@@ -295,19 +474,13 @@ function ProtectionTable() {
 export default function ProtectionPage() {
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <div>
-        <h1 className="text-title font-semibold text-ink">Protection</h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          A successful backup job is not a backup, and a valid backup nobody has restored
-          is not proven recoverable. Those are two separate columns here for exactly that
-          reason.
-        </p>
-      </div>
+      <PageHeader
+        title="Protection"
+        description="Backed up and proven restorable are two different answers — Drake keeps them apart."
+      />
       <Suspense fallback={<DataState kind="loading" />}>
         <ProtectionTable />
       </Suspense>
-      </div>
     </PageFrame>
   );
 }

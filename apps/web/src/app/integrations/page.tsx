@@ -1,15 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  Boxes,
+  CircleCheck,
+  DatabaseBackup,
+  Github,
+  Layers,
+  Plug,
+  TriangleAlert,
+} from "lucide-react";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
-import { StatusMatrix } from "@/components/charts/visuals";
-import { humanize, toneForHealth } from "@/lib/design/status";
-import { DataState } from "@/components/state/DataState";
+import { Donut } from "@/components/charts/visuals";
+import {
+  IconBubble,
+  KpiTile,
+  PILL_BUTTON,
+  ShareBar,
+  StateCard,
+} from "@/components/features/configure/kit";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import type { IntegrationHealth } from "@/lib/catalog";
-import { PageFrame } from "@/components/shell/AppShell";
+import { formatRelative, formatUtc } from "@/lib/design/format";
 
 const OBSERVED_STATUS: Record<string, HealthStatus> = {
   ok: "healthy",
@@ -19,147 +36,426 @@ const OBSERVED_STATUS: Record<string, HealthStatus> = {
   not_configured: "unknown",
 };
 
-export default function IntegrationsPage() {
-  const [health, retry] = useApi<{ integrations: IntegrationHealth[]; next_cursor: string | null }>(
-    "/v1/integrations/health",
+const PROVIDERS: Record<
+  string,
+  { name: string; icon: LucideIcon; blurb: string }
+> = {
+  github: { name: "GitHub", icon: Github, blurb: "Repository governance" },
+  "cluster-agent": {
+    name: "Cluster agent",
+    icon: Boxes,
+    blurb: "Kubernetes inventory",
+  },
+  "backup-reporter": {
+    name: "Backup reporter",
+    icon: DatabaseBackup,
+    blurb: "Backup evidence",
+  },
+};
+
+function providerSpec(type: string) {
+  return (
+    PROVIDERS[type] ?? {
+      name: type.replace(/[-_]+/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
+      icon: Plug,
+      blurb: "Connector",
+    }
   );
+}
+
+/** Where the screen has a place to manage a provider, the tile links to it.
+ *  Every other connector is configured by an operator out of band. */
+const MANAGE_HREF: Record<string, string> = { github: "/integrations/github" };
+
+function scopeKey(integration: IntegrationHealth) {
+  return `${integration.scope.type}/${integration.scope.ref}`;
+}
+
+function IntegrationsOverview({
+  integrations,
+}: {
+  integrations: IntegrationHealth[];
+}) {
+  const providers = new Set(integrations.map((i) => i.integration_type)).size;
+  const scopes = new Set(integrations.map(scopeKey)).size;
+  const configured = integrations.filter(
+    (i) => i.configuration_state === "configured",
+  ).length;
+  const ok = integrations.filter((i) => i.observed_state === "ok").length;
+  const attention = integrations.filter(
+    (i) =>
+      i.observed_state === "degraded" ||
+      i.observed_state === "stale" ||
+      i.last_error_code,
+  ).length;
+
+  return (
+    <div className="page-grid" data-testid="integrations-stats">
+      <KpiTile icon={Plug} label="Providers" value={providers}>
+        <p className="text-micro text-ink-muted">
+          <span data-tabular className="font-medium text-ink-secondary">
+            {integrations.length}
+          </span>{" "}
+          connectors across{" "}
+          <span data-tabular className="font-medium text-ink-secondary">
+            {scopes}
+          </span>{" "}
+          scope{scopes === 1 ? "" : "s"}
+        </p>
+      </KpiTile>
+      <KpiTile
+        icon={Layers}
+        tone="info"
+        label="Connected"
+        value={configured}
+        suffix={`of ${integrations.length}`}
+      >
+        <ShareBar
+          value={configured}
+          total={integrations.length}
+          tone="info"
+          label="configured"
+        />
+      </KpiTile>
+      <KpiTile
+        icon={CircleCheck}
+        tone="success"
+        label="Answering OK"
+        value={ok}
+        suffix={`of ${integrations.length}`}
+      >
+        <ShareBar
+          value={ok}
+          total={integrations.length}
+          tone="success"
+          label="reporting normally"
+        />
+      </KpiTile>
+      <KpiTile
+        icon={TriangleAlert}
+        tone={attention > 0 ? "warning" : undefined}
+        label="Needs attention"
+        value={attention}
+      >
+        <p className="text-micro text-ink-muted">
+          Degraded, stale or erroring connectors
+        </p>
+      </KpiTile>
+    </div>
+  );
+}
+
+function ProviderTile({
+  type,
+  entries,
+}: {
+  type: string;
+  entries: IntegrationHealth[];
+}) {
+  const spec = providerSpec(type);
+  const connected = entries.filter(
+    (e) => e.configuration_state === "configured",
+  ).length;
+  const manageHref = MANAGE_HREF[type];
+  const latest = entries
+    .map((e) => e.last_success_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+
+  return (
+    <article
+      aria-label={spec.name}
+      className="flex h-full flex-col rounded-[1.5rem] border border-border bg-surface shadow-panel"
+    >
+      <div className="flex items-center gap-4 px-6 pt-6">
+        <span
+          aria-hidden
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
+            connected > 0
+              ? "bg-accent text-ink-inverse"
+              : "bg-surface-3 text-ink-secondary"
+          }`}
+        >
+          <spec.icon className="h-6 w-6" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-[1.0625rem] font-semibold text-ink">
+            {spec.name}
+          </h3>
+          <p className="truncate text-caption text-ink-muted">{spec.blurb}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-between gap-3 px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex gap-1" aria-hidden>
+            {entries.map((entry) => (
+              <span
+                key={scopeKey(entry)}
+                className={`h-1.5 w-5 rounded-full ${
+                  entry.configuration_state === "configured"
+                    ? "bg-info"
+                    : "bg-surface-3"
+                }`}
+              />
+            ))}
+          </div>
+          <span className="truncate text-micro text-ink-muted">
+            <span data-tabular className="font-medium text-ink-secondary">
+              {connected}/{entries.length}
+            </span>{" "}
+            scopes
+          </span>
+        </div>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-medium whitespace-nowrap ${
+            connected > 0
+              ? "bg-info-soft text-info"
+              : "bg-surface-3 text-ink-muted"
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`h-1.5 w-1.5 rounded-full ${connected > 0 ? "bg-info" : "bg-ink-muted"}`}
+          />
+          {connected > 0 ? "Connected" : "Not connected"}
+        </span>
+      </div>
+
+      <ul className="mt-4 flex-1 divide-y divide-border border-t border-border">
+        {entries.map((integration) => (
+          <li
+            key={scopeKey(integration)}
+            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-6 py-3.5"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-body font-medium text-ink">
+                {integration.scope.ref}
+              </p>
+              <p className="truncate text-micro text-ink-muted">
+                {integration.scope.type} · last sync{" "}
+                {integration.last_success_at ? (
+                  <time
+                    dateTime={integration.last_success_at}
+                    title={formatUtc(integration.last_success_at)}
+                  >
+                    {formatRelative(integration.last_success_at)}
+                  </time>
+                ) : (
+                  <span>never</span>
+                )}
+              </p>
+              {integration.last_error_code ? (
+                <p className="mt-0.5 font-mono text-micro text-critical">
+                  {integration.last_error_code}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 font-mono text-micro text-ink-secondary">
+                {integration.configuration_state}
+              </span>
+              <StatusBadge
+                status={
+                  OBSERVED_STATUS[integration.observed_state] ?? "unknown"
+                }
+                label={integration.observed_state}
+                size="compact"
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {/* mt-auto: when the gallery rows stretch to the aside's height, the
+          footer stays on the card's bottom edge instead of floating. */}
+      <div className="mt-auto flex items-center justify-between gap-3 border-t border-border px-6 py-4">
+        <span className="min-w-0 truncate text-micro text-ink-muted">
+          {latest ? (
+            <>
+              Latest success{" "}
+              <time dateTime={latest}>{formatRelative(latest)}</time>
+            </>
+          ) : (
+            "No successful sync yet"
+          )}
+        </span>
+        {manageHref ? (
+          <Link href={manageHref} className={PILL_BUTTON}>
+            Manage
+            <ArrowRight aria-hidden className="h-3.5 w-3.5" />
+          </Link>
+        ) : (
+          <span
+            className="rounded-full bg-surface-2 px-3 py-1.5 text-micro font-medium whitespace-nowrap text-ink-muted"
+            title="Connected by an operator; there is nothing to set here."
+          >
+            Operator-managed
+          </span>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function HealthSummary({
+  integrations,
+}: {
+  integrations: IntegrationHealth[];
+}) {
+  const count = (state: string) =>
+    integrations.filter((i) => i.observed_state === state).length;
+  const ok = count("ok");
+  const degraded = count("degraded");
+  const stale = count("stale");
+  const rest = integrations.length - ok - degraded - stale;
+  const scopes = [...new Set(integrations.map(scopeKey))];
+
+  return (
+    <div className="page-aside">
+      <Panel className="h-full">
+        <PanelHeader
+          title="Observed health"
+          description="Every connector, by what Drake last saw"
+        />
+        <Donut
+          label="Observed connector state"
+          size={148}
+          thickness={16}
+          slices={[
+            { name: "OK", value: ok, tone: "success" },
+            { name: "Degraded", value: degraded, tone: "critical" },
+            { name: "Stale", value: stale, tone: "stale" },
+            { name: "Not reporting", value: rest, tone: "unknown" },
+          ]}
+        />
+      </Panel>
+      <Panel className="h-full">
+        <PanelHeader
+          title="Coverage by scope"
+          description="Connected providers per scope"
+        />
+        <ul className="space-y-4">
+          {scopes.map((key) => {
+            const inScope = integrations.filter((i) => scopeKey(i) === key);
+            const connected = inScope.filter(
+              (i) => i.configuration_state === "configured",
+            );
+            return (
+              <li key={key} className="flex items-center gap-3">
+                <IconBubble icon={Layers} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-caption font-medium text-ink">
+                      {key}
+                    </span>
+                    <span data-tabular className="text-micro text-ink-muted">
+                      {connected.length}/{inScope.length}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex gap-1" aria-hidden>
+                    {inScope.map((i) => {
+                      const Icon = providerSpec(i.integration_type).icon;
+                      const on = i.configuration_state === "configured";
+                      return (
+                        <span
+                          key={i.integration_type}
+                          title={`${providerSpec(i.integration_type).name}: ${on ? "connected" : "not connected"}`}
+                          className={`flex h-6 flex-1 items-center justify-center rounded-full ${
+                            on
+                              ? "bg-info-soft text-info"
+                              : "bg-surface-3 text-ink-muted"
+                          }`}
+                        >
+                          <Icon className="h-3 w-3" />
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </Panel>
+    </div>
+  );
+}
+
+export default function IntegrationsPage() {
+  const [health, retry] = useApi<{
+    integrations: IntegrationHealth[];
+    next_cursor: string | null;
+  }>("/v1/integrations/health");
 
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <div>
-        <h1 className="text-title font-semibold text-ink">
-          Integration Health
-        </h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          Connector configuration and observed state per scope. Providers are
-          not yet connected in this phase.
-        </p>
-      </div>
-      <div>
-        <Link
-          href="/integrations/github"
-          className="inline-flex rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-sunken"
-        >
-          GitHub App integration
-        </Link>
-      </div>
-      <Card>
+      <PageHeader
+        title="Integration Health"
+        description="Connector configuration and observed state per scope."
+        actions={
+          <Link href="/integrations/github" className={PILL_BUTTON}>
+            <Github aria-hidden className="h-4 w-4" />
+            GitHub App integration
+          </Link>
+        }
+      />
+      <div className="space-y-6">
         <LoadGate value={health} retry={retry}>
-          {(body) =>
-            body.integrations.length === 0 ? (
-              <DataState
-                kind="empty"
-                title="No integrations in your scope"
-                description="Integrations registered on scopes you can read will appear here."
-              />
-            ) : (
+          {(body) => {
+            if (body.integrations.length === 0) {
+              return (
+                <Panel>
+                  <StateCard
+                    kind="empty"
+                    icon={Plug}
+                    title="No integrations in your scope"
+                    description="Integrations registered on scopes you can read will appear here."
+                  />
+                </Panel>
+              );
+            }
+            const byType = new Map<string, IntegrationHealth[]>();
+            for (const integration of body.integrations) {
+              byType.set(integration.integration_type, [
+                ...(byType.get(integration.integration_type) ?? []),
+                integration,
+              ]);
+            }
+            return (
               <>
-              {/* Provider × scope is a matrix, and the gaps are the point: a
-                  grid of tones shows which scope is missing which provider
-                  from across the room, where a column of words makes the
-                  reader compare strings. The table underneath keeps every
-                  detail — this is the index, not a replacement. */}
-              <div className="mb-4 border-b border-border pb-4">
-                <StatusMatrix
-                  label="Provider readiness by scope"
-                  rowLabel="Scope"
-                  rows={[
-                    ...new Map(
-                      body.integrations.map((integration) => [
-                        `${integration.scope.type}/${integration.scope.ref}`,
-                        {
-                          key: `${integration.scope.type}/${integration.scope.ref}`,
-                          label: integration.scope.ref,
-                          sub: integration.scope.type,
-                        },
-                      ]),
-                    ).values(),
-                  ]}
-                  columns={[
-                    ...new Map(
-                      body.integrations.map((integration) => [
-                        integration.integration_type,
-                        { key: integration.integration_type, label: integration.integration_type },
-                      ]),
-                    ).values(),
-                  ]}
-                  cell={(scopeKey, type) => {
-                    const match = body.integrations.find(
-                      (integration) =>
-                        `${integration.scope.type}/${integration.scope.ref}` === scopeKey &&
-                        integration.integration_type === type,
-                    );
-                    if (!match) return null;
-                    if (match.configuration_state !== "configured") {
-                      return { tone: "not-applicable", label: "Not connected" };
-                    }
-                    return {
-                      tone: toneForHealth(match.observed_state),
-                      label: humanize(match.observed_state),
-                    };
-                  }}
-                />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" data-testid="integration-table">
-                  <thead>
-                    <tr className="border-b border-border text-left text-caption text-ink-secondary">
-                      <th className="px-2 py-2">Type</th>
-                      <th className="px-2 py-2">Scope</th>
-                      <th className="px-2 py-2">Configuration</th>
-                      <th className="px-2 py-2">Observed</th>
-                      <th className="px-2 py-2">Last success</th>
-                      <th className="px-2 py-2">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {body.integrations.map((integration) => (
-                      <tr
-                        key={`${integration.integration_type}-${integration.scope.type}-${integration.scope.ref}`}
-                      >
-                        <td className="px-2 py-2 font-mono text-xs text-ink">
-                          {integration.integration_type}
-                        </td>
-                        <td className="px-2 py-2 font-mono text-xs text-ink-secondary">
-                          {integration.scope.type}/{integration.scope.ref}
-                        </td>
-                        <td className="px-2 py-2">
-                          <StatusBadge
-                            status={
-                              integration.configuration_state === "configured"
-                                ? "maintenance"
-                                : "unknown"
-                            }
-                            label={integration.configuration_state}
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <StatusBadge
-                            status={
-                              OBSERVED_STATUS[integration.observed_state] ?? "unknown"
-                            }
-                            label={integration.observed_state}
-                          />
-                        </td>
-                        <td className="px-2 py-2 font-mono text-xs text-ink-secondary">
-                          {integration.last_success_at
-                            ? integration.last_success_at.slice(0, 19)
-                            : "never"}
-                        </td>
-                        <td className="px-2 py-2 font-mono text-xs text-ink-secondary">
-                          {integration.last_error_code ?? "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                <IntegrationsOverview integrations={body.integrations} />
+                <div className="page-split">
+                  <section
+                    aria-labelledby="provider-gallery"
+                    className="page-main"
+                  >
+                    <h2
+                      id="provider-gallery"
+                      className="-mb-2 text-[1.0625rem] font-semibold text-ink"
+                    >
+                      Providers
+                    </h2>
+                    <div
+                      className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2"
+                      data-testid="integration-table"
+                    >
+                      {[...byType.entries()].map(([type, entries]) => (
+                        <ProviderTile
+                          key={type}
+                          type={type}
+                          entries={entries}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                  <HealthSummary integrations={body.integrations} />
+                </div>
               </>
-            )
-          }
+            );
+          }}
         </LoadGate>
-      </Card>
       </div>
     </PageFrame>
   );

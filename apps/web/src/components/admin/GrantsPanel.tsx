@@ -2,9 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { CircleCheck, KeyRound, Plus, Users } from "lucide-react";
+
+import {
+  FIELD_LABEL,
+  IconBubble,
+  InitialsBubble,
+  KpiTile,
+  PILL_BUTTON,
+  PILL_FIELD,
+  PILL_PRIMARY,
+  ShareBar,
+  StateCard,
+  TABLE_HEAD,
+} from "@/components/features/configure/kit";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet, apiMutate } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
@@ -43,14 +57,20 @@ export function GrantsPanel() {
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
   const [grants, setGrants] = useState<Loadable<Grant[]>>({ state: "loading" });
-  const [options, setOptions] = useState<Loadable<GrantOptions>>({ state: "loading" });
+  const [options, setOptions] = useState<Loadable<GrantOptions>>({
+    state: "loading",
+  });
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // Keep previously loaded data on refresh: the create form must not
     // unmount (and lose its success/error feedback) while lists reload.
-    setGrants((current) => (current.state === "ready" ? current : { state: "loading" }));
-    setOptions((current) => (current.state === "ready" ? current : { state: "loading" }));
+    setGrants((current) =>
+      current.state === "ready" ? current : { state: "loading" },
+    );
+    setOptions((current) =>
+      current.state === "ready" ? current : { state: "loading" },
+    );
     try {
       const [grantsBody, optionsBody] = await Promise.all([
         apiGet<{ grants: Grant[] }>("/v1/grants"),
@@ -59,7 +79,8 @@ export function GrantsPanel() {
       setGrants({ state: "ready", data: grantsBody.grants });
       setOptions({ state: "ready", data: optionsBody });
     } catch (error) {
-      const message = error instanceof ApiError ? error.message : "request failed";
+      const message =
+        error instanceof ApiError ? error.message : "request failed";
       setGrants({ state: "error", message });
       setOptions({ state: "error", message });
     }
@@ -72,90 +93,189 @@ export function GrantsPanel() {
   const revoke = async (grant: Grant) => {
     setActionError(null);
     try {
-      await apiMutate(`/v1/grants/${grant.id}`, { csrfToken: csrf, method: "DELETE" });
+      await apiMutate(`/v1/grants/${grant.id}`, {
+        csrfToken: csrf,
+        method: "DELETE",
+      });
       await load();
     } catch (error) {
-      setActionError(error instanceof ApiError ? error.message : "revoke failed");
+      setActionError(
+        error instanceof ApiError ? error.message : "revoke failed",
+      );
     }
   };
 
+  const grantList = grants.state === "ready" ? grants.data : [];
+  const activeGrants = grantList.filter(
+    (grant) => grant.revoked_at === null,
+  ).length;
+  const principals = new Set(
+    grantList.map(
+      (grant) => grant.identity_display ?? grant.group_display ?? grant.id,
+    ),
+  ).size;
+
   return (
-    <div className="space-y-4">
-      {options.state === "ready" ? (
-        <CreateGrantForm options={options.data} csrf={csrf} onCreated={load} />
+    <div className="space-y-6">
+      {grants.state === "ready" ? (
+        <div className="page-grid" data-cols="3">
+          <KpiTile icon={KeyRound} label="Grants" value={grantList.length}>
+            <p className="text-micro text-ink-muted">
+              Every grant you may manage
+            </p>
+          </KpiTile>
+          <KpiTile
+            icon={CircleCheck}
+            tone="success"
+            label="Active"
+            value={activeGrants}
+            suffix={`of ${grantList.length}`}
+          >
+            <ShareBar
+              value={activeGrants}
+              total={grantList.length}
+              tone="success"
+              label="currently in force"
+            />
+          </KpiTile>
+          <KpiTile
+            icon={Users}
+            tone="info"
+            label="Principals"
+            value={principals}
+          >
+            <p className="text-micro text-ink-muted">
+              <span data-tabular className="font-medium text-ink-secondary">
+                {grantList.length - activeGrants}
+              </span>{" "}
+              revoked grants kept for the record
+            </p>
+          </KpiTile>
+        </div>
       ) : null}
 
-      <Card title="Scoped grants">
-        {grants.state === "loading" ? <DataState kind="loading" /> : null}
-        {grants.state === "error" ? (
-          <DataState kind="error" description={grants.message} onRetry={() => void load()} />
-        ) : null}
-        {grants.state === "ready" && grants.data.length === 0 ? (
-          <DataState
-            kind="empty"
-            title="No grants in your scope"
-            description="Grants you are allowed to manage will appear here."
-          />
-        ) : null}
-        {actionError ? (
-          <p role="alert" className="mb-2 text-sm text-critical">
-            {actionError}
-          </p>
-        ) : null}
-        {grants.state === "ready" && grants.data.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="grant-table">
-              <thead>
-                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-ink-muted">
-                  <th className="px-2 py-2">Principal</th>
-                  <th className="px-2 py-2">Role</th>
-                  <th className="px-2 py-2">Scope</th>
-                  <th className="px-2 py-2">Status</th>
-                  <th className="px-2 py-2" aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {grants.data.map((grant) => {
-                  const active = grant.revoked_at === null;
-                  return (
-                    <tr key={grant.id}>
-                      <td className="px-2 py-2 text-ink">
-                        {grant.identity_display ?? grant.group_display ?? "—"}
-                        {grant.group_display ? (
-                          <span className="ml-1 text-xs text-ink-muted">(group)</span>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-2 text-ink-secondary">{grant.role_name}</td>
-                      <td className="px-2 py-2">
-                        <span className="font-mono text-xs text-ink-secondary">
-                          {grant.scope_type}/{grant.scope_ref}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2">
-                        <StatusBadge
-                          status={active ? "healthy" : "unknown"}
-                          label={active ? "active" : "revoked"}
-                        />
-                      </td>
-                      <td className="px-2 py-2 text-right">
-                        {active ? (
-                          <button
-                            type="button"
-                            onClick={() => void revoke(grant)}
-                            className="rounded-lg border border-border px-3 py-1 text-xs text-ink-secondary hover:bg-surface-sunken"
-                          >
-                            Revoke
-                          </button>
-                        ) : null}
-                      </td>
+      <div className="page-split" data-cols="3">
+        <div className="page-main">
+          <Panel flush>
+            <PanelHeader
+              flush
+              title="Scoped grants"
+              description="Who holds which role, where"
+            />
+            {grants.state === "loading" ? (
+              <div className="px-7 py-5">
+                <DataState kind="loading" />
+              </div>
+            ) : null}
+            {grants.state === "error" ? (
+              <div className="px-7 py-5">
+                <DataState
+                  kind="error"
+                  description={grants.message}
+                  onRetry={() => void load()}
+                />
+              </div>
+            ) : null}
+            {grants.state === "ready" && grants.data.length === 0 ? (
+              <StateCard
+                kind="empty"
+                icon={KeyRound}
+                title="No grants in your scope"
+                description="Grants you are allowed to manage will appear here."
+              />
+            ) : null}
+            {actionError ? (
+              <p
+                role="alert"
+                className="mx-7 mt-4 rounded-full bg-critical-soft px-4 py-2 text-caption text-critical"
+              >
+                {actionError}
+              </p>
+            ) : null}
+            {grants.state === "ready" && grants.data.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left" data-testid="grant-table">
+                  <thead>
+                    <tr className={`border-b border-border ${TABLE_HEAD}`}>
+                      <th className="h-11 pr-3 pl-7 font-medium">Principal</th>
+                      <th className="h-11 px-3 font-medium">Role</th>
+                      <th className="h-11 px-3 font-medium">Scope</th>
+                      <th className="h-11 px-3 font-medium">Status</th>
+                      <th className="h-11 pr-7 pl-3" aria-label="Actions" />
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {grants.data.map((grant) => {
+                      const active = grant.revoked_at === null;
+                      const principal =
+                        grant.identity_display ?? grant.group_display ?? "—";
+                      return (
+                        <tr
+                          key={grant.id}
+                          className="h-16 transition-colors hover:bg-surface-hover"
+                        >
+                          <td className="pr-3 pl-7">
+                            <span className="flex items-center gap-3">
+                              <InitialsBubble name={principal} size="sm" />
+                              <span className="min-w-0">
+                                <span className="block text-body font-semibold whitespace-nowrap text-ink">
+                                  {principal}
+                                </span>
+                                {grant.group_display ? (
+                                  <span className="block text-micro text-ink-muted">
+                                    group
+                                  </span>
+                                ) : null}
+                              </span>
+                            </span>
+                          </td>
+                          <td className="px-3">
+                            <span className="rounded-full bg-surface-2 px-2.5 py-1 text-caption font-medium whitespace-nowrap text-ink">
+                              {grant.role_name}
+                            </span>
+                          </td>
+                          <td className="px-3">
+                            <span className="font-mono text-micro whitespace-nowrap text-ink-secondary">
+                              {grant.scope_type}/{grant.scope_ref}
+                            </span>
+                          </td>
+                          <td className="px-3">
+                            <StatusBadge
+                              status={active ? "healthy" : "unknown"}
+                              label={active ? "active" : "revoked"}
+                            />
+                          </td>
+                          <td className="pr-7 pl-3 text-right">
+                            {active ? (
+                              <button
+                                type="button"
+                                onClick={() => void revoke(grant)}
+                                className={PILL_BUTTON}
+                              >
+                                Revoke
+                              </button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </Panel>
+        </div>
+
+        {options.state === "ready" ? (
+          <div className="page-aside" data-sticky>
+            <CreateGrantForm
+              options={options.data}
+              csrf={csrf}
+              onCreated={load}
+            />
           </div>
         ) : null}
-      </Card>
+      </div>
     </div>
   );
 }
@@ -169,7 +289,9 @@ function CreateGrantForm({
   csrf: string;
   onCreated: () => Promise<void>;
 }) {
-  const [principalType, setPrincipalType] = useState<"identity" | "group">("identity");
+  const [principalType, setPrincipalType] = useState<"identity" | "group">(
+    "identity",
+  );
   const [principalId, setPrincipalId] = useState("");
   const [scopeId, setScopeId] = useState(options.scopes[0]?.id ?? "");
   const [roleId, setRoleId] = useState("");
@@ -186,7 +308,9 @@ function CreateGrantForm({
   const delegableRoles = useMemo(
     () =>
       options.roles.filter((role) =>
-        selectedScope ? selectedScope.delegable_role_ids.includes(role.id) : false,
+        selectedScope
+          ? selectedScope.delegable_role_ids.includes(role.id)
+          : false,
       ),
     [options.roles, selectedScope],
   );
@@ -235,100 +359,114 @@ function CreateGrantForm({
     }
   };
 
-  const selectClass =
-    "h-9 w-full rounded-lg border border-border bg-surface px-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent";
+  const selectClass = PILL_FIELD;
+  const labelClass = FIELD_LABEL;
 
   return (
-    <Card title="Create grant">
-      <form onSubmit={(event) => void submit(event)} data-testid="grant-create-form">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <fieldset>
-            <legend className="mb-1 text-xs font-medium text-ink-secondary">
-              Principal type
-            </legend>
-            <div className="flex gap-3">
-              {(["identity", "group"] as const).map((type) => (
-                <label key={type} className="flex items-center gap-1.5 text-sm text-ink">
-                  <input
-                    type="radio"
-                    name="principal-type"
-                    checked={principalType === type}
-                    onChange={() => {
-                      setPrincipalType(type);
-                      setPrincipalId("");
-                    }}
-                    className="accent-[var(--accent)]"
-                  />
-                  {type === "identity" ? "Identity" : "Mapped group"}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <div>
-            <label htmlFor="grant-principal" className="mb-1 block text-xs font-medium text-ink-secondary">
-              {principalType === "identity" ? "Identity" : "Group mapping"}
-            </label>
-            <select
-              id="grant-principal"
-              value={principalId}
-              onChange={(event) => setPrincipalId(event.target.value)}
-              className={selectClass}
-            >
-              <option value="">Select…</option>
-              {principals.map((principal) => (
-                <option key={principal.id} value={principal.id}>
-                  {principal.display_name}
-                </option>
-              ))}
-            </select>
+    <Panel>
+      <PanelHeader
+        title="Create grant"
+        description="Give a principal a role at one scope"
+        actions={<IconBubble icon={Plus} size="sm" />}
+      />
+      <form
+        onSubmit={(event) => void submit(event)}
+        data-testid="grant-create-form"
+        className="grid grid-cols-1 gap-4 @min-[36rem]/page:grid-cols-2 @min-[60rem]/page:grid-cols-1"
+      >
+        <fieldset>
+          <legend className={labelClass}>Principal type</legend>
+          <div className="grid grid-cols-2 gap-1 rounded-full border border-border bg-surface-2 p-1">
+            {(["identity", "group"] as const).map((type) => (
+              <label
+                key={type}
+                className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-full px-3 py-2 text-caption font-medium transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent ${
+                  principalType === type
+                    ? "bg-surface text-ink shadow-panel"
+                    : "text-ink-secondary hover:text-ink"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="principal-type"
+                  checked={principalType === type}
+                  onChange={() => {
+                    setPrincipalType(type);
+                    setPrincipalId("");
+                  }}
+                  className="sr-only"
+                />
+                {type === "identity" ? "Identity" : "Mapped group"}
+              </label>
+            ))}
           </div>
+        </fieldset>
 
-          <div>
-            <label htmlFor="grant-scope" className="mb-1 block text-xs font-medium text-ink-secondary">
-              Scope
-            </label>
-            <select
-              id="grant-scope"
-              value={scopeId}
-              onChange={(event) => {
-                setScopeId(event.target.value);
-                setRoleId("");
-              }}
-              className={selectClass}
-            >
-              {options.scopes.map((scope) => (
-                <option key={scope.id} value={scope.id}>
-                  {scope.scope_type}/{scope.scope_ref}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div>
+          <label htmlFor="grant-principal" className={labelClass}>
+            {principalType === "identity" ? "Identity" : "Group mapping"}
+          </label>
+          <select
+            id="grant-principal"
+            value={principalId}
+            onChange={(event) => setPrincipalId(event.target.value)}
+            className={selectClass}
+          >
+            <option value="">Select…</option>
+            {principals.map((principal) => (
+              <option key={principal.id} value={principal.id}>
+                {principal.display_name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          <div>
-            <label htmlFor="grant-role" className="mb-1 block text-xs font-medium text-ink-secondary">
-              Role
-            </label>
-            <select
-              id="grant-role"
-              value={roleId}
-              onChange={(event) => setRoleId(event.target.value)}
-              className={selectClass}
-            >
-              <option value="">Select…</option>
-              {delegableRoles.map((role) => (
-                <option key={role.id} value={role.id}>
-                  {role.name}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-[11px] text-ink-muted">
-              Only roles you can delegate at the selected scope are listed.
-            </p>
-          </div>
+        <div>
+          <label htmlFor="grant-scope" className={labelClass}>
+            Scope
+          </label>
+          <select
+            id="grant-scope"
+            value={scopeId}
+            onChange={(event) => {
+              setScopeId(event.target.value);
+              setRoleId("");
+            }}
+            className={selectClass}
+          >
+            {options.scopes.map((scope) => (
+              <option key={scope.id} value={scope.id}>
+                {scope.scope_type}/{scope.scope_ref}
+              </option>
+            ))}
+          </select>
+        </div>
 
+        <div>
+          <label htmlFor="grant-role" className={labelClass}>
+            Role
+          </label>
+          <select
+            id="grant-role"
+            value={roleId}
+            onChange={(event) => setRoleId(event.target.value)}
+            className={selectClass}
+          >
+            <option value="">Select…</option>
+            {delegableRoles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 px-4 text-micro text-ink-muted">
+            Only roles you can delegate at the selected scope are listed.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 @min-[36rem]/page:col-span-2 @min-[36rem]/page:grid-cols-2 @min-[60rem]/page:col-span-1 @min-[60rem]/page:grid-cols-1">
           <div>
-            <label htmlFor="grant-valid-from" className="mb-1 block text-xs font-medium text-ink-secondary">
+            <label htmlFor="grant-valid-from" className={labelClass}>
               Valid from (optional)
             </label>
             <input
@@ -341,7 +479,7 @@ function CreateGrantForm({
           </div>
 
           <div>
-            <label htmlFor="grant-valid-to" className="mb-1 block text-xs font-medium text-ink-secondary">
+            <label htmlFor="grant-valid-to" className={labelClass}>
               Valid to (optional)
             </label>
             <input
@@ -355,33 +493,37 @@ function CreateGrantForm({
         </div>
 
         {options.directory_scope === "subtree" ? (
-          <p className="mt-3 text-xs text-ink-muted">
+          <p className="rounded-[1.25rem] bg-surface-2 px-4 py-3 text-micro text-ink-secondary @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1">
             You can select principals already present in your scope. Adding
             people beyond it arrives with the directory integration.
           </p>
         ) : null}
 
         {formError ? (
-          <p role="alert" className="mt-3 text-sm text-critical">
+          <p
+            role="alert"
+            className="rounded-full bg-critical-soft px-4 py-2 text-caption text-critical @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1"
+          >
             {formError}
           </p>
         ) : null}
         {success ? (
-          <p role="status" className="mt-3 text-sm text-healthy">
+          <p
+            role="status"
+            className="rounded-full bg-healthy-soft px-4 py-2 text-caption text-healthy @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1"
+          >
             {success}
           </p>
         ) : null}
 
-        <div className="mt-4 border-t border-border pt-3">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="h-9 rounded-lg bg-accent px-5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? "Creating…" : "Create grant"}
-          </button>
-        </div>
+        <button
+          type="submit"
+          disabled={submitting}
+          className={`${PILL_PRIMARY} w-full @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1`}
+        >
+          {submitting ? "Creating…" : "Create grant"}
+        </button>
       </form>
-    </Card>
+    </Panel>
   );
 }

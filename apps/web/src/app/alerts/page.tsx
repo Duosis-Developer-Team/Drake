@@ -9,28 +9,47 @@
  * screen is the business context around a decision Alertmanager already
  * made.
  *
- * The columns exist so three different facts stay separate: whether the
- * alert is firing, whether it warranted an incident, and whether anyone has
- * suppressed the notification. Collapsing them is how "somebody silenced
- * it" comes to read as "somebody handled it".
+ * The row keeps three different facts apart: whether the alert is firing,
+ * whether it warranted an incident, and whether anyone has suppressed the
+ * notification. Collapsing them is how "somebody silenced it" comes to read
+ * as "somebody handled it".
  */
 
+import {
+  BellOff,
+  BellRing,
+  CheckCircle2,
+  Link2Off,
+  Siren,
+  VolumeX,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import {
-  CountChip,
   MappingBadge,
   PriorityBadge,
   SeverityBadge,
   StatusPill,
 } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
-import { StackedBar } from "@/components/charts/visuals";
+import {
+  CardTitle,
+  EmptyHero,
+  FactPill,
+  KpiTile,
+  PillSelect,
+  RowBubble,
+  ShareBar,
+  StatePad,
+  Toolbar,
+} from "@/components/incidents/OpsKit";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel } from "@/components/ui/Panel";
 import {
   MAPPING_EXPLANATIONS,
   alertListPath,
@@ -41,28 +60,37 @@ import {
   type Page,
   type Priority,
 } from "@/lib/alerting";
-
-const SELECT_CLASS =
-  "rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-ink";
+import { toneSpec, type StatusTone } from "@/lib/design/status";
 
 const STATUSES: AlertStatus[] = ["firing", "resolved"];
 const PRIORITIES: Priority[] = ["P1", "P2", "P3", "P4"];
 
+/**
+ * One alert. The whole row opens the alert; the incident link sits above the
+ * row's stretched link so it stays its own target. Status, severity and
+ * priority are chips; incident, notification and owner trail as three
+ * separate facts, never collapsed into one tick (see the file header).
+ */
 function AlertRow({ alert }: { alert: AlertInstance }) {
+  const firing = alert.status === "firing";
   return (
-    <tr
-      className="border-t border-border align-top"
+    <li
       data-testid={`alert-row-${alert.alert_name}`}
+      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-7 py-4 transition-colors hover:bg-surface-hover md:grid-cols-[auto_minmax(0,1fr)_auto]"
     >
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
+      <RowBubble
+        icon={firing ? BellRing : CheckCircle2}
+        tone={firing ? "critical" : "success"}
+      />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           <Link
             href={`/alerts/${alert.id}`}
-            className="text-sm font-medium text-ink hover:underline"
+            className="truncate text-body font-semibold text-ink after:absolute after:inset-0 after:content-['']"
           >
             {alert.alert_name}
           </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
+          <span className="font-mono text-micro text-ink-muted">
             {alert.mapping_state === "mapped"
               ? [alert.project_key, alert.environment_key, alert.service_key]
                   .filter(Boolean)
@@ -70,53 +98,126 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
               : "no catalog match"}
           </span>
         </div>
-      </td>
-      <td className="py-2.5 pr-3">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-secondary">
+          {/* An alert without an incident is not a failure of anything: P3
+              and P4 are recorded and shown, and never page. */}
+          {alert.incident ? (
+            <Link
+              href={`/incidents/${alert.incident.id}`}
+              className="relative z-10 inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-0.5 text-ink hover:bg-surface-3"
+            >
+              <Siren aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+              {alert.incident.state}
+              {alert.incident.acknowledged_at ? " · acknowledged" : ""}
+            </Link>
+          ) : (
+            <span className="text-ink-muted">no incident</span>
+          )}
+          <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
+          {alert.silenced ? (
+            <StatusBadge status="maintenance" label="Silenced" size="compact" />
+          ) : (
+            <span className="text-ink-muted">notifying</span>
+          )}
+          {alert.owner_team ? (
+            <>
+              <span
+                aria-hidden
+                className="h-1 w-1 rounded-full bg-border-strong"
+              />
+              <span>{alert.owner_team}</span>
+            </>
+          ) : null}
+          {alert.slo_key ? (
+            <span className="font-mono text-micro text-ink-muted">
+              {alert.slo_key}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="col-span-2 flex flex-wrap items-center gap-2 md:col-span-1 md:justify-end">
         <StatusPill status={alert.status} />
-      </td>
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
-          <SeverityBadge severity={alert.severity} />
-          <PriorityBadge priority={alert.priority} />
+        <SeverityBadge severity={alert.severity} />
+        <PriorityBadge priority={alert.priority} />
+        <div className="ml-2 w-24 text-right text-micro leading-4 text-ink-muted">
+          <div className="font-medium text-ink-secondary">
+            {formatAge(alert.last_seen_at)}
+          </div>
+          {/* Drake's own receipt time, kept visible so a late delivery is not
+              mistaken for a late outage. */}
+          <div>received {formatAge(alert.ingested_at)}</div>
         </div>
-      </td>
-      <td className="py-2.5 pr-3">
-        {/* An alert without an incident is not a failure of anything: P3 and
-            P4 are recorded and shown, and never page. */}
-        {alert.incident ? (
-          <Link
-            href={`/incidents/${alert.incident.id}`}
-            className="text-xs text-ink hover:underline"
-          >
-            {alert.incident.state}
-            {alert.incident.acknowledged_at ? " · acknowledged" : ""}
-          </Link>
-        ) : (
-          <span className="text-[11px] italic text-ink-muted">no incident</span>
-        )}
-      </td>
-      <td className="py-2.5 pr-3">
-        {alert.silenced ? (
-          <StatusBadge status="maintenance" label="Silenced" />
-        ) : (
-          <span className="text-[11px] text-ink-muted">notifying</span>
-        )}
-      </td>
-      <td className="py-2.5 pr-3 text-xs text-ink-secondary">
-        <div>{alert.owner_team ?? "—"}</div>
-        {alert.slo_key ? (
-          <div className="font-mono text-[11px] text-ink-muted">{alert.slo_key}</div>
-        ) : null}
-      </td>
-      <td className="py-2.5 text-xs text-ink-secondary">
-        <div>{formatAge(alert.last_seen_at)}</div>
-        {/* Drake's own receipt time, kept visible so a late delivery is not
-            mistaken for a late outage. */}
-        <div className="text-[11px] text-ink-muted">
-          received {formatAge(alert.ingested_at)}
-        </div>
-      </td>
-    </tr>
+      </div>
+    </li>
+  );
+}
+
+/** One priority lane in the side breakdown: label, bar, count. */
+function PriorityLane({
+  label,
+  count,
+  total,
+  tone,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  tone: StatusTone;
+}) {
+  return (
+    <li className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex min-w-0 items-center gap-2 text-caption font-medium text-ink-secondary">
+          <span
+            aria-hidden
+            className={`h-2 w-2 shrink-0 rounded-full ${toneSpec(tone).dot}`}
+          />
+          <span className="truncate">{label}</span>
+        </span>
+        <span data-tabular className="text-body font-semibold text-ink">
+          {count}
+        </span>
+      </div>
+      <ShareBar
+        share={total > 0 ? count / total : null}
+        tone={tone}
+        className="h-2"
+      />
+    </li>
+  );
+}
+
+function MiniStat({
+  icon: Icon,
+  label,
+  count,
+  tone,
+}: {
+  icon: LucideIcon;
+  label: string;
+  count: number;
+  tone: StatusTone;
+}) {
+  return (
+    <div
+      data-testid={`count-${label.toLowerCase().replace(/\s+/g, "-")}`}
+      className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 px-4 py-3"
+    >
+      <span
+        aria-hidden
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+          count > 0 ? toneSpec(tone).chip : "bg-surface-3 text-ink-muted"
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-caption text-ink-secondary">
+        {label}
+      </span>
+      <span data-tabular className="text-title font-semibold text-ink">
+        {count}
+      </span>
+    </div>
   );
 }
 
@@ -124,144 +225,245 @@ function AlertsInner() {
   const [status, setStatus] = useState<string>("firing");
   const [priority, setPriority] = useState<string>("");
   const [summary] = useApi<AlertSummary>("/v1/alerts/summary");
-  const [page, retry] = useApi<Page<AlertInstance>>(alertListPath({ status, priority }));
+  const [page, retry] = useApi<Page<AlertInstance>>(
+    alertListPath({ status, priority }),
+  );
+
+  const firing = summary.state === "ready" ? summary.data.firing : 0;
+  const shareOfFiring = (count: number) => (firing > 0 ? count / firing : null);
 
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-ink">Alerts</h1>
-        <p className="text-sm text-ink-secondary">
-          Alertmanager decides when a condition is true. Drake records what it decided,
-          which service it belongs to, and what happened next.
-        </p>
-      </header>
-
-      <Card title="Now">
+      <PageHeader
+        title="Alerts"
+        description="What Alertmanager decided, where it belongs in your catalog, and what happened next."
+      />
+      <div className="flex flex-col gap-6">
         {summary.state === "loading" ? (
-          <DataState kind="loading" />
+          <Panel data-testid="alerts-now">
+            <DataState kind="loading" />
+          </Panel>
         ) : summary.state === "error" ? (
-          <DataState kind="error" description={summary.message} />
+          <Panel data-testid="alerts-now">
+            <DataState kind="error" description={summary.message} />
+          </Panel>
         ) : (
-          <div className="flex flex-wrap gap-2.5" data-testid="alert-summary">
-            <div className="w-full">
-              {/* Priority is ordered, so it reads left-to-right rather than
-                  around a circle. "Other" is what is firing outside P1/P2 —
-                  computed, not assumed, and never negative. */}
-              <StackedBar
-                label="Firing alerts by priority"
-                segments={[
-                  { name: "P1", value: summary.data.p1, tone: "critical" },
-                  { name: "P2", value: summary.data.p2, tone: "warning" },
-                  {
-                    name: "Other priorities",
-                    value: Math.max(0, summary.data.firing - summary.data.p1 - summary.data.p2),
-                    tone: "info",
-                  },
-                ]}
-              />
-              <div className="mt-2 flex flex-wrap gap-2">
-                <CountChip label="Firing" count={summary.data.firing} tone="critical" />
-                <CountChip label="Silenced" count={summary.data.silenced} tone="maintenance" />
-                <CountChip label="Unmapped" count={summary.data.unmapped} tone="warning" />
-                <CountChip
-                  label="With incident"
-                  count={summary.data.with_incident}
-                  tone="maintenance"
-                />
-              </div>
-            </div>
+          <div
+            className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+            data-testid="alerts-now"
+          >
+            <KpiTile
+              data-testid="alerting-kpi-firing"
+              label="Firing"
+              value={summary.data.firing}
+              icon={BellRing}
+              tone="critical"
+              share={firing > 0 ? summary.data.with_incident / firing : null}
+              caption={`${summary.data.with_incident} with an incident`}
+            />
+            <KpiTile
+              data-testid="alerting-kpi-p1"
+              label="P1 · page now"
+              value={summary.data.p1}
+              icon={Zap}
+              tone="critical"
+              share={shareOfFiring(summary.data.p1)}
+              caption={firing > 0 ? `of ${firing} firing` : "nothing firing"}
+            />
+            <KpiTile
+              data-testid="alerting-kpi-p2"
+              label="P2 · urgent"
+              value={summary.data.p2}
+              icon={Siren}
+              tone="warning"
+              share={shareOfFiring(summary.data.p2)}
+              caption={firing > 0 ? `of ${firing} firing` : "nothing firing"}
+            />
+            <KpiTile
+              data-testid="alerting-kpi-unmapped"
+              label="Unmapped"
+              value={summary.data.unmapped}
+              icon={Link2Off}
+              tone="warning"
+              share={shareOfFiring(summary.data.unmapped)}
+              caption="no catalog match, no incident"
+            />
           </div>
         )}
-      </Card>
 
-      <Card title="Alerts">
-        <div className="mb-3 flex flex-wrap gap-2">
-          {/* Fixed vocabularies only. There is no free-text field here, and
-              no way to type a matcher, a regex or a PromQL fragment. */}
-          <select
-            aria-label="Status"
-            className={SELECT_CLASS}
+        {/* Fixed vocabularies only. There is no free-text field here, and
+            no way to type a matcher, a regex or a PromQL fragment. */}
+        <Toolbar
+          summary={
+            page.state === "ready"
+              ? `${page.data.items.length} of ${page.data.total} shown`
+              : undefined
+          }
+        >
+          <PillSelect
+            label="Status"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
-          >
-            <option value="">Any status</option>
-            {STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Priority"
-            className={SELECT_CLASS}
-            value={priority}
-            onChange={(event) => setPriority(event.target.value)}
-          >
-            <option value="">Any priority</option>
-            {PRIORITIES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {page.state === "loading" ? (
-          <DataState kind="loading" />
-        ) : page.state === "error" ? (
-          page.notFound ? (
-            <DataState kind="permission-denied" />
-          ) : (
-            <DataState kind="error" description={page.message} onRetry={retry} />
-          )
-        ) : page.data.items.length === 0 ? (
-          <DataState
-            kind="empty"
-            title="No alerts match"
-            description="Nothing in your scope matches these filters. This is not a claim that nothing is wrong — only that no alert reached Drake."
+            placeholder="Any status"
+            options={STATUSES.map((value) => ({ value, label: value }))}
+            onChange={setStatus}
           />
-        ) : (
-          <>
-            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-ink-muted">
-                <tr>
-                  <th className="pb-2 pr-3 font-medium">Alert</th>
-                  <th className="pb-2 pr-3 font-medium">Status</th>
-                  <th className="pb-2 pr-3 font-medium">Severity</th>
-                  <th className="pb-2 pr-3 font-medium">Incident</th>
-                  <th className="pb-2 pr-3 font-medium">Notification</th>
-                  <th className="pb-2 pr-3 font-medium">Owner / SLO</th>
-                  <th className="pb-2 font-medium">Last seen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.data.items.map((alert) => (
-                  <AlertRow key={alert.id} alert={alert} />
-                ))}
-              </tbody>
-            </table>
-            </div>
-            {page.data.items.some((alert) => alert.mapping_state !== "mapped") ? (
-              <div className="mt-4 space-y-1.5" data-testid="unmapped-note">
-                <p className="text-xs font-medium text-ink">Unmapped alerts</p>
-                {page.data.items
-                  .filter((alert) => alert.mapping_state !== "mapped")
-                  .map((alert) => (
-                    <div key={alert.id} className="flex items-center gap-2">
-                      <MappingBadge state={alert.mapping_state} />
-                      <span className="text-xs text-ink-secondary">
-                        {MAPPING_EXPLANATIONS[alert.mapping_error_code ?? ""] ??
-                          "Drake could not place this alert in the catalog, so it opened no incident."}
-                      </span>
+          <PillSelect
+            label="Priority"
+            value={priority}
+            placeholder="Any priority"
+            options={PRIORITIES.map((value) => ({ value, label: value }))}
+            onChange={setPriority}
+          />
+        </Toolbar>
+
+        <div className="page-split">
+          <div className="page-main">
+            <Panel
+              flush
+              className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+            >
+              <CardTitle
+                flush
+                icon={BellRing}
+                title={
+                  status === "resolved"
+                    ? "Resolved alerts"
+                    : status === "firing"
+                      ? "Firing alerts"
+                      : "All alerts"
+                }
+                description="Newest signal first, as Alertmanager reported it"
+              />
+              {page.state === "loading" ? (
+                <StatePad>
+                  <DataState kind="loading" />
+                </StatePad>
+              ) : page.state === "error" ? (
+                <StatePad>
+                  {page.notFound ? (
+                    <DataState kind="permission-denied" />
+                  ) : (
+                    <DataState
+                      kind="error"
+                      description={page.message}
+                      onRetry={retry}
+                    />
+                  )}
+                </StatePad>
+              ) : page.data.items.length === 0 ? (
+                <EmptyHero
+                  icon={BellOff}
+                  title="No alerts match"
+                  description="No alert in your scope reached Drake for these filters — not a claim that nothing is wrong."
+                >
+                  <FactPill>Status · {status || "any"}</FactPill>
+                  <FactPill>Priority · {priority || "any"}</FactPill>
+                </EmptyHero>
+              ) : (
+                <>
+                  <ul className="divide-y divide-border">
+                    {page.data.items.map((alert) => (
+                      <AlertRow key={alert.id} alert={alert} />
+                    ))}
+                  </ul>
+                  {page.data.items.some(
+                    (alert) => alert.mapping_state !== "mapped",
+                  ) ? (
+                    <div
+                      className="space-y-2 border-t border-border bg-surface-2/60 px-7 py-5"
+                      data-testid="unmapped-note"
+                    >
+                      <p className="text-caption font-semibold text-ink">
+                        Unmapped alerts
+                      </p>
+                      {page.data.items
+                        .filter((alert) => alert.mapping_state !== "mapped")
+                        .map((alert) => (
+                          <div
+                            key={alert.id}
+                            className="flex flex-wrap items-center gap-2"
+                          >
+                            <MappingBadge state={alert.mapping_state} />
+                            <span className="text-caption text-ink-secondary">
+                              {MAPPING_EXPLANATIONS[
+                                alert.mapping_error_code ?? ""
+                              ] ??
+                                "Drake could not place this alert in the catalog, so it opened no incident."}
+                            </span>
+                          </div>
+                        ))}
                     </div>
-                  ))}
-              </div>
-            ) : null}
-          </>
-        )}
-      </Card>
+                  ) : null}
+                </>
+              )}
+            </Panel>
+          </div>
+
+          {summary.state === "ready" ? (
+            <div className="page-aside">
+              <Panel className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
+                <CardTitle
+                  icon={Siren}
+                  title="Now"
+                  description="Firing alerts, by priority"
+                />
+                <div
+                  data-testid="alert-summary"
+                  className="flex flex-col gap-6"
+                >
+                  {/* Priority is ordered, so it reads top to bottom. "Other" is
+                    what is firing outside P1/P2 — computed, never negative. */}
+                  <ul
+                    className="space-y-4"
+                    aria-label="Firing alerts by priority"
+                  >
+                    <PriorityLane
+                      label="P1"
+                      count={summary.data.p1}
+                      total={firing}
+                      tone="critical"
+                    />
+                    <PriorityLane
+                      label="P2"
+                      count={summary.data.p2}
+                      total={firing}
+                      tone="warning"
+                    />
+                    <PriorityLane
+                      label="Other"
+                      count={Math.max(
+                        0,
+                        firing - summary.data.p1 - summary.data.p2,
+                      )}
+                      total={firing}
+                      tone="info"
+                    />
+                  </ul>
+                  <div className="grid gap-2.5">
+                    <MiniStat
+                      icon={VolumeX}
+                      label="Silenced"
+                      count={summary.data.silenced}
+                      tone="neutral"
+                    />
+                    <MiniStat
+                      icon={Link2Off}
+                      label="Unmapped"
+                      count={summary.data.unmapped}
+                      tone="warning"
+                    />
+                    <MiniStat
+                      icon={Siren}
+                      label="With incident"
+                      count={summary.data.with_incident}
+                      tone="info"
+                    />
+                  </div>
+                </div>
+              </Panel>
+            </div>
+          ) : null}
+        </div>
       </div>
     </PageFrame>
   );

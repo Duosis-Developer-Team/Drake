@@ -12,24 +12,58 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  BellOff,
+  BellRing,
+  CheckCheck,
+  CircleCheck,
+  Inbox,
+  MailOpen,
+  Route,
+  Siren,
+} from "lucide-react";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
+import { StackedBar } from "@/components/charts/visuals";
+import {
+  IconBubble,
+  KpiTile,
+  PILL_BUTTON,
+  ShareBar,
+  StateCard,
+} from "@/components/features/configure/kit";
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { SegmentedControl } from "@/components/ui/controls";
 import { ApiError } from "@/lib/api";
+import { formatRelative, formatUtc } from "@/lib/design/format";
+import type { StatusTone } from "@/lib/design/status";
 import { useSession } from "@/lib/session";
 import {
+  EVENT_TYPES,
   EVENT_TYPE_LABELS,
   fetchInbox,
   markRead,
   type InboxItem,
   type InboxPage,
+  type NotificationEventType,
 } from "@/lib/notifications";
 
 type State =
   | { kind: "loading" }
   | { kind: "error"; message: string; denied: boolean }
   | { kind: "ready"; data: InboxPage };
+
+const EVENT_VISUAL: Record<
+  NotificationEventType,
+  { icon: LucideIcon; tone: StatusTone }
+> = {
+  opened: { icon: Siren, tone: "critical" },
+  acknowledged: { icon: BellRing, tone: "warning" },
+  auto_resolved: { icon: CircleCheck, tone: "success" },
+};
 
 function NotificationRow({
   item,
@@ -40,48 +74,63 @@ function NotificationRow({
   onRead: (id: string) => void;
   busy: boolean;
 }) {
+  const visual = EVENT_VISUAL[item.event_type] ?? {
+    icon: BellRing,
+    tone: "unknown" as StatusTone,
+  };
   return (
     <li
-      className={`flex flex-wrap items-start gap-3 border-t border-border py-3 ${
-        item.read_at ? "" : "bg-surface-sunken/40"
+      className={`relative flex flex-wrap items-start gap-4 px-7 py-5 transition-colors hover:bg-surface-hover ${
+        item.read_at ? "" : "bg-surface-2/60"
       }`}
       data-testid={`notification-${item.id}`}
     >
-      <span
-        aria-hidden
-        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-          item.read_at ? "bg-transparent" : "bg-accent"
-        }`}
-      />
+      {item.read_at ? null : (
+        <span
+          aria-hidden
+          className="absolute top-1/2 left-2.5 h-2 w-2 -translate-y-1/2 rounded-full bg-info"
+        />
+      )}
+      <IconBubble icon={visual.icon} tone={visual.tone} />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-ink">{item.title}</p>
-        <p className="mt-0.5 text-xs text-ink-secondary">{item.body}</p>
-        <p className="mt-1 text-[11px] text-ink-muted">
-          <span className="mr-2">{EVENT_TYPE_LABELS[item.event_type]}</span>
-          <time className="font-mono">{item.created_at}</time>
-          {item.read_at ? <span className="ml-2">read</span> : null}
+        <p
+          className={`text-body text-ink ${item.read_at ? "font-medium" : "font-semibold"}`}
+        >
+          {item.title}
+        </p>
+        <p className="mt-0.5 text-caption text-ink-secondary">{item.body}</p>
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-micro text-ink-muted">
+          <span className="rounded-full bg-surface-3 px-2 py-0.5 font-medium text-ink-secondary">
+            {EVENT_TYPE_LABELS[item.event_type]}
+          </span>
+          <time dateTime={item.created_at} title={formatUtc(item.created_at)}>
+            {formatRelative(item.created_at)}
+          </time>
+          {item.read_at ? <span>· read</span> : null}
         </p>
       </div>
-      <div className="flex items-center gap-2">
-        {/* Every listed row is one the reader may still open: the API
-            filters out notifications whose incident has left their scope
-            rather than returning a redacted placeholder. */}
-        <Link
-          href={item.target_path}
-          className="text-xs font-medium text-ink-secondary underline hover:text-ink"
-        >
-          Open incident
-        </Link>
+      <div className="flex shrink-0 items-center gap-2 self-center">
         {item.read_at ? null : (
           <button
             type="button"
             disabled={busy}
             onClick={() => onRead(item.id)}
-            className="rounded-lg border border-border px-2 py-1 text-[11px] font-medium text-ink-secondary hover:bg-surface-sunken disabled:opacity-50"
+            className={PILL_BUTTON}
           >
+            <CheckCheck aria-hidden className="h-3.5 w-3.5" />
             Mark read
           </button>
         )}
+        {/* Every listed row is one the reader may still open: the API
+            filters out notifications whose incident has left their scope
+            rather than returning a redacted placeholder. */}
+        <Link
+          href={item.target_path}
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-caption font-medium text-ink-inverse hover:opacity-90"
+        >
+          Open incident
+          <ArrowRight aria-hidden className="h-3.5 w-3.5" />
+        </Link>
       </div>
     </li>
   );
@@ -89,7 +138,8 @@ function NotificationRow({
 
 export default function NotificationsPage() {
   const { state: session } = useSession();
-  const csrfToken = session.status === "authenticated" ? session.me.csrf_token : null;
+  const csrfToken =
+    session.status === "authenticated" ? session.me.csrf_token : null;
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
@@ -128,96 +178,180 @@ export default function NotificationsPage() {
     }
   };
 
-  const unreadIds =
-    state.kind === "ready"
-      ? state.data.items.filter((item) => !item.read_at).map((item) => item.id)
-      : [];
+  const items = state.kind === "ready" ? state.data.items : [];
+  const unreadIds = items
+    .filter((item) => !item.read_at)
+    .map((item) => item.id);
+  const unreadCount = unreadIds.length;
+  const total = items.length;
+  const byEvent = EVENT_TYPES.map((event) => ({
+    event,
+    count: items.filter((item) => item.event_type === event).length,
+  }));
 
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-title font-semibold text-ink">Notifications</h1>
-          <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-            Incidents you were routed by a notification policy. Drake writes these; nothing
-            here was composed by another user.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            role="group"
-            aria-label="View"
-            className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
-          >
-            {[
-              { key: false, label: "All" },
-              { key: true, label: "Unread" },
-            ].map((option) => (
-              <button
-                key={option.label}
-                type="button"
-                aria-pressed={unreadOnly === option.key}
-                onClick={() => setUnreadOnly(option.key)}
-                className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                  unreadOnly === option.key
-                    ? "bg-accent text-white"
-                    : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+      <PageHeader
+        title="Notifications"
+        description="Incidents a notification policy routed to you. Drake writes every one of these."
+        actions={
+          <Link href="/notification-policies" className={PILL_BUTTON}>
+            <Route aria-hidden className="h-3.5 w-3.5" />
+            Routing policies
+          </Link>
+        }
+      />
+
+      <div className="space-y-6">
+        {state.kind === "ready" ? (
+          <div className="page-grid" data-cols="3">
+            <KpiTile
+              icon={Inbox}
+              label={unreadOnly ? "Shown (unread view)" : "Shown"}
+              value={total}
+            >
+              <p className="text-micro text-ink-muted">
+                Most recent page of your inbox
+              </p>
+            </KpiTile>
+            <KpiTile
+              icon={BellRing}
+              tone={unreadCount > 0 ? "info" : undefined}
+              label="Unread"
+              value={unreadCount}
+              suffix={`of ${total}`}
+            >
+              <ShareBar
+                value={unreadCount}
+                total={total}
+                tone="info"
+                label="still unread"
+              />
+            </KpiTile>
+            <KpiTile
+              icon={Siren}
+              tone={byEvent[0].count > 0 ? "critical" : undefined}
+              label="Incidents opened"
+              value={byEvent[0].count}
+            >
+              <p className="text-micro text-ink-muted">
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {byEvent[2].count}
+                </span>{" "}
+                resolved ·{" "}
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {byEvent[1].count}
+                </span>{" "}
+                acknowledged
+              </p>
+            </KpiTile>
           </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SegmentedControl
+            label="View"
+            value={unreadOnly ? "unread" : "all"}
+            onChange={(value) => setUnreadOnly(value === "unread")}
+            options={[
+              { value: "all", label: "All" },
+              { value: "unread", label: "Unread" },
+            ]}
+          />
           {unreadIds.length > 0 ? (
             <button
               type="button"
               disabled={busy}
               onClick={() => read(unreadIds)}
-              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-sunken disabled:opacity-50"
+              className={PILL_BUTTON}
             >
+              <MailOpen aria-hidden className="h-3.5 w-3.5" />
               Mark visible read
             </button>
           ) : null}
         </div>
-      </div>
 
-      {state.kind === "loading" ? <DataState kind="loading" /> : null}
-      {state.kind === "error" ? (
-        <Card>
-          {state.denied ? (
-            <DataState
-              kind="permission-denied"
-              description="Your session cannot read notifications."
-            />
-          ) : (
-            <DataState kind="error" description={state.message} onRetry={load} />
-          )}
-        </Card>
-      ) : null}
-      {state.kind === "ready" && state.data.items.length === 0 ? (
-        <Card>
-          <DataState
-            kind="empty"
-            title={unreadOnly ? "Nothing unread" : "No notifications"}
-            description="Drake sends these when an incident matches a notification policy you are a destination for."
-          />
-        </Card>
-      ) : null}
-      {state.kind === "ready" && state.data.items.length > 0 ? (
-        <Card>
-          <ul data-testid="inbox-list">
-            {state.data.items.map((item) => (
-              <NotificationRow
-                key={item.id}
-                item={item}
-                busy={busy}
-                onRead={(id) => read([id])}
+        {state.kind === "loading" ? (
+          <Panel>
+            <DataState kind="loading" />
+          </Panel>
+        ) : null}
+        {state.kind === "error" ? (
+          <Panel>
+            {state.denied ? (
+              <StateCard
+                kind="permission-denied"
+                title="Permission required"
+                description="Your session cannot read notifications."
               />
-            ))}
-          </ul>
-        </Card>
-      ) : null}
+            ) : (
+              <StateCard
+                kind="error"
+                title="Could not load notifications"
+                description={state.message}
+                onRetry={load}
+              />
+            )}
+          </Panel>
+        ) : null}
+        {state.kind === "ready" && items.length === 0 ? (
+          <Panel>
+            <StateCard
+              kind="empty"
+              icon={BellOff}
+              title={unreadOnly ? "Nothing unread" : "No notifications"}
+              description="Drake sends these when an incident matches a policy you are a destination for."
+              action={
+                <Link href="/notification-policies" className={PILL_BUTTON}>
+                  Review routing policies
+                </Link>
+              }
+            />
+          </Panel>
+        ) : null}
+        {state.kind === "ready" && items.length > 0 ? (
+          <div className="page-split" data-cols="3">
+            <div className="page-main">
+              <Panel flush>
+                <PanelHeader
+                  flush
+                  title="Inbox"
+                  meta={
+                    <span>
+                      {total} shown · {unreadCount} unread
+                    </span>
+                  }
+                />
+                <ul className="divide-y divide-border" data-testid="inbox-list">
+                  {items.map((item) => (
+                    <NotificationRow
+                      key={item.id}
+                      item={item}
+                      busy={busy}
+                      onRead={(id) => read([id])}
+                    />
+                  ))}
+                </ul>
+              </Panel>
+            </div>
+            <div className="page-aside">
+              <Panel>
+                <PanelHeader
+                  title="By event"
+                  description="What the shown notifications were about"
+                />
+                <StackedBar
+                  label="Notifications by event"
+                  segments={byEvent.map(({ event, count }) => ({
+                    name: EVENT_TYPE_LABELS[event],
+                    value: count,
+                    tone: EVENT_VISUAL[event].tone,
+                  }))}
+                />
+              </Panel>
+            </div>
+          </div>
+        ) : null}
       </div>
     </PageFrame>
   );

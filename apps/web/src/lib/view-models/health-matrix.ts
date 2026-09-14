@@ -1,0 +1,55 @@
+/**
+ * The Command Center's service × environment health map (brief §9.4) — a
+ * grid, not a donut, so one degraded service does not disappear into an
+ * aggregate ring. Nothing here computes health: a cell's tone is the worst
+ * of the statuses the API already reported for the services placed in it.
+ */
+import type { StatusTone } from "@/lib/design/status";
+import { compareTone, toneForHealth } from "@/lib/design/status";
+import type { ServiceHealthRow } from "@/lib/serviceHealth";
+
+export interface HealthMatrixCell {
+  projectKey: string;
+  environmentKey: string;
+  /** Carried through so a cell can safely link to the service-health list
+   *  filtered to exactly this project/environment — the same authorized
+   *  list view, not a new surface. */
+  projectId: string;
+  environmentId: string;
+  services: { serviceKey: string; tone: StatusTone }[];
+}
+
+/** Groups the service-health list by project → environment. A row with no
+ *  services never appears here — there is nothing in `ServiceHealthRow[]`
+ *  to invent a cell from — so an empty list produces an explicit `[]`. */
+export function buildHealthMatrix(services: ServiceHealthRow[]): HealthMatrixCell[] {
+  const order: string[] = [];
+  const cells = new Map<string, HealthMatrixCell>();
+  for (const row of services) {
+    const key = `${row.project_key}\u0000${row.environment_key}`;
+    if (!cells.has(key)) {
+      cells.set(key, {
+        projectKey: row.project_key,
+        environmentKey: row.environment_key,
+        projectId: row.project_id,
+        environmentId: row.environment_id,
+        services: [],
+      });
+      order.push(key);
+    }
+    cells.get(key)!.services.push({
+      serviceKey: row.service_key,
+      tone: toneForHealth(row.health.status),
+    });
+  }
+  return order.map((key) => cells.get(key)!);
+}
+
+/** The worst tone among a cell's services, via the shared severity order. */
+export function worstToneOf(cell: HealthMatrixCell): StatusTone {
+  let worst: StatusTone = cell.services[0]?.tone ?? "unknown";
+  for (const service of cell.services) {
+    if (compareTone(service.tone, worst) < 0) worst = service.tone;
+  }
+  return worst;
+}

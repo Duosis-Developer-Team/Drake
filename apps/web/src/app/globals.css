@@ -5,12 +5,38 @@
 /*
  * Drake design tokens.
  *
- * Every colour below is either sampled from the authoritative logo masters in
- * apps/web/assets/brand or derived from one of those samples and then checked
- * for contrast. The measured anchors are:
+ * 2026-09-14 obsidian/neutral/solar remake (docs/superpowers/plans/
+ * new-plan-visual-remake.md §4) retires every green in the system — brand,
+ * focus ring, active rail, chart series, "healthy" status — in favour of:
  *
- *   light canvas  #f9f9fb    light ink  #074630    light accent  #02a242
- *   dark  canvas  #032821    dark  ink  #f7f9f9    dark  accent  #0ecd65
+ *   light canvas #ECECEC   light ink #161616   dark canvas #101010   ink #F1F1F1
+ *   cool accent   #2A78D6 light / #5998E5 dark  obsidian rail #181818
+ *
+ * Every neutral above is true grey (R=G=B) rather than the brief's own warm
+ * bone/obsidian cast — an explicit correction over the brief's literal hexes:
+ * neutral means neutral, not tinted.
+ *
+ * `--brand` is the one token that inverts by role rather than by hue: it is
+ * the dominant monochrome fill for primary actions, so it is near-black ink
+ * in light mode (paired with `--text-inverse`) and near-white bone in dark
+ * mode — never a saturated colour, which cannot pass 4.5:1 as body-sized text
+ * or a large fill on either theme's own surfaces. The brief's original solar
+ * yellow accent read as cheap against a true neutral grey, not premium — a
+ * direct correction: the accent is a cool blue instead, the same hue already
+ * used for `--series-1`, reserved for `--brand-accent`/`--focus-ring` (small
+ * marks, ≥3:1 only) and the sidebar's active-item rail, exactly as the brief
+ * scopes it ("small brand detail", never a dominant fill). Every hex below was solved with the same
+ * WCAG relative-luminance formula `design-system.test.ts` checks against, so
+ * the ratios these comments claim are the ones the test enforces.
+ *
+ * "Healthy" is reassigned to a cool blue and "Information" to cobalt (brief
+ * §4.3) — status colour is now fully independent of brand colour, so nothing
+ * about "no green" ever implies "no blue for healthy is available".
+ *
+ * The sidebar is a deliberate exception: `--sidebar-*` below is declared with
+ * the SAME values in both `:root` and `.dark`. Every other surface flips with
+ * the theme; the rail stays a constant obsidian anchor in both themes, so an
+ * operator's sense of "where am I" never resets on a theme change.
  *
  * Two layers, deliberately separate:
  *
@@ -22,140 +48,189 @@
  *      here invents a colour; it only gives the semantic layer class names.
  *
  * Status colours are reserved. `--status-critical` is the only red in the
- * system and never doubles as a selection, a brand accent or a chart series;
- * `--status-stale` is deliberately a lower-chroma amber so that "we have not
- * heard from this recently" never renders in the healthy green.
+ * system and never doubles as a selection, a brand accent or a chart series.
  */
 
 :root {
   color-scheme: light;
 
-  /* Surfaces, canvas outward. */
-  --canvas: #f4f6f5;
+  /* Surfaces, canvas outward. True neutral grey (R=G=B) — not the brief's
+     warm bone cast, overridden per direction. */
+  --canvas: #ebebeb;
   --surface-1: #ffffff;
-  --surface-2: #f3f7f5;
-  --surface-3: #ebf0ed;
+  --surface-2: #f1f1f1;
+  --surface-3: #e4e4e4;
   --surface-elevated: #ffffff;
-  --surface-hover: #eff4f1;
-  --surface-selected: #e1f1e8;
+  --surface-hover: #f3f3f3;
+  --surface-selected: #e6e6e6;
 
-  --border-subtle: #d3ddd8;
-  --border-strong: #7c8e85;
+  --border-subtle: #d6d6d6;
+  --border-strong: #767676;
 
-  --text-primary: #0c2019;
-  --text-secondary: #48584f;
-  --text-muted: #59695f;
-  --text-inverse: #ffffff;
+  --text-primary: #161616;
+  --text-secondary: #555555;
+  --text-muted: #626262;
+  --text-inverse: #f1f1f1;
 
-  /* Brand. `--brand` carries weight (buttons, active rails); `--brand-accent`
-     is the livelier green from the serpent and is used for emphasis only. */
-  --brand: #074630;
-  --brand-hover: #0a5c3f;
-  --brand-active: #05341f;
-  --brand-soft: #e1f1e8;
-  --brand-accent: #02a242;
-  --focus-ring: #00843a;
+  /* Brand. `--brand` is the monochrome obsidian ink used for primary fills
+     and emphasis text — never a saturated accent, which fails 4.5:1 at this
+     size (see file header). `--brand-accent`/`--focus-ring` carry the cool
+     blue hue instead (same family as `--series-1`), comfortably clearing
+     3:1 as a mark on this theme's own neutral surfaces. */
+  --brand: #161616;
+  --brand-hover: #2a2a2a;
+  --brand-active: #000000;
+  --brand-soft: #f1f1f1;
+  --brand-accent: #2a78d6;
+  --focus-ring: #2a78d6;
 
-  --chart-grid: #e7edea;
-  --chart-axis: #59695f;
-  --chart-tooltip: #0c2019;
-  --chart-tooltip-text: #f7f9f9;
+  --chart-grid: #e4e4e4;
+  --chart-axis: #646464;
+  --chart-tooltip: #181818;
+  --chart-tooltip-text: #f1f1f1;
 
-  --status-success: #067647;
-  --status-info: #175cd3;
-  --status-warning: #b54708;
-  --status-critical: #b42318;
-  --status-neutral: #4e5b64;
-  --status-unknown: #566273;
-  --status-stale: #8a6410;
+  --status-success: #1d62c0;
+  --status-info: #4556d4;
+  --status-warning: #86560f;
+  --status-critical: #c41c1c;
+  --status-neutral: #606060;
+  --status-unknown: #5d6168;
+  --status-stale: #7646c0;
 
-  --status-success-soft: #e3f5ec;
-  --status-info-soft: #e6effc;
-  --status-warning-soft: #fbf0e2;
-  --status-critical-soft: #fcebe9;
-  --status-neutral-soft: #eef1f0;
-  --status-unknown-soft: #eef1f4;
-  --status-stale-soft: #f7f0dd;
+  --status-success-soft: #e6effb;
+  --status-info-soft: #eceefd;
+  --status-warning-soft: #f9eedd;
+  --status-critical-soft: #fbe7e7;
+  --status-neutral-soft: #eeeeee;
+  --status-unknown-soft: #edeef0;
+  --status-stale-soft: #f1eafb;
 
-  /* Categorical chart series. Fixed order, never cycled. Validated for the
-     white chart surface: CVD dE 9.2 worst adjacent pair, normal-vision 19.7.
-     Slots 3 and 5 sit just under 3:1 on white, which the chart frame relieves
-     by always shipping a legend and a data-table view. */
+  /* The obsidian rail. Same values in `.dark` below — see the header note. */
+  --sidebar-canvas: #fafafa;
+  --sidebar-surface-hover: #efefef;
+  --sidebar-surface-selected: #e8e8e8;
+  --sidebar-border: #dedede;
+  --sidebar-text: #161616;
+  --sidebar-text-muted: #666666;
+  --sidebar-active-rail: #2a78d6;
+
+  /* Categorical chart series. Fixed order, never cycled. The old green slot
+     (series-3) is retired to a sky blue, distinct in hue from series-1. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
-  --series-3: #1baf7a;
+  --series-3: #1c8fd6;
   --series-4: #4a3aa7;
   --series-5: #e87ba4;
   --series-6: #b58100;
 
-  --shadow-panel: 0 1px 2px rgb(12 32 25 / 0.06), 0 1px 3px rgb(12 32 25 / 0.04);
-  --shadow-overlay: 0 12px 32px -8px rgb(12 32 25 / 0.18), 0 4px 8px -4px rgb(12 32 25 / 0.08);
-  --scrim: rgb(12 32 25 / 0.45);
+  /* A soft, wide-blur elevation rather than a hairline — the difference
+     between a bordered box and a surface that visibly lifts off the canvas
+     (remake brief: PayFlow-grade depth, not a flat admin panel). */
+  --shadow-panel: 0 1px 2px rgb(23 22 20 / 0.04), 0 10px 28px -8px rgb(23 22 20 / 0.10);
+  --shadow-overlay: 0 20px 48px -12px rgb(23 22 20 / 0.22), 0 8px 16px -6px rgb(23 22 20 / 0.10);
+  --scrim: rgb(23 22 20 / 0.45);
+  /* PayFlow frame: the bezel the rail and the content surface sit inside. */
+  --frame: #d4d4d4;
+  --sidebar-nav: #ffffff;
+  --sidebar-bubble: #efefef;
+  --sidebar-bubble-active: #161616;
+  --sidebar-bubble-active-ink: #ffffff;
 }
 
 .dark {
   color-scheme: dark;
 
-  --canvas: #032821;
-  --surface-1: #06342b;
-  --surface-2: #0a3e33;
-  --surface-3: #0e4a3c;
-  --surface-elevated: #0a3e33;
-  --surface-hover: #0f4a3d;
-  --surface-selected: #0e4535;
+  /* 2026-09-14 PayFlow-reference pass: the panel/canvas gap was only 2.5
+     points of L* (#101010 vs #161616) — too close for a panel to visibly
+     lift off the page the way the reference's cards do. Every surface below
+     is re-stepped for a real gap, and `surface-elevated` is corrected to
+     actually be the lightest of the family (it was, bug, darker than
+     surface-2/3) — the topmost surface reads as topmost. */
+  --canvas: #080808;
+  --surface-1: #1c1c1c;
+  --surface-2: #2a2a2a;
+  --surface-3: #363636;
+  --surface-elevated: #404040;
+  --surface-hover: #2e2e2e;
+  --surface-selected: #3c3c3c;
 
-  --border-subtle: #18543f;
-  --border-strong: #3e8c71;
+  --border-subtle: #3a3a3a;
+  --border-strong: #808080;
 
-  --text-primary: #f7f9f9;
-  --text-secondary: #a9c0b6;
-  --text-muted: #9cb6ab;
-  --text-inverse: #062018;
+  --text-primary: #f1f1f1;
+  --text-secondary: #c2c2c2;
+  --text-muted: #a3a3a3;
+  --text-inverse: #161616;
 
-  --brand: #0ecd65;
-  --brand-hover: #35dd84;
-  --brand-active: #0aa954;
-  --brand-soft: #0c4531;
-  --brand-accent: #0ecd65;
-  --focus-ring: #10cd68;
+  --brand: #f1f1f1;
+  --brand-hover: #ffffff;
+  --brand-active: #d7d7d7;
+  --brand-soft: #242424;
+  --brand-accent: #5998e5;
+  --focus-ring: #5998e5;
 
-  --chart-grid: #0f4034;
-  --chart-axis: #9cb6ab;
-  --chart-tooltip: #0e4a3c;
-  --chart-tooltip-text: #f7f9f9;
+  --chart-grid: #303030;
+  --chart-axis: #b9b9b9;
+  --chart-tooltip: #0c0c0c;
+  --chart-tooltip-text: #f1f1f1;
 
-  --status-success: #3ccb7f;
-  --status-info: #63a5fa;
-  --status-warning: #fdb022;
-  --status-critical: #f97066;
-  --status-neutral: #9aa4b2;
-  --status-unknown: #a3aebd;
-  --status-stale: #d9a441;
+  /* success/info/unknown/stale nudged a touch lighter (same hue) so they
+     still clear 4.5:1 against the brighter `surface-1` above — verified
+     against design-system.test.ts's WCAG formula before landing here. */
+  --status-success: #5b98ea;
+  --status-info: #8391f1;
+  --status-warning: #d9922e;
+  --status-critical: #f07272;
+  --status-neutral: #a0a0a0;
+  --status-unknown: #9ba0a7;
+  --status-stale: #af89e6;
 
-  --status-success-soft: #0a3c2a;
-  --status-info-soft: #10304f;
-  --status-warning-soft: #382a0e;
-  --status-critical-soft: #3a1c1a;
-  --status-neutral-soft: #1b2a2a;
-  --status-unknown-soft: #1c2b2b;
-  --status-stale-soft: #332816;
+  --status-success-soft: #13233a;
+  --status-info-soft: #191c3d;
+  --status-warning-soft: #3b2c16;
+  --status-critical-soft: #3f1a1a;
+  --status-neutral-soft: #2c2c2c;
+  --status-unknown-soft: #2a2d31;
+  --status-stale-soft: #2a1a40;
+
+  /* The obsidian rail, unchanged from `:root` — see the file header note. */
+  --sidebar-canvas: #121212;
+  --sidebar-surface-hover: #262626;
+  --sidebar-surface-selected: #303030;
+  --sidebar-border: #2a2a2a;
+  --sidebar-text: #f1f1f1;
+  --sidebar-text-muted: #8f8f8f;
+  --sidebar-active-rail: #5998e5;
 
   /* Not a flip of the light row: the same six hues, re-stepped for the dark
-     surface and re-validated there (CVD dE 9.4, all six clear 3:1). */
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #9085e9;
-  --series-5: #d55181;
-  --series-6: #c98500;
+     surface and re-validated there. */
+  --series-1: #5998e5;
+  --series-2: #f59068;
+  --series-3: #43acec;
+  --series-4: #6553cb;
+  --series-5: #ef8fb3;
+  --series-6: #f2ad00;
 
-  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.24);
-  --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.4);
-  --scrim: rgb(1 15 12 / 0.6);
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 16px 40px -20px rgb(0 0 0 / 0.7);
+  --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.65), 0 8px 16px -6px rgb(0 0 0 / 0.4);
+  --scrim: rgb(3 3 2 / 0.6);
+  --frame: #000000;
+  --sidebar-nav: #1c1c1c;
+  --sidebar-bubble: #2a2a2a;
+  --sidebar-bubble-active: #f1f1f1;
+  --sidebar-bubble-active-ink: #161616;
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
+  --color-frame: var(--frame);
+  /* The lead card follows the theme like every other card. */
+  --color-hero-ink: var(--text-primary);
+  --color-hero-ink-muted: var(--text-muted);
+  --color-sidebar-nav: var(--sidebar-nav);
+  --color-sidebar-bubble: var(--sidebar-bubble);
+  --color-sidebar-bubble-active: var(--sidebar-bubble-active);
+  --color-sidebar-bubble-active-ink: var(--sidebar-bubble-active-ink);
   --color-surface: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
@@ -189,6 +264,15 @@
   --color-chart-grid: var(--chart-grid);
   --color-chart-axis: var(--chart-axis);
 
+  /* The obsidian rail. Theme-invariant on purpose — see the file header. */
+  --color-sidebar: var(--sidebar-canvas);
+  --color-sidebar-hover: var(--sidebar-surface-hover);
+  --color-sidebar-selected: var(--sidebar-surface-selected);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ink: var(--sidebar-text);
+  --color-sidebar-ink-muted: var(--sidebar-text-muted);
+  --color-sidebar-active-rail: var(--sidebar-active-rail);
+
   --color-healthy: var(--status-success);
   --color-info: var(--status-info);
   --color-warning: var(--status-warning);
@@ -220,29 +304,46 @@
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  /* Type scale. Monitoring density: the steps are close together on purpose,
-     and the page title is not allowed to dominate the screen. */
-  --text-display: 1.5rem;
-  --text-display--line-height: 2rem;
+  /* Type scale. Monitoring density: the steps stay close together, and the
+     page title is not allowed to dominate the screen — but per the
+     2026-09-13 remake brief §7.2 the previous scale ran small enough to slow
+     a reader down, so display/title/section each step up one notch here. */
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.25rem;
   --text-display--letter-spacing: -0.02em;
-  --text-title: 1.125rem;
-  --text-title--line-height: 1.625rem;
-  --text-title--letter-spacing: -0.011em;
-  --text-section: 0.9375rem;
-  --text-section--line-height: 1.375rem;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.75rem;
+  --text-title--letter-spacing: -0.015em;
+  --text-section: 1.0625rem;
+  --text-section--line-height: 1.5rem;
   --text-body: 0.875rem;
   --text-body--line-height: 1.375rem;
   --text-caption: 0.8125rem;
   --text-caption--line-height: 1.25rem;
   --text-micro: 0.6875rem;
   --text-micro--line-height: 1rem;
-  --text-metric: 1.75rem;
-  --text-metric--line-height: 2rem;
+  --text-metric: 2rem;
+  --text-metric--line-height: 2.25rem;
   --text-metric--letter-spacing: -0.02em;
 
-  --radius-control: 0.5rem;
-  --radius-panel: 0.75rem;
-  --radius-overlay: 1rem;
+  /* 2026-09-14 remake brief §12.3: panel/canvas/control radii step up a
+     full tier from the previous scale — the difference between "flat admin
+     boxes" and a premium, PayFlow-grade surface is largely this number.
+     Stepped up again the same day against the PayFlow reference itself:
+     its cards and controls round far past a standard "rounded corner" —
+     buttons and badges read as true pills, not just softened rectangles. */
+  --radius-control: 0.875rem;
+  --radius-panel: 1.375rem;
+  /* The one dominant surface per screen — the Command Center verdict panel,
+     for instance — reads a step rounder than a standard panel (brief §7.3). */
+  --radius-canvas: 1.75rem;
+  --radius-overlay: 1.375rem;
+
+  /* Sidebar rail width. 248px expanded keeps room for a full label at the
+     new type scale; 72px collapsed still fits an icon, its focus ring and
+     the collapse control without clipping (brief §7.4). */
+  --sidebar-width-expanded: 15.5rem;
+  --sidebar-width-collapsed: 4.5rem;
 
   --shadow-panel: var(--shadow-panel);
   --shadow-overlay: var(--shadow-overlay);
@@ -270,7 +371,7 @@ html {
 
 body {
   min-height: 100%;
-  background-color: var(--canvas);
+  background-color: var(--frame);
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -295,11 +396,17 @@ table,
 }
 
 /* One focus ring for the whole product, visible on every surface in both
-   themes. Components never restyle it; they only choose where it sits. */
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: 0.25rem;
+   themes. It lives in `@layer base` on purpose: unlayered CSS beats every
+   Tailwind utility, so out here it overrode `outline-none` on borderless
+   fields (a box drawn inside the search palette) and its radius squared off
+   `rounded-full` pills on focus. In the base layer, a component that shows
+   focus on its own wrapper (`focus-within:ring`) can opt out, and the ring
+   follows the element's own shape. */
+@layer base {
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
 }
 
 ::selection {
@@ -311,6 +418,123 @@ table,
    dense table. */
 * {
   scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Page column system.
+ *
+ * The KPI row and the main/aside split below it share ONE set of tracks, so
+ * every card edge on a page lands on the same vertical line. Breakpoints are
+ * container queries on `PageFrame` (container `page`), not the viewport: the
+ * collapsible rail changes the content width without changing the window.
+ *
+ *   .page-grid                  KPI row — 1 → 2 → 4 tracks (data-cols="3": 3)
+ *   .page-split                 main spans 3 of the 4 tracks, aside 1
+ *     > .page-main              stretches; its last child fills the height
+ *     > .page-aside             stacked cards; under the split they sit below
+ *                               main two-up, each card on two KPI tracks
+ *   .page-split[data-cols="3"]  main spans 2 of 3, aside 1 (aside may lead)
+ *   .page-aside[data-sticky]    pins under the top bar (forms, detail panes)
+ */
+.page-grid,
+.page-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+.page-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-main > :last-child {
+  flex: 1 1 auto;
+}
+
+.page-aside {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 1.5rem;
+}
+
+@container page (min-width: 36rem) {
+  .page-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .page-split:not([data-cols="3"]) > .page-aside {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container page (min-width: 60rem) {
+  .page-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .page-grid[data-cols="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .page-grid[data-cols="3"],
+  .page-split[data-cols="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .page-split[data-cols="3"] > .page-main {
+    grid-column: span 2;
+  }
+  .page-split[data-cols="3"] > .page-aside[data-sticky] {
+    position: sticky;
+    top: 6rem;
+    align-self: start;
+  }
+}
+
+@container page (min-width: 68rem) {
+  .page-split:not([data-cols="3"]) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .page-split:not([data-cols="3"]) > .page-main {
+    grid-column: span 3;
+  }
+  .page-split:not([data-cols="3"]) > .page-aside {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page-split:not([data-cols="3"]) > .page-aside[data-sticky] {
+    position: sticky;
+    top: 6rem;
+    align-self: start;
+  }
+}
+
+/* At split width `.page-main` dissolves into the split's own grid: anything
+   leading the main card (a filter bar, a section heading) becomes a full-width
+   row, so the main card and the aside start on the same line and — sharing a
+   grid row — end on the same line too. */
+@container page (min-width: 60rem) {
+  .page-split[data-cols="3"] > .page-main {
+    display: contents;
+  }
+  .page-split[data-cols="3"] > .page-main > * {
+    grid-column: span 2;
+  }
+  .page-split[data-cols="3"] > .page-main > :not(:last-child) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container page (min-width: 68rem) {
+  .page-split:not([data-cols="3"]) > .page-main {
+    display: contents;
+  }
+  .page-split:not([data-cols="3"]) > .page-main > * {
+    grid-column: span 3;
+  }
+  .page-split:not([data-cols="3"]) > .page-main > :not(:last-child) {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Surface entrances. Nothing here loops, pulses or bounces; every one is a

@@ -12,15 +12,36 @@
  * means someone should go configure something.
  */
 
+import {
+  ChevronRight,
+  FileWarning,
+  FolderGit2,
+  GitPullRequest,
+  Inbox,
+  PackageCheck,
+  PlugZap,
+  RefreshCw,
+  ScanSearch,
+  ShieldCheck,
+} from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
-import { SessionBadge } from "@/components/onboarding/primitives";
+import { SessionBadge, sessionTone } from "@/components/onboarding/primitives";
 import { StartOnboarding } from "@/components/onboarding/StartOnboarding";
+import {
+  FactChip,
+  IconBubble,
+  KpiTile,
+  StateCard,
+  Stepper,
+  type StepStatus,
+} from "@/components/protection/kit";
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { toneSpec, type StatusTone } from "@/lib/design/status";
 import {
   MISSING_INPUT_LABELS,
   WIZARD_STEPS,
@@ -32,206 +53,392 @@ import {
 } from "@/lib/onboarding";
 import { useSession } from "@/lib/session";
 
+const STEP_HINTS: Record<(typeof WIZARD_STEPS)[number], string> = {
+  "Integration status": "GitHub App ready",
+  Repository: "Pick one to onboard",
+  "Safe discovery": "Metadata files only",
+  "Detected structure": "What Drake found",
+  Review: "Item by item",
+  Approval: "This exact plan",
+  Result: "Written to the catalog",
+};
+
+function HowItWorks({ status }: { status: GitHubStatus | null }) {
+  const configured = status?.configuration_state === "configured";
+  const notConfigured = status?.configuration_state === "not_configured";
+  const steps = WIZARD_STEPS.map((label, index) => {
+    let state: StepStatus = "upcoming";
+    if (index === 0)
+      state = configured ? "done" : notConfigured ? "blocked" : "current";
+    if (index === 1 && configured) state = "current";
+    return { label, status: state, hint: STEP_HINTS[label] };
+  });
+  return (
+    <Panel>
+      <PanelHeader
+        title="How this works"
+        description="Seven steps from a repository to a catalog project. Nothing changes before approval."
+      />
+      <div className="overflow-x-auto">
+        <div className="min-w-[44rem]">
+          <Stepper steps={steps} data-testid="wizard-steps" />
+        </div>
+      </div>
+      <p className="flex items-center gap-3 rounded-full bg-surface-2 px-5 py-3 text-caption text-ink-secondary">
+        <ShieldCheck aria-hidden className="h-4 w-4 shrink-0 text-healthy" />
+        <span>
+          Nothing in a repository is executed: no build, no install, no script,
+          no hook, no workflow. Drake reads an allowlist of metadata files at
+          one immutable commit.
+        </span>
+      </p>
+    </Panel>
+  );
+}
+
 function NotConfigured({ status }: { status: GitHubStatus }) {
   return (
-    <Card title="GitHub App">
-      <div data-testid="github-not-configured">
-        <DataState
+    <Panel>
+      <div data-testid="github-not-configured" className="flex flex-col gap-5">
+        <StateCard
           kind="not-configured"
+          icon={PlugZap}
           title="GitHub is not configured"
           description="Drake cannot read repositories. Nothing has been contacted, no token has been issued, and no repository list is being shown."
-        />
-        <ul className="mt-3 space-y-1">
-          {status.missing_operator_inputs.map((key) => (
-            <li key={key} className="text-xs text-ink-secondary">
-              {MISSING_INPUT_LABELS[key] ?? key}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-3 text-xs text-ink-muted">
-          An operator configures the App identity and its credential references outside
-          Drake. Drake never accepts a credential through this screen.
+        >
+          <ul className="flex flex-wrap justify-center gap-2">
+            {status.missing_operator_inputs.map((key) => (
+              <li
+                key={key}
+                className={`rounded-full px-3.5 py-1.5 text-caption ${toneSpec("warning").chip}`}
+              >
+                {MISSING_INPUT_LABELS[key] ?? key}
+              </li>
+            ))}
+          </ul>
+        </StateCard>
+        <p className="text-center text-micro text-ink-muted">
+          An operator configures the App identity and its credential references
+          outside Drake. Drake never accepts a credential through this screen.
         </p>
       </div>
-    </Card>
+    </Panel>
+  );
+}
+
+function IntegrationHealth({ status }: { status: GitHubStatus }) {
+  const pullRequests =
+    status.gitops_pending + status.gitops_active + status.gitops_failed;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="page-grid" data-testid="integration-health">
+        <KpiTile
+          icon={FileWarning}
+          label="Need review"
+          value={status.needs_review}
+          tone="warning"
+          part={status.needs_review}
+          whole={status.sessions}
+          caption={`of ${status.sessions} session${status.sessions === 1 ? "" : "s"}`}
+        />
+        <KpiTile
+          icon={PackageCheck}
+          label="Imported"
+          value={status.imported}
+          tone="success"
+          part={status.imported}
+          whole={status.sessions}
+          caption={`of ${status.sessions} session${status.sessions === 1 ? "" : "s"}`}
+        />
+        <KpiTile
+          icon={ScanSearch}
+          label="Partial analyses"
+          value={status.analyses_truncated}
+          tone="info"
+          part={status.analyses_truncated}
+          whole={status.analyses}
+          caption={`of ${status.analyses} analys${status.analyses === 1 ? "is" : "es"} · last ${formatAge(status.last_analyzed_at)}`}
+        />
+        <KpiTile
+          icon={GitPullRequest}
+          label="Failed pull requests"
+          value={status.gitops_failed}
+          tone={status.gitops_failed > 0 ? "critical" : "neutral"}
+          part={status.gitops_failed}
+          whole={pullRequests}
+          caption={`of ${pullRequests} manifest pull request${pullRequests === 1 ? "" : "s"}`}
+        />
+      </div>
+      {status.gitops_pr_enabled ? null : (
+        <p
+          className="flex items-center gap-3 self-start rounded-full border border-border bg-surface px-5 py-2.5 text-caption text-ink-secondary"
+          data-testid="gitops-disabled"
+        >
+          <GitPullRequest
+            aria-hidden
+            className="h-4 w-4 shrink-0 text-ink-muted"
+          />
+          GitOps pull requests are switched off. Drake will not write to any
+          repository.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Where the sessions are, as bars against the session total. */
+function Pipeline({ status }: { status: GitHubStatus }) {
+  const rows: { label: string; count: number; tone: StatusTone }[] = [
+    { label: "Needs review", count: status.needs_review, tone: "warning" },
+    { label: "Ready to approve", count: status.ready, tone: "info" },
+    { label: "Imported", count: status.imported, tone: "success" },
+    { label: "Stale", count: status.stale, tone: "stale" },
+    {
+      label: "GitHub unavailable",
+      count: status.provider_unavailable,
+      tone: "unknown",
+    },
+  ];
+  return (
+    <Panel className="h-full">
+      <PanelHeader
+        title="Session pipeline"
+        description="Where the sessions in your scope stand."
+      />
+      <p className="flex items-baseline gap-2">
+        <span
+          data-tabular
+          className="text-[2.25rem] leading-none font-semibold tracking-[-0.03em] text-ink"
+        >
+          {status.sessions}
+        </span>
+        <span className="text-caption text-ink-muted">sessions</span>
+      </p>
+      <ul className="flex flex-col gap-4">
+        {rows.map((row) => {
+          const share =
+            status.sessions > 0 ? (row.count / status.sessions) * 100 : 0;
+          return (
+            <li key={row.label}>
+              <span className="flex min-w-0 items-center gap-2 text-caption text-ink-secondary">
+                <span
+                  aria-hidden
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneSpec(row.tone).dot}`}
+                />
+                <span className="min-w-0 truncate">{row.label}</span>
+                <span
+                  data-tabular
+                  className="ml-auto shrink-0 font-semibold text-ink"
+                >
+                  {row.count}
+                </span>
+              </span>
+              <span
+                aria-hidden
+                className="mt-2 block h-2 overflow-hidden rounded-full bg-surface-3"
+              >
+                <span
+                  className={`block h-full rounded-full ${toneSpec(row.tone).dot}`}
+                  style={{ width: `${share}%` }}
+                />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-auto grid grid-cols-2 gap-3">
+        <div className="rounded-2xl bg-surface-2 px-4 py-3">
+          <p className="text-micro text-ink-muted">Analyses</p>
+          <p data-tabular className="mt-1 text-title font-semibold text-ink">
+            {status.analyses}
+          </p>
+        </div>
+        <div className="rounded-2xl bg-surface-2 px-4 py-3">
+          <p className="text-micro text-ink-muted">Analyses failed</p>
+          <p data-tabular className="mt-1 text-title font-semibold text-ink">
+            {status.analyses_failed}
+          </p>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
 function SessionRow({ session }: { session: OnboardingSession }) {
   return (
-    <tr
-      className="border-t border-border align-top"
+    <li
+      className="group relative flex flex-wrap items-center gap-x-5 gap-y-3 px-7 py-5 transition-colors hover:bg-surface-hover"
       data-testid={`session-row-${session.repository.name}`}
     >
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
-          <Link
-            href={`/onboarding/${session.id}`}
-            className="text-sm font-medium text-ink hover:underline"
-          >
-            {session.repository.full_name}
-          </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
-            {session.repository.default_branch} · {shortSha(session.analyzed_commit_sha)}
-          </span>
-        </div>
-      </td>
-      <td className="py-2.5 pr-3">
-        <SessionBadge state={session.state} />
+      <IconBubble icon={FolderGit2} tone={sessionTone(session.state)} />
+      <div className="min-w-0 flex-1 basis-64">
+        <Link
+          href={`/onboarding/${session.id}`}
+          className="text-body font-semibold break-all text-ink after:absolute after:inset-0 after:content-['']"
+        >
+          {session.repository.full_name}
+        </Link>
+        <span className="mt-0.5 block font-mono text-micro text-ink-muted">
+          {session.repository.default_branch} ·{" "}
+          {shortSha(session.analyzed_commit_sha)}
+        </span>
         {session.reason ? (
-          <p className="mt-1 max-w-xs text-[11px] text-ink-secondary">{session.reason}</p>
+          <p className="mt-1 max-w-prose text-micro text-ink-secondary">
+            {session.reason}
+          </p>
         ) : null}
-      </td>
-      <td className="py-2.5 pr-3 text-xs text-ink-secondary">
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
         {session.plan ? (
           <>
-            <div>
+            <FactChip label="Plan">
               v{session.plan.plan_version} · {session.plan.total_items} items
-            </div>
+            </FactChip>
             {session.plan.blocking_items > 0 ? (
-              <div className="text-warning">
+              <FactChip label="Decisions" tone="warning">
                 {session.plan.blocking_items} need review
-              </div>
+              </FactChip>
             ) : null}
           </>
         ) : (
-          <span className="italic text-ink-muted">not analysed</span>
+          <span className="rounded-full bg-surface-2 px-3 py-1 text-micro text-ink-muted italic">
+            not analysed
+          </span>
         )}
-      </td>
-      <td className="py-2.5 pr-3 text-xs text-ink-secondary">
         {session.imported_project_key ? (
           <Link
             href={`/projects/${session.imported_project_id}`}
-            className="hover:underline"
+            className="relative z-10 rounded-full bg-surface-2 px-3 py-1 text-micro font-semibold text-ink hover:bg-surface-3"
           >
             {session.imported_project_key}
           </Link>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className="py-2.5 text-xs text-ink-secondary">{formatAge(session.created_at)}</td>
-    </tr>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <SessionBadge state={session.state} />
+        <span className="text-micro text-ink-muted">
+          opened {formatAge(session.created_at)}
+        </span>
+      </div>
+      <ChevronRight
+        aria-hidden
+        className="hidden h-4 w-4 shrink-0 text-ink-muted transition-transform group-hover:translate-x-0.5 md:block"
+      />
+    </li>
   );
 }
 
 function OnboardingInner() {
   const { state: auth } = useSession();
   const csrfToken = auth.status === "authenticated" ? auth.me.csrf_token : "";
-  const [status, retryStatus] = useApi<GitHubStatus>("/v1/onboarding/github/status");
+  const [status, retryStatus] = useApi<GitHubStatus>(
+    "/v1/onboarding/github/status",
+  );
   const [page, retryPage] = useApi<SessionPage>("/v1/onboarding/sessions");
+  const configured =
+    status.state === "ready" &&
+    status.data.configuration_state === "configured";
+
+  const sessions = (
+    <Panel flush>
+      <PanelHeader
+        flush
+        title="Sessions"
+        description="Every onboarding in your scope, newest first."
+        meta={
+          page.state === "ready" && page.data.items.length > 0 ? (
+            <span>{page.data.total} total</span>
+          ) : null
+        }
+      />
+      {page.state === "loading" ? (
+        <div className="px-7 py-5">
+          <DataState kind="loading" />
+        </div>
+      ) : page.state === "error" ? (
+        page.notFound ? (
+          <StateCard kind="permission-denied" />
+        ) : (
+          <StateCard
+            kind="error"
+            description={page.message}
+            action={<RetryButton onClick={retryPage} />}
+          />
+        )
+      ) : page.data.items.length === 0 ? (
+        <StateCard
+          kind="empty"
+          icon={Inbox}
+          title="No onboarding sessions"
+          description="Nothing in your scope is being onboarded. This is not a statement about which repositories exist."
+        />
+      ) : (
+        <ul className="divide-y divide-border">
+          {page.data.items.map((session) => (
+            <SessionRow key={session.id} session={session} />
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
 
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-ink">Onboard a project</h1>
-        <p className="text-sm text-ink-secondary">
-          Drake reads a repository statically, proposes what it would add to the catalog,
-          and changes nothing until someone approves that exact proposal.
-        </p>
-      </header>
+      <PageHeader
+        title="Onboard a project"
+        description="Drake reads a repository statically, proposes a catalog change, and applies nothing until someone approves it."
+      />
+      <div className="flex flex-col gap-6">
+        <HowItWorks status={status.state === "ready" ? status.data : null} />
 
-      <Card title="How this works">
-        <ol className="flex flex-wrap gap-2" data-testid="wizard-steps">
-          {WIZARD_STEPS.map((step, index) => (
-            <li
-              key={step}
-              className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-secondary"
-            >
-              <span className="font-mono text-ink-muted">{index + 1}.</span> {step}
-            </li>
-          ))}
-        </ol>
-        <p className="mt-3 text-xs text-ink-muted">
-          Nothing in a repository is executed: no build, no install, no script, no hook, no
-          workflow. Drake reads an allowlist of metadata files at one immutable commit.
-        </p>
-      </Card>
-
-      {status.state === "loading" ? (
-        <DataState kind="loading" />
-      ) : status.state === "error" ? (
-        <DataState kind="error" description={status.message} onRetry={retryStatus} />
-      ) : status.data.configuration_state === "not_configured" ? (
-        <NotConfigured status={status.data} />
-      ) : (
-        <Card title="Integration health">
-          <div
-            className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4"
-            data-testid="integration-health"
-          >
-            <div>
-              <div className="text-lg font-semibold text-ink">{status.data.needs_review}</div>
-              <div className="text-ink-muted">need review</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-ink">{status.data.imported}</div>
-              <div className="text-ink-muted">imported</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-ink">
-                {status.data.analyses_truncated}
-              </div>
-              <div className="text-ink-muted">partial analyses</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-ink">{status.data.gitops_failed}</div>
-              <div className="text-ink-muted">failed pull requests</div>
-            </div>
-          </div>
-          {status.data.gitops_pr_enabled ? null : (
-            <p className="mt-3 text-xs text-ink-muted" data-testid="gitops-disabled">
-              GitOps pull requests are switched off. Drake will not write to any repository.
-            </p>
-          )}
-        </Card>
-      )}
-
-      {status.state === "ready" && status.data.configuration_state === "configured" ? (
-        <StartOnboarding csrfToken={csrfToken} canManage={status.data.can_manage} />
-      ) : null}
-
-      <Card title="Sessions">
-        {page.state === "loading" ? (
-          <DataState kind="loading" />
-        ) : page.state === "error" ? (
-          page.notFound ? (
-            <DataState kind="permission-denied" />
-          ) : (
-            <DataState kind="error" description={page.message} onRetry={retryPage} />
-          )
-        ) : page.data.items.length === 0 ? (
-          <DataState
-            kind="empty"
-            title="No onboarding sessions"
-            description="Nothing in your scope is being onboarded. This is not a statement about which repositories exist."
-          />
+        {status.state === "loading" ? (
+          <Panel>
+            <DataState kind="loading" />
+          </Panel>
+        ) : status.state === "error" ? (
+          <Panel>
+            <StateCard
+              kind="error"
+              description={status.message}
+              action={<RetryButton onClick={retryStatus} />}
+            />
+          </Panel>
+        ) : status.data.configuration_state === "not_configured" ? (
+          <NotConfigured status={status.data} />
         ) : (
-          /* Its own scroller, contained: a wide table must scroll itself
-             rather than taking the page sideways with it. */
-          <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs text-ink-muted">
-              <tr>
-                <th className="pb-2 pr-3 font-medium">Repository</th>
-                <th className="pb-2 pr-3 font-medium">State</th>
-                <th className="pb-2 pr-3 font-medium">Plan</th>
-                <th className="pb-2 pr-3 font-medium">Project</th>
-                <th className="pb-2 font-medium">Opened</th>
-              </tr>
-            </thead>
-            <tbody>
-              {page.data.items.map((session) => (
-                <SessionRow key={session.id} session={session} />
-              ))}
-            </tbody>
-          </table>
-          </div>
+          <IntegrationHealth status={status.data} />
         )}
-      </Card>
+
+        {configured && status.state === "ready" ? (
+          <div className="page-split">
+            <div className="page-main">
+              <StartOnboarding
+                csrfToken={csrfToken}
+                canManage={status.data.can_manage}
+              />
+            </div>
+            <div className="page-aside">
+              <Pipeline status={status.data} />
+            </div>
+          </div>
+        ) : null}
+
+        {sessions}
       </div>
     </PageFrame>
+  );
+}
+
+function RetryButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
+    >
+      <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+      Retry
+    </button>
   );
 }
 

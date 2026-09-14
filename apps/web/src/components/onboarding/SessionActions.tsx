@@ -22,7 +22,7 @@
 import { useCallback, useState, type MutableRefObject } from "react";
 
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
 import {
   ERROR_GUIDANCE,
@@ -167,8 +167,9 @@ export function SessionActions({
     session.approved_plan_version !== null;
 
   return (
-    <Card title="Actions">
-      <div className="space-y-3" data-testid="session-actions">
+    <Panel>
+      <PanelHeader title="Actions" />
+      <div className="space-y-4" data-testid="session-actions">
         {failure ? (
           <div data-testid="action-error">
             <DataState
@@ -195,7 +196,7 @@ export function SessionActions({
                   onChanged();
                 })
               }
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending === "analyze"
                 ? "Analysing…"
@@ -211,7 +212,7 @@ export function SessionActions({
               data-testid="action-approve"
               disabled={busy || !approvable}
               onClick={() => setConfirming("approve")}
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               Approve plan
             </button>
@@ -223,7 +224,7 @@ export function SessionActions({
               data-testid="action-apply"
               disabled={busy || !appliable}
               onClick={() => setConfirming("apply")}
-              className="rounded-md border border-accent bg-accent-soft px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-accent bg-accent-soft px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending === "apply" ? "Applying…" : "Apply approved plan"}
             </button>
@@ -235,7 +236,7 @@ export function SessionActions({
               data-testid="action-cancel"
               disabled={busy}
               onClick={() => setConfirming("cancel")}
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel session
             </button>
@@ -256,7 +257,7 @@ export function SessionActions({
                     })
                   : undefined
               }
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               Propose manifest pull request
             </button>
@@ -267,7 +268,7 @@ export function SessionActions({
               data-testid="action-manifest-draft"
               href={manifestDraftPath(session.id)}
               download
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
+              className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
             >
               Download manifest draft
             </a>
@@ -369,7 +370,7 @@ export function SessionActions({
 
         {result ? <ApplyResultCard result={result} projectId={session.imported_project_id} /> : null}
       </div>
-    </Card>
+    </Panel>
   );
 }
 
@@ -406,7 +407,7 @@ function Confirm({
       role="group"
       aria-label={title}
       data-testid={testId}
-      className="rounded-md border border-border bg-surface-subtle p-3"
+      className="rounded-2xl border border-border bg-surface-subtle p-3"
     >
       <p className="text-xs font-medium text-ink">{title}</p>
       <div className="mt-2">{children}</div>
@@ -416,7 +417,7 @@ function Confirm({
           data-testid={`${testId}-yes`}
           disabled={busy}
           onClick={onConfirm}
-          className="rounded-md border border-accent px-3 py-1.5 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-accent px-3 py-1.5 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? "Working…" : confirmLabel}
         </button>
@@ -425,7 +426,7 @@ function Confirm({
           data-testid={`${testId}-no`}
           disabled={busy}
           onClick={onCancel}
-          className="rounded-md border border-border px-3 py-1.5 text-xs text-ink-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-border px-3 py-1.5 text-xs text-ink-secondary disabled:cursor-not-allowed disabled:opacity-50"
         >
           Back
         </button>
@@ -453,7 +454,7 @@ export function ApplyResultCard({
 }) {
   return (
     <div
-      className="rounded-md border border-border bg-surface-subtle p-3"
+      className="rounded-2xl border border-border bg-surface-subtle p-3"
       data-testid="apply-result"
     >
       <p className="text-xs font-medium text-ink">Applied to the catalog</p>

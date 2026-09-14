@@ -23,24 +23,46 @@
  *   `INVENTORY_KINDS`, which is the allowlist.
  */
 
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import {
+  Boxes,
+  Container,
+  Database,
+  EyeOff,
+  FolderTree,
+  RefreshCw,
+  SearchX,
+  Server,
+  Shapes,
+  Workflow,
+  X,
+} from "lucide-react";
 import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { SortedBarChart } from "@/components/charts/CategoryCharts";
-import { Donut, ToneCounters } from "@/components/charts/visuals";
+import { ToneCounters } from "@/components/charts/visuals";
+import {
+  IconBubble,
+  PillLink,
+  SegmentBar,
+  StatTile,
+  StateCard,
+} from "@/components/clusters/primitives";
+import { PillSearch, PillSelect } from "@/components/inventory/controls";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
-import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { Button, FilterBar, Select } from "@/components/ui/controls";
-import { CopyableIdentifier, FreshnessIndicator, Timestamp } from "@/components/ui/identifiers";
+import { Button } from "@/components/ui/controls";
+import {
+  CopyableIdentifier,
+  FreshnessIndicator,
+  Timestamp,
+} from "@/components/ui/identifiers";
 import {
   DeniedState,
-  EmptyState,
   ErrorState,
   LoadingSkeleton,
-  NotFoundState,
 } from "@/components/ui/states";
 import { humanize, toneForHealth } from "@/lib/design/status";
 import { ApiError, apiGet } from "@/lib/api";
@@ -94,7 +116,8 @@ function buildQuery(filters: {
   if (filters.lifecycle && filters.lifecycle !== "active") {
     params.set("lifecycle", filters.lifecycle);
   }
-  if (filters.search.trim().length >= 2) params.set("search", filters.search.trim());
+  if (filters.search.trim().length >= 2)
+    params.set("search", filters.search.trim());
   if (filters.cursor) params.set("cursor", filters.cursor);
   const encoded = params.toString();
   return encoded ? `?${encoded}` : "";
@@ -102,12 +125,36 @@ function buildQuery(filters: {
 
 function rollupSegments(rollup: HealthRollup) {
   return [
-    { name: "Healthy", value: rollup.healthy, tone: "success" as const },
-    { name: "Degraded", value: rollup.degraded, tone: "warning" as const },
-    { name: "Unhealthy", value: rollup.unhealthy, tone: "critical" as const },
-    { name: "Unknown", value: rollup.unknown, tone: "unknown" as const },
+    {
+      key: "healthy",
+      label: "Healthy",
+      value: rollup.healthy,
+      tone: "success" as const,
+    },
+    {
+      key: "degraded",
+      label: "Degraded",
+      value: rollup.degraded,
+      tone: "warning" as const,
+    },
+    {
+      key: "unhealthy",
+      label: "Unhealthy",
+      value: rollup.unhealthy,
+      tone: "critical" as const,
+    },
+    {
+      key: "unknown",
+      label: "Unknown",
+      value: rollup.unknown,
+      tone: "unknown" as const,
+    },
   ];
 }
+
+const HEADER_CELL =
+  "h-11 px-4 text-left text-micro font-medium tracking-[0.08em] whitespace-nowrap text-ink-muted uppercase first:pl-7 last:pr-7";
+const BODY_CELL = "h-14 px-4 align-middle first:pl-7 last:pr-7";
 
 function InventoryInner() {
   const { clusterId } = useParams<{ clusterId: string }>();
@@ -191,7 +238,9 @@ function InventoryInner() {
         setNextCursor(body.next_cursor);
       })
       .catch((error: unknown) => {
-        setMoreError(error instanceof ApiError ? error.message : "request failed");
+        setMoreError(
+          error instanceof ApiError ? error.message : "request failed",
+        );
       })
       .finally(() => setLoadingMore(false));
   }, [clusterId, kind, health, lifecycle, search, eventType, nextCursor]);
@@ -211,62 +260,17 @@ function InventoryInner() {
     [summary.data],
   );
 
-  const columns: Column<InventoryResourceRow>[] = [
-    {
-      key: "kind",
-      header: "Kind",
-      cell: (row) => <span className="font-mono text-micro text-ink-secondary">{row.kind}</span>,
-    },
-    {
-      key: "namespace",
-      header: "Namespace",
-      cell: (row) => (
-        <span className="font-mono text-micro text-ink-secondary">{row.namespace ?? "—"}</span>
-      ),
-    },
-    {
-      key: "name",
-      header: "Name",
-      cell: (row) => (
-        <Link
-          href={`/clusters/${clusterId}/inventory/${row.id}`}
-          className="rounded font-mono text-micro text-ink hover:text-brand"
-        >
-          {row.name}
-        </Link>
-      ),
-    },
-    {
-      key: "health",
-      header: "Health",
-      cell: (row) => (
-        <StatusBadge status={toneForHealth(row.health)} label={humanize(row.health)} size="compact" />
-      ),
-    },
-    {
-      key: "lifecycle",
-      header: "Lifecycle",
-      cell: (row) =>
-        row.lifecycle === "missing" ? (
-          <StatusBadge status="stale" label="Missing" size="compact" />
-        ) : (
-          <span className="text-caption text-ink-secondary">Active</span>
-        ),
-    },
-    {
-      key: "observed",
-      header: "Observed",
-      align: "right",
-      priority: "low",
-      cell: (row) => <Timestamp value={row.observed_at} className="text-ink-muted" />,
-    },
-  ];
+  const inventoryState = summary.data?.inventory.state;
+  const missingCount = summary.data?.inventory.missing_resources ?? 0;
+  const topKinds = [...kindCategories]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 3);
 
   return (
     <PageFrame width="wide">
       <PageHeader
         title="Inventory"
-        description="Observed Kubernetes resources with derived health. A resource that disappeared stays listed as missing — it is never silently dropped."
+        description="Observed Kubernetes resources with derived health — a resource that disappears stays listed as missing."
         status={
           page.data ? (
             <StatusBadge
@@ -284,196 +288,314 @@ function InventoryInner() {
           ) : undefined
         }
         actions={
-          <Link
+          <PillLink
+            LinkComponent={Link}
             href={`/clusters/${clusterId}`}
-            className="rounded text-caption font-medium text-brand hover:underline"
+            icon={Server}
           >
             Cluster detail
-          </Link>
+          </PillLink>
         }
       />
 
-      {summary.data && summary.data.inventory.state !== "not_configured" ? (
-        <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <Panel data-testid="inventory-rollups">
-            <PanelHeader
-              title="What the last sweep found"
-              description="Health composition per resource class, from the states the agent reported."
-              level={2}
-              meta={
-                <>
-                  <span data-tabular>
-                    {summary.data.inventory.active_resources ?? 0} active
-                  </span>
-                  <span data-tabular className={summary.data.inventory.missing_resources ? "text-stale" : ""}>
-                    {summary.data.inventory.missing_resources ?? 0} missing
-                  </span>
-                </>
-              }
+      {summary.data ? (
+        <div className="page-grid mb-6">
+          <StatTile
+            icon={Boxes}
+            label="Active resources"
+            value={summary.data.inventory.active_resources ?? 0}
+            suffix="observed"
+          >
+            <SegmentBar
+              label="Resources by lifecycle"
+              segments={[
+                {
+                  key: "active",
+                  label: "Active",
+                  value: summary.data.inventory.active_resources ?? 0,
+                  tone: "info",
+                },
+                {
+                  key: "missing",
+                  label: "Missing",
+                  value: missingCount,
+                  tone: "stale",
+                },
+              ]}
             />
-            <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
-              {(
-                [
-                  ["Nodes", summary.data.nodes],
-                  ["Namespaces", summary.data.namespaces],
-                  ["Workloads", summary.data.workloads],
-                  ["Pods", summary.data.pods],
-                  ["Volume claims", summary.data.persistent_volume_claims],
-                ] as const
-              )
-                .filter(([, rollup]) => rollup.total > 0)
-                .map(([label, rollup]) => (
-                  <div key={label} className="min-w-0">
-                    <p className="mb-1.5 text-caption font-medium text-ink">{label}</p>
-                    <Donut
-                      size={104}
-                      thickness={12}
-                      label={`${label} by health`}
-                      centerLabel={`${rollup.total}`}
-                      slices={rollupSegments(rollup)}
-                    />
-                  </div>
+          </StatTile>
+          <StatTile
+            icon={EyeOff}
+            tone={missingCount > 0 ? "stale" : null}
+            label="Missing"
+            value={missingCount}
+            suffix="gone from the cluster"
+          >
+            <p className="text-micro text-ink-muted">
+              {missingCount > 0 && lifecycle === "active"
+                ? "Hidden by the active-only filter below"
+                : "Kept in the list, never silently dropped"}
+            </p>
+          </StatTile>
+          <StatTile
+            icon={Shapes}
+            label="Kinds observed"
+            value={kindCategories.length}
+            suffix="kinds"
+          >
+            {topKinds.length > 0 ? (
+              <ul className="flex flex-wrap gap-1.5">
+                {topKinds.map((entry) => (
+                  <li
+                    key={entry.name}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-micro text-ink-secondary"
+                  >
+                    <span className="font-mono">{entry.name}</span>
+                    <span data-tabular className="font-semibold text-ink">
+                      {entry.value}
+                    </span>
+                  </li>
                 ))}
-              {summary.data.pods.crashloop > 0 ||
-              summary.data.pods.oom_killed > 0 ||
-              summary.data.pods.restarts > 0 ? (
-                <div className="sm:col-span-2">
-                  <p className="mb-1.5 text-caption font-medium text-ink">Pod instability</p>
-                  {/* These are counts of specific failure modes, not a
-                      composition — they do not add up to the pod total, so
-                      they get counters rather than a wedge each. */}
-                  <ToneCounters
-                    items={[
-                      {
-                        label: "crash-looping",
-                        count: summary.data.pods.crashloop,
-                        tone: "critical",
-                      },
-                      {
-                        label: "OOM-killed",
-                        count: summary.data.pods.oom_killed,
-                        tone: "critical",
-                      },
-                      {
-                        label: "restarts in window",
-                        count: summary.data.pods.restarts,
-                        tone: "warning",
-                      },
-                    ]}
-                  />
-                </div>
-              ) : null}
-            </div>
-          </Panel>
-
-          <SortedBarChart
-            title="Resources by kind"
-            question="Which kinds make up this cluster's inventory?"
-            unit="count"
-            status={kindCategories.length === 0 ? "empty" : "ready"}
-            asOf={summary.data.as_of}
-            freshness={summary.data.inventory.state === "stale" ? "stale" : "fresh"}
-            categories={kindCategories}
-            emptyDescription="The last sweep recorded no resources of any allowlisted kind."
-          />
+              </ul>
+            ) : (
+              <p className="text-micro text-ink-muted">
+                No allowlisted kind recorded yet
+              </p>
+            )}
+          </StatTile>
+          <StatTile
+            icon={RefreshCw}
+            tone={inventoryState ? toneForHealth(inventoryState) : null}
+            label="Inventory sweep"
+            value={
+              <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+                {humanize(inventoryState)}
+              </span>
+            }
+          >
+            <FreshnessIndicator
+              asOf={summary.data.as_of}
+              state={inventoryState === "stale" ? "stale" : "fresh"}
+            />
+          </StatTile>
         </div>
       ) : null}
 
-      <SectionHeader
-        title="Resources"
-        description="Secrets and ConfigMaps are outside the collected set and never appear here."
-      />
-
-      <Panel flush className="mt-3">
-        <div className="border-b border-border px-4 py-3">
-          <FilterBar
-            summary={
-              page.data
-                ? `${rows.length} shown${nextCursor ? " (more available)" : ""}`
-                : undefined
-            }
-            onReset={
-              filtered
-                ? () => {
-                    setDraft("");
-                    router.replace(`/clusters/${clusterId}/inventory`, { scroll: false });
-                  }
-                : undefined
-            }
-          >
-            <Select
-                data-testid="filter-kind"
-                label="Kind"
-                value={kind}
-                placeholder="All kinds"
-                options={INVENTORY_KINDS.map((option) => ({ value: option, label: option }))}
-                // Leaving the URL is what people paste, so a filter that no
-                // longer applies must not ride along in it: switching away
-                // from Event drops the event type rather than hiding it.
-                onChange={(value) =>
-                  setParam(value === "Event" ? { kind: value } : { kind: value, event_type: "" })
-                }
-              />
-            <Select
-                data-testid="filter-health"
-                label="Health"
-                value={health}
-                placeholder="Any health"
-                options={HEALTH_OPTIONS}
-                onChange={(value) => setParam({ health: value })}
-              />
-            {kind === "Event" ? (
-              <Select
-                data-testid="filter-event-type"
-                label="Event type"
-                value={eventType}
-                options={EVENT_TYPE_OPTIONS}
-                onChange={(value) => setParam({ event_type: value })}
-              />
+      {summary.data && summary.data.inventory.state !== "not_configured" ? (
+        <div className="mb-6 grid grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <Panel data-testid="inventory-rollups" className="h-full">
+            <PanelHeader
+              title="What the last sweep found"
+              description="Health composition per resource class, as the agent reported it."
+              level={2}
+            />
+            <ul className="space-y-5">
+              {(
+                [
+                  ["Nodes", Server, summary.data.nodes],
+                  ["Namespaces", FolderTree, summary.data.namespaces],
+                  ["Workloads", Workflow, summary.data.workloads],
+                  ["Pods", Container, summary.data.pods],
+                  [
+                    "Volume claims",
+                    Database,
+                    summary.data.persistent_volume_claims,
+                  ],
+                ] as const
+              )
+                .filter(([, , rollup]) => rollup.total > 0)
+                .map(([label, icon, rollup]) => (
+                  <li key={label} className="flex items-center gap-4">
+                    <IconBubble icon={icon} size="small" />
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-2 flex items-baseline justify-between gap-2 text-caption">
+                        <span className="font-medium text-ink">{label}</span>
+                        <span data-tabular className="font-semibold text-ink">
+                          {rollup.total}
+                        </span>
+                      </p>
+                      <SegmentBar
+                        label={`${label} by health`}
+                        height="h-2"
+                        segments={rollupSegments(rollup)}
+                      />
+                    </div>
+                  </li>
+                ))}
+            </ul>
+            {summary.data.pods.crashloop > 0 ||
+            summary.data.pods.oom_killed > 0 ||
+            summary.data.pods.restarts > 0 ? (
+              <div className="mt-auto rounded-[1rem] bg-surface-2 px-5 py-4">
+                <p className="mb-3 text-micro tracking-[0.08em] text-ink-muted uppercase">
+                  Pod instability
+                </p>
+                {/* Counts of specific failure modes, not a composition — they
+                    do not add up to the pod total, so counters, not wedges. */}
+                <ToneCounters
+                  items={[
+                    {
+                      label: "crash-looping",
+                      count: summary.data.pods.crashloop,
+                      tone: "critical",
+                    },
+                    {
+                      label: "OOM-killed",
+                      count: summary.data.pods.oom_killed,
+                      tone: "critical",
+                    },
+                    {
+                      label: "restarts in window",
+                      count: summary.data.pods.restarts,
+                      tone: "warning",
+                    },
+                  ]}
+                />
+              </div>
             ) : null}
-            <Select
-                data-testid="filter-lifecycle"
-                label="Lifecycle"
-                value={lifecycle}
-                options={LIFECYCLE_OPTIONS}
-                onChange={(value) => setParam({ lifecycle: value })}
-              />
-            <label className="flex items-center gap-2 text-caption text-ink-secondary">
-              Name
-              <input
-                type="search"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                minLength={2}
-                maxLength={64}
-                placeholder="min 2 characters"
-                data-testid="filter-search"
-                className="h-9 w-40 rounded-control border border-border bg-surface px-2.5 text-body text-ink placeholder:text-ink-muted"
-              />
-            </label>
-          </FilterBar>
-          {lifecycle === "active" && (summary.data?.inventory.missing_resources ?? 0) > 0 ? (
-            <p className="mt-2 text-micro text-stale">
-              {summary.data?.inventory.missing_resources} missing resource(s) are hidden by the
-              active-only filter.
-            </p>
-          ) : null}
-        </div>
+          </Panel>
 
+          <div className="h-full min-w-0 [&>*]:h-full">
+            <SortedBarChart
+              title="Resources by kind"
+              question="Which kinds make up this cluster's inventory?"
+              unit="count"
+              status={kindCategories.length === 0 ? "empty" : "ready"}
+              asOf={summary.data.as_of}
+              freshness={
+                summary.data.inventory.state === "stale" ? "stale" : "fresh"
+              }
+              categories={kindCategories}
+              emptyDescription="The last sweep recorded no resources of any allowlisted kind."
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-10">
+        <SectionHeader
+          title="Resources"
+          description="Secrets and ConfigMaps are outside the collected set and never appear here."
+        />
+      </div>
+
+      {/* One card-less toolbar of pills; the count and the reset live on it. */}
+      <div
+        className="mt-4 mb-4 flex flex-wrap items-center gap-2.5"
+        data-testid="filter-bar"
+      >
+        <PillSelect
+          data-testid="filter-kind"
+          label="Kind"
+          value={kind}
+          placeholder="All kinds"
+          active={Boolean(kind)}
+          options={INVENTORY_KINDS.map((option) => ({
+            value: option,
+            label: option,
+          }))}
+          // Leaving the URL is what people paste, so a filter that no
+          // longer applies must not ride along in it: switching away
+          // from Event drops the event type rather than hiding it.
+          onChange={(value) =>
+            setParam(
+              value === "Event"
+                ? { kind: value }
+                : { kind: value, event_type: "" },
+            )
+          }
+        />
+        <PillSelect
+          data-testid="filter-health"
+          label="Health"
+          value={health}
+          placeholder="Any health"
+          active={Boolean(health)}
+          options={HEALTH_OPTIONS}
+          onChange={(value) => setParam({ health: value })}
+        />
+        {kind === "Event" ? (
+          <PillSelect
+            data-testid="filter-event-type"
+            label="Event type"
+            value={eventType}
+            active={Boolean(eventType)}
+            options={EVENT_TYPE_OPTIONS}
+            onChange={(value) => setParam({ event_type: value })}
+          />
+        ) : null}
+        <PillSelect
+          data-testid="filter-lifecycle"
+          label="Lifecycle"
+          value={lifecycle}
+          active={lifecycle !== "active"}
+          options={LIFECYCLE_OPTIONS}
+          onChange={(value) => setParam({ lifecycle: value })}
+        />
+        <PillSearch
+          data-testid="filter-search"
+          label="Name"
+          value={draft}
+          onChange={setDraft}
+          placeholder="Name (min 2 characters)"
+        />
+        {filtered ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft("");
+              router.replace(`/clusters/${clusterId}/inventory`, {
+                scroll: false,
+              });
+            }}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full px-3.5 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            <X aria-hidden className="h-4 w-4" />
+            Clear filters
+          </button>
+        ) : null}
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          {lifecycle === "active" && missingCount > 0 ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stale-soft px-3 py-1.5 text-micro text-stale">
+              <EyeOff aria-hidden className="h-3.5 w-3.5" />
+              {missingCount} missing resource(s) are hidden by the active-only
+              filter.
+            </span>
+          ) : null}
+          {page.data ? (
+            <span
+              data-tabular
+              className="rounded-full bg-surface px-3 py-1.5 text-micro font-medium text-ink-secondary"
+            >
+              {`${rows.length} shown${nextCursor ? " (more available)" : ""}`}
+            </span>
+          ) : null}
+        </span>
+      </div>
+
+      <Panel flush>
         {page.loading && !page.data ? (
-          <div className="px-4 py-4">
-            <LoadingSkeleton variant="table" rows={6} label="Loading inventory" />
+          <div className="px-7 py-5">
+            <LoadingSkeleton
+              variant="table"
+              rows={6}
+              label="Loading inventory"
+            />
           </div>
         ) : page.notFound ? (
-          <div className="px-4 py-2">
-            <NotFoundState description="This cluster's inventory does not exist in your authorized scope." />
-          </div>
+          <StateCard
+            testId="state-not-found"
+            icon={Server}
+            tone="not-applicable"
+            title="Not found"
+            description="This cluster's inventory does not exist in your authorized scope."
+          />
         ) : page.denied ? (
-          <div className="px-4 py-2">
+          <div className="px-7 py-4">
             <DeniedState />
           </div>
         ) : !page.data ? (
-          <div className="px-4 py-2">
+          <div className="px-7 py-4">
             <ErrorState
               description={page.error ?? undefined}
               correlationId={page.correlationId}
@@ -483,28 +605,134 @@ function InventoryInner() {
         ) : (
           <>
             <div data-testid="resource-rows">
-              <DataTable
-                caption="Inventory resources matching the current filters"
-                rows={rows}
-                columns={columns}
-                density="compact"
-                stickyHeader
-                rowKey={(row) => row.id}
-                emptyState={
-                  <EmptyState
-                    title="No resources match"
-                    description="Nothing in the authorized inventory matches these filters."
-                  />
-                }
-              />
+              {rows.length === 0 ? (
+                <StateCard
+                  testId="state-empty"
+                  icon={SearchX}
+                  title="No resources match"
+                  description="Nothing in the authorized inventory matches these filters."
+                  action={
+                    filtered ? (
+                      <Button
+                        size="compact"
+                        onClick={() => {
+                          setDraft("");
+                          router.replace(`/clusters/${clusterId}/inventory`, {
+                            scroll: false,
+                          });
+                        }}
+                      >
+                        Clear filters
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
+                  <table
+                    className="w-full border-collapse text-body"
+                    data-tabular
+                  >
+                    <caption className="sr-only">
+                      Inventory resources matching the current filters
+                    </caption>
+                    <thead className="sticky top-0 z-10 bg-surface-2">
+                      <tr className="border-b border-border">
+                        <th scope="col" className={HEADER_CELL}>
+                          Name
+                        </th>
+                        <th scope="col" className={HEADER_CELL}>
+                          Kind
+                        </th>
+                        <th scope="col" className={HEADER_CELL}>
+                          Namespace
+                        </th>
+                        <th scope="col" className={HEADER_CELL}>
+                          Health
+                        </th>
+                        <th scope="col" className={HEADER_CELL}>
+                          Lifecycle
+                        </th>
+                        <th
+                          scope="col"
+                          className={`${HEADER_CELL} hidden text-right lg:table-cell`}
+                        >
+                          Observed
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <tr
+                          key={row.id}
+                          className="border-b border-border transition-colors last:border-b-0 hover:bg-surface-hover"
+                        >
+                          <td className={BODY_CELL}>
+                            <Link
+                              href={`/clusters/${clusterId}/inventory/${row.id}`}
+                              className="rounded font-mono text-caption font-semibold break-all text-ink hover:text-brand"
+                            >
+                              {row.name}
+                            </Link>
+                          </td>
+                          <td className={BODY_CELL}>
+                            <span className="inline-flex rounded-full bg-surface-2 px-2.5 py-1 font-mono text-micro text-ink-secondary">
+                              {row.kind}
+                            </span>
+                          </td>
+                          <td
+                            className={`${BODY_CELL} font-mono text-micro text-ink-secondary`}
+                          >
+                            {row.namespace ?? (
+                              <span className="text-ink-muted">—</span>
+                            )}
+                          </td>
+                          <td className={BODY_CELL}>
+                            <StatusBadge
+                              status={toneForHealth(row.health)}
+                              label={humanize(row.health)}
+                              size="compact"
+                            />
+                          </td>
+                          <td className={BODY_CELL}>
+                            {row.lifecycle === "missing" ? (
+                              <StatusBadge
+                                status="stale"
+                                label="Missing"
+                                size="compact"
+                              />
+                            ) : (
+                              <span className="text-caption text-ink-secondary">
+                                Active
+                              </span>
+                            )}
+                          </td>
+                          <td
+                            className={`${BODY_CELL} hidden text-right lg:table-cell`}
+                          >
+                            <Timestamp
+                              value={row.observed_at}
+                              className="text-ink-muted"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
             {moreError ? (
-              <div className="px-4 py-2">
-                <ErrorState compact description={moreError} onRetry={loadMore} />
+              <div className="px-7 py-2">
+                <ErrorState
+                  compact
+                  description={moreError}
+                  onRetry={loadMore}
+                />
               </div>
             ) : null}
             {nextCursor ? (
-              <div className="border-t border-border px-4 py-2">
+              <div className="flex justify-center border-t border-border px-7 py-4">
                 <Button
                   onClick={loadMore}
                   disabled={loadingMore}
@@ -520,10 +748,14 @@ function InventoryInner() {
       </Panel>
 
       {page.data ? (
-        <p className="mt-3 text-micro text-ink-muted">
+        <p className="mt-4 text-micro text-ink-muted">
           Cluster{" "}
-          <CopyableIdentifier value={clusterId} label="cluster id" truncate={16} /> · inventory as
-          of <Timestamp value={page.data.as_of} />
+          <CopyableIdentifier
+            value={clusterId}
+            label="cluster id"
+            truncate={16}
+          />{" "}
+          · inventory as of <Timestamp value={page.data.as_of} />
         </p>
       ) : null}
     </PageFrame>

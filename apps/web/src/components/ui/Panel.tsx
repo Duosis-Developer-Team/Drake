@@ -16,19 +16,38 @@ import { toneSpec } from "@/lib/design/status";
 
 export type PanelTone = "default" | StatusTone;
 
+/** Status on a PayFlow-style card is a quiet tinted edge, not a thick left
+ *  rail — a 4px rail on a 24px radius bends into a crescent and reads broken. */
 const RAIL: Partial<Record<PanelTone, string>> = {
-  critical: "border-l-4 border-l-critical",
-  warning: "border-l-4 border-l-warning",
-  stale: "border-l-4 border-l-stale",
-  unknown: "border-l-4 border-l-unknown",
-  success: "border-l-4 border-l-healthy",
-  info: "border-l-4 border-l-info",
+  critical: "ring-1 ring-inset ring-critical/45",
+  warning: "ring-1 ring-inset ring-warning/40",
+  stale: "ring-1 ring-inset ring-stale/40",
+  unknown: "",
+  success: "",
+  info: "",
+};
+
+const RADIUS = {
+  panel: "rounded-[1.5rem]",
+  canvas: "rounded-[1.75rem]",
+} as const;
+
+export type PanelSurface = "default" | "hero";
+
+/** `hero` is the one lead card a screen may have. It follows the theme like
+ *  every other card — same surface, same border — and is set apart only by a
+ *  deeper shadow, never by a colour of its own. */
+const SURFACE: Record<PanelSurface, string> = {
+  default: "border border-border bg-surface shadow-panel",
+  hero: "border border-border bg-surface text-ink shadow-overlay",
 };
 
 export function Panel({
   children,
   tone = "default",
+  surface = "default",
   flush = false,
+  radius = "panel",
   className = "",
   "data-testid": testId,
   as: Element = "section",
@@ -36,8 +55,15 @@ export function Panel({
 }: {
   children: React.ReactNode;
   tone?: PanelTone;
+  /** `"hero"` is the one lead panel a screen is allowed: the same
+   *  theme-following surface with a deeper shadow. */
+  surface?: PanelSurface;
   /** Drop the body padding — for tables and anything edge-to-edge. */
   flush?: boolean;
+  /** `"canvas"` is the one-dominant-surface-per-screen radius (brief §7.3) —
+   *  reserved for a page's single lead panel, e.g. the Command Center
+   *  verdict. Every other caller keeps the default. */
+  radius?: keyof typeof RADIUS;
   className?: string;
   "data-testid"?: string;
   as?: "section" | "div" | "article";
@@ -52,9 +78,9 @@ export function Panel({
       // its source: a flex child defaults to `min-width: auto`, so any wrapper
       // around a wide table grows past the panel and the PAGE scrolls
       // sideways instead of the table's own scroller doing it.
-      className={`flex min-w-0 flex-col rounded-panel border border-border bg-surface shadow-panel [&>*]:min-w-0 ${
-        RAIL[tone] ?? ""
-      } ${flush ? "" : "gap-3 p-4"} ${className}`}
+      className={`flex min-w-0 flex-col ${RADIUS[radius]} ${SURFACE[surface]} [&>*]:min-w-0 ${
+        surface === "default" ? RAIL[tone] ?? "" : ""
+      } ${flush ? "" : "gap-6 p-7"} ${className}`}
       {...rest}
     >
       {children}
@@ -90,16 +116,16 @@ export function PanelHeader({
   const Heading = `h${level}` as const;
   return (
     <div
-      className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${
-        flush ? "border-b border-border px-4 py-3" : ""
+      className={`flex items-start justify-between gap-x-4 gap-y-2 ${
+        flush ? "border-b border-border px-7 pt-6 pb-5" : ""
       }`}
     >
-      <div className="min-w-0">
-        <Heading id={id} className="text-section font-semibold text-ink">
+      <div className="min-w-0 flex-1">
+        <Heading id={id} className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
           {title}
         </Heading>
         {description ? (
-          <p className="mt-0.5 text-caption text-ink-secondary">{description}</p>
+          <p className="mt-0.5 text-caption text-ink-muted">{description}</p>
         ) : null}
         {meta ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
@@ -121,12 +147,12 @@ export function PanelBody({
   className?: string;
   flush?: boolean;
 }) {
-  return <div className={`min-w-0 flex-1 ${flush ? "" : "px-4 py-3"} ${className}`}>{children}</div>;
+  return <div className={`min-w-0 flex-1 ${flush ? "" : "px-7 py-5"} ${className}`}>{children}</div>;
 }
 
 export function PanelFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-t border-border px-4 py-2 text-micro text-ink-muted">{children}</div>
+    <div className="border-t border-border px-7 py-4 text-micro text-ink-muted">{children}</div>
   );
 }
 
@@ -148,7 +174,7 @@ export function SectionHeader({
   id?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-border pb-2">
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pb-1">
       <div className="min-w-0">
         <h2 id={id} className="text-section font-semibold text-ink">
           {title}

@@ -2,9 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { Fingerprint, ScrollText, ShieldAlert, UserRound } from "lucide-react";
+
+import { StackedBar } from "@/components/charts/visuals";
+import {
+  IconBubble,
+  KpiTile,
+  PILL_BUTTON,
+  StateCard,
+  TABLE_HEAD,
+} from "@/components/features/configure/kit";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet } from "@/lib/api";
 
 interface AuditEvent {
@@ -53,61 +63,110 @@ export function AuditPanel() {
     void loadPage(null);
   }, [loadPage]);
 
+  const tally = {
+    success: events.filter((event) => event.result === "success").length,
+    denied: events.filter((event) => event.result === "denied").length,
+    failure: events.filter((event) => event.result === "failure").length,
+  };
+  const actors = new Set(events.map((event) => `${event.actor_type}:${event.actor_id}`)).size;
+
   return (
-    <Card title="Audit trail">
-      {phase === "loading" ? <DataState kind="loading" /> : null}
-      {phase === "error" ? (
-        <DataState kind="error" description={message} onRetry={() => void loadPage(null)} />
-      ) : null}
-      {phase !== "loading" && phase !== "error" && events.length === 0 ? (
-        <DataState kind="empty" title="No audit events in your scope" />
-      ) : null}
+    <div className="space-y-6">
       {events.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" data-testid="audit-table">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-ink-muted">
-                <th className="px-2 py-2">Time (UTC)</th>
-                <th className="px-2 py-2">Actor</th>
-                <th className="px-2 py-2">Action</th>
-                <th className="px-2 py-2">Scope</th>
-                <th className="px-2 py-2">Result</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {events.map((event) => (
-                <tr key={event.id}>
-                  <td className="px-2 py-2 font-mono text-xs text-ink-secondary">
-                    {event.occurred_at.replace("T", " ").slice(0, 19)}
-                  </td>
-                  <td className="px-2 py-2 font-mono text-xs text-ink-secondary">
-                    {event.actor_type}
-                  </td>
-                  <td className="px-2 py-2 font-mono text-xs text-ink">{event.action}</td>
-                  <td className="px-2 py-2 font-mono text-xs text-ink-secondary">
-                    {event.scope_ref ?? "—"}
-                  </td>
-                  <td className="px-2 py-2">
-                    <StatusBadge status={RESULT_STATUS[event.result]} label={event.result} />
-                  </td>
+        <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)]">
+          <KpiTile icon={ScrollText} label="Events loaded" value={events.length}>
+            <p className="text-micro text-ink-muted">
+              {cursor ? "More pages are available" : "Every event in your scope"}
+            </p>
+          </KpiTile>
+          <KpiTile icon={Fingerprint} tone="info" label="Distinct actors" value={actors}>
+            <p className="text-micro text-ink-muted">Across the loaded events</p>
+          </KpiTile>
+          <Panel className="h-full !gap-5">
+            <div className="flex items-center gap-3">
+              <IconBubble icon={ShieldAlert} tone={tally.failure + tally.denied > 0 ? "warning" : undefined} />
+              <span className="text-caption font-medium text-ink-secondary">Outcome of loaded events</span>
+            </div>
+            <StackedBar
+              label="Audit outcomes"
+              height={20}
+              segments={[
+                { name: "Success", value: tally.success, tone: "success" },
+                { name: "Denied", value: tally.denied, tone: "warning" },
+                { name: "Failure", value: tally.failure, tone: "critical" },
+              ]}
+            />
+          </Panel>
+        </div>
+      ) : null}
+
+      <Panel flush>
+        <PanelHeader flush title="Audit trail" description="Append-only; newest first" />
+        {phase === "loading" ? (
+          <div className="px-7 py-5">
+            <DataState kind="loading" />
+          </div>
+        ) : null}
+        {phase === "error" ? (
+          <div className="px-7 py-5">
+            <DataState kind="error" description={message} onRetry={() => void loadPage(null)} />
+          </div>
+        ) : null}
+        {phase !== "loading" && phase !== "error" && events.length === 0 ? (
+          <StateCard kind="empty" icon={ScrollText} title="No audit events in your scope" />
+        ) : null}
+        {events.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left" data-testid="audit-table">
+              <thead>
+                <tr className={`border-b border-border ${TABLE_HEAD}`}>
+                  <th className="h-11 px-7 font-medium">Time (UTC)</th>
+                  <th className="h-11 px-3 font-medium">Actor</th>
+                  <th className="h-11 px-3 font-medium">Action</th>
+                  <th className="h-11 px-3 font-medium">Scope</th>
+                  <th className="h-11 px-7 font-medium">Result</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {cursor ? (
-        <div className="mt-3 border-t border-border pt-3">
-          <button
-            type="button"
-            onClick={() => void loadPage(cursor)}
-            disabled={phase === "loading-more"}
-            className="h-9 rounded-lg border border-border px-4 text-sm text-ink-secondary hover:bg-surface-sunken disabled:opacity-50"
-          >
-            {phase === "loading-more" ? "Loading…" : "Load more"}
-          </button>
-        </div>
-      ) : null}
-    </Card>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {events.map((event) => (
+                  <tr key={event.id} className="h-14 transition-colors hover:bg-surface-hover">
+                    <td className="px-7 font-mono text-micro whitespace-nowrap text-ink-secondary">
+                      {event.occurred_at.replace("T", " ").slice(0, 19)}
+                    </td>
+                    <td className="px-3">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-2.5 pl-1 text-micro text-ink-secondary">
+                        <span aria-hidden className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-3">
+                          <UserRound className="h-3 w-3" />
+                        </span>
+                        <span className="font-mono">{event.actor_type}</span>
+                      </span>
+                    </td>
+                    <td className="px-3 font-mono text-caption font-medium text-ink">{event.action}</td>
+                    <td className="px-3 font-mono text-micro text-ink-secondary">
+                      {event.scope_ref ?? "—"}
+                    </td>
+                    <td className="px-7">
+                      <StatusBadge status={RESULT_STATUS[event.result]} label={event.result} size="compact" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {cursor ? (
+          <div className="border-t border-border px-7 py-4">
+            <button
+              type="button"
+              onClick={() => void loadPage(cursor)}
+              disabled={phase === "loading-more"}
+              className={PILL_BUTTON}
+            >
+              {phase === "loading-more" ? "Loading…" : "Load more"}
+            </button>
+          </div>
+        ) : null}
+      </Panel>
+    </div>
   );
 }

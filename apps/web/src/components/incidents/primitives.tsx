@@ -9,6 +9,8 @@
  * be tested against a database.
  */
 
+import { Inbox } from "lucide-react";
+
 import {
   EVENT_DESCRIPTIONS,
   EVENT_LABELS,
@@ -19,6 +21,71 @@ import {
 } from "@/lib/incidents";
 import { REASON_LABELS } from "@/lib/serviceHealth";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
+import { RingProgress } from "@/components/charts/visuals";
+import { Panel } from "@/components/ui/Panel";
+import { DataState } from "@/components/state/DataState";
+import type { StatusTone } from "@/lib/design/status";
+
+/**
+ * One KPI tile for a list screen's summary row: a big honest count with a
+ * ring showing its share of the page. When the page has nothing at all, the
+ * share is `null` rather than a fabricated 0% — the ring renders as an
+ * empty, muted track instead of implying a measurement that never happened.
+ */
+export function IncidentKpiTile({
+  label,
+  count,
+  total,
+  tone,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  tone: StatusTone;
+}) {
+  const share = total > 0 ? count / total : null;
+  return (
+    <Panel data-testid={`incident-kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-caption text-ink-muted">{label}</p>
+          <p
+            data-tabular
+            className="mt-1 text-[2rem] leading-none font-semibold tracking-[-0.03em] text-ink"
+          >
+            {count}
+          </p>
+        </div>
+        <RingProgress value={share} unit="ratio" label={`${label} of shown incidents`} tone={tone} size={48} />
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * A calm, intentional empty state for the incident list — a muted ring
+ * medallion above the honest explanation, rather than a bare sentence
+ * floating in a mostly-empty card.
+ */
+export function IncidentsEmptyCard({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <Panel className="items-center gap-4 py-12 text-center">
+      <span
+        aria-hidden
+        className="flex h-14 w-14 items-center justify-center rounded-full bg-surface-3 ring-8 ring-surface-2"
+      >
+        <Inbox className="h-6 w-6 text-ink-muted" />
+      </span>
+      <DataState kind="empty" title={title} description={description} />
+    </Panel>
+  );
+}
 
 /** Lifecycle state → badge vocabulary. A plain renaming: `acknowledged` is
  * not "less severe", it is "someone is on it", so it keeps a warning tone
@@ -43,16 +110,80 @@ export function ReasonLabel({ reason }: { reason: string }) {
 
 export function ReasonList({ reasons }: { reasons: string[] }) {
   if (reasons.length === 0) {
-    return <p className="text-xs italic text-ink-muted">No reason codes recorded.</p>;
+    return <p className="text-caption italic text-ink-muted">No reason codes recorded.</p>;
   }
   return (
-    <ul className="space-y-1" data-testid="incident-reasons">
+    <ul className="flex flex-wrap gap-1.5" data-testid="incident-reasons">
       {reasons.map((reason) => (
-        <li key={reason} className="text-xs text-ink-secondary">
+        <li
+          key={reason}
+          className="rounded-full bg-surface-2 px-3 py-1 text-caption text-ink-secondary"
+        >
           <ReasonLabel reason={reason} />
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * The three-stage lifecycle, as a horizontal progress stepper.
+ *
+ * Purely a rendering of state the API already sent — `state`,
+ * `acknowledged_at` and `resolved_at` — as a shape instead of three lines of
+ * a definition list. A step lights up only once its timestamp exists; an
+ * open incident stops at step one with the rest visibly, honestly grey.
+ */
+export function IncidentLifecycle({
+  openedAt,
+  acknowledgedAt,
+  resolvedAt,
+}: {
+  openedAt: string;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+}) {
+  const steps: { key: string; label: string; time: string | null; tone: StatusTone }[] = [
+    { key: "opened", label: "Opened", time: openedAt, tone: "critical" },
+    {
+      key: "acknowledged",
+      label: "Acknowledged",
+      time: acknowledgedAt,
+      tone: "warning",
+    },
+    { key: "resolved", label: "Resolved", time: resolvedAt, tone: "success" },
+  ];
+  return (
+    <div className="flex items-start" data-testid="incident-lifecycle">
+      {steps.map((step, index) => {
+        const done = Boolean(step.time);
+        const nextDone = index < steps.length - 1 ? Boolean(steps[index + 1].time) : false;
+        return (
+          <div key={step.key} className="flex min-w-0 flex-1 items-start last:flex-none">
+            <div className="flex shrink-0 flex-col items-center gap-1.5 text-center">
+              <span
+                aria-hidden
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-caption font-semibold ${
+                  done ? `text-ink-inverse ${step.tone === "critical" ? "bg-critical" : step.tone === "warning" ? "bg-warning" : "bg-healthy"}` : "bg-surface-3 text-ink-muted"
+                }`}
+              >
+                {index + 1}
+              </span>
+              <span className={`text-micro font-medium ${done ? "text-ink" : "text-ink-muted"}`}>
+                {step.label}
+              </span>
+              <span className="font-mono text-micro text-ink-muted">{step.time ?? "—"}</span>
+            </div>
+            {index < steps.length - 1 ? (
+              <span
+                aria-hidden
+                className={`mt-4 h-0.5 flex-1 rounded-full ${nextDone ? "bg-ink-muted" : "bg-surface-3"}`}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

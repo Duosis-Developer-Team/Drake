@@ -11,6 +11,8 @@
  * keep testing the same thing.
  */
 
+import { Sigma } from "lucide-react";
+
 import {
   DeniedState,
   EmptyState,
@@ -77,11 +79,14 @@ export function DataState({
     case "zero":
       // A measured zero is a value, not an absence: it renders as the number.
       return (
-        <p data-testid="state-zero" className="text-body text-ink">
-          <span data-tabular className="font-semibold">
+        <p data-testid="state-zero" className="flex items-center gap-3.5 py-1 text-body text-ink">
+          <span
+            data-tabular
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface-2 text-section font-semibold"
+          >
             0
           </span>{" "}
-          <span className="text-ink-secondary">
+          <span className="text-caption text-ink-secondary">
             {description ?? "The source reported an actual value of 0."}
           </span>
         </p>
@@ -92,10 +97,21 @@ export function DataState({
       return <PartialBanner description={description} />;
     case "estimated":
       return (
-        <p data-testid="state-estimated" className="text-caption text-warning">
-          <span className="font-medium">Estimated.</span>{" "}
-          {description ??
-            "Derived from a documented estimation method, not an exact measurement."}
+        <p
+          data-testid="state-estimated"
+          className="flex items-start gap-3 rounded-[1.125rem] border border-warning/30 bg-warning-soft px-4 py-3 text-caption text-warning"
+        >
+          <span
+            aria-hidden
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-warning/15"
+          >
+            <Sigma className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 pt-1">
+            <span className="font-semibold">Estimated.</span>{" "}
+            {description ??
+              "Derived from a documented estimation method, not an exact measurement."}
+          </span>
         </p>
       );
     case "unknown":

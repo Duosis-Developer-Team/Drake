@@ -111,7 +111,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex shrink-0 items-center gap-0.5 rounded-control border border-border bg-surface-2 p-0.5"
+      className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-surface p-1"
     >
       {options.map((option) => {
         const selected = option.value === value;
@@ -124,17 +124,17 @@ export function SegmentedControl<T extends string>({
             aria-checked={selected}
             title={iconOnly ? option.label : undefined}
             onClick={() => onChange(option.value)}
-            className={`inline-flex items-center gap-1.5 rounded-[0.375rem] font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-full font-medium transition-colors ${
               iconOnly
                 ? size === "compact"
-                  ? "h-6 w-7 justify-center"
-                  : "h-7 w-8 justify-center"
+                  ? "h-7 w-7 justify-center"
+                  : "h-8 w-8 justify-center"
                 : size === "compact"
                   ? "h-6 px-2 text-micro"
                   : "h-7 px-2.5 text-caption"
             } ${
               selected
-                ? "bg-surface text-ink shadow-panel"
+                ? "bg-surface-3 text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
                 : "text-ink-secondary hover:text-ink"
             }`}
           >

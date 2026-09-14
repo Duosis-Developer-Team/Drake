@@ -106,7 +106,7 @@ export function LocalSignIn() {
       <button
         type="submit"
         disabled={pending}
-        className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-accent px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-accent px-5 text-sm font-medium text-ink-inverse transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Signing in…" : "Sign in"}
       </button>

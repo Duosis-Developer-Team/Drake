@@ -32,6 +32,8 @@ coverage/
 *.tsbuildinfo
 .turbo/
 .eslintcache
+apps/web/.wave0-baseline/
+apps/web/.visual-preview/
 
 # --- Python ---
 __pycache__/
@@ -73,3 +75,9 @@ tmp/
 
 # --- Disposable E2E GitHub App material (script-managed) ---
 /.e2e-github/
+
+# --- Disposable local-preview Alertmanager webhook token (manual, throwaway) ---
+/.e2e-alertmanager/
+
+# --- Local git worktrees for isolated plan execution ---
+/.worktrees/
