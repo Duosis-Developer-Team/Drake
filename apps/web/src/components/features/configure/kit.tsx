@@ -10,13 +10,7 @@
  */
 
 import type { LucideIcon } from "lucide-react";
-import {
-  Ban,
-  CircleSlash,
-  Inbox,
-  RefreshCw,
-  XCircle,
-} from "lucide-react";
+import { Ban, CircleSlash, Inbox, RefreshCw, XCircle } from "lucide-react";
 
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
@@ -30,9 +24,11 @@ export const PILL_PRIMARY =
 export const PILL_FIELD =
   "h-11 w-full min-w-0 appearance-none rounded-full border border-border bg-surface px-4 text-body text-ink placeholder:text-ink-muted disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent";
 
-export const FIELD_LABEL = "mb-1.5 block text-caption font-medium text-ink-secondary";
+export const FIELD_LABEL =
+  "mb-1.5 block text-caption font-medium text-ink-secondary";
 
-export const TABLE_HEAD = "text-micro font-medium uppercase tracking-[0.08em] text-ink-muted";
+export const TABLE_HEAD =
+  "text-micro font-medium uppercase tracking-[0.08em] text-ink-muted";
 
 /** A round icon bubble, tone-tinted or neutral. */
 export function IconBubble({
@@ -44,10 +40,18 @@ export function IconBubble({
   tone?: StatusTone;
   size?: "sm" | "md" | "lg" | "xl";
 }) {
-  const box = { sm: "h-8 w-8", md: "h-10 w-10", lg: "h-11 w-11", xl: "h-14 w-14" }[size];
-  const glyph = { sm: "h-4 w-4", md: "h-[1.125rem] w-[1.125rem]", lg: "h-5 w-5", xl: "h-6 w-6" }[
-    size
-  ];
+  const box = {
+    sm: "h-8 w-8",
+    md: "h-10 w-10",
+    lg: "h-11 w-11",
+    xl: "h-14 w-14",
+  }[size];
+  const glyph = {
+    sm: "h-4 w-4",
+    md: "h-[1.125rem] w-[1.125rem]",
+    lg: "h-5 w-5",
+    xl: "h-6 w-6",
+  }[size];
   const colour = tone ? toneSpec(tone).chip : "bg-surface-2 text-ink-secondary";
   return (
     <span
@@ -60,7 +64,13 @@ export function IconBubble({
 }
 
 /** Two-letter initials in a neutral bubble — for people and accounts. */
-export function InitialsBubble({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
+export function InitialsBubble({
+  name,
+  size = "md",
+}: {
+  name: string;
+  size?: "sm" | "md";
+}) {
   const initials =
     name
       .split(/[\s/_.-]+/)
@@ -102,7 +112,9 @@ export function KpiTile({
     <Panel className="h-full !gap-5" data-testid={testId}>
       <div className="flex items-center gap-3">
         <IconBubble icon={icon} tone={tone} />
-        <span className="text-caption font-medium text-ink-secondary">{label}</span>
+        <span className="text-caption font-medium text-ink-secondary">
+          {label}
+        </span>
       </div>
       <div className="flex items-baseline gap-2">
         <span
@@ -111,7 +123,9 @@ export function KpiTile({
         >
           {value}
         </span>
-        {suffix ? <span className="text-caption text-ink-muted">{suffix}</span> : null}
+        {suffix ? (
+          <span className="text-caption text-ink-muted">{suffix}</span>
+        ) : null}
       </div>
       {children ? <div className="mt-auto min-w-0">{children}</div> : null}
     </Panel>
@@ -130,7 +144,8 @@ export function ShareBar({
   tone?: StatusTone;
   label: string;
 }) {
-  const share = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
+  const share =
+    total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
   return (
     <div className="min-w-0">
       <div
@@ -153,27 +168,43 @@ export function ShareBar({
   );
 }
 
-type StateKind = "empty" | "not-configured" | "no-data" | "permission-denied" | "error";
+type StateKind =
+  "empty" | "not-configured" | "no-data" | "permission-denied" | "error";
 
 const STATE_DEFAULTS: Record<
   StateKind,
   { testId: string; icon: LucideIcon; tone: StatusTone; title: string }
 > = {
-  empty: { testId: "state-empty", icon: Inbox, tone: "neutral", title: "Nothing here yet" },
+  empty: {
+    testId: "state-empty",
+    icon: Inbox,
+    tone: "neutral",
+    title: "Nothing here yet",
+  },
   "not-configured": {
     testId: "state-not-configured",
     icon: CircleSlash,
     tone: "not-applicable",
     title: "Not configured",
   },
-  "no-data": { testId: "state-no-data", icon: Inbox, tone: "neutral", title: "No data" },
+  "no-data": {
+    testId: "state-no-data",
+    icon: Inbox,
+    tone: "neutral",
+    title: "No data",
+  },
   "permission-denied": {
     testId: "state-permission-denied",
     icon: Ban,
     tone: "denied",
     title: "Permission required",
   },
-  error: { testId: "state-error", icon: XCircle, tone: "critical", title: "Query failed" },
+  error: {
+    testId: "state-error",
+    icon: XCircle,
+    tone: "critical",
+    title: "Query failed",
+  },
 };
 
 /**
@@ -209,14 +240,22 @@ export function StateCard({
       Retry
     </button>
   ) : null;
-  const tone = toneOverride ?? (kind === "empty" || kind === "no-data" ? undefined : spec.tone);
+  const tone =
+    toneOverride ??
+    (kind === "empty" || kind === "no-data" ? undefined : spec.tone);
 
   if (inline) {
     return (
-      <div data-testid={spec.testId} role="status" className="flex items-start gap-4">
+      <div
+        data-testid={spec.testId}
+        role="status"
+        className="flex items-start gap-4"
+      >
         <IconBubble icon={Icon} tone={tone} size="lg" />
         <div className="min-w-0 flex-1">
-          <p className="text-body font-semibold text-ink">{title ?? spec.title}</p>
+          <p className="text-body font-semibold text-ink">
+            {title ?? spec.title}
+          </p>
           {description ? (
             <p className="mt-0.5 text-caption text-ink-muted">{description}</p>
           ) : null}
@@ -236,7 +275,7 @@ export function StateCard({
     <div
       data-testid={spec.testId}
       role="status"
-      className="flex flex-col items-center px-6 py-10 text-center"
+      className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center"
     >
       <span
         aria-hidden
@@ -244,9 +283,13 @@ export function StateCard({
       >
         <IconBubble icon={Icon} tone={tone} size="lg" />
       </span>
-      <p className="mt-5 text-[1.0625rem] font-semibold text-ink">{title ?? spec.title}</p>
+      <p className="mt-5 text-[1.0625rem] font-semibold text-ink">
+        {title ?? spec.title}
+      </p>
       {description ? (
-        <p className="mt-1 max-w-md text-caption text-ink-muted">{description}</p>
+        <p className="mt-1 max-w-md text-caption text-ink-muted">
+          {description}
+        </p>
       ) : null}
       {children}
       {action || retry ? (
@@ -315,7 +358,11 @@ export function FilterChips<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-2">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="flex flex-wrap items-center gap-2"
+    >
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -362,9 +409,14 @@ export function MetaGrid({
       className={`grid grid-cols-1 gap-3 ${columns === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
     >
       {items.map((item) => (
-        <div key={item.label} className="min-w-0 rounded-2xl bg-surface-2 px-4 py-3">
+        <div
+          key={item.label}
+          className="min-w-0 rounded-2xl bg-surface-2 px-4 py-3"
+        >
           <dt className="text-micro text-ink-muted">{item.label}</dt>
-          <dd className="mt-1 min-w-0 truncate text-caption font-medium text-ink">{item.value}</dd>
+          <dd className="mt-1 min-w-0 truncate text-caption font-medium text-ink">
+            {item.value}
+          </dd>
         </div>
       ))}
     </dl>

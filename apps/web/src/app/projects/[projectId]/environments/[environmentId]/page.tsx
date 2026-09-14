@@ -16,24 +16,49 @@
  * one and nobody captured it.
  */
 
+import {
+  ArrowUpRight,
+  Boxes,
+  Box,
+  Cpu,
+  Gauge,
+  GitCompare,
+  Radar,
+  ServerCog,
+  ShieldCheck,
+  Tag,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import {
+  CapabilityTile,
+  DefinitionGrid,
+  FactPill,
+  IconBubble,
+  StatTile,
+  TileState,
+  capabilityTone,
+} from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Provenance } from "@/components/provenance/Provenance";
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/ui/Panel";
+import { Panel, PanelFooter, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { InlineCode, RelativeTime } from "@/components/ui/identifiers";
 import {
   DeniedState,
-  EmptyState,
   ErrorState,
   LoadingSkeleton,
   NotFoundState,
 } from "@/components/ui/states";
 import type { Environment, ServiceSummary } from "@/lib/catalog";
 import { useCrumbLabel } from "@/lib/crumbs";
-import { humanize, toneForHealth, type StatusTone } from "@/lib/design/status";
+import {
+  humanize,
+  toneForHealth,
+  toneSpec,
+  type StatusTone,
+} from "@/lib/design/status";
 import { useResource } from "@/lib/useResource";
 
 const CRITICALITY_TONE: Record<string, StatusTone> = {
@@ -53,14 +78,12 @@ const CAPABILITY_LABELS: Record<string, string> = {
   drift: "Config drift",
 };
 
-function MetaRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border py-2 last:border-b-0">
-      <dt className="text-caption text-ink-muted">{label}</dt>
-      <dd className="text-body text-ink">{children}</dd>
-    </div>
-  );
-}
+const CAPABILITY_ICONS: Record<string, typeof Boxes> = {
+  workloads: Boxes,
+  targets: Radar,
+  quotas: Gauge,
+  drift: GitCompare,
+};
 
 export default function EnvironmentDetailPage() {
   const { projectId, environmentId } = useParams<{
@@ -70,9 +93,10 @@ export default function EnvironmentDetailPage() {
   const environment = useResource<Environment>(
     `/v1/projects/${projectId}/environments/${environmentId}`,
   );
-  const services = useResource<{ services: ServiceSummary[]; next_cursor: string | null }>(
-    `/v1/projects/${projectId}/environments/${environmentId}/services`,
-  );
+  const services = useResource<{
+    services: ServiceSummary[];
+    next_cursor: string | null;
+  }>(`/v1/projects/${projectId}/environments/${environmentId}/services`);
 
   // `scope.ref` is "project_key/environment_key" — the ancestor the shell
   // breadcrumb needs a name for.
@@ -117,6 +141,20 @@ export default function EnvironmentDetailPage() {
   const serviceList = services.data?.services ?? [];
   const isExternal = data.runtime === "external";
 
+  const capabilityEntries = Object.entries(CAPABILITY_LABELS).map(
+    ([key, label]) => ({
+      key,
+      label,
+      state: data.operational?.[key] ?? "unknown",
+    }),
+  );
+  const reporting = capabilityEntries.filter(
+    (entry) => entry.state === "ok",
+  ).length;
+  const components = [
+    ...new Set(serviceList.map((service) => service.component ?? "—")),
+  ];
+
   return (
     <PageFrame width="wide">
       <PageHeader
@@ -125,7 +163,9 @@ export default function EnvironmentDetailPage() {
           <>
             {data.health ? (
               <>
-                <span className="text-caption text-ink-muted">Measured health</span>
+                <span className="text-caption text-ink-muted">
+                  Measured health
+                </span>
                 <StatusBadge
                   status={toneForHealth(data.health.status)}
                   label={humanize(data.health.status)}
@@ -151,180 +191,301 @@ export default function EnvironmentDetailPage() {
               branch <InlineCode>{data.branch || "—"}</InlineCode>
             </span>
             <span>
-              <InlineCode>v{data.version}</InlineCode> catalog version
-            </span>
-            <span>
-              catalog record accepted <RelativeTime value={data.source.accepted_at} />
+              catalog record accepted{" "}
+              <RelativeTime value={data.source.accepted_at} />
             </span>
           </>
         }
       />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-        <Panel
-          flush
-          data-testid="services-panel"
-          className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
-        >
-          <PanelHeader
-            flush
-            title="Services"
-            description="Every service bound to this environment."
-            meta={
-              services.data ? (
-                <span>
-                  {serviceList.length} service{serviceList.length === 1 ? "" : "s"}
-                </span>
-              ) : undefined
-            }
-          />
-          {services.loading && !services.data ? (
-            <div className="px-7 py-5">
-              <LoadingSkeleton variant="table" rows={3} />
-            </div>
-          ) : services.denied ? (
-            <div className="px-7 py-5">
-              <DeniedState compact />
-            </div>
-          ) : !services.data ? (
-            <div className="px-7 py-5">
-              <ErrorState
-                compact
-                description={services.error ?? undefined}
-                correlationId={services.correlationId}
-                onRetry={services.reload}
-              />
-            </div>
-          ) : serviceList.length === 0 ? (
-            <div className="px-7 py-5">
-              <EmptyState compact title="No service bindings" />
-            </div>
-          ) : (
-            <ul className="divide-y divide-border" data-testid="service-list">
-              {serviceList.map((service) => (
-                <li key={service.id}>
-                  <Link
-                    href={`/projects/${projectId}/environments/${environmentId}/services/${service.id}`}
-                    className="flex items-center justify-between gap-3 px-7 py-4 transition-colors hover:bg-surface-hover"
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <span
-                        aria-hidden
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-caption font-semibold text-ink-secondary"
-                      >
-                        {(service.display_name || service.service_key).slice(0, 1).toUpperCase()}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-body font-medium text-ink">
-                          {service.display_name || service.service_key}
-                        </span>
-                        <span className="block truncate font-mono text-micro text-ink-muted">
-                          {service.component ?? "—"} · {service.runtime}
-                        </span>
-                      </span>
-                    </span>
-                    <span className="shrink-0 font-mono text-micro text-ink-muted">
-                      {service.metrics_profile} · v{service.version}
-                    </span>
-                  </Link>
-                </li>
+      <div className="flex flex-col gap-8">
+        <div className="page-grid motion-safe:animate-[fade-in_320ms_var(--ease-entrance)_backwards]">
+          <StatTile
+            icon={Boxes}
+            label="Services"
+            value={services.data ? serviceList.length : "—"}
+            suffix={services.data ? "bound here" : "could not load"}
+          >
+            {serviceList.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {components.map((component) => (
+                  <FactPill key={component} icon={Tag}>
+                    {`${component} · ${serviceList.filter((service) => (service.component ?? "—") === component).length}`}
+                  </FactPill>
+                ))}
+              </div>
+            ) : (
+              <p className="text-micro text-ink-muted">
+                No service bindings yet
+              </p>
+            )}
+          </StatTile>
+          <StatTile
+            icon={ShieldCheck}
+            label="Capabilities"
+            value={reporting}
+            suffix={`of ${capabilityEntries.length} reporting`}
+          >
+            <ul
+              className="grid grid-cols-4 gap-1.5"
+              aria-label="Capability states"
+            >
+              {capabilityEntries.map((entry) => (
+                <li
+                  key={entry.key}
+                  title={`${entry.label}: ${entry.state === "ok" ? "Reporting" : humanize(entry.state)}`}
+                  className={`h-2 rounded-full ${
+                    entry.state === "ok"
+                      ? toneSpec(capabilityTone(entry.state)).dot
+                      : "bg-surface-3"
+                  }`}
+                />
               ))}
             </ul>
-          )}
-        </Panel>
-
-        <div className="flex flex-col gap-6">
-          <Panel
-            data-testid="operational-grid"
-            className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+          </StatTile>
+          <StatTile
+            icon={ServerCog}
+            label="Runtime"
+            value={humanize(data.runtime)}
           >
-            <PanelHeader
-              title="Capabilities"
-              description="What Drake can currently observe for this environment."
-              level={3}
-            />
-            <ul className="grid grid-cols-2 gap-2">
-              {Object.entries(CAPABILITY_LABELS).map(([key, label]) => {
-                const state = data.operational?.[key] ?? "unknown";
-                return (
-                  <li
-                    key={key}
-                    className="flex h-full flex-col gap-1.5 rounded-control border border-border px-3 py-2"
-                  >
-                    <span className="text-caption text-ink-secondary">{label}</span>
-                    <StatusBadge
-                      status={toneForHealth(state === "ok" ? "healthy" : state)}
-                      label={humanize(state)}
-                      size="compact"
+            <div className="flex flex-wrap gap-1.5">
+              <FactPill mono>{`branch ${data.branch || "—"}`}</FactPill>
+              {data.cluster ? (
+                <FactPill mono>
+                  {data.cluster.display_name || data.cluster.ref}
+                </FactPill>
+              ) : null}
+            </div>
+          </StatTile>
+          <StatTile
+            icon={Cpu}
+            label="Catalog record"
+            value={`v${data.version}`}
+          >
+            <p className="text-micro text-ink-muted">
+              accepted <RelativeTime value={data.source.accepted_at} />
+            </p>
+          </StatTile>
+        </div>
+
+        <div className="page-split">
+          <div className="page-main">
+            <Panel
+              flush
+              data-testid="services-panel"
+              className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+            >
+              <PanelHeader
+                flush
+                title="Services"
+                description="Every service bound to this environment."
+                meta={
+                  services.data ? (
+                    <span>
+                      {serviceList.length} service
+                      {serviceList.length === 1 ? "" : "s"}
+                    </span>
+                  ) : undefined
+                }
+              />
+              {services.loading && !services.data ? (
+                <div className="px-7 py-6">
+                  <LoadingSkeleton variant="table" rows={3} />
+                </div>
+              ) : services.denied ? (
+                <div className="px-7 py-6">
+                  <DeniedState compact />
+                </div>
+              ) : !services.data ? (
+                <div className="px-7 py-6">
+                  <ErrorState
+                    compact
+                    description={services.error ?? undefined}
+                    correlationId={services.correlationId}
+                    onRetry={services.reload}
+                  />
+                </div>
+              ) : serviceList.length === 0 ? (
+                <div className="px-7 py-8">
+                  <TileState
+                    icon={Boxes}
+                    testId="state-empty"
+                    title="No service bindings"
+                    description="Services appear here once one is bound to this environment."
+                  />
+                </div>
+              ) : (
+                <ul
+                  className="grid grid-cols-1 gap-4 p-7 sm:grid-cols-2 2xl:grid-cols-3"
+                  data-testid="service-list"
+                >
+                  {serviceList.map((service) => (
+                    <li key={service.id} className="min-w-0">
+                      <Link
+                        href={`/projects/${projectId}/environments/${environmentId}/services/${service.id}`}
+                        className="group flex h-full min-w-0 flex-col gap-4 rounded-[1.25rem] border border-border bg-surface-2/40 p-5 transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                      >
+                        <span className="flex min-w-0 items-start gap-3">
+                          <IconBubble icon={Box} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-body font-semibold text-ink">
+                              {service.display_name || service.service_key}
+                            </span>
+                            <span className="block truncate font-mono text-micro text-ink-muted">
+                              {service.component ?? "—"} · {service.runtime}
+                            </span>
+                          </span>
+                          <ArrowUpRight
+                            aria-hidden
+                            className="h-4 w-4 shrink-0 text-ink-muted transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                          />
+                        </span>
+                        <span className="mt-auto flex flex-wrap items-center gap-1.5">
+                          <FactPill mono>{service.metrics_profile}</FactPill>
+                          <FactPill mono>{`v${service.version}`}</FactPill>
+                          <StatusBadge
+                            status={
+                              service.lifecycle === "active"
+                                ? "success"
+                                : "neutral"
+                            }
+                            label={humanize(service.lifecycle)}
+                            size="compact"
+                          />
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+
+          <div className="page-aside">
+            <Panel
+              data-testid="operational-grid"
+              className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+            >
+              <PanelHeader
+                title="Capabilities"
+                description="What Drake can observe here."
+                level={3}
+              />
+              {/* The aside is one KPI track wide: let long capability names wrap. */}
+              <ul className="grid grid-cols-1 gap-3 [&_.truncate]:whitespace-normal">
+                {capabilityEntries.map(({ key, label, state }) => (
+                  <li key={key} className="min-w-0">
+                    <CapabilityTile
+                      icon={CAPABILITY_ICONS[key] ?? Boxes}
+                      label={label}
+                      state={state}
                     />
                   </li>
-                );
-              })}
-            </ul>
-          </Panel>
+                ))}
+              </ul>
+            </Panel>
 
-          <Panel
-            flush
-            className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:120ms]"
-          >
-            <PanelHeader flush title="Environment metadata" level={3} />
-            <PanelBody>
-              <dl>
-                <MetaRow label="Runtime">
-                  <InlineCode>{data.runtime}</InlineCode>
-                </MetaRow>
-                <MetaRow label="Branch">
-                  <InlineCode>{data.branch || "—"}</InlineCode>
-                </MetaRow>
-                <MetaRow label="Cluster / namespace">
-                  {data.cluster ? (
-                    <InlineCode>{`${data.cluster.ref} / ${data.namespace}`}</InlineCode>
-                  ) : data.not_applicable?.includes("cluster") ? (
-                    // The runtime has no such concept. This used to render for
-                    // ANY environment without a cluster, so a Kubernetes
-                    // environment that had genuinely lost its cluster was
-                    // described as "external runtime" and looked fine.
-                    <span className="text-caption text-ink-muted italic">Not applicable</span>
-                  ) : (
-                    <span className="text-caption text-ink-muted italic">Not recorded</span>
-                  )}
-                </MetaRow>
-                {isExternal ? (
-                  <>
-                    <MetaRow label="Hosting provider">
-                      <InlineCode>{data.hosting_provider ?? "unknown"}</InlineCode>
-                    </MetaRow>
-                    <MetaRow label="Agent">
-                      <span className="text-caption text-ink-muted italic">Not applicable</span>
-                    </MetaRow>
-                    <MetaRow label="Health source">
-                      <InlineCode>{data.health?.source.status ?? "not_configured"}</InlineCode>
-                    </MetaRow>
-                    <MetaRow label="Freshness">
-                      <InlineCode>{data.health?.freshness ?? "unavailable"}</InlineCode>
-                    </MetaRow>
-                    {data.health?.last_observed_at ? (
-                      <MetaRow label="Last observed">
-                        <RelativeTime value={data.health.last_observed_at} />
-                      </MetaRow>
-                    ) : null}
-                  </>
-                ) : null}
-                <MetaRow label="Catalog version">
-                  <span data-tabular>v{data.version}</span>
-                </MetaRow>
-              </dl>
-            </PanelBody>
-            <PanelFooter>
-              <Provenance
-                source={`${data.source.kind}:${data.source.ref || "-"}`}
-                asOf={data.as_of}
-                freshness="catalog"
-                measurementMethod="catalog_record"
-                confidence="exact"
-              />
-            </PanelFooter>
-          </Panel>
+            <Panel
+              flush
+              className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:120ms]"
+            >
+              <PanelHeader flush title="Environment metadata" level={3} />
+              <div className="px-7 py-6 [&>dl]:grid-cols-1 [&>dl>div]:col-span-1">
+                <DefinitionGrid
+                  items={[
+                    {
+                      label: "Runtime",
+                      value: <InlineCode>{data.runtime}</InlineCode>,
+                    },
+                    {
+                      label: "Branch",
+                      value: <InlineCode>{data.branch || "—"}</InlineCode>,
+                    },
+                    {
+                      label: "Cluster / namespace",
+                      wide: true,
+                      value: data.cluster ? (
+                        <InlineCode>{`${data.cluster.ref} / ${data.namespace}`}</InlineCode>
+                      ) : data.not_applicable?.includes("cluster") ? (
+                        // The runtime has no such concept. This used to render
+                        // for ANY environment without a cluster, so a
+                        // Kubernetes environment that had genuinely lost its
+                        // cluster was described as "external runtime".
+                        <span className="text-caption text-ink-muted italic">
+                          Not applicable
+                        </span>
+                      ) : (
+                        <span className="text-caption text-ink-muted italic">
+                          Not recorded
+                        </span>
+                      ),
+                    },
+                    ...(isExternal
+                      ? [
+                          {
+                            label: "Hosting provider",
+                            value: (
+                              <InlineCode>
+                                {data.hosting_provider ?? "unknown"}
+                              </InlineCode>
+                            ),
+                          },
+                          {
+                            label: "Agent",
+                            value: (
+                              <span className="text-caption text-ink-muted italic">
+                                Not applicable
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "Health source",
+                            value: (
+                              <InlineCode>
+                                {data.health?.source.status ?? "not_configured"}
+                              </InlineCode>
+                            ),
+                          },
+                          {
+                            label: "Freshness",
+                            value: (
+                              <InlineCode>
+                                {data.health?.freshness ?? "unavailable"}
+                              </InlineCode>
+                            ),
+                          },
+                          ...(data.health?.last_observed_at
+                            ? [
+                                {
+                                  label: "Last observed",
+                                  value: (
+                                    <RelativeTime
+                                      value={data.health.last_observed_at}
+                                    />
+                                  ),
+                                },
+                              ]
+                            : []),
+                        ]
+                      : []),
+                    {
+                      label: "Catalog version",
+                      value: <span data-tabular>v{data.version}</span>,
+                    },
+                  ]}
+                />
+              </div>
+              <PanelFooter>
+                <Provenance
+                  source={`${data.source.kind}:${data.source.ref || "-"}`}
+                  asOf={data.as_of}
+                  freshness="catalog"
+                  measurementMethod="catalog_record"
+                  confidence="exact"
+                />
+              </PanelFooter>
+            </Panel>
+          </div>
         </div>
       </div>
     </PageFrame>

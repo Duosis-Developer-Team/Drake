@@ -14,6 +14,7 @@
  */
 
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
+import type { StatusTone } from "@/lib/design/status";
 import {
   ACTION_LABELS,
   GITOPS_LABELS,
@@ -57,6 +58,20 @@ const GITOPS_BADGE: Record<GitOpsState, HealthStatus> = {
   stale: "warning",
   cancelled: "unknown",
 };
+
+const HEALTH_TONE: Record<HealthStatus, StatusTone> = {
+  healthy: "success",
+  warning: "warning",
+  critical: "critical",
+  unknown: "unknown",
+  stale: "stale",
+  maintenance: "info",
+};
+
+/** The session state's tone, for an avatar. Same mapping as the badge. */
+export function sessionTone(state: SessionState): StatusTone {
+  return HEALTH_TONE[SESSION_BADGE[state]];
+}
 
 export function SessionBadge({ state }: { state: SessionState }) {
   return <StatusBadge status={SESSION_BADGE[state]} label={SESSION_LABELS[state]} />;

@@ -396,11 +396,17 @@ table,
 }
 
 /* One focus ring for the whole product, visible on every surface in both
-   themes. Components never restyle it; they only choose where it sits. */
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: 0.25rem;
+   themes. It lives in `@layer base` on purpose: unlayered CSS beats every
+   Tailwind utility, so out here it overrode `outline-none` on borderless
+   fields (a box drawn inside the search palette) and its radius squared off
+   `rounded-full` pills on focus. In the base layer, a component that shows
+   focus on its own wrapper (`focus-within:ring`) can opt out, and the ring
+   follows the element's own shape. */
+@layer base {
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
 }
 
 ::selection {
@@ -412,6 +418,123 @@ table,
    dense table. */
 * {
   scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Page column system.
+ *
+ * The KPI row and the main/aside split below it share ONE set of tracks, so
+ * every card edge on a page lands on the same vertical line. Breakpoints are
+ * container queries on `PageFrame` (container `page`), not the viewport: the
+ * collapsible rail changes the content width without changing the window.
+ *
+ *   .page-grid                  KPI row — 1 → 2 → 4 tracks (data-cols="3": 3)
+ *   .page-split                 main spans 3 of the 4 tracks, aside 1
+ *     > .page-main              stretches; its last child fills the height
+ *     > .page-aside             stacked cards; under the split they sit below
+ *                               main two-up, each card on two KPI tracks
+ *   .page-split[data-cols="3"]  main spans 2 of 3, aside 1 (aside may lead)
+ *   .page-aside[data-sticky]    pins under the top bar (forms, detail panes)
+ */
+.page-grid,
+.page-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+.page-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-main > :last-child {
+  flex: 1 1 auto;
+}
+
+.page-aside {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 1.5rem;
+}
+
+@container page (min-width: 36rem) {
+  .page-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .page-split:not([data-cols="3"]) > .page-aside {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container page (min-width: 60rem) {
+  .page-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .page-grid[data-cols="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .page-grid[data-cols="3"],
+  .page-split[data-cols="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .page-split[data-cols="3"] > .page-main {
+    grid-column: span 2;
+  }
+  .page-split[data-cols="3"] > .page-aside[data-sticky] {
+    position: sticky;
+    top: 6rem;
+    align-self: start;
+  }
+}
+
+@container page (min-width: 68rem) {
+  .page-split:not([data-cols="3"]) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .page-split:not([data-cols="3"]) > .page-main {
+    grid-column: span 3;
+  }
+  .page-split:not([data-cols="3"]) > .page-aside {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page-split:not([data-cols="3"]) > .page-aside[data-sticky] {
+    position: sticky;
+    top: 6rem;
+    align-self: start;
+  }
+}
+
+/* At split width `.page-main` dissolves into the split's own grid: anything
+   leading the main card (a filter bar, a section heading) becomes a full-width
+   row, so the main card and the aside start on the same line and — sharing a
+   grid row — end on the same line too. */
+@container page (min-width: 60rem) {
+  .page-split[data-cols="3"] > .page-main {
+    display: contents;
+  }
+  .page-split[data-cols="3"] > .page-main > * {
+    grid-column: span 2;
+  }
+  .page-split[data-cols="3"] > .page-main > :not(:last-child) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container page (min-width: 68rem) {
+  .page-split:not([data-cols="3"]) > .page-main {
+    display: contents;
+  }
+  .page-split:not([data-cols="3"]) > .page-main > * {
+    grid-column: span 3;
+  }
+  .page-split:not([data-cols="3"]) > .page-main > :not(:last-child) {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Surface entrances. Nothing here loops, pulses or bounces; every one is a

@@ -37,11 +37,26 @@ const OBSERVED_STATUS: Record<string, HealthStatus> = {
   not_configured: "unknown",
 };
 
-const PROVIDERS: Record<string, { name: string; icon: LucideIcon; blurb: string }> = {
+const PROVIDERS: Record<
+  string,
+  { name: string; icon: LucideIcon; blurb: string }
+> = {
   github: { name: "GitHub", icon: Github, blurb: "Repository governance" },
-  prometheus: { name: "Prometheus", icon: Flame, blurb: "Metrics and alerting" },
-  "cluster-agent": { name: "Cluster agent", icon: Boxes, blurb: "Kubernetes inventory" },
-  "backup-reporter": { name: "Backup reporter", icon: DatabaseBackup, blurb: "Backup evidence" },
+  prometheus: {
+    name: "Prometheus",
+    icon: Flame,
+    blurb: "Metrics and alerting",
+  },
+  "cluster-agent": {
+    name: "Cluster agent",
+    icon: Boxes,
+    blurb: "Kubernetes inventory",
+  },
+  "backup-reporter": {
+    name: "Backup reporter",
+    icon: DatabaseBackup,
+    blurb: "Backup evidence",
+  },
 };
 
 function providerSpec(type: string) {
@@ -62,20 +77,26 @@ function scopeKey(integration: IntegrationHealth) {
   return `${integration.scope.type}/${integration.scope.ref}`;
 }
 
-function IntegrationsOverview({ integrations }: { integrations: IntegrationHealth[] }) {
+function IntegrationsOverview({
+  integrations,
+}: {
+  integrations: IntegrationHealth[];
+}) {
   const providers = new Set(integrations.map((i) => i.integration_type)).size;
   const scopes = new Set(integrations.map(scopeKey)).size;
-  const configured = integrations.filter((i) => i.configuration_state === "configured").length;
+  const configured = integrations.filter(
+    (i) => i.configuration_state === "configured",
+  ).length;
   const ok = integrations.filter((i) => i.observed_state === "ok").length;
   const attention = integrations.filter(
-    (i) => i.observed_state === "degraded" || i.observed_state === "stale" || i.last_error_code,
+    (i) =>
+      i.observed_state === "degraded" ||
+      i.observed_state === "stale" ||
+      i.last_error_code,
   ).length;
 
   return (
-    <div
-      className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-2 xl:grid-cols-4"
-      data-testid="integrations-stats"
-    >
+    <div className="page-grid" data-testid="integrations-stats">
       <KpiTile icon={Plug} label="Providers" value={providers}>
         <p className="text-micro text-ink-muted">
           <span data-tabular className="font-medium text-ink-secondary">
@@ -88,11 +109,33 @@ function IntegrationsOverview({ integrations }: { integrations: IntegrationHealt
           scope{scopes === 1 ? "" : "s"}
         </p>
       </KpiTile>
-      <KpiTile icon={Layers} tone="info" label="Connected" value={configured} suffix={`of ${integrations.length}`}>
-        <ShareBar value={configured} total={integrations.length} tone="info" label="configured" />
+      <KpiTile
+        icon={Layers}
+        tone="info"
+        label="Connected"
+        value={configured}
+        suffix={`of ${integrations.length}`}
+      >
+        <ShareBar
+          value={configured}
+          total={integrations.length}
+          tone="info"
+          label="configured"
+        />
       </KpiTile>
-      <KpiTile icon={CircleCheck} tone="success" label="Answering OK" value={ok} suffix={`of ${integrations.length}`}>
-        <ShareBar value={ok} total={integrations.length} tone="success" label="reporting normally" />
+      <KpiTile
+        icon={CircleCheck}
+        tone="success"
+        label="Answering OK"
+        value={ok}
+        suffix={`of ${integrations.length}`}
+      >
+        <ShareBar
+          value={ok}
+          total={integrations.length}
+          tone="success"
+          label="reporting normally"
+        />
       </KpiTile>
       <KpiTile
         icon={TriangleAlert}
@@ -100,15 +143,25 @@ function IntegrationsOverview({ integrations }: { integrations: IntegrationHealt
         label="Needs attention"
         value={attention}
       >
-        <p className="text-micro text-ink-muted">Degraded, stale or erroring connectors</p>
+        <p className="text-micro text-ink-muted">
+          Degraded, stale or erroring connectors
+        </p>
       </KpiTile>
     </div>
   );
 }
 
-function ProviderTile({ type, entries }: { type: string; entries: IntegrationHealth[] }) {
+function ProviderTile({
+  type,
+  entries,
+}: {
+  type: string;
+  entries: IntegrationHealth[];
+}) {
   const spec = providerSpec(type);
-  const connected = entries.filter((e) => e.configuration_state === "configured").length;
+  const connected = entries.filter(
+    (e) => e.configuration_state === "configured",
+  ).length;
   const manageHref = MANAGE_HREF[type];
   const latest = entries
     .map((e) => e.last_success_at)
@@ -125,13 +178,17 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
         <span
           aria-hidden
           className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
-            connected > 0 ? "bg-accent text-ink-inverse" : "bg-surface-3 text-ink-secondary"
+            connected > 0
+              ? "bg-accent text-ink-inverse"
+              : "bg-surface-3 text-ink-secondary"
           }`}
         >
           <spec.icon className="h-6 w-6" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[1.0625rem] font-semibold text-ink">{spec.name}</h3>
+          <h3 className="truncate text-[1.0625rem] font-semibold text-ink">
+            {spec.name}
+          </h3>
           <p className="truncate text-caption text-ink-muted">{spec.blurb}</p>
         </div>
       </div>
@@ -143,7 +200,9 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
               <span
                 key={scopeKey(entry)}
                 className={`h-1.5 w-5 rounded-full ${
-                  entry.configuration_state === "configured" ? "bg-info" : "bg-surface-3"
+                  entry.configuration_state === "configured"
+                    ? "bg-info"
+                    : "bg-surface-3"
                 }`}
               />
             ))}
@@ -157,7 +216,9 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
         </div>
         <span
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-medium whitespace-nowrap ${
-            connected > 0 ? "bg-info-soft text-info" : "bg-surface-3 text-ink-muted"
+            connected > 0
+              ? "bg-info-soft text-info"
+              : "bg-surface-3 text-ink-muted"
           }`}
         >
           <span
@@ -175,11 +236,16 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
             className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-6 py-3.5"
           >
             <div className="min-w-0">
-              <p className="truncate text-body font-medium text-ink">{integration.scope.ref}</p>
+              <p className="truncate text-body font-medium text-ink">
+                {integration.scope.ref}
+              </p>
               <p className="truncate text-micro text-ink-muted">
                 {integration.scope.type} · last sync{" "}
                 {integration.last_success_at ? (
-                  <time dateTime={integration.last_success_at} title={formatUtc(integration.last_success_at)}>
+                  <time
+                    dateTime={integration.last_success_at}
+                    title={formatUtc(integration.last_success_at)}
+                  >
                     {formatRelative(integration.last_success_at)}
                   </time>
                 ) : (
@@ -197,7 +263,9 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
                 {integration.configuration_state}
               </span>
               <StatusBadge
-                status={OBSERVED_STATUS[integration.observed_state] ?? "unknown"}
+                status={
+                  OBSERVED_STATUS[integration.observed_state] ?? "unknown"
+                }
                 label={integration.observed_state}
                 size="compact"
               />
@@ -206,11 +274,14 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
         ))}
       </ul>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
+      {/* mt-auto: when the gallery rows stretch to the aside's height, the
+          footer stays on the card's bottom edge instead of floating. */}
+      <div className="mt-auto flex items-center justify-between gap-3 border-t border-border px-6 py-4">
         <span className="min-w-0 truncate text-micro text-ink-muted">
           {latest ? (
             <>
-              Latest success <time dateTime={latest}>{formatRelative(latest)}</time>
+              Latest success{" "}
+              <time dateTime={latest}>{formatRelative(latest)}</time>
             </>
           ) : (
             "No successful sync yet"
@@ -234,8 +305,13 @@ function ProviderTile({ type, entries }: { type: string; entries: IntegrationHea
   );
 }
 
-function HealthSummary({ integrations }: { integrations: IntegrationHealth[] }) {
-  const count = (state: string) => integrations.filter((i) => i.observed_state === state).length;
+function HealthSummary({
+  integrations,
+}: {
+  integrations: IntegrationHealth[];
+}) {
+  const count = (state: string) =>
+    integrations.filter((i) => i.observed_state === state).length;
   const ok = count("ok");
   const degraded = count("degraded");
   const stale = count("stale");
@@ -243,9 +319,12 @@ function HealthSummary({ integrations }: { integrations: IntegrationHealth[] }) 
   const scopes = [...new Set(integrations.map(scopeKey))];
 
   return (
-    <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2 2xl:grid-cols-1">
+    <div className="page-aside">
       <Panel className="h-full">
-        <PanelHeader title="Observed health" description="Every connector, by what Drake last saw" />
+        <PanelHeader
+          title="Observed health"
+          description="Every connector, by what Drake last saw"
+        />
         <Donut
           label="Observed connector state"
           size={148}
@@ -259,17 +338,24 @@ function HealthSummary({ integrations }: { integrations: IntegrationHealth[] }) 
         />
       </Panel>
       <Panel className="h-full">
-        <PanelHeader title="Coverage by scope" description="Connected providers per scope" />
+        <PanelHeader
+          title="Coverage by scope"
+          description="Connected providers per scope"
+        />
         <ul className="space-y-4">
           {scopes.map((key) => {
             const inScope = integrations.filter((i) => scopeKey(i) === key);
-            const connected = inScope.filter((i) => i.configuration_state === "configured");
+            const connected = inScope.filter(
+              (i) => i.configuration_state === "configured",
+            );
             return (
               <li key={key} className="flex items-center gap-3">
                 <IconBubble icon={Layers} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-caption font-medium text-ink">{key}</span>
+                    <span className="truncate text-caption font-medium text-ink">
+                      {key}
+                    </span>
                     <span data-tabular className="text-micro text-ink-muted">
                       {connected.length}/{inScope.length}
                     </span>
@@ -283,7 +369,9 @@ function HealthSummary({ integrations }: { integrations: IntegrationHealth[] }) 
                           key={i.integration_type}
                           title={`${providerSpec(i.integration_type).name}: ${on ? "connected" : "not connected"}`}
                           className={`flex h-6 flex-1 items-center justify-center rounded-full ${
-                            on ? "bg-info-soft text-info" : "bg-surface-3 text-ink-muted"
+                            on
+                              ? "bg-info-soft text-info"
+                              : "bg-surface-3 text-ink-muted"
                           }`}
                         >
                           <Icon className="h-3 w-3" />
@@ -302,9 +390,10 @@ function HealthSummary({ integrations }: { integrations: IntegrationHealth[] }) 
 }
 
 export default function IntegrationsPage() {
-  const [health, retry] = useApi<{ integrations: IntegrationHealth[]; next_cursor: string | null }>(
-    "/v1/integrations/health",
-  );
+  const [health, retry] = useApi<{
+    integrations: IntegrationHealth[];
+    next_cursor: string | null;
+  }>("/v1/integrations/health");
 
   return (
     <PageFrame>
@@ -343,9 +432,15 @@ export default function IntegrationsPage() {
             return (
               <>
                 <IntegrationsOverview integrations={body.integrations} />
-                <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-                  <section aria-labelledby="provider-gallery" className="min-w-0 space-y-4">
-                    <h2 id="provider-gallery" className="text-[1.0625rem] font-semibold text-ink">
+                <div className="page-split">
+                  <section
+                    aria-labelledby="provider-gallery"
+                    className="page-main"
+                  >
+                    <h2
+                      id="provider-gallery"
+                      className="-mb-2 text-[1.0625rem] font-semibold text-ink"
+                    >
                       Providers
                     </h2>
                     <div
@@ -353,7 +448,11 @@ export default function IntegrationsPage() {
                       data-testid="integration-table"
                     >
                       {[...byType.entries()].map(([type, entries]) => (
-                        <ProviderTile key={type} type={type} entries={entries} />
+                        <ProviderTile
+                          key={type}
+                          type={type}
+                          entries={entries}
+                        />
                       ))}
                     </div>
                   </section>

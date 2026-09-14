@@ -109,7 +109,8 @@ function PolicyForm({
   onCancel: () => void;
 }) {
   const { state: session, hasPermission } = useSession();
-  const csrfToken = session.status === "authenticated" ? session.me.csrf_token : null;
+  const csrfToken =
+    session.status === "authenticated" ? session.me.csrf_token : null;
   const canManage = hasPermission("notification.manage");
   const nameId = useId();
   const projectFieldId = useId();
@@ -117,7 +118,9 @@ function PolicyForm({
 
   const [name, setName] = useState(existing?.display_name ?? "");
   const [projectId, setProjectId] = useState(existing?.project_id ?? "");
-  const [environmentId, setEnvironmentId] = useState(existing?.environment_id ?? "");
+  const [environmentId, setEnvironmentId] = useState(
+    existing?.environment_id ?? "",
+  );
   const [events, setEvents] = useState<NotificationEventType[]>(
     existing?.event_types ?? ["opened", "auto_resolved"],
   );
@@ -135,7 +138,9 @@ function PolicyForm({
     }
     let cancelled = false;
     fetch(`/v1/projects/${projectId}/environments`, { credentials: "include" })
-      .then((response) => (response.ok ? response.json() : { environments: [] }))
+      .then((response) =>
+        response.ok ? response.json() : { environments: [] },
+      )
       .then((body: { environments?: EnvironmentSummary[] }) => {
         if (!cancelled) setEnvironments(body.environments ?? []);
       })
@@ -175,7 +180,10 @@ function PolicyForm({
           enabled,
           expected_version: existing.version,
         });
-        setNotice({ kind: "saved", message: "Saved. Only future incidents are affected." });
+        setNotice({
+          kind: "saved",
+          message: "Saved. Only future incidents are affected.",
+        });
       } else {
         await createPolicy(csrfToken, {
           display_name: name,
@@ -208,7 +216,9 @@ function PolicyForm({
     }
   };
 
-  const complete = Boolean(name && (existing || projectId) && events.length > 0);
+  const complete = Boolean(
+    name && (existing || projectId) && events.length > 0,
+  );
 
   return (
     <Panel>
@@ -234,7 +244,11 @@ function PolicyForm({
         </div>
       ) : null}
 
-      <form onSubmit={submit} className="space-y-6" aria-label="Notification policy">
+      <form
+        onSubmit={submit}
+        className="space-y-6"
+        aria-label="Notification policy"
+      >
         <Step number={1} title="Name this rule">
           <label htmlFor={nameId} className="sr-only">
             Name
@@ -318,7 +332,9 @@ function PolicyForm({
                     onChange={() => toggleEvent(event)}
                     className="sr-only"
                   />
-                  {checked ? <CheckCheck aria-hidden className="h-3.5 w-3.5" /> : null}
+                  {checked ? (
+                    <CheckCheck aria-hidden className="h-3.5 w-3.5" />
+                  ) : null}
                   {EVENT_TYPE_LABELS[event]}
                 </label>
               );
@@ -350,14 +366,18 @@ function PolicyForm({
             <span data-tabular className="font-semibold text-ink">
               {destinations.length}
             </span>{" "}
-            destinations in scope. Webhook targets are chosen by name — there is no address to
-            enter here.
+            destinations in scope. Webhook targets are chosen by name — there is
+            no address to enter here.
           </p>
         </div>
 
         {notice.kind === "conflict" ? (
           <div role="alert" data-testid="policy-conflict">
-            <DataState kind="error" title="Version conflict" description={notice.message} />
+            <DataState
+              kind="error"
+              title="Version conflict"
+              description={notice.message}
+            />
           </div>
         ) : null}
         {notice.kind === "error" ? (
@@ -408,9 +428,14 @@ function RuleCard({
       }`}
     >
       <div className="flex flex-wrap items-center gap-4 px-6 pt-5 pb-4">
-        <IconBubble icon={BellRing} tone={policy.enabled ? "info" : undefined} />
+        <IconBubble
+          icon={BellRing}
+          tone={policy.enabled ? "info" : undefined}
+        />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-body font-semibold text-ink">{policy.display_name}</p>
+          <p className="truncate text-body font-semibold text-ink">
+            {policy.display_name}
+          </p>
           <p className="text-micro text-ink-muted">Revision {policy.version}</p>
         </div>
         <StatusBadge
@@ -428,17 +453,27 @@ function RuleCard({
             <BellRing aria-hidden className="h-3 w-3" /> When
           </p>
           <p className="mt-1 text-caption font-medium text-ink">
-            {policy.event_types.map((event) => EVENT_TYPE_LABELS[event] ?? event).join(", ")}
+            {policy.event_types
+              .map((event) => EVENT_TYPE_LABELS[event] ?? event)
+              .join(", ")}
           </p>
         </div>
-        <ArrowRight aria-hidden className="mx-auto hidden h-4 w-4 text-ink-muted md:block" />
+        <ArrowRight
+          aria-hidden
+          className="mx-auto hidden h-4 w-4 text-ink-muted md:block"
+        />
         <div className="h-full rounded-2xl bg-surface-2 px-4 py-3">
           <p className="flex items-center gap-1.5 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
             <Layers aria-hidden className="h-3 w-3" /> In
           </p>
-          <p className="mt-1 truncate font-mono text-caption text-ink">{scope}</p>
+          <p className="mt-1 truncate font-mono text-caption text-ink">
+            {scope}
+          </p>
         </div>
-        <ArrowRight aria-hidden className="mx-auto hidden h-4 w-4 text-ink-muted md:block" />
+        <ArrowRight
+          aria-hidden
+          className="mx-auto hidden h-4 w-4 text-ink-muted md:block"
+        />
         <div className="h-full rounded-2xl bg-surface-2 px-4 py-3">
           <p className="flex items-center gap-1.5 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
             <Send aria-hidden className="h-3 w-3" /> Send to
@@ -455,7 +490,9 @@ function RuleCard({
 
 export default function NotificationPoliciesPage() {
   const [policies, setPolicies] = useState<NotificationPolicy[] | null>(null);
-  const [destinations, setDestinations] = useState<NotificationDestination[]>([]);
+  const [destinations, setDestinations] = useState<NotificationDestination[]>(
+    [],
+  );
   const [options, setOptions] = useState<PolicyOptions | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [editing, setEditing] = useState<NotificationPolicy | null>(null);
@@ -471,17 +508,26 @@ export default function NotificationPoliciesPage() {
         .then((response) => (response.ok ? response.json() : { projects: [] }))
         .then((body: { projects?: ProjectSummary[] }) => body.projects ?? []),
     ])
-      .then(([loadedPolicies, loadedOptions, loadedDestinations, loadedProjects]) => {
-        if (cancelled) return;
-        setPolicies(loadedPolicies);
-        setOptions(loadedOptions);
-        setDestinations(loadedDestinations);
-        setProjects(loadedProjects);
-        setError(null);
-      })
+      .then(
+        ([
+          loadedPolicies,
+          loadedOptions,
+          loadedDestinations,
+          loadedProjects,
+        ]) => {
+          if (cancelled) return;
+          setPolicies(loadedPolicies);
+          setOptions(loadedOptions);
+          setDestinations(loadedDestinations);
+          setProjects(loadedProjects);
+          setError(null);
+        },
+      )
       .catch((problem: unknown) => {
         if (!cancelled) {
-          setError(problem instanceof ApiError ? problem.message : "request failed");
+          setError(
+            problem instanceof ApiError ? problem.message : "request failed",
+          );
         }
       });
     return () => {
@@ -492,7 +538,9 @@ export default function NotificationPoliciesPage() {
   useEffect(() => load(), [load]);
 
   const enabledCount = policies?.filter((policy) => policy.enabled).length ?? 0;
-  const webhooks = destinations.filter((d) => d.destination_type === "webhook").length;
+  const webhooks = destinations.filter(
+    (d) => d.destination_type === "webhook",
+  ).length;
 
   return (
     <PageFrame>
@@ -515,16 +563,37 @@ export default function NotificationPoliciesPage() {
         {policies === null && !error ? <DataState kind="loading" /> : null}
 
         {policies !== null ? (
-          <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-3">
+          <div className="page-grid" data-cols="3">
             <KpiTile icon={Route} label="Policies" value={policies.length}>
-              <p className="text-micro text-ink-muted">Routing rules in your scope</p>
-            </KpiTile>
-            <KpiTile icon={CircleCheck} tone="success" label="Enabled" value={enabledCount} suffix={`of ${policies.length}`}>
-              <ShareBar value={enabledCount} total={policies.length} tone="success" label="routing now" />
-            </KpiTile>
-            <KpiTile icon={Webhook} tone="info" label="Destinations" value={destinations.length}>
               <p className="text-micro text-ink-muted">
-                <span data-tabular className="font-medium text-ink-secondary">{webhooks}</span> webhook ·{" "}
+                Routing rules in your scope
+              </p>
+            </KpiTile>
+            <KpiTile
+              icon={CircleCheck}
+              tone="success"
+              label="Enabled"
+              value={enabledCount}
+              suffix={`of ${policies.length}`}
+            >
+              <ShareBar
+                value={enabledCount}
+                total={policies.length}
+                tone="success"
+                label="routing now"
+              />
+            </KpiTile>
+            <KpiTile
+              icon={Webhook}
+              tone="info"
+              label="Destinations"
+              value={destinations.length}
+            >
+              <p className="text-micro text-ink-muted">
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {webhooks}
+                </span>{" "}
+                webhook ·{" "}
                 <span data-tabular className="font-medium text-ink-secondary">
                   {destinations.length - webhooks}
                 </span>{" "}
@@ -535,14 +604,19 @@ export default function NotificationPoliciesPage() {
         ) : null}
 
         {policies !== null || options ? (
-          <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
-            <section aria-labelledby="policies-heading" className="min-w-0 space-y-4">
+          <div className="page-split" data-cols="3">
+            <section aria-labelledby="policies-heading" className="page-main">
               <div className="flex items-baseline justify-between gap-3">
-                <h2 id="policies-heading" className="text-[1.0625rem] font-semibold text-ink">
+                <h2
+                  id="policies-heading"
+                  className="text-[1.0625rem] font-semibold text-ink"
+                >
                   Rules
                 </h2>
                 {policies !== null ? (
-                  <span className="text-micro text-ink-muted">{policies.length} configured</span>
+                  <span className="text-micro text-ink-muted">
+                    {policies.length} configured
+                  </span>
                 ) : null}
               </div>
               {policies !== null && policies.length === 0 ? (
@@ -553,17 +627,39 @@ export default function NotificationPoliciesPage() {
                     title="No policies"
                     description="Nothing is routed yet. Incidents still open and resolve; nobody is told about them."
                   />
-                  <ol className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-3 pb-2 sm:grid-cols-3" aria-label="How a rule reads">
+                  <ol
+                    className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-3 pb-2 sm:grid-cols-3"
+                    aria-label="How a rule reads"
+                  >
                     {[
-                      { icon: BellRing, title: "When", line: "an incident opens or resolves" },
-                      { icon: Layers, title: "In", line: "a project or environment" },
-                      { icon: Send, title: "Send to", line: "people or a named webhook" },
+                      {
+                        icon: BellRing,
+                        title: "When",
+                        line: "an incident opens or resolves",
+                      },
+                      {
+                        icon: Layers,
+                        title: "In",
+                        line: "a project or environment",
+                      },
+                      {
+                        icon: Send,
+                        title: "Send to",
+                        line: "people or a named webhook",
+                      },
                     ].map((step) => (
-                      <li key={step.title} className="flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
+                      <li
+                        key={step.title}
+                        className="flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3"
+                      >
                         <IconBubble icon={step.icon} size="sm" />
                         <span className="min-w-0">
-                          <span className="block text-caption font-semibold text-ink">{step.title}</span>
-                          <span className="block text-micro text-ink-muted">{step.line}</span>
+                          <span className="block text-caption font-semibold text-ink">
+                            {step.title}
+                          </span>
+                          <span className="block text-micro text-ink-muted">
+                            {step.line}
+                          </span>
                         </span>
                       </li>
                     ))}
@@ -585,7 +681,7 @@ export default function NotificationPoliciesPage() {
             </section>
 
             {options ? (
-              <div className="xl:sticky xl:top-6">
+              <div className="page-aside">
                 <PolicyForm
                   key={editing?.id ?? "new"}
                   projects={projects}

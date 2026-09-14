@@ -17,13 +17,13 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useRef, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import { ActionBadge, GitOpsBadge, SessionBadge } from "@/components/onboarding/primitives";
 import { SessionActions } from "@/components/onboarding/SessionActions";
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import {
   formatAge,
   shortSha,
@@ -141,282 +141,289 @@ export default function OnboardingSessionPage() {
 
   return (
     <PageFrame>
-      <div className="space-y-5">
       <LoadGate value={session} retry={reloadSession}>
         {(data) => (
           <>
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h1 className="text-xl font-semibold text-ink">
-                  {data.repository.full_name}
-                </h1>
-                <p className="mt-1 font-mono text-xs break-all text-ink-muted">
-                  {data.repository.default_branch} ·{" "}
-                  {shortSha(data.analyzed_commit_sha)}
-                </p>
-              </div>
-              <SessionBadge state={data.state} />
-            </div>
-
-            {data.repository.security_gate ? (
-              <Card title="Security gate">
-                <div data-testid="security-gate">
-                  <DataState
-                    kind="permission-denied"
-                    title="Closed by a manual security gate"
-                    description="This repository cannot be onboarded until an operator closes the gate. Drake makes no provider call and issues no token for it."
-                  />
-                </div>
-              </Card>
-            ) : null}
-
-            {data.state === "stale" ? (
-              <Card title="Out of date">
-                <div data-testid="stale-notice">
-                  <DataState
-                    kind="stale"
-                    title="The repository moved"
-                    description="This plan describes a commit that is no longer the branch head. A review of a commit is not a review of its successor, so it cannot be applied. Analyse again."
-                  />
-                </div>
-              </Card>
-            ) : null}
-
-            <SessionActions
-              session={data}
-              plan={plan.state === "ready" ? plan.data.plan : null}
-              csrfToken={csrfToken}
-              gitopsEnabled={status.state === "ready" ? status.data.gitops_pr_enabled : false}
-              onChanged={reloadAll}
-              result={applyResult}
-              onResult={setApplyResult}
-              applyKey={applyKey}
+            <PageHeader
+              title={data.repository.full_name}
+              description={
+                <>
+                  {data.repository.default_branch} · {shortSha(data.analyzed_commit_sha)}
+                </>
+              }
+              status={<SessionBadge state={data.state} />}
             />
 
-            <div className="grid gap-5 md:grid-cols-2">
-              <Card title="Safe discovery">
-                {findings.state === "loading" ? (
+            <div className="space-y-6">
+              {data.repository.security_gate ? (
+                <Panel tone="critical">
+                  <PanelHeader title="Security gate" />
+                  <div data-testid="security-gate">
+                    <DataState
+                      kind="permission-denied"
+                      title="Closed by a manual security gate"
+                      description="This repository cannot be onboarded until an operator closes the gate. Drake makes no provider call and issues no token for it."
+                    />
+                  </div>
+                </Panel>
+              ) : null}
+
+              {data.state === "stale" ? (
+                <Panel tone="warning">
+                  <PanelHeader title="Out of date" />
+                  <div data-testid="stale-notice">
+                    <DataState
+                      kind="stale"
+                      title="The repository moved"
+                      description="This plan describes a commit that is no longer the branch head. A review of a commit is not a review of its successor, so it cannot be applied. Analyse again."
+                    />
+                  </div>
+                </Panel>
+              ) : null}
+
+              <SessionActions
+                session={data}
+                plan={plan.state === "ready" ? plan.data.plan : null}
+                csrfToken={csrfToken}
+                gitopsEnabled={status.state === "ready" ? status.data.gitops_pr_enabled : false}
+                onChanged={reloadAll}
+                result={applyResult}
+                onResult={setApplyResult}
+                applyKey={applyKey}
+              />
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <Panel>
+                  <PanelHeader title="Safe discovery" />
+                  {findings.state === "loading" ? (
+                    <DataState kind="loading" />
+                  ) : findings.state === "error" ? (
+                    <DataState kind="error" description={findings.message} />
+                  ) : findings.data.analysis === null ? (
+                    <DataState
+                      kind="empty"
+                      title="Not analysed yet"
+                      description="No repository has been read for this session."
+                    />
+                  ) : (
+                    <div data-testid="analysis">
+                      <dl className="divide-y divide-border">
+                        <MetaRow label="Commit">
+                          {shortSha(findings.data.analysis.commit_sha)}
+                        </MetaRow>
+                        <MetaRow label="Files read">
+                          {String(findings.data.analysis.files_read)}
+                        </MetaRow>
+                        <MetaRow label="Manifest">
+                          {findings.data.analysis.manifest_found ? "found" : "absent"}
+                        </MetaRow>
+                        <MetaRow label="Analysed">
+                          {formatAge(findings.data.analysis.analyzed_at)}
+                        </MetaRow>
+                      </dl>
+                      {findings.data.analysis.truncated ? (
+                        <div className="mt-2" data-testid="analysis-truncated">
+                          <DataState
+                            kind="partial"
+                            title="Partial analysis"
+                            description="The analysis stopped at a budget, so this describes part of the repository. It is not a complete picture."
+                          />
+                        </div>
+                      ) : null}
+                      <p className="mt-3 text-xs text-ink-muted">
+                        Paths and digests only. Drake stores no file content, and never reads
+                        environment files, private keys, credentials or cluster configuration.
+                      </p>
+                    </div>
+                  )}
+                </Panel>
+
+                <Panel>
+                  <PanelHeader title="Session" />
+                  <dl className="divide-y divide-border">
+                    <MetaRow label="State">{data.state}</MetaRow>
+                    <MetaRow label="Plan version">
+                      {data.plan ? `v${data.plan.plan_version}` : "—"}
+                    </MetaRow>
+                    <MetaRow label="Approved">
+                      {data.approved_at
+                        ? `v${data.approved_plan_version} · ${formatAge(data.approved_at)}`
+                        : "not approved"}
+                    </MetaRow>
+                    <MetaRow label="Imported">
+                      {data.imported_project_key ? (
+                        <Link
+                          href={`/projects/${data.imported_project_id}`}
+                          className="hover:underline"
+                        >
+                          {data.imported_project_key}
+                        </Link>
+                      ) : (
+                        "not imported"
+                      )}
+                    </MetaRow>
+                  </dl>
+                  {data.reason ? (
+                    <p className="mt-2 text-xs text-ink-secondary">{data.reason}</p>
+                  ) : null}
+                </Panel>
+              </div>
+
+              <Panel>
+                <PanelHeader title="Proposed changes" />
+                {plan.state === "loading" ? (
                   <DataState kind="loading" />
-                ) : findings.state === "error" ? (
-                  <DataState kind="error" description={findings.message} />
-                ) : findings.data.analysis === null ? (
+                ) : plan.state === "error" ? (
+                  <DataState kind="error" description={plan.message} />
+                ) : plan.data.plan === null ? (
                   <DataState
                     kind="empty"
-                    title="Not analysed yet"
-                    description="No repository has been read for this session."
+                    title="No plan yet"
+                    description="Analyse the repository to produce a proposal."
                   />
                 ) : (
-                  <div className="space-y-1" data-testid="analysis">
-                    <MetaRow label="Commit">
-                      {shortSha(findings.data.analysis.commit_sha)}
-                    </MetaRow>
-                    <MetaRow label="Files read">
-                      {String(findings.data.analysis.files_read)}
-                    </MetaRow>
-                    <MetaRow label="Manifest">
-                      {findings.data.analysis.manifest_found ? "found" : "absent"}
-                    </MetaRow>
-                    <MetaRow label="Analysed">
-                      {formatAge(findings.data.analysis.analyzed_at)}
-                    </MetaRow>
-                    {findings.data.analysis.truncated ? (
-                      <div data-testid="analysis-truncated">
-                        <DataState
-                          kind="partial"
-                          title="Partial analysis"
-                          description="The analysis stopped at a budget, so this describes part of the repository. It is not a complete picture."
-                        />
-                      </div>
-                    ) : null}
-                    <p className="mt-2 text-xs text-ink-muted">
-                      Paths and digests only. Drake stores no file content, and never reads
-                      environment files, private keys, credentials or cluster configuration.
-                    </p>
+                  <div className="space-y-5" data-testid="plan">
+                    {/*
+                      `min-w-0` and `break-all` on the digest: a 64-character
+                      monospace token is one unbreakable word, so flex-wrap
+                      cannot help it — it pushed the page 19px wider than the
+                      viewport at 768px, which scrolls every row's right-hand
+                      end (where the actions are) off screen.
+                    */}
+                    <div className="flex min-w-0 flex-wrap gap-4 rounded-2xl bg-surface-2 px-4 py-3 text-caption text-ink-secondary">
+                      <span>
+                        Plan <span className="font-mono">v{plan.data.plan.plan_version}</span>
+                      </span>
+                      <span>
+                        Commit{" "}
+                        <span className="font-mono">
+                          {shortSha(plan.data.plan.commit_sha)}
+                        </span>
+                      </span>
+                      <span>
+                        Digest{" "}
+                        <span className="font-mono break-all">
+                          {plan.data.plan.plan_digest}
+                        </span>
+                      </span>
+                      <span>{plan.data.plan.total_items} items</span>
+                    </div>
+
+                    {GROUPS.map((group) => {
+                      const items = plan.data.items.filter((item) =>
+                        group.actions.includes(item.action),
+                      );
+                      if (items.length === 0) return null;
+                      return (
+                        <div key={group.title} data-testid={`plan-group-${group.actions[0]}`}>
+                          <p className="mb-2 text-caption font-medium text-ink">{group.title}</p>
+                          <ul className="space-y-1.5">
+                            {items.map((item) => (
+                              <li
+                                key={item.item_key}
+                                className="flex min-w-0 flex-wrap items-baseline gap-2 rounded-xl bg-surface-2 px-3 py-2 break-words"
+                              >
+                                <ActionBadge action={item.action} />
+                                <span className="font-mono text-xs text-ink">
+                                  {item.entity_kind}
+                                </span>
+                                <span className="text-xs text-ink-secondary">
+                                  {item.proposed_name ?? item.existing_name ?? item.item_key}
+                                </span>
+                                {item.reason ? (
+                                  <span className="text-[11px] text-ink-muted">
+                                    {item.reason}
+                                  </span>
+                                ) : null}
+                                {item.entity_kind === "deployment_source" &&
+                                item.detail?.materialized === false ? (
+                                  <span
+                                    className="text-[11px] text-ink-muted"
+                                    data-testid="deployment-source-note"
+                                  >
+                                    Recorded as evidence only — no catalog row is written for it.
+                                  </span>
+                                ) : null}
+                                <Changes item={item} />
+                              </li>
+                            ))}
+                          </ul>
+                          {group.note ? (
+                            <p className="mt-1.5 text-[11px] text-ink-muted">{group.note}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+
+                    <div className="border-t border-border pt-3">
+                      {plan.data.plan.applicable && data.can_apply ? (
+                        <p className="text-xs text-ink-secondary" data-testid="apply-available">
+                          This plan can be applied. Applying writes to Drake&apos;s catalog and
+                          changes nothing in the repository.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-warning" data-testid="apply-blocked">
+                          {plan.data.plan.blocking_items > 0
+                            ? `Apply is blocked: ${plan.data.plan.blocking_items} item(s) need a decision.`
+                            : data.can_apply === false
+                              ? "You can review this plan but not apply it. Applying needs the onboarding apply permission."
+                              : "This plan is not currently applicable."}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
-              </Card>
+              </Panel>
 
-              <Card title="Session">
-                <MetaRow label="State">{data.state}</MetaRow>
-                <MetaRow label="Plan version">
-                  {data.plan ? `v${data.plan.plan_version}` : "—"}
-                </MetaRow>
-                <MetaRow label="Approved">
-                  {data.approved_at
-                    ? `v${data.approved_plan_version} · ${formatAge(data.approved_at)}`
-                    : "not approved"}
-                </MetaRow>
-                <MetaRow label="Imported">
-                  {data.imported_project_key ? (
-                    <Link
-                      href={`/projects/${data.imported_project_id}`}
-                      className="hover:underline"
-                    >
-                      {data.imported_project_key}
-                    </Link>
-                  ) : (
-                    "not imported"
-                  )}
-                </MetaRow>
-                {data.reason ? (
-                  <p className="mt-2 text-xs text-ink-secondary">{data.reason}</p>
-                ) : null}
-              </Card>
-            </div>
-
-            <Card title="Proposed changes">
-              {plan.state === "loading" ? (
-                <DataState kind="loading" />
-              ) : plan.state === "error" ? (
-                <DataState kind="error" description={plan.message} />
-              ) : plan.data.plan === null ? (
-                <DataState
-                  kind="empty"
-                  title="No plan yet"
-                  description="Analyse the repository to produce a proposal."
-                />
-              ) : (
-                <div className="space-y-4" data-testid="plan">
-                  {/*
-                    `min-w-0` and `break-all` on the digest: a 64-character
-                    monospace token is one unbreakable word, so flex-wrap
-                    cannot help it — it pushed the page 19px wider than the
-                    viewport at 768px, which scrolls every row's right-hand
-                    end (where the actions are) off screen.
-                  */}
-                  <div className="flex min-w-0 flex-wrap gap-4 text-xs text-ink-secondary">
-                    <span>
-                      Plan <span className="font-mono">v{plan.data.plan.plan_version}</span>
-                    </span>
-                    <span>
-                      Commit{" "}
-                      <span className="font-mono">
-                        {shortSha(plan.data.plan.commit_sha)}
-                      </span>
-                    </span>
-                    <span>
-                      Digest{" "}
-                      <span className="font-mono break-all">
-                        {plan.data.plan.plan_digest}
-                      </span>
-                    </span>
-                    <span>{plan.data.plan.total_items} items</span>
-                  </div>
-
-                  {GROUPS.map((group) => {
-                    const items = plan.data.items.filter((item) =>
-                      group.actions.includes(item.action),
-                    );
-                    if (items.length === 0) return null;
-                    return (
-                      <div key={group.title} data-testid={`plan-group-${group.actions[0]}`}>
-                        <p className="mb-1.5 text-xs font-medium text-ink">{group.title}</p>
-                        <ul className="space-y-1.5">
-                          {items.map((item) => (
-                            <li
-                              key={item.item_key}
-                              className="flex min-w-0 flex-wrap items-baseline gap-2 break-words"
-                            >
-                              <ActionBadge action={item.action} />
-                              <span className="font-mono text-xs text-ink">
-                                {item.entity_kind}
-                              </span>
-                              <span className="text-xs text-ink-secondary">
-                                {item.proposed_name ?? item.existing_name ?? item.item_key}
-                              </span>
-                              {item.reason ? (
-                                <span className="text-[11px] text-ink-muted">
-                                  {item.reason}
-                                </span>
-                              ) : null}
-                              {item.entity_kind === "deployment_source" &&
-                              item.detail?.materialized === false ? (
-                                <span
-                                  className="text-[11px] text-ink-muted"
-                                  data-testid="deployment-source-note"
-                                >
-                                  Recorded as evidence only — no catalog row is written for it.
-                                </span>
-                              ) : null}
-                              <Changes item={item} />
-                            </li>
-                          ))}
-                        </ul>
-                        {group.note ? (
-                          <p className="mt-1.5 text-[11px] text-ink-muted">{group.note}</p>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-
-                  <div className="border-t border-border pt-3">
-                    {plan.data.plan.applicable && data.can_apply ? (
-                      <p className="text-xs text-ink-secondary" data-testid="apply-available">
-                        This plan can be applied. Applying writes to Drake&apos;s catalog and
-                        changes nothing in the repository.
-                      </p>
-                    ) : (
-                      <p className="text-xs text-warning" data-testid="apply-blocked">
-                        {plan.data.plan.blocking_items > 0
-                          ? `Apply is blocked: ${plan.data.plan.blocking_items} item(s) need a decision.`
-                          : data.can_apply === false
-                            ? "You can review this plan but not apply it. Applying needs the onboarding apply permission."
-                            : "This plan is not currently applicable."}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </Card>
-
-            {data.gitops_requests && data.gitops_requests.length > 0 ? (
-              <Card title="Manifest pull requests">
-                <ul className="space-y-2" data-testid="gitops-requests">
-                  {data.gitops_requests.map((entry) => (
-                    <li key={entry.id} className="flex min-w-0 flex-wrap items-baseline gap-2">
-                      <GitOpsBadge state={entry.state} />
-                      <span className="font-mono text-xs break-all text-ink-secondary">
-                        {entry.branch_name} → {entry.file_path}
-                      </span>
-                      {entry.pull_request_url ? (
-                        <a
-                          href={entry.pull_request_url}
-                          target="_blank"
-                          // `noopener` so the opened tab cannot reach back
-                          // through `window.opener`; `noreferrer` so Drake's
-                          // URL — which contains a session id — is not sent
-                          // to GitHub as a referrer.
-                          rel="noopener noreferrer"
-                          data-testid={`gitops-pr-link-${entry.id}`}
-                          className="text-xs text-ink hover:underline"
-                        >
-                          Open draft pull request #{entry.provider_pr_number} →
-                        </a>
-                      ) : null}
-                      {entry.error_code ? (
-                        <span className="font-mono text-[11px] break-all text-critical">
-                          {entry.error_code}
+              {data.gitops_requests && data.gitops_requests.length > 0 ? (
+                <Panel>
+                  <PanelHeader title="Manifest pull requests" />
+                  <ul className="space-y-2" data-testid="gitops-requests">
+                    {data.gitops_requests.map((entry) => (
+                      <li key={entry.id} className="flex min-w-0 flex-wrap items-baseline gap-2">
+                        <GitOpsBadge state={entry.state} />
+                        <span className="font-mono text-xs break-all text-ink-secondary">
+                          {entry.branch_name} → {entry.file_path}
                         </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-3 text-xs text-ink-muted">
-                  The pull request Drake opens is a <strong>draft</strong>, and deliberately
-                  incomplete: every <span className="font-mono">REPLACE_ME</span> in it is a
-                  decision a person has to make. Fill them in and merge it in GitHub.
-                </p>
-                <p className="mt-1.5 text-xs text-ink-muted">
-                  Merging it does not import anything into Drake — it puts the manifest in the
-                  repository, which is where Drake reads intent from. Analyse again afterwards
-                  and approve the plan; the import happens there.
-                </p>
-              </Card>
-            ) : null}
+                        {entry.pull_request_url ? (
+                          <a
+                            href={entry.pull_request_url}
+                            target="_blank"
+                            // `noopener` so the opened tab cannot reach back
+                            // through `window.opener`; `noreferrer` so Drake's
+                            // URL — which contains a session id — is not sent
+                            // to GitHub as a referrer.
+                            rel="noopener noreferrer"
+                            data-testid={`gitops-pr-link-${entry.id}`}
+                            className="text-xs text-ink hover:underline"
+                          >
+                            Open draft pull request #{entry.provider_pr_number} →
+                          </a>
+                        ) : null}
+                        {entry.error_code ? (
+                          <span className="font-mono text-[11px] break-all text-critical">
+                            {entry.error_code}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-xs text-ink-muted">
+                    The pull request Drake opens is a <strong>draft</strong>, and deliberately
+                    incomplete: every <span className="font-mono">REPLACE_ME</span> in it is a
+                    decision a person has to make. Fill them in and merge it in GitHub.
+                  </p>
+                  <p className="mt-1.5 text-xs text-ink-muted">
+                    Merging it does not import anything into Drake — it puts the manifest in the
+                    repository, which is where Drake reads intent from. Analyse again afterwards
+                    and approve the plan; the import happens there.
+                  </p>
+                </Panel>
+              ) : null}
+            </div>
           </>
         )}
       </LoadGate>
-      </div>
     </PageFrame>
   );
 }

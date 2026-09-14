@@ -57,14 +57,20 @@ export function GrantsPanel() {
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
   const [grants, setGrants] = useState<Loadable<Grant[]>>({ state: "loading" });
-  const [options, setOptions] = useState<Loadable<GrantOptions>>({ state: "loading" });
+  const [options, setOptions] = useState<Loadable<GrantOptions>>({
+    state: "loading",
+  });
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // Keep previously loaded data on refresh: the create form must not
     // unmount (and lose its success/error feedback) while lists reload.
-    setGrants((current) => (current.state === "ready" ? current : { state: "loading" }));
-    setOptions((current) => (current.state === "ready" ? current : { state: "loading" }));
+    setGrants((current) =>
+      current.state === "ready" ? current : { state: "loading" },
+    );
+    setOptions((current) =>
+      current.state === "ready" ? current : { state: "loading" },
+    );
     try {
       const [grantsBody, optionsBody] = await Promise.all([
         apiGet<{ grants: Grant[] }>("/v1/grants"),
@@ -73,7 +79,8 @@ export function GrantsPanel() {
       setGrants({ state: "ready", data: grantsBody.grants });
       setOptions({ state: "ready", data: optionsBody });
     } catch (error) {
-      const message = error instanceof ApiError ? error.message : "request failed";
+      const message =
+        error instanceof ApiError ? error.message : "request failed";
       setGrants({ state: "error", message });
       setOptions({ state: "error", message });
     }
@@ -86,25 +93,36 @@ export function GrantsPanel() {
   const revoke = async (grant: Grant) => {
     setActionError(null);
     try {
-      await apiMutate(`/v1/grants/${grant.id}`, { csrfToken: csrf, method: "DELETE" });
+      await apiMutate(`/v1/grants/${grant.id}`, {
+        csrfToken: csrf,
+        method: "DELETE",
+      });
       await load();
     } catch (error) {
-      setActionError(error instanceof ApiError ? error.message : "revoke failed");
+      setActionError(
+        error instanceof ApiError ? error.message : "revoke failed",
+      );
     }
   };
 
   const grantList = grants.state === "ready" ? grants.data : [];
-  const activeGrants = grantList.filter((grant) => grant.revoked_at === null).length;
+  const activeGrants = grantList.filter(
+    (grant) => grant.revoked_at === null,
+  ).length;
   const principals = new Set(
-    grantList.map((grant) => grant.identity_display ?? grant.group_display ?? grant.id),
+    grantList.map(
+      (grant) => grant.identity_display ?? grant.group_display ?? grant.id,
+    ),
   ).size;
 
   return (
     <div className="space-y-6">
       {grants.state === "ready" ? (
-        <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-3">
+        <div className="page-grid" data-cols="3">
           <KpiTile icon={KeyRound} label="Grants" value={grantList.length}>
-            <p className="text-micro text-ink-muted">Every grant you may manage</p>
+            <p className="text-micro text-ink-muted">
+              Every grant you may manage
+            </p>
           </KpiTile>
           <KpiTile
             icon={CircleCheck}
@@ -120,7 +138,12 @@ export function GrantsPanel() {
               label="currently in force"
             />
           </KpiTile>
-          <KpiTile icon={Users} tone="info" label="Principals" value={principals}>
+          <KpiTile
+            icon={Users}
+            tone="info"
+            label="Principals"
+            value={principals}
+          >
             <p className="text-micro text-ink-muted">
               <span data-tabular className="font-medium text-ink-secondary">
                 {grantList.length - activeGrants}
@@ -131,102 +154,125 @@ export function GrantsPanel() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-        <Panel flush>
-          <PanelHeader flush title="Scoped grants" description="Who holds which role, where" />
-          {grants.state === "loading" ? (
-            <div className="px-7 py-5">
-              <DataState kind="loading" />
-            </div>
-          ) : null}
-          {grants.state === "error" ? (
-            <div className="px-7 py-5">
-              <DataState kind="error" description={grants.message} onRetry={() => void load()} />
-            </div>
-          ) : null}
-          {grants.state === "ready" && grants.data.length === 0 ? (
-            <StateCard
-              kind="empty"
-              icon={KeyRound}
-              title="No grants in your scope"
-              description="Grants you are allowed to manage will appear here."
+      <div className="page-split" data-cols="3">
+        <div className="page-main">
+          <Panel flush>
+            <PanelHeader
+              flush
+              title="Scoped grants"
+              description="Who holds which role, where"
             />
-          ) : null}
-          {actionError ? (
-            <p role="alert" className="mx-7 mt-4 rounded-full bg-critical-soft px-4 py-2 text-caption text-critical">
-              {actionError}
-            </p>
-          ) : null}
-          {grants.state === "ready" && grants.data.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left" data-testid="grant-table">
-                <thead>
-                  <tr className={`border-b border-border ${TABLE_HEAD}`}>
-                    <th className="h-11 pr-3 pl-7 font-medium">Principal</th>
-                    <th className="h-11 px-3 font-medium">Role</th>
-                    <th className="h-11 px-3 font-medium">Scope</th>
-                    <th className="h-11 px-3 font-medium">Status</th>
-                    <th className="h-11 pr-7 pl-3" aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {grants.data.map((grant) => {
-                    const active = grant.revoked_at === null;
-                    const principal = grant.identity_display ?? grant.group_display ?? "—";
-                    return (
-                      <tr key={grant.id} className="h-16 transition-colors hover:bg-surface-hover">
-                        <td className="pr-3 pl-7">
-                          <span className="flex items-center gap-3">
-                            <InitialsBubble name={principal} size="sm" />
-                            <span className="min-w-0">
-                              <span className="block text-body font-semibold whitespace-nowrap text-ink">
-                                {principal}
+            {grants.state === "loading" ? (
+              <div className="px-7 py-5">
+                <DataState kind="loading" />
+              </div>
+            ) : null}
+            {grants.state === "error" ? (
+              <div className="px-7 py-5">
+                <DataState
+                  kind="error"
+                  description={grants.message}
+                  onRetry={() => void load()}
+                />
+              </div>
+            ) : null}
+            {grants.state === "ready" && grants.data.length === 0 ? (
+              <StateCard
+                kind="empty"
+                icon={KeyRound}
+                title="No grants in your scope"
+                description="Grants you are allowed to manage will appear here."
+              />
+            ) : null}
+            {actionError ? (
+              <p
+                role="alert"
+                className="mx-7 mt-4 rounded-full bg-critical-soft px-4 py-2 text-caption text-critical"
+              >
+                {actionError}
+              </p>
+            ) : null}
+            {grants.state === "ready" && grants.data.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left" data-testid="grant-table">
+                  <thead>
+                    <tr className={`border-b border-border ${TABLE_HEAD}`}>
+                      <th className="h-11 pr-3 pl-7 font-medium">Principal</th>
+                      <th className="h-11 px-3 font-medium">Role</th>
+                      <th className="h-11 px-3 font-medium">Scope</th>
+                      <th className="h-11 px-3 font-medium">Status</th>
+                      <th className="h-11 pr-7 pl-3" aria-label="Actions" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {grants.data.map((grant) => {
+                      const active = grant.revoked_at === null;
+                      const principal =
+                        grant.identity_display ?? grant.group_display ?? "—";
+                      return (
+                        <tr
+                          key={grant.id}
+                          className="h-16 transition-colors hover:bg-surface-hover"
+                        >
+                          <td className="pr-3 pl-7">
+                            <span className="flex items-center gap-3">
+                              <InitialsBubble name={principal} size="sm" />
+                              <span className="min-w-0">
+                                <span className="block text-body font-semibold whitespace-nowrap text-ink">
+                                  {principal}
+                                </span>
+                                {grant.group_display ? (
+                                  <span className="block text-micro text-ink-muted">
+                                    group
+                                  </span>
+                                ) : null}
                               </span>
-                              {grant.group_display ? (
-                                <span className="block text-micro text-ink-muted">group</span>
-                              ) : null}
                             </span>
-                          </span>
-                        </td>
-                        <td className="px-3">
-                          <span className="rounded-full bg-surface-2 px-2.5 py-1 text-caption font-medium whitespace-nowrap text-ink">
-                            {grant.role_name}
-                          </span>
-                        </td>
-                        <td className="px-3">
-                          <span className="font-mono text-micro whitespace-nowrap text-ink-secondary">
-                            {grant.scope_type}/{grant.scope_ref}
-                          </span>
-                        </td>
-                        <td className="px-3">
-                          <StatusBadge
-                            status={active ? "healthy" : "unknown"}
-                            label={active ? "active" : "revoked"}
-                          />
-                        </td>
-                        <td className="pr-7 pl-3 text-right">
-                          {active ? (
-                            <button
-                              type="button"
-                              onClick={() => void revoke(grant)}
-                              className={PILL_BUTTON}
-                            >
-                              Revoke
-                            </button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </Panel>
+                          </td>
+                          <td className="px-3">
+                            <span className="rounded-full bg-surface-2 px-2.5 py-1 text-caption font-medium whitespace-nowrap text-ink">
+                              {grant.role_name}
+                            </span>
+                          </td>
+                          <td className="px-3">
+                            <span className="font-mono text-micro whitespace-nowrap text-ink-secondary">
+                              {grant.scope_type}/{grant.scope_ref}
+                            </span>
+                          </td>
+                          <td className="px-3">
+                            <StatusBadge
+                              status={active ? "healthy" : "unknown"}
+                              label={active ? "active" : "revoked"}
+                            />
+                          </td>
+                          <td className="pr-7 pl-3 text-right">
+                            {active ? (
+                              <button
+                                type="button"
+                                onClick={() => void revoke(grant)}
+                                className={PILL_BUTTON}
+                              >
+                                Revoke
+                              </button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </Panel>
+        </div>
 
         {options.state === "ready" ? (
-          <div className="2xl:sticky 2xl:top-6">
-            <CreateGrantForm options={options.data} csrf={csrf} onCreated={load} />
+          <div className="page-aside" data-sticky>
+            <CreateGrantForm
+              options={options.data}
+              csrf={csrf}
+              onCreated={load}
+            />
           </div>
         ) : null}
       </div>
@@ -243,7 +289,9 @@ function CreateGrantForm({
   csrf: string;
   onCreated: () => Promise<void>;
 }) {
-  const [principalType, setPrincipalType] = useState<"identity" | "group">("identity");
+  const [principalType, setPrincipalType] = useState<"identity" | "group">(
+    "identity",
+  );
   const [principalId, setPrincipalId] = useState("");
   const [scopeId, setScopeId] = useState(options.scopes[0]?.id ?? "");
   const [roleId, setRoleId] = useState("");
@@ -260,7 +308,9 @@ function CreateGrantForm({
   const delegableRoles = useMemo(
     () =>
       options.roles.filter((role) =>
-        selectedScope ? selectedScope.delegable_role_ids.includes(role.id) : false,
+        selectedScope
+          ? selectedScope.delegable_role_ids.includes(role.id)
+          : false,
       ),
     [options.roles, selectedScope],
   );
@@ -322,7 +372,7 @@ function CreateGrantForm({
       <form
         onSubmit={(event) => void submit(event)}
         data-testid="grant-create-form"
-        className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-1"
+        className="grid grid-cols-1 gap-4 @min-[36rem]/page:grid-cols-2 @min-[60rem]/page:grid-cols-1"
       >
         <fieldset>
           <legend className={labelClass}>Principal type</legend>
@@ -414,7 +464,7 @@ function CreateGrantForm({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:col-span-2 2xl:col-span-1 2xl:grid-cols-1">
+        <div className="grid grid-cols-1 gap-3 @min-[36rem]/page:col-span-2 @min-[36rem]/page:grid-cols-2 @min-[60rem]/page:col-span-1 @min-[60rem]/page:grid-cols-1">
           <div>
             <label htmlFor="grant-valid-from" className={labelClass}>
               Valid from (optional)
@@ -443,24 +493,34 @@ function CreateGrantForm({
         </div>
 
         {options.directory_scope === "subtree" ? (
-          <p className="rounded-[1.25rem] bg-surface-2 px-4 py-3 text-micro text-ink-secondary md:col-span-2 2xl:col-span-1">
-            You can select principals already present in your scope. Adding people beyond it
-            arrives with the directory integration.
+          <p className="rounded-[1.25rem] bg-surface-2 px-4 py-3 text-micro text-ink-secondary @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1">
+            You can select principals already present in your scope. Adding
+            people beyond it arrives with the directory integration.
           </p>
         ) : null}
 
         {formError ? (
-          <p role="alert" className="rounded-full bg-critical-soft px-4 py-2 text-caption text-critical md:col-span-2 2xl:col-span-1">
+          <p
+            role="alert"
+            className="rounded-full bg-critical-soft px-4 py-2 text-caption text-critical @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1"
+          >
             {formError}
           </p>
         ) : null}
         {success ? (
-          <p role="status" className="rounded-full bg-healthy-soft px-4 py-2 text-caption text-healthy md:col-span-2 2xl:col-span-1">
+          <p
+            role="status"
+            className="rounded-full bg-healthy-soft px-4 py-2 text-caption text-healthy @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1"
+          >
             {success}
           </p>
         ) : null}
 
-        <button type="submit" disabled={submitting} className={`${PILL_PRIMARY} w-full md:col-span-2 2xl:col-span-1`}>
+        <button
+          type="submit"
+          disabled={submitting}
+          className={`${PILL_PRIMARY} w-full @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1`}
+        >
           {submitting ? "Creating…" : "Create grant"}
         </button>
       </form>

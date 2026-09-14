@@ -26,7 +26,16 @@ import {
   type ChartStatus,
   type ChartWindow,
 } from "@/components/charts/ChartFrame";
-import { AXIS_STYLE, baseOption, type EChartsOption } from "@/components/charts/options";
+import {
+  AXIS_STYLE,
+  areaGradient,
+  baseOption,
+  chartFontFamily,
+  tooltipHeader,
+  tooltipRow,
+  withAlpha,
+  type EChartsOption,
+} from "@/components/charts/options";
 import { EChart } from "@/components/charts/LazyChart";
 import { formatTimeAxis, formatUnit, formatUtc } from "@/lib/design/format";
 import type { Thresholds } from "@/lib/design/status";
@@ -117,9 +126,25 @@ export function TimeSeriesChart({
       (tokens: Tokens, animate: boolean): EChartsOption => {
         const base = baseOption(tokens, animate);
         const axis = AXIS_STYLE(tokens);
+        const colorOf = (slot: number) => tokens[SERIES_TOKENS[slot % SERIES_TOKENS.length]];
+        // A soft wash under the lines. Strong under a lone series, a whisper
+        // under a few, and none once the washes would stack into mud.
+        const washStrength =
+          visible.length === 1 ? (area ? 0.28 : 0.2) : visible.length <= 3 ? 0.08 : 0;
+        const pill = (color: string) => ({
+          color,
+          backgroundColor: tokens["surface-1"],
+          borderColor: withAlpha(color, 0.45),
+          borderWidth: 1,
+          borderRadius: 999,
+          padding: [2, 7],
+          fontSize: 10,
+          fontWeight: 600 as const,
+          fontFamily: chartFontFamily(),
+        });
         return {
           ...base,
-          grid: { left: 8, right: 16, top: 12, bottom: 4, containLabel: true },
+          grid: { left: 4, right: 16, top: markers?.length ? 30 : 16, bottom: 2, containLabel: true },
           tooltip: {
             ...(base.tooltip as object),
             trigger: "axis",
@@ -135,19 +160,21 @@ export function TimeSeriesChart({
                     color?: string;
                   };
                   const value = point.value?.[1];
-                  return `<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
-<span style="display:inline-flex;gap:6px;align-items:center"><span style="width:8px;height:2px;border-radius:2px;background:${point.color}"></span>${point.seriesName ?? ""}</span>
-<span style="font-variant-numeric:tabular-nums">${formatUnit(value ?? null, unit)}</span></div>`;
+                  return tooltipRow(
+                    tokens,
+                    point.color ?? tokens["series-1"],
+                    point.seriesName ?? "",
+                    formatUnit(value ?? null, unit),
+                  );
                 })
                 .join("");
-              return `<div style="font-variant-numeric:tabular-nums;margin-bottom:4px;opacity:.8">${
-                stamp ? formatUtc(new Date(stamp)) : ""
-              }</div>${rows}`;
+              return `${stamp ? tooltipHeader(tokens, formatUtc(new Date(stamp))) : ""}${rows}`;
             },
           },
           xAxis: {
             type: "time",
             ...axis,
+            boundaryGap: false,
             splitLine: { show: false },
             axisLabel: {
               ...axis.axisLabel,
@@ -158,6 +185,7 @@ export function TimeSeriesChart({
             type: "value",
             ...axis,
             axisLine: { show: false },
+            splitNumber: 4,
             axisLabel: {
               ...axis.axisLabel,
               formatter: (value: number) => formatUnit(value, unit, { compact: true }),
@@ -170,21 +198,39 @@ export function TimeSeriesChart({
               // cannot read custom properties, and an unparsed colour falls
               // back to ECharts' own palette — which is how four series end
               // up sharing one line colour.
-              const color = tokens[SERIES_TOKENS[slot % SERIES_TOKENS.length]];
+              const color = colorOf(slot);
               const dash = SERIES_DASH[slot % SERIES_DASH.length];
               return {
                 name: entry.name,
                 type: "line" as const,
                 data: entry.points,
+                // Smoothed, but monotone along x: a curve that overshoots a
+                // sample would draw a value that was never measured.
+                smooth: 0.35,
+                smoothMonotone: "x" as const,
                 showSymbol: false,
                 symbol: "circle",
-                symbolSize: 6,
+                symbolSize: 9,
                 // A null sample stays a hole in the line.
                 connectNulls: false,
-                lineStyle: { width: 2, color, type: dash ?? "solid" },
-                itemStyle: { color },
-                areaStyle: area && visible.length === 1 ? { opacity: 0.12, color } : undefined,
-                emphasis: { focus: "series" as const },
+                lineStyle: {
+                  width: visible.length > 3 ? 2 : 2.5,
+                  color,
+                  type: dash ?? "solid",
+                  cap: "round" as const,
+                  join: "round" as const,
+                },
+                itemStyle: { color, borderColor: tokens["surface-1"], borderWidth: 2 },
+                areaStyle:
+                  washStrength > 0
+                    ? { color: areaGradient(color, washStrength), opacity: 1 }
+                    : undefined,
+                emphasis: {
+                  focus: "series" as const,
+                  lineStyle: { width: 3 },
+                  itemStyle: { borderColor: tokens["surface-1"], borderWidth: 2.5 },
+                },
+                blur: { lineStyle: { opacity: 0.25 }, areaStyle: { opacity: 0.1 } },
                 markLine:
                   slot === 0 && (thresholds || markers?.length)
                     ? {
@@ -203,17 +249,27 @@ export function TimeSeriesChart({
                                   yAxis: thresholds.warn,
                                   lineStyle: {
                                     color: tokens["status-warning"],
-                                    type: "dashed" as const,
+                                    type: [5, 4],
+                                    width: 1.25,
+                                    opacity: 0.9,
                                   },
-                                  label: { formatter: `warn ${formatUnit(thresholds.warn, unit)}` },
+                                  label: {
+                                    ...pill(tokens["status-warning"]),
+                                    position: "insideEndTop" as const,
+                                    formatter: `warn ${formatUnit(thresholds.warn, unit)}`,
+                                  },
                                 },
                                 {
                                   yAxis: thresholds.critical,
                                   lineStyle: {
                                     color: tokens["status-critical"],
-                                    type: "dashed" as const,
+                                    type: [5, 4],
+                                    width: 1.25,
+                                    opacity: 0.9,
                                   },
                                   label: {
+                                    ...pill(tokens["status-critical"]),
+                                    position: "insideEndTop" as const,
                                     formatter: `critical ${formatUnit(thresholds.critical, unit)}`,
                                   },
                                 },
@@ -221,8 +277,16 @@ export function TimeSeriesChart({
                             : []),
                           ...(markers ?? []).map((marker) => ({
                             xAxis: marker.at,
-                            lineStyle: { color: tokens["status-info"], type: "solid" as const },
-                            label: { formatter: marker.label, rotate: 90 },
+                            lineStyle: {
+                              color: tokens["status-info"],
+                              type: [2, 3],
+                              width: 1.5,
+                            },
+                            label: {
+                              ...pill(tokens["status-info"]),
+                              position: "end" as const,
+                              formatter: marker.label,
+                            },
                           })),
                         ],
                       }

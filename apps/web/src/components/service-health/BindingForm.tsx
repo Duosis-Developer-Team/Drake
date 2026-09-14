@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import {
@@ -54,16 +54,16 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium text-ink-secondary">{label}</span>
+    <label className="block space-y-1.5">
+      <span className="text-caption font-medium text-ink-secondary">{label}</span>
       {children}
-      {hint ? <span className="block text-[11px] text-ink-muted">{hint}</span> : null}
+      {hint ? <span className="block text-micro text-ink-muted">{hint}</span> : null}
     </label>
   );
 }
 
 const SELECT_CLASS =
-  "w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-ink disabled:opacity-50";
+  "h-9 w-full rounded-control border border-border bg-surface px-2.5 text-body text-ink disabled:opacity-50";
 
 export function BindingForm({ environmentServiceId, existing, onSaved }: Props) {
   const { state, hasPermission } = useSession();
@@ -207,19 +207,18 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
   const complete = Boolean(clusterId && namespace && workload);
 
   return (
-    <Card title={existing ? "Edit binding" : "Bind a workload"}>
+    <Panel>
+      <PanelHeader title={existing ? "Edit binding" : "Bind a workload"} />
       {!canManage ? (
-        <div className="mb-3">
-          <DataState
-            kind="permission-denied"
-            description="Binding a service to a workload needs integration.manage in this scope."
-          />
-        </div>
+        <DataState
+          kind="permission-denied"
+          description="Binding a service to a workload needs integration.manage in this scope."
+        />
       ) : null}
 
-      <form onSubmit={submit} className="space-y-4" aria-label="Workload binding">
+      <form onSubmit={submit} className="space-y-5" aria-label="Workload binding">
         {existing ? (
-          <p className="rounded-lg border border-border bg-surface-sunken px-3 py-2 text-xs text-ink-secondary">
+          <p className="rounded-control border border-border bg-surface-2 px-3 py-2.5 text-caption text-ink-secondary">
             Bound to{" "}
             <span className="font-mono">
               {existing.cluster_ref}/{existing.namespace}/{existing.workload_kind}/
@@ -229,7 +228,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
             history always refers to one thing.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="Cluster">
               <select
                 className={SELECT_CLASS}
@@ -284,7 +283,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field
             label="Metric preset"
             hint={
@@ -323,7 +322,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
         </div>
 
         <div
-          className="rounded-lg border border-border bg-surface-sunken px-3 py-2 text-xs text-ink-secondary"
+          className="rounded-control border border-border bg-surface-2 px-3 py-2.5 text-caption text-ink-secondary"
           data-testid="datasource-state"
         >
           {/* State only. A datasource is configured by someone with
@@ -346,23 +345,23 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
           <div role="alert">
             <DataState kind="error" description={notice.message} />
             {notice.correlationId ? (
-              <p className="mt-1 text-xs text-ink-muted">
+              <p className="mt-1 text-micro text-ink-muted">
                 Correlation ID: <span className="font-mono">{notice.correlationId}</span>
               </p>
             ) : null}
           </div>
         ) : null}
         {notice.kind === "saved" ? (
-          <p role="status" className="text-xs text-ink-secondary" data-testid="save-notice">
+          <p role="status" className="text-caption text-ink-secondary" data-testid="save-notice">
             {notice.message}
           </p>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 border-t border-border pt-5">
           <button
             type="submit"
             disabled={!canManage || busy || (!existing && !complete)}
-            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-inverse disabled:opacity-50"
+            className="rounded-full bg-brand px-4 py-1.5 text-caption font-medium text-ink-inverse transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {existing ? "Save changes" : "Create binding"}
           </button>
@@ -378,7 +377,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
                     "Re-checked cluster inventory.",
                   )
                 }
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-sunken disabled:opacity-50"
+                className="rounded-full border border-border px-4 py-1.5 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Re-resolve
               </button>
@@ -399,7 +398,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
                       : "Binding re-enabled.",
                   )
                 }
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-sunken disabled:opacity-50"
+                className="rounded-full border border-border px-4 py-1.5 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {existing.lifecycle === "active" ? "Disable" : "Re-enable"}
               </button>
@@ -407,6 +406,6 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
           ) : null}
         </div>
       </form>
-    </Card>
+    </Panel>
   );
 }

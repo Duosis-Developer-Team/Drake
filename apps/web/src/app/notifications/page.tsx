@@ -56,7 +56,10 @@ type State =
   | { kind: "error"; message: string; denied: boolean }
   | { kind: "ready"; data: InboxPage };
 
-const EVENT_VISUAL: Record<NotificationEventType, { icon: LucideIcon; tone: StatusTone }> = {
+const EVENT_VISUAL: Record<
+  NotificationEventType,
+  { icon: LucideIcon; tone: StatusTone }
+> = {
   opened: { icon: Siren, tone: "critical" },
   acknowledged: { icon: BellRing, tone: "warning" },
   auto_resolved: { icon: CircleCheck, tone: "success" },
@@ -71,7 +74,10 @@ function NotificationRow({
   onRead: (id: string) => void;
   busy: boolean;
 }) {
-  const visual = EVENT_VISUAL[item.event_type] ?? { icon: BellRing, tone: "unknown" as StatusTone };
+  const visual = EVENT_VISUAL[item.event_type] ?? {
+    icon: BellRing,
+    tone: "unknown" as StatusTone,
+  };
   return (
     <li
       className={`relative flex flex-wrap items-start gap-4 px-7 py-5 transition-colors hover:bg-surface-hover ${
@@ -80,11 +86,16 @@ function NotificationRow({
       data-testid={`notification-${item.id}`}
     >
       {item.read_at ? null : (
-        <span aria-hidden className="absolute top-1/2 left-2.5 h-2 w-2 -translate-y-1/2 rounded-full bg-info" />
+        <span
+          aria-hidden
+          className="absolute top-1/2 left-2.5 h-2 w-2 -translate-y-1/2 rounded-full bg-info"
+        />
       )}
       <IconBubble icon={visual.icon} tone={visual.tone} />
       <div className="min-w-0 flex-1">
-        <p className={`text-body text-ink ${item.read_at ? "font-medium" : "font-semibold"}`}>
+        <p
+          className={`text-body text-ink ${item.read_at ? "font-medium" : "font-semibold"}`}
+        >
           {item.title}
         </p>
         <p className="mt-0.5 text-caption text-ink-secondary">{item.body}</p>
@@ -127,7 +138,8 @@ function NotificationRow({
 
 export default function NotificationsPage() {
   const { state: session } = useSession();
-  const csrfToken = session.status === "authenticated" ? session.me.csrf_token : null;
+  const csrfToken =
+    session.status === "authenticated" ? session.me.csrf_token : null;
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
@@ -167,7 +179,9 @@ export default function NotificationsPage() {
   };
 
   const items = state.kind === "ready" ? state.data.items : [];
-  const unreadIds = items.filter((item) => !item.read_at).map((item) => item.id);
+  const unreadIds = items
+    .filter((item) => !item.read_at)
+    .map((item) => item.id);
   const unreadCount = unreadIds.length;
   const total = items.length;
   const byEvent = EVENT_TYPES.map((event) => ({
@@ -190,17 +204,45 @@ export default function NotificationsPage() {
 
       <div className="space-y-6">
         {state.kind === "ready" ? (
-          <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-3">
-            <KpiTile icon={Inbox} label={unreadOnly ? "Shown (unread view)" : "Shown"} value={total}>
-              <p className="text-micro text-ink-muted">Most recent page of your inbox</p>
-            </KpiTile>
-            <KpiTile icon={BellRing} tone={unreadCount > 0 ? "info" : undefined} label="Unread" value={unreadCount} suffix={`of ${total}`}>
-              <ShareBar value={unreadCount} total={total} tone="info" label="still unread" />
-            </KpiTile>
-            <KpiTile icon={Siren} tone={byEvent[0].count > 0 ? "critical" : undefined} label="Incidents opened" value={byEvent[0].count}>
+          <div className="page-grid" data-cols="3">
+            <KpiTile
+              icon={Inbox}
+              label={unreadOnly ? "Shown (unread view)" : "Shown"}
+              value={total}
+            >
               <p className="text-micro text-ink-muted">
-                <span data-tabular className="font-medium text-ink-secondary">{byEvent[2].count}</span> resolved ·{" "}
-                <span data-tabular className="font-medium text-ink-secondary">{byEvent[1].count}</span> acknowledged
+                Most recent page of your inbox
+              </p>
+            </KpiTile>
+            <KpiTile
+              icon={BellRing}
+              tone={unreadCount > 0 ? "info" : undefined}
+              label="Unread"
+              value={unreadCount}
+              suffix={`of ${total}`}
+            >
+              <ShareBar
+                value={unreadCount}
+                total={total}
+                tone="info"
+                label="still unread"
+              />
+            </KpiTile>
+            <KpiTile
+              icon={Siren}
+              tone={byEvent[0].count > 0 ? "critical" : undefined}
+              label="Incidents opened"
+              value={byEvent[0].count}
+            >
+              <p className="text-micro text-ink-muted">
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {byEvent[2].count}
+                </span>{" "}
+                resolved ·{" "}
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {byEvent[1].count}
+                </span>{" "}
+                acknowledged
               </p>
             </KpiTile>
           </div>
@@ -268,31 +310,46 @@ export default function NotificationsPage() {
           </Panel>
         ) : null}
         {state.kind === "ready" && items.length > 0 ? (
-          <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-            <Panel flush>
-              <PanelHeader flush title="Inbox" meta={<span>{total} shown · {unreadCount} unread</span>} />
-              <ul className="divide-y divide-border" data-testid="inbox-list">
-                {items.map((item) => (
-                  <NotificationRow
-                    key={item.id}
-                    item={item}
-                    busy={busy}
-                    onRead={(id) => read([id])}
-                  />
-                ))}
-              </ul>
-            </Panel>
-            <Panel>
-              <PanelHeader title="By event" description="What the shown notifications were about" />
-              <StackedBar
-                label="Notifications by event"
-                segments={byEvent.map(({ event, count }) => ({
-                  name: EVENT_TYPE_LABELS[event],
-                  value: count,
-                  tone: EVENT_VISUAL[event].tone,
-                }))}
-              />
-            </Panel>
+          <div className="page-split" data-cols="3">
+            <div className="page-main">
+              <Panel flush>
+                <PanelHeader
+                  flush
+                  title="Inbox"
+                  meta={
+                    <span>
+                      {total} shown · {unreadCount} unread
+                    </span>
+                  }
+                />
+                <ul className="divide-y divide-border" data-testid="inbox-list">
+                  {items.map((item) => (
+                    <NotificationRow
+                      key={item.id}
+                      item={item}
+                      busy={busy}
+                      onRead={(id) => read([id])}
+                    />
+                  ))}
+                </ul>
+              </Panel>
+            </div>
+            <div className="page-aside">
+              <Panel>
+                <PanelHeader
+                  title="By event"
+                  description="What the shown notifications were about"
+                />
+                <StackedBar
+                  label="Notifications by event"
+                  segments={byEvent.map(({ event, count }) => ({
+                    name: EVENT_TYPE_LABELS[event],
+                    value: count,
+                    tone: EVENT_VISUAL[event].tone,
+                  }))}
+                />
+              </Panel>
+            </div>
           </div>
         ) : null}
       </div>

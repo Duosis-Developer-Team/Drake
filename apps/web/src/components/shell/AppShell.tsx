@@ -178,7 +178,12 @@ export function PageFrame({
 }) {
   const max =
     width === "wide" ? "max-w-none" : width === "narrow" ? "max-w-3xl" : "max-w-[110rem]";
-  return <div className={`mx-auto w-full px-4 pt-4 pb-12 lg:px-10 ${max}`}>{children}</div>;
+  // `@container/page` drives the shared column system in globals.css.
+  return (
+    <div className={`@container/page mx-auto w-full px-4 pt-4 pb-12 lg:px-10 ${max}`}>
+      {children}
+    </div>
+  );
 }
 
 /**

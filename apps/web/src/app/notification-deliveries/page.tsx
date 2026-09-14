@@ -104,7 +104,9 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
       })
       .catch((problem: unknown) => {
         if (!cancelled) {
-          setError(problem instanceof ApiError ? problem.message : "request failed");
+          setError(
+            problem instanceof ApiError ? problem.message : "request failed",
+          );
         }
       });
     return () => {
@@ -128,7 +130,10 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
         return (
           <li key={attempt.attempt_number} className="relative flex gap-4">
             {index < attempts.length - 1 ? (
-              <span aria-hidden className="absolute top-8 bottom-[-1rem] left-[0.9375rem] w-px bg-border" />
+              <span
+                aria-hidden
+                className="absolute top-8 bottom-[-1rem] left-[0.9375rem] w-px bg-border"
+              />
             ) : null}
             <span
               aria-hidden
@@ -144,24 +149,32 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
             </span>
             <div className="min-w-0 pt-1 text-micro text-ink-secondary">
               <p>
-                <span className="text-caption font-semibold text-ink">Attempt {attempt.attempt_number}</span>{" "}
+                <span className="text-caption font-semibold text-ink">
+                  Attempt {attempt.attempt_number}
+                </span>{" "}
                 — {attempt.outcome}
               </p>
               <p className="mt-1 flex flex-wrap gap-1.5">
                 {attempt.http_status ? (
-                  <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono">HTTP {attempt.http_status}</span>
+                  <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono">
+                    HTTP {attempt.http_status}
+                  </span>
                 ) : null}
                 {attempt.error_code ? (
                   <span className="rounded-full bg-surface-3 px-2 py-0.5">
-                    {DELIVERY_ERROR_LABELS[attempt.error_code] ?? attempt.error_code}
+                    {DELIVERY_ERROR_LABELS[attempt.error_code] ??
+                      attempt.error_code}
                   </span>
                 ) : null}
                 {attempt.duration_ms !== null ? (
-                  <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono">{attempt.duration_ms} ms</span>
+                  <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono">
+                    {attempt.duration_ms} ms
+                  </span>
                 ) : null}
                 {attempt.retry_at ? (
                   <span className="rounded-full bg-surface-3 px-2 py-0.5">
-                    retry at <time className="font-mono">{attempt.retry_at}</time>
+                    retry at{" "}
+                    <time className="font-mono">{attempt.retry_at}</time>
                   </span>
                 ) : null}
               </p>
@@ -176,30 +189,43 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
 function LifecycleCard() {
   return (
     <Panel>
-      <PanelHeader title="Delivery lifecycle" description="At-least-once, with a stable idempotency key" />
+      <PanelHeader
+        title="Delivery lifecycle"
+        description="At-least-once, with a stable idempotency key"
+      />
       <ol className="space-y-3">
-        {(["pending", "retrying", "delivered", "dead_letter", "suppressed"] as DeliveryState[]).map(
-          (state) => (
-            <li key={state} className="flex items-center gap-3">
-              <IconBubble icon={STATE_ICON[state]} tone={STATE_TONE[state]} size="sm" />
-              <span className="min-w-0 flex-1 text-caption font-medium text-ink">
-                {DELIVERY_STATE_LABELS[state]}
-              </span>
-              <span className="text-right text-micro text-ink-muted">
+        {(
+          [
+            "pending",
+            "retrying",
+            "delivered",
+            "dead_letter",
+            "suppressed",
+          ] as DeliveryState[]
+        ).map((state) => (
+          <li key={state} className="flex items-center gap-3">
+            <IconBubble
+              icon={STATE_ICON[state]}
+              tone={STATE_TONE[state]}
+              size="sm"
+            />
+            <span className="min-w-0 flex-1 text-caption font-medium text-ink">
+              {DELIVERY_STATE_LABELS[state]}
+            </span>
+            <span className="text-right text-micro text-ink-muted">
+              {
                 {
-                  {
-                    pending: "queued",
-                    processing: "in flight",
-                    retrying: "backing off",
-                    delivered: "accepted",
-                    dead_letter: "gave up",
-                    suppressed: "not sent",
-                  }[state]
-                }
-              </span>
-            </li>
-          ),
-        )}
+                  pending: "queued",
+                  processing: "in flight",
+                  retrying: "backing off",
+                  delivered: "accepted",
+                  dead_letter: "gave up",
+                  suppressed: "not sent",
+                }[state]
+              }
+            </span>
+          </li>
+        ))}
       </ol>
     </Panel>
   );
@@ -223,7 +249,9 @@ export default function NotificationDeliveriesPage() {
       })
       .catch((problem: unknown) => {
         if (!cancelled) {
-          setError(problem instanceof ApiError ? problem.message : "request failed");
+          setError(
+            problem instanceof ApiError ? problem.message : "request failed",
+          );
         }
       });
     return () => {
@@ -264,27 +292,56 @@ export default function NotificationDeliveriesPage() {
 
       <div className="space-y-6">
         {rows !== null ? (
-          <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="page-grid">
             <KpiTile icon={Send} label="Deliveries shown" value={shown}>
               <p className="text-micro text-ink-muted">
-                {state ? `Filtered to ${DELIVERY_STATE_LABELS[state]}` : "Every state, newest first"}
+                {state
+                  ? `Filtered to ${DELIVERY_STATE_LABELS[state]}`
+                  : "Every state, newest first"}
               </p>
             </KpiTile>
-            <KpiTile icon={CircleCheck} tone="success" label="Delivered" value={byState.delivered} suffix={`of ${shown}`}>
-              <ShareBar value={byState.delivered} total={shown} tone="success" label="accepted by the target" />
+            <KpiTile
+              icon={CircleCheck}
+              tone="success"
+              label="Delivered"
+              value={byState.delivered}
+              suffix={`of ${shown}`}
+            >
+              <ShareBar
+                value={byState.delivered}
+                total={shown}
+                tone="success"
+                label="accepted by the target"
+              />
             </KpiTile>
-            <KpiTile icon={RotateCcw} tone={inFlight > 0 ? "warning" : undefined} label="In flight" value={inFlight}>
+            <KpiTile
+              icon={RotateCcw}
+              tone={inFlight > 0 ? "warning" : undefined}
+              label="In flight"
+              value={inFlight}
+            >
               <p className="text-micro text-ink-muted">
-                <span data-tabular className="font-medium text-ink-secondary">{byState.retrying}</span> retrying ·{" "}
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {byState.retrying}
+                </span>{" "}
+                retrying ·{" "}
                 <span data-tabular className="font-medium text-ink-secondary">
                   {byState.pending + byState.processing}
                 </span>{" "}
                 queued
               </p>
             </KpiTile>
-            <KpiTile icon={MailX} tone={byState.dead_letter > 0 ? "critical" : undefined} label="Dead letter" value={byState.dead_letter}>
+            <KpiTile
+              icon={MailX}
+              tone={byState.dead_letter > 0 ? "critical" : undefined}
+              label="Dead letter"
+              value={byState.dead_letter}
+            >
               <p className="text-micro text-ink-muted">
-                <span data-tabular className="font-medium text-ink-secondary">{byState.suppressed}</span> suppressed
+                <span data-tabular className="font-medium text-ink-secondary">
+                  {byState.suppressed}
+                </span>{" "}
+                suppressed
               </p>
             </KpiTile>
           </div>
@@ -296,15 +353,23 @@ export default function NotificationDeliveriesPage() {
           onChange={(value) => setState(value)}
           options={[
             { value: "" as DeliveryState | "", label: "Any state" },
-            ...STATES.map((value) => ({ value, label: DELIVERY_STATE_LABELS[value] })),
+            ...STATES.map((value) => ({
+              value,
+              label: DELIVERY_STATE_LABELS[value],
+            })),
           ]}
         />
 
-        <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-          <div className="min-w-0 space-y-6">
+        <div className="page-split">
+          <div className="page-main">
             {error ? (
               <Panel>
-                <StateCard kind="error" title="Could not load deliveries" description={error} onRetry={load} />
+                <StateCard
+                  kind="error"
+                  title="Could not load deliveries"
+                  description={error}
+                  onRetry={load}
+                />
               </Panel>
             ) : null}
             {rows === null && !error ? (
@@ -321,7 +386,11 @@ export default function NotificationDeliveriesPage() {
                   description="No webhook deliveries match this filter in your authorized scope."
                   action={
                     state ? (
-                      <button type="button" onClick={() => setState("")} className={PILL_BUTTON}>
+                      <button
+                        type="button"
+                        onClick={() => setState("")}
+                        className={PILL_BUTTON}
+                      >
                         Show every state
                       </button>
                     ) : null
@@ -332,12 +401,26 @@ export default function NotificationDeliveriesPage() {
 
             {rows !== null && rows.length > 0 ? (
               <Panel flush>
-                <PanelHeader flush title="Deliveries" meta={<span>{rows.length} shown</span>} />
-                <ul className="divide-y divide-border" data-testid="delivery-list">
+                <PanelHeader
+                  flush
+                  title="Deliveries"
+                  meta={<span>{rows.length} shown</span>}
+                />
+                <ul
+                  className="divide-y divide-border"
+                  data-testid="delivery-list"
+                >
                   {rows.map((row) => (
-                    <li key={row.id} className="px-7 py-4 transition-colors hover:bg-surface-hover" data-testid={`delivery-${row.id}`}>
+                    <li
+                      key={row.id}
+                      className="px-7 py-4 transition-colors hover:bg-surface-hover"
+                      data-testid={`delivery-${row.id}`}
+                    >
                       <div className="flex flex-wrap items-center gap-4">
-                        <IconBubble icon={STATE_ICON[row.state]} tone={STATE_TONE[row.state]} />
+                        <IconBubble
+                          icon={STATE_ICON[row.state]}
+                          tone={STATE_TONE[row.state]}
+                        />
                         <div className="min-w-0 flex-1">
                           <Link
                             href={`/incidents/${row.incident_id}`}
@@ -347,7 +430,8 @@ export default function NotificationDeliveriesPage() {
                           </Link>
                           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-ink-muted">
                             <span className="text-ink-secondary">
-                              {EVENT_TYPE_LABELS[row.event_type] ?? row.event_type}
+                              {EVENT_TYPE_LABELS[row.event_type] ??
+                                row.event_type}
                             </span>
                             <span>→ {row.destination_display_name}</span>
                             <span className="font-mono">{row.project_key}</span>
@@ -359,12 +443,15 @@ export default function NotificationDeliveriesPage() {
                             label={DELIVERY_STATE_LABELS[row.state]}
                           />
                           <span className="rounded-full bg-surface-2 px-2.5 py-1 text-micro font-medium text-ink-secondary">
-                            {row.attempt_count} attempt{row.attempt_count === 1 ? "" : "s"}
+                            {row.attempt_count} attempt
+                            {row.attempt_count === 1 ? "" : "s"}
                           </span>
                           <button
                             type="button"
                             aria-expanded={expanded === row.id}
-                            onClick={() => setExpanded(expanded === row.id ? null : row.id)}
+                            onClick={() =>
+                              setExpanded(expanded === row.id ? null : row.id)
+                            }
                             className={PILL_BUTTON}
                           >
                             {expanded === row.id ? "Hide attempts" : "Attempts"}
@@ -375,24 +462,35 @@ export default function NotificationDeliveriesPage() {
                           </button>
                         </div>
                       </div>
-                      {row.last_error_code || row.delivered_at || row.next_attempt_at ? (
+                      {row.last_error_code ||
+                      row.delivered_at ||
+                      row.next_attempt_at ? (
                         <p className="mt-2 flex flex-wrap items-center gap-2 pl-14 text-micro text-ink-muted">
                           {row.last_error_code ? (
                             <span className="rounded-full bg-critical-soft px-2 py-0.5 text-critical">
-                              {DELIVERY_ERROR_LABELS[row.last_error_code] ?? row.last_error_code}
-                              {row.last_http_status ? ` (HTTP ${row.last_http_status})` : ""}
+                              {DELIVERY_ERROR_LABELS[row.last_error_code] ??
+                                row.last_error_code}
+                              {row.last_http_status
+                                ? ` (HTTP ${row.last_http_status})`
+                                : ""}
                             </span>
                           ) : null}
                           {row.delivered_at ? (
                             <span>
                               delivered{" "}
-                              <time dateTime={row.delivered_at} title={formatUtc(row.delivered_at)}>
+                              <time
+                                dateTime={row.delivered_at}
+                                title={formatUtc(row.delivered_at)}
+                              >
                                 {formatRelative(row.delivered_at)}
                               </time>
                             </span>
                           ) : row.next_attempt_at ? (
                             <span>
-                              next attempt <time className="font-mono">{row.next_attempt_at}</time>
+                              next attempt{" "}
+                              <time className="font-mono">
+                                {row.next_attempt_at}
+                              </time>
                             </span>
                           ) : null}
                         </p>
@@ -409,21 +507,31 @@ export default function NotificationDeliveriesPage() {
             ) : null}
           </div>
 
-          <div className="space-y-6">
+          <div className="page-aside">
             {rows !== null && rows.length > 0 ? (
               <Panel>
-                <PanelHeader title="Outcome breakdown" description="Deliveries shown, by state" />
+                <PanelHeader
+                  title="Outcome breakdown"
+                  description="Deliveries shown, by state"
+                />
                 <Donut
                   label="Delivery outcomes"
                   size={148}
                   thickness={16}
-                  slices={(["delivered", "retrying", "pending", "processing", "dead_letter", "suppressed"] as DeliveryState[]).map(
-                    (value) => ({
-                      name: DELIVERY_STATE_LABELS[value],
-                      value: byState[value],
-                      tone: STATE_TONE[value],
-                    }),
-                  )}
+                  slices={(
+                    [
+                      "delivered",
+                      "retrying",
+                      "pending",
+                      "processing",
+                      "dead_letter",
+                      "suppressed",
+                    ] as DeliveryState[]
+                  ).map((value) => ({
+                    name: DELIVERY_STATE_LABELS[value],
+                    value: byState[value],
+                    tone: STATE_TONE[value],
+                  }))}
                 />
               </Panel>
             ) : null}
