@@ -8,7 +8,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import { BindingForm } from "@/components/service-health/BindingForm";
@@ -98,27 +98,21 @@ function BindScreen() {
 
 export default function BindPage() {
   return (
-    <PageFrame>
-      <div className="space-y-5">
-      <div>
-        <p className="text-xs text-ink-muted">
-          <Link href="/service-health" className="hover:text-ink">
-            Service health
-          </Link>{" "}
-          / Binding
-        </p>
-        <h1 className="mt-1 text-title font-semibold text-ink">
-          Service ↔ workload binding
-        </h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          Choose the workload this service runs as. Which metrics are read comes from a
-          reviewed preset — there is no query to write here.
-        </p>
-      </div>
+    <PageFrame width="narrow">
+      <p className="mb-2 text-micro text-ink-muted">
+        <Link href="/service-health" className="hover:text-ink">
+          Service health
+        </Link>
+        <span className="mx-1.5">/</span>
+        <span className="text-ink-secondary">Binding</span>
+      </p>
+      <PageHeader
+        title="Service ↔ workload binding"
+        description="Choose the workload this service runs as. Which metrics are read comes from a reviewed preset — there is no query to write here."
+      />
       <Suspense fallback={<DataState kind="loading" />}>
         <BindScreen />
       </Suspense>
-      </div>
     </PageFrame>
   );
 }

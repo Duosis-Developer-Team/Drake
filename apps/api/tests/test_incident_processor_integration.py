@@ -22,7 +22,12 @@ pytestmark = pytest.mark.integration
 
 __all__ = ["engine", "migrated_db"]
 
-BASE = datetime(2026, 8, 8, 12, 0, 0, tzinfo=UTC)
+# Anchored to the run, not to the calendar. A fixed date is a slow fuse: the
+# API's `opened_within` windows are measured against the database clock, so a
+# world built on 2026-08-08 silently ages out of the 30-day window and the
+# suite begins failing on a date nobody chose. Every offset below this point
+# is in minutes, so an hour of margin keeps the whole world in the past.
+BASE = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
 
 
 async def make_world(engine: AsyncEngine) -> dict[str, uuid.UUID]:

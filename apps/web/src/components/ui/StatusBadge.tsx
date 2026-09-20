@@ -110,6 +110,32 @@ export function HealthIndicator({
   );
 }
 
+/** A circular, tone-filled icon badge — the "avatar" for an entity row that
+ *  has no photo of its own (a service, a cluster, a project). Leads a row the
+ *  way a contact photo leads one in a consumer app: colour and shape carry
+ *  the state before the reader even reaches the label. */
+export function ToneAvatar({
+  status,
+  size = "default",
+}: {
+  status: HealthStatus | StatusTone;
+  size?: "default" | "compact";
+}) {
+  const tone = resolve(status);
+  const spec = toneSpec(tone);
+  const Icon = spec.icon;
+  return (
+    <span
+      aria-hidden
+      className={`flex shrink-0 items-center justify-center rounded-full ${spec.chip} ${
+        size === "compact" ? "h-7 w-7" : "h-9 w-9"
+      }`}
+    >
+      <Icon className={size === "compact" ? "h-3.5 w-3.5" : "h-4.5 w-4.5"} />
+    </span>
+  );
+}
+
 /** A raw backend health word, badged without the caller mapping it first. */
 export function HealthWord({ value, label }: { value: string | null | undefined; label?: string }) {
   return <StatusBadge status={toneForHealth(value)} label={label ?? humanize(value)} />;

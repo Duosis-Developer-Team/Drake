@@ -125,6 +125,29 @@ describe("token layer", () => {
   });
 });
 
+describe("sidebar tokens", () => {
+  // 2026-09-14 PayFlow pass: the rail follows the theme — a light rail in
+  // light mode, an obsidian one in dark — so every check runs per theme.
+  const SIDEBAR_TEXT: TokenName[] = ["sidebar-text", "sidebar-text-muted"];
+
+  for (const [theme, tokens] of [
+    ["light", LIGHT_TOKENS],
+    ["dark", DARK_TOKENS],
+  ] as const) {
+    it(`${theme}: sidebar text clears 4.5:1 on the sidebar canvas`, () => {
+      for (const text of SIDEBAR_TEXT) {
+        const ratio = contrast(tokens[text], tokens["sidebar-canvas"]);
+        expect(ratio, `${text} on sidebar-canvas is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`${theme}: the active-entry rail clears 3:1 on the sidebar canvas`, () => {
+      const ratio = contrast(tokens["sidebar-active-rail"], tokens["sidebar-canvas"]);
+      expect(ratio, `sidebar-active-rail on sidebar-canvas is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+    });
+  }
+});
+
 describe("contrast", () => {
   const SURFACES: TokenName[] = ["surface-1", "canvas", "surface-2", "surface-3"];
   const TEXT: TokenName[] = ["text-primary", "text-secondary", "text-muted"];

@@ -46,6 +46,7 @@ vi.mock("echarts/core", () => ({
 vi.mock("echarts/charts", () => ({
   BarChart: {},
   CustomChart: {},
+  GaugeChart: {},
   HeatmapChart: {},
   LineChart: {},
   PieChart: {},

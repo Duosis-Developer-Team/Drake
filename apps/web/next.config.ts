@@ -25,6 +25,8 @@ const drakeApiBase = process.env.DRAKE_API_URL ?? "http://127.0.0.1:8000";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // The dev-tools bubble sits bottom-left on top of the rail's identity card.
+  devIndicators: false,
   // Standalone output only for the container build: it emits a
   // self-contained server with exactly the modules it needs, which is what
   // makes the image independent of the pnpm workspace symlink layout.

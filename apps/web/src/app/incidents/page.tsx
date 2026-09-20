@@ -10,17 +10,42 @@
  * different things to tell an operator at 3am.
  */
 
+import {
+  Activity,
+  CheckCircle2,
+  Eye,
+  HeartPulse,
+  Inbox,
+  Layers,
+  Siren,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { useApi } from "@/components/catalog/primitives";
-import { IncidentStateBadge, ReasonLabel } from "@/components/incidents/primitives";
-import { StackedBar } from "@/components/charts/visuals";
+import {
+  BreakdownRing,
+  CardTitle,
+  EmptyHero,
+  FactPill,
+  KpiTile,
+  PillSelect,
+  RowBubble,
+  StatePad,
+  Toolbar,
+} from "@/components/incidents/OpsKit";
+import {
+  IncidentStateBadge,
+  ReasonLabel,
+} from "@/components/incidents/primitives";
+import { HealthBadge } from "@/components/service-health/primitives";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel } from "@/components/ui/Panel";
+import type { StatusTone } from "@/lib/design/status";
 import {
   INCIDENT_STATES,
   OPENED_WINDOWS,
@@ -32,64 +57,135 @@ import {
   type IncidentSummary,
   type OpenedWindow,
 } from "@/lib/incidents";
-import { HealthBadge } from "@/components/service-health/primitives";
 
-const SELECT_CLASS =
-  "rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-ink";
+const STATE_VISUAL: Record<
+  IncidentState,
+  { icon: LucideIcon; tone: StatusTone }
+> = {
+  open: { icon: Siren, tone: "critical" },
+  acknowledged: { icon: Eye, tone: "warning" },
+  resolved: { icon: CheckCircle2, tone: "success" },
+};
 
+/**
+ * One incident. The leading bubble carries its lifecycle state; the title,
+ * severity and state lead; workload and reason follow; current health,
+ * opened time and duration sit on the right. The whole row opens it.
+ */
 function IncidentRow({ incident }: { incident: IncidentSummary }) {
+  const visual = STATE_VISUAL[incident.state];
   return (
-    <tr
-      className="border-t border-border align-top"
+    <li
       data-testid={`incident-row-${incident.service_key}`}
+      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-7 py-4 transition-colors hover:bg-surface-hover md:grid-cols-[auto_minmax(0,1fr)_auto]"
     >
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
+      <RowBubble icon={visual.icon} tone={visual.tone} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           <Link
             href={`/incidents/${incident.id}`}
-            className="text-sm font-medium text-ink hover:underline"
+            className="truncate text-body font-semibold text-ink after:absolute after:inset-0 after:content-['']"
           >
             {incident.title}
           </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
-            {incident.project_key}/{incident.environment_key}/{incident.service_key}
-          </span>
+          <StatusBadge
+            status="critical"
+            label={incident.severity}
+            size="compact"
+          />
+          <IncidentStateBadge state={incident.state} />
         </div>
-      </td>
-      <td className="py-2.5 pr-3">
-        <StatusBadge status="critical" label={incident.severity} />
-      </td>
-      <td className="py-2.5 pr-3">
-        <IncidentStateBadge state={incident.state} />
-        {incident.acknowledged_at ? (
-          <span className="mt-1 block text-[11px] text-ink-muted">
-            acknowledged <time className="font-mono">{incident.acknowledged_at}</time>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-secondary">
+          <span className="font-mono text-micro text-ink-muted">
+            {incident.binding.cluster_ref}/{incident.binding.namespace}/
+            {incident.binding.workload_name}
           </span>
-        ) : null}
-      </td>
-      <td className="py-2.5 pr-3">
-        <span className="font-mono text-[11px] text-ink-secondary">
-          {incident.binding.cluster_ref}/{incident.binding.namespace}/
-          {incident.binding.workload_name}
-        </span>
-      </td>
-      <td className="py-2.5 pr-3 text-xs text-ink-secondary">
-        <ReasonLabel reason={incident.primary_reason} />
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
-        <time className="font-mono">{incident.opened_at}</time>
-      </td>
-      <td className="py-2.5 pr-3 whitespace-nowrap text-xs text-ink-secondary">
-        {formatDuration(incident.opened_at, incident.resolved_at)}
-      </td>
-      <td className="py-2.5">
+          <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
+          <span className="inline-flex items-center gap-1.5">
+            <Activity aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+            <ReasonLabel reason={incident.primary_reason} />
+          </span>
+          {incident.acknowledged_at ? (
+            <span className="text-micro text-ink-muted">
+              acknowledged{" "}
+              <time className="font-mono">{incident.acknowledged_at}</time>
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="col-span-2 flex flex-wrap items-center gap-4 md:col-span-1 md:justify-end">
         {incident.current_health ? (
           <HealthBadge status={incident.current_health.status} />
         ) : (
-          <span className="text-xs italic text-ink-muted">unknown</span>
+          <span className="text-caption text-ink-muted">health unknown</span>
         )}
-      </td>
-    </tr>
+        <div className="text-right text-micro leading-4 text-ink-muted">
+          <div className="font-semibold text-ink-secondary" data-tabular>
+            {formatDuration(incident.opened_at, incident.resolved_at)}
+          </div>
+          <div>
+            opened <time className="font-mono">{incident.opened_at}</time>
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/** The lifecycle rule the header used to spell out, as three small steps. */
+function LifecycleRule() {
+  const steps: {
+    icon: LucideIcon;
+    tone: StatusTone;
+    title: string;
+    detail: string;
+  }[] = [
+    {
+      icon: Siren,
+      tone: "critical",
+      title: "Opens",
+      detail: "after two consecutive trustworthy critical evaluations",
+    },
+    {
+      icon: Eye,
+      tone: "warning",
+      title: "Acknowledged",
+      detail: "someone is on it — monitoring continues",
+    },
+    {
+      icon: HeartPulse,
+      tone: "success",
+      title: "Closes",
+      detail: "on its own when the service reports healthy twice",
+    },
+  ];
+  return (
+    <Panel>
+      <CardTitle icon={Layers} title="How incidents move" />
+      <ol className="relative space-y-5">
+        <span
+          aria-hidden
+          className="absolute top-5 bottom-5 left-[1.1875rem] w-px bg-border"
+        />
+        {steps.map((step) => {
+          const Icon = step.icon;
+          return (
+            <li key={step.title} className="relative flex items-start gap-3.5">
+              <RowBubble icon={Icon} tone={step.tone} />
+              <div className="min-w-0 pt-0.5">
+                <p className="text-caption font-semibold text-ink">
+                  {step.title}
+                </p>
+                <p className="text-micro text-ink-muted">{step.detail}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="rounded-2xl bg-surface-2 px-4 py-3 text-micro text-ink-secondary">
+        A datasource outage never opens an incident.
+      </p>
+    </Panel>
   );
 }
 
@@ -110,136 +206,186 @@ function IncidentTable() {
   });
   const [page, retry] = useApi<IncidentPage>(path);
 
+  const items = page.state === "ready" ? page.data.items : [];
+  const total = items.length;
+  const openCount = items.filter((item) => item.state === "open").length;
+  const ackCount = items.filter((item) => item.state === "acknowledged").length;
+  const resolvedCount = items.filter(
+    (item) => item.state === "resolved",
+  ).length;
+
+  const filters = (
+    <Toolbar
+      summary={
+        page.state === "ready"
+          ? `${total} of ${page.data.total} shown`
+          : undefined
+      }
+    >
+      <PillSelect
+        label="State"
+        value={state}
+        placeholder="Any"
+        options={INCIDENT_STATES.map((value) => ({
+          value,
+          label: STATE_LABELS[value],
+        }))}
+        onChange={(value) => setState(value as IncidentState | "")}
+      />
+      <PillSelect
+        label="Severity"
+        value={severity}
+        placeholder="Any"
+        options={[{ value: "critical" as const, label: "critical" }]}
+        onChange={(value) => setSeverity(value as "critical" | "")}
+      />
+      <PillSelect
+        label="Opened within"
+        value={openedWithin}
+        placeholder="Any time"
+        options={OPENED_WINDOWS.map((value) => ({ value, label: value }))}
+        onChange={(value) => setOpenedWithin(value as OpenedWindow | "")}
+      />
+    </Toolbar>
+  );
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters">
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          State
-          <select
-            className={SELECT_CLASS}
-            value={state}
-            onChange={(event) => setState(event.target.value as IncidentState | "")}
-          >
-            <option value="">Any</option>
-            {INCIDENT_STATES.map((value) => (
-              <option key={value} value={value}>
-                {STATE_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Severity
-          <select
-            className={SELECT_CLASS}
-            value={severity}
-            onChange={(event) => setSeverity(event.target.value as "critical" | "")}
-          >
-            <option value="">Any</option>
-            <option value="critical">critical</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-          Opened within
-          <select
-            className={SELECT_CLASS}
-            value={openedWithin}
-            onChange={(event) => setOpenedWithin(event.target.value as OpenedWindow | "")}
-          >
-            <option value="">Any time</option>
-            {OPENED_WINDOWS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+    <div className="flex flex-col gap-6">
+      {page.state === "ready" ? (
+        <div
+          className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
+          data-testid="incident-summary"
+        >
+          <KpiTile
+            data-testid="incident-kpi-open"
+            label="Open"
+            value={openCount}
+            icon={Siren}
+            tone="critical"
+            share={total > 0 ? openCount / total : null}
+            caption="nobody has acknowledged yet"
+          />
+          <KpiTile
+            data-testid="incident-kpi-acknowledged"
+            label="Acknowledged"
+            value={ackCount}
+            icon={Eye}
+            tone="warning"
+            share={total > 0 ? ackCount / total : null}
+            caption="someone is on it"
+          />
+          <KpiTile
+            data-testid="incident-kpi-resolved"
+            label="Resolved"
+            value={resolvedCount}
+            icon={CheckCircle2}
+            tone="success"
+            share={total > 0 ? resolvedCount / total : null}
+            caption="closed on a real recovery"
+          />
+          <KpiTile
+            data-testid="incident-kpi-shown"
+            label="Shown"
+            value={total}
+            icon={Inbox}
+            tone="info"
+            share={page.data.total > 0 ? total / page.data.total : null}
+            caption={`of ${page.data.total} in your authorized scope`}
+          />
+        </div>
+      ) : null}
 
-      {page.state === "loading" ? <DataState kind="loading" /> : null}
+      {filters}
 
-      {page.state === "error" ? (
-        <Card>
-          {/* Permission denied and "request failed" are different answers
-              and get different screens. */}
-          {page.notFound ? (
-            <DataState
-              kind="permission-denied"
-              description="Your current scope does not include incidents."
+      <div className="page-split">
+        <div className="page-main">
+          <Panel
+            flush
+            className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+          >
+            <CardTitle
+              flush
+              icon={Siren}
+              title="Incident queue"
+              description="Worst first, as the processor recorded them"
             />
-          ) : (
-            <DataState kind="error" description={page.message} onRetry={retry} />
-          )}
-        </Card>
-      ) : null}
+            {page.state === "loading" ? (
+              <StatePad>
+                <DataState kind="loading" />
+              </StatePad>
+            ) : null}
+            {page.state === "error" ? (
+              <StatePad>
+                {/* Permission denied and "request failed" are different answers
+                  and get different screens. */}
+                {page.notFound ? (
+                  <DataState
+                    kind="permission-denied"
+                    description="Your current scope does not include incidents."
+                  />
+                ) : (
+                  <DataState
+                    kind="error"
+                    description={page.message}
+                    onRetry={retry}
+                  />
+                )}
+              </StatePad>
+            ) : null}
+            {page.state === "ready" && total === 0 ? (
+              <EmptyHero
+                icon={Inbox}
+                title="No incidents"
+                description="Nothing matches these filters in your authorized scope."
+              >
+                <FactPill>
+                  State · {state ? STATE_LABELS[state] : "any"}
+                </FactPill>
+                <FactPill>Severity · {severity || "any"}</FactPill>
+                <FactPill>Opened · {openedWithin || "any time"}</FactPill>
+              </EmptyHero>
+            ) : null}
+            {page.state === "ready" && total > 0 ? (
+              <>
+                <ul
+                  className="divide-y divide-border"
+                  data-testid="incident-table"
+                >
+                  {items.map((incident) => (
+                    <IncidentRow key={incident.id} incident={incident} />
+                  ))}
+                </ul>
+                <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
+                  Showing {items.length} of {page.data.total} incidents in your
+                  authorized scope.
+                </p>
+              </>
+            ) : null}
+          </Panel>
+        </div>
 
-      {page.state === "ready" && page.data.items.length === 0 ? (
-        <Card>
-          <DataState
-            kind="empty"
-            title="No incidents"
-            description="Nothing matches these filters in your authorized scope."
-          />
-        </Card>
-      ) : null}
-
-      {page.state === "ready" && page.data.items.length > 0 ? (
-        <Card title="In this view">
-          {/* Computed from the rows on screen, and labelled as such: this is
-              a page, not the whole set, and calling it a total would be a
-              number nobody measured. */}
-          <StackedBar
-            label="Incidents on this page by state"
-            segments={[
-              {
-                name: "Open",
-                value: page.data.items.filter((item) => item.state === "open").length,
-                tone: "critical",
-              },
-              {
-                name: "Acknowledged",
-                value: page.data.items.filter((item) => item.state === "acknowledged").length,
-                tone: "warning",
-              },
-              {
-                name: "Resolved",
-                value: page.data.items.filter((item) => item.state === "resolved").length,
-                tone: "success",
-              },
-            ]}
-          />
-        </Card>
-      ) : null}
-
-      {page.state === "ready" && page.data.items.length > 0 ? (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left" data-testid="incident-table">
-              <thead>
-                <tr className="text-caption text-ink-secondary">
-                  <th className="pb-2 pr-3 font-medium">Incident</th>
-                  <th className="pb-2 pr-3 font-medium">Severity</th>
-                  <th className="pb-2 pr-3 font-medium">State</th>
-                  <th className="pb-2 pr-3 font-medium">Workload</th>
-                  <th className="pb-2 pr-3 font-medium">Primary reason</th>
-                  <th className="pb-2 pr-3 font-medium">Opened</th>
-                  <th className="pb-2 pr-3 font-medium">Duration</th>
-                  <th className="pb-2 font-medium">Current health</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.data.items.map((incident) => (
-                  <IncidentRow key={incident.id} incident={incident} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-[11px] text-ink-muted">
-            Showing {page.data.items.length} of {page.data.total} incidents in your
-            authorized scope.
-          </p>
-        </Card>
-      ) : null}
+        <div className="page-aside">
+          {page.state === "ready" ? (
+            <Panel className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
+              <CardTitle
+                icon={Activity}
+                title="By state"
+                description="Incidents on this page"
+              />
+              <BreakdownRing
+                label="Incidents on this page by state"
+                centerCaption="on this page"
+                slices={[
+                  { name: "Open", value: openCount, tone: "critical" },
+                  { name: "Acknowledged", value: ackCount, tone: "warning" },
+                  { name: "Resolved", value: resolvedCount, tone: "success" },
+                ]}
+              />
+            </Panel>
+          ) : null}
+          <LifecycleRule />
+        </div>
+      </div>
     </div>
   );
 }
@@ -247,19 +393,13 @@ function IncidentTable() {
 export default function IncidentsPage() {
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <div>
-        <h1 className="text-title font-semibold text-ink">Incidents</h1>
-        <p className="mt-1 max-w-3xl text-caption text-ink-secondary">
-          Opened by Drake after two consecutive trustworthy critical evaluations, and closed
-          automatically when the service reports healthy twice. A datasource outage never
-          opens one.
-        </p>
-      </div>
+      <PageHeader
+        title="Incidents"
+        description="Opened and closed by Drake from trustworthy health evaluations — never by a datasource outage."
+      />
       <Suspense fallback={<DataState kind="loading" />}>
         <IncidentTable />
       </Suspense>
-      </div>
     </PageFrame>
   );
 }

@@ -22,7 +22,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { DataState } from "@/components/state/DataState";
-import { Card } from "@/components/ui/Card";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
 import {
   CANDIDATE_BLOCKERS,
@@ -148,7 +148,8 @@ export function StartOnboarding({
 
   if (!canManage) {
     return (
-      <Card title="Start an onboarding">
+      <Panel>
+        <PanelHeader title="Start an onboarding" />
         <div data-testid="start-permission-denied">
           <DataState
             kind="permission-denied"
@@ -156,7 +157,7 @@ export function StartOnboarding({
             description="Starting one needs the onboarding manage permission on the scope the repository belongs to. You can still review sessions you have access to."
           />
         </div>
-      </Card>
+      </Panel>
     );
   }
 
@@ -188,11 +189,15 @@ export function StartOnboarding({
     !selected || starting || (!selected.startable && !selected.active_session_id);
 
   return (
-    <Card title="Start an onboarding">
-      <div className="space-y-3" data-testid="start-onboarding">
+    <Panel>
+      <PanelHeader
+        title="Start an onboarding"
+        description="Search a repository the GitHub App can see, then start a session on it."
+      />
+      <div className="space-y-4" data-testid="start-onboarding">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-0 flex-1">
-            <label htmlFor={inputId} className="block text-xs text-ink-muted">
+            <label htmlFor={inputId} className="block text-caption text-ink-muted">
               Repository
             </label>
             {/*
@@ -220,7 +225,7 @@ export function StartOnboarding({
                 const picked = items.find((item) => item.id === value);
                 if (picked) setSelected(picked);
               }}
-              className="mt-1 w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-ink"
+              className="mt-1 w-full rounded-full border border-border bg-surface px-4 py-2 text-body text-ink placeholder:text-ink-muted"
             />
             <datalist id={listId} data-testid="repository-options">
               {items.map((item) => (
@@ -236,7 +241,7 @@ export function StartOnboarding({
             data-testid="start-onboarding-button"
             disabled={startDisabled}
             onClick={start}
-            className="rounded-md border border-accent bg-accent-soft px-3 py-1.5 text-sm font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full border border-accent bg-accent-soft px-4 py-2 text-body font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {selected?.active_session_id
               ? "Open existing session"
@@ -272,7 +277,7 @@ export function StartOnboarding({
             />
           </div>
         ) : (
-          <ul className="max-h-64 space-y-1 overflow-y-auto" data-testid="repository-list">
+          <ul className="max-h-64 space-y-1.5 overflow-y-auto" data-testid="repository-list">
             {items.map((item) => (
               <li key={item.id}>
                 <button
@@ -283,7 +288,7 @@ export function StartOnboarding({
                     setSelected(item);
                     setFailure(null);
                   }}
-                  className={`flex w-full min-w-0 items-baseline justify-between gap-3 rounded-md border px-2.5 py-1.5 text-left text-xs ${
+                  className={`flex w-full min-w-0 items-baseline justify-between gap-3 rounded-full border px-4 py-2 text-left text-caption ${
                     selected?.id === item.id
                       ? "border-accent bg-accent-soft"
                       : "border-border hover:bg-surface-hover"
@@ -291,7 +296,7 @@ export function StartOnboarding({
                 >
                   <span className="truncate text-ink">{item.full_name}</span>
                   {item.startable ? null : (
-                    <span className="shrink-0 text-[11px] text-warning">unavailable</span>
+                    <span className="shrink-0 text-micro text-warning">unavailable</span>
                   )}
                 </button>
               </li>
@@ -305,7 +310,7 @@ export function StartOnboarding({
             data-testid="repository-load-more"
             disabled={loadingMore}
             onClick={() => void loadMore()}
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-ink-secondary hover:bg-surface-hover disabled:opacity-50"
+            className="rounded-full border border-border px-3 py-1.5 text-caption text-ink-secondary hover:bg-surface-hover disabled:opacity-50"
           >
             {loadingMore ? "Loading…" : "Load more repositories"}
           </button>
@@ -351,6 +356,6 @@ export function StartOnboarding({
           Starting a session reads nothing yet. The analysis is a separate, explicit step.
         </p>
       </div>
-    </Card>
+    </Panel>
   );
 }

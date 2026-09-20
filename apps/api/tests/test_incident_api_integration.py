@@ -8,7 +8,7 @@ people press acknowledge at the same time.
 import uuid as uuidlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -18,14 +18,12 @@ from harness_s1 import S1Harness, build_harness, grant_platform_owner
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_catalog_api_integration import grant, make_role, seed_catalog_world
-from test_incident_processor_integration import evaluation, make_world
+from test_incident_processor_integration import BASE, evaluation, make_world
 from test_telemetry_api_integration import engine, migrated_db
 
 pytestmark = pytest.mark.integration
 
 __all__ = ["engine", "migrated_db"]
-
-BASE = datetime(2026, 8, 8, 12, 0, 0, tzinfo=UTC)
 
 
 def incident_harness() -> S1Harness:

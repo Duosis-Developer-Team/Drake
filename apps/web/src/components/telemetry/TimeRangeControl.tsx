@@ -39,7 +39,7 @@ export function TimeRangeControl() {
           aria-pressed={active === preset.key}
           className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
             active === preset.key
-              ? "bg-accent text-white"
+              ? "bg-accent text-ink-inverse"
               : "text-ink-secondary hover:bg-surface-sunken"
           }`}
         >

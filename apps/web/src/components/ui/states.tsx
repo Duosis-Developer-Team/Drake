@@ -22,12 +22,27 @@
  * the other direction.
  */
 
-import { Clock, RefreshCw } from "lucide-react";
+import { Clock, PieChart, RefreshCw } from "lucide-react";
 
 import { formatRelative, formatUtc } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";
 
+export type StateLayout = "inline" | "centered";
+
+/**
+ * The one shape every state takes: a tone bubble, a title, one line, and an
+ * optional action.
+ *
+ * `inline` sits beside other content (a table slot, a list); `centered` owns
+ * its region (a chart's plot area, a page body). A compact block defaults to
+ * inline and a full one to centered.
+ *
+ * Several screens already draw their own illustration above a compact state
+ * inside a centred card. The `in-[.text-center]` variants notice that parent:
+ * the block centres itself and drops its own bubble, so the card never shows
+ * two icons stacked on top of each other.
+ */
 function StateBlock({
   tone,
   title,
@@ -35,6 +50,7 @@ function StateBlock({
   children,
   testId,
   compact = false,
+  layout,
 }: {
   tone: StatusTone;
   title: string;
@@ -42,22 +58,70 @@ function StateBlock({
   children?: React.ReactNode;
   testId: string;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   const spec = toneSpec(tone);
   const Icon = spec.icon;
+  const resolved = layout ?? (compact ? "inline" : "centered");
+
+  if (resolved === "centered") {
+    return (
+      <div
+        data-testid={testId}
+        role="status"
+        className={`flex flex-col items-center text-center ${compact ? "py-2" : "px-6 py-10"}`}
+      >
+        <span
+          aria-hidden
+          className={`flex shrink-0 items-center justify-center rounded-full ${spec.chip} ${
+            compact ? "h-11 w-11" : "h-14 w-14"
+          } in-[.text-center]:hidden`}
+        >
+          <Icon className={compact ? "h-5 w-5" : "h-6 w-6"} />
+        </span>
+        <p
+          className={`font-semibold tracking-[-0.01em] text-ink in-[.text-center]:mt-0 ${
+            compact ? "mt-3 text-body" : "mt-4 text-section"
+          }`}
+        >
+          {title}
+        </p>
+        {description ? (
+          <p className="mt-1 max-w-md text-caption text-ink-muted">{description}</p>
+        ) : null}
+        {children ? (
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">{children}</div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid={testId}
       role="status"
-      className={`flex items-start gap-3 ${compact ? "py-1" : "px-1 py-6"}`}
+      className={`flex items-start gap-3.5 in-[.text-center]:flex-col in-[.text-center]:items-center in-[.text-center]:gap-0 ${
+        compact ? "py-1" : "px-1 py-6"
+      }`}
     >
-      <Icon aria-hidden className={`mt-0.5 h-5 w-5 shrink-0 ${spec.text}`} />
-      <div className="min-w-0">
-        <p className="text-body font-medium text-ink">{title}</p>
+      <span
+        aria-hidden
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${spec.chip} in-[.text-center]:hidden`}
+      >
+        <Icon className="h-[1.125rem] w-[1.125rem]" />
+      </span>
+      <div className="min-w-0 pt-0.5 in-[.text-center]:pt-0">
+        <p className="text-body font-semibold text-ink">{title}</p>
         {description ? (
-          <p className="mt-0.5 max-w-prose text-caption text-ink-secondary">{description}</p>
+          <p className="mt-0.5 max-w-prose text-caption text-ink-muted in-[.text-center]:mx-auto">
+            {description}
+          </p>
         ) : null}
-        {children ? <div className="mt-2">{children}</div> : null}
+        {children ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 in-[.text-center]:justify-center">
+            {children}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -68,11 +132,13 @@ export function EmptyState({
   description = "This collection has no entries in your authorized scope.",
   action,
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -81,6 +147,7 @@ export function EmptyState({
       title={title}
       description={description}
       compact={compact}
+      layout={layout}
     >
       {action}
     </StateBlock>
@@ -91,10 +158,12 @@ export function NoDataState({
   title,
   description = "The source answered for this window and returned no samples. This is not a value of zero.",
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -103,6 +172,7 @@ export function NoDataState({
       title={title ?? "No data in this window"}
       description={description}
       compact={compact}
+      layout={layout}
     />
   );
 }
@@ -113,12 +183,14 @@ export function ErrorState({
   correlationId,
   onRetry,
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   correlationId?: string;
   onRetry?: () => void;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -127,22 +199,27 @@ export function ErrorState({
       title={title ?? "Query failed"}
       description={description ?? "The request did not complete. This is not the same as empty."}
       compact={compact}
+      layout={layout}
     >
+      {onRetry || correlationId ? (
       <div className="flex flex-wrap items-center gap-3">
-        {onRetry ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="inline-flex items-center gap-1.5 rounded-control border border-border px-2.5 py-1 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
-          >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-            Retry
-          </button>
-        ) : null}
-        {correlationId ? (
-          <span className="font-mono text-micro text-ink-muted">ref: {correlationId}</span>
-        ) : null}
-      </div>
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+              Retry
+            </button>
+          ) : null}
+          {correlationId ? (
+            <span className="inline-flex h-6 items-center rounded-full bg-surface-2 px-2.5 font-mono text-micro text-ink-muted">
+              ref: {correlationId}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </StateBlock>
   );
 }
@@ -151,10 +228,12 @@ export function DeniedState({
   title,
   description = "Your current scope does not include this. Whether anything exists here is not disclosed.",
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -163,6 +242,7 @@ export function DeniedState({
       title={title ?? "Permission required"}
       description={description}
       compact={compact}
+      layout={layout}
     />
   );
 }
@@ -179,10 +259,12 @@ export function NotFoundState({
   title = "Not found",
   description = "This resource does not exist in your authorized scope.",
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -191,6 +273,7 @@ export function NotFoundState({
       title={title}
       description={description}
       compact={compact}
+      layout={layout}
     />
   );
 }
@@ -200,11 +283,13 @@ export function NotConfiguredState({
   description = "No source has been connected for this yet.",
   action,
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -213,6 +298,7 @@ export function NotConfiguredState({
       title={title ?? "Not configured"}
       description={description}
       compact={compact}
+      layout={layout}
     >
       {action}
     </StateBlock>
@@ -223,10 +309,12 @@ export function NotApplicableState({
   title,
   description,
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -237,6 +325,7 @@ export function NotApplicableState({
         description ?? "This does not apply to this resource, so there is nothing to report."
       }
       compact={compact}
+      layout={layout}
     />
   );
 }
@@ -245,10 +334,12 @@ export function UnknownState({
   title,
   description = "The state cannot be determined. It is reported as unknown rather than assumed.",
   compact,
+  layout,
 }: {
   title?: string;
   description?: React.ReactNode;
   compact?: boolean;
+  layout?: StateLayout;
 }) {
   return (
     <StateBlock
@@ -257,6 +348,7 @@ export function UnknownState({
       title={title ?? "Unknown"}
       description={description}
       compact={compact}
+      layout={layout}
     />
   );
 }
@@ -280,11 +372,16 @@ export function StaleBanner({
     <div
       role="status"
       data-testid="state-stale"
-      className="flex items-start gap-2 rounded-control border border-stale/40 bg-stale-soft px-3 py-2 text-caption text-stale"
+      className="flex items-start gap-3 rounded-[1.125rem] border border-stale/30 bg-stale-soft px-4 py-3 text-caption text-stale"
     >
-      <Clock aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-      <span className="min-w-0">
-        <span className="font-medium">Last known values.</span>{" "}
+      <span
+        aria-hidden
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stale/15"
+      >
+        <Clock className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 pt-1">
+        <span className="font-semibold">Last known values.</span>{" "}
         {description ?? "The source has not refreshed in time, so these are not current."}
         {asOf ? (
           <>
@@ -307,10 +404,18 @@ export function PartialBanner({ description }: { description?: React.ReactNode }
     <div
       role="status"
       data-testid="state-partial"
-      className="rounded-control border border-warning/40 bg-warning-soft px-3 py-2 text-caption text-warning"
+      className="flex items-start gap-3 rounded-[1.125rem] border border-warning/30 bg-warning-soft px-4 py-3 text-caption text-warning"
     >
-      <span className="font-medium">Partial result.</span>{" "}
-      {description ?? "Part of the requested scope could not be read, so this does not cover all of it."}
+      <span
+        aria-hidden
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-warning/15"
+      >
+        <PieChart className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 pt-1">
+        <span className="font-semibold">Partial result.</span>{" "}
+        {description ?? "Part of the requested scope could not be read, so this does not cover all of it."}
+      </span>
     </div>
   );
 }
@@ -322,39 +427,83 @@ export function PartialBanner({ description }: { description?: React.ReactNode }
  * content will: a spinner in a table slot moves everything below it when the
  * data lands, and that shift is the thing the skeleton is there to prevent.
  */
+const SHIMMER = "animate-pulse bg-surface-3 motion-reduce:animate-none";
+/** Fixed, not random: a skeleton that re-rolls on every render flickers. */
+const BAR_HEIGHTS = [38, 52, 44, 66, 58, 72, 48, 62, 80, 56, 68, 46, 60, 74, 54, 64];
+
 export function LoadingSkeleton({
   variant = "text",
   rows = 3,
   label = "Loading",
+  height,
 }: {
   variant?: "text" | "table" | "chart" | "tiles";
   rows?: number;
   label?: string;
+  /** Chart variant only: the height of the plot it stands in for. */
+  height?: number;
 }) {
-  const shimmer = "animate-pulse rounded bg-surface-3 motion-reduce:animate-none";
   return (
     <div data-testid="state-loading" aria-busy="true" className="min-w-0">
       <span className="sr-only">{label}</span>
       {variant === "chart" ? (
-        <div className={`${shimmer} h-48 w-full rounded-control`} />
+        <div
+          aria-hidden
+          className="relative flex w-full flex-col justify-between overflow-hidden rounded-[1.125rem] bg-surface-2/60 px-5 pt-5 pb-4"
+          style={{ height: height ?? 192 }}
+        >
+          {/* Faint grid, then a row of bars: the silhouette of a plot. */}
+          {[0, 1, 2, 3].map((line) => (
+            <span key={line} className="block border-t border-dashed border-border" />
+          ))}
+          <div className="absolute inset-x-5 bottom-4 flex h-[70%] items-end gap-[3%]">
+            {BAR_HEIGHTS.map((bar, index) => (
+              <span
+                key={index}
+                className={`${SHIMMER} flex-1 rounded-t-md`}
+                style={{ height: `${bar}%`, animationDelay: `${index * 60}ms` }}
+              />
+            ))}
+          </div>
+        </div>
       ) : variant === "tiles" ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div aria-hidden className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {Array.from({ length: rows }).map((_, index) => (
-            <div key={index} className={`${shimmer} h-20 rounded-control`} />
+            <div key={index} className="rounded-[1.125rem] border border-border bg-surface p-5">
+              <div className="flex items-center gap-3">
+                <span className={`${SHIMMER} h-9 w-9 rounded-full`} />
+                <span className={`${SHIMMER} h-3 w-20 rounded-full`} />
+              </div>
+              <span className={`${SHIMMER} mt-5 block h-8 w-16 rounded-lg`} />
+              <span className={`${SHIMMER} mt-4 block h-1.5 w-full rounded-full`} />
+            </div>
           ))}
         </div>
       ) : variant === "table" ? (
-        <div className="space-y-px">
+        <div aria-hidden className="divide-y divide-border">
           {Array.from({ length: rows }).map((_, index) => (
-            <div key={index} className={`${shimmer} h-9 w-full`} />
+            <div key={index} className="flex h-14 items-center gap-4 px-1">
+              <span className={`${SHIMMER} h-9 w-9 shrink-0 rounded-full`} />
+              <div className="min-w-0 flex-1 space-y-2">
+                <span
+                  className={`${SHIMMER} block h-3 rounded-full`}
+                  style={{ width: `${[42, 34, 48, 38][index % 4]}%` }}
+                />
+                <span
+                  className={`${SHIMMER} block h-2.5 rounded-full opacity-70`}
+                  style={{ width: `${[24, 30, 20, 27][index % 4]}%` }}
+                />
+              </div>
+              <span className={`${SHIMMER} h-6 w-20 shrink-0 rounded-full`} />
+            </div>
           ))}
         </div>
       ) : (
-        <div className="space-y-2">
+        <div aria-hidden className="space-y-3 py-1">
           {Array.from({ length: rows }).map((_, index) => (
             <div
               key={index}
-              className={`${shimmer} h-4`}
+              className={`${SHIMMER} h-3 rounded-full`}
               style={{ width: `${[80, 60, 70, 50][index % 4]}%` }}
             />
           ))}

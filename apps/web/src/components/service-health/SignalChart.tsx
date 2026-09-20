@@ -41,7 +41,7 @@ export function RangeSelector({
     <div
       role="group"
       aria-label="Time range"
-      className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+      className="inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-1"
     >
       {SERIES_RANGES.map((range) => (
         <button
@@ -49,10 +49,10 @@ export function RangeSelector({
           type="button"
           onClick={() => onChange(range)}
           aria-pressed={value === range}
-          className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+          className={`rounded-full px-3 py-1 text-caption font-medium transition-colors ${
             value === range
-              ? "bg-accent text-white"
-              : "text-ink-secondary hover:bg-surface-sunken"
+              ? "bg-ink text-canvas"
+              : "text-ink-secondary hover:bg-surface-hover"
           }`}
         >
           {range}
@@ -62,7 +62,7 @@ export function RangeSelector({
   );
 }
 
-function Plot({ data }: { data: HealthSeries }) {
+function Plot({ data, unit }: { data: HealthSeries; unit: string }) {
   const points = data.series.flatMap((series) => series.points);
   const values = points
     .map(([, value]) => value)
@@ -81,42 +81,65 @@ function Plot({ data }: { data: HealthSeries }) {
   const y = (value: number) => 40 - ((value - minValue) / spanValue) * 36 - 2;
 
   return (
-    <svg
-      viewBox="0 0 100 40"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={`${SIGNAL_LABELS[data.signal] ?? data.signal} over the last ${data.range_key}`}
-      className="h-28 w-full"
-      data-testid="signal-chart"
-    >
-      {data.series.map((series, index) => {
-        // Each run of consecutive non-null points is its own path, so a gap
-        // in the data is a gap in the line rather than a straight segment
-        // drawn across it.
-        const runs: string[] = [];
-        let current: string[] = [];
-        for (const [ts, value] of series.points) {
-          if (value === null) {
-            if (current.length > 1) runs.push(current.join(" "));
-            current = [];
-            continue;
+    <div className="relative">
+      <div aria-hidden className="pointer-events-none absolute inset-0 flex flex-col justify-between">
+        {[0, 1, 2].map((line) => (
+          <span key={line} className="block border-t border-dashed border-border" />
+        ))}
+      </div>
+      <span
+        aria-hidden
+        className="absolute top-1 right-0 rounded-full bg-surface px-1.5 font-mono text-[10px] text-ink-muted"
+      >
+        {formatSignal(maxValue, unit)}
+      </span>
+      <svg
+        viewBox="0 0 100 40"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${SIGNAL_LABELS[data.signal] ?? data.signal} over the last ${data.range_key}`}
+        className="relative h-36 w-full"
+        style={{ color: "var(--series-1)" }}
+        data-testid="signal-chart"
+      >
+        {data.series.map((series, index) => {
+          // Each run of consecutive non-null points is its own path, so a gap
+          // in the data is a gap in the line rather than a straight segment
+          // drawn across it.
+          const runs: [number, number][][] = [];
+          let current: [number, number][] = [];
+          for (const [ts, value] of series.points) {
+            if (value === null) {
+              if (current.length > 1) runs.push(current);
+              current = [];
+              continue;
+            }
+            current.push([x(ts), y(value)]);
           }
-          current.push(`${current.length === 0 ? "M" : "L"}${x(ts)},${y(value)}`);
-        }
-        if (current.length > 1) runs.push(current.join(" "));
-        return runs.map((path, runIndex) => (
-          <path
-            key={`${index}-${runIndex}`}
-            d={path}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="0.8"
-            vectorEffect="non-scaling-stroke"
-            className="text-accent"
-          />
-        ));
-      })}
-    </svg>
+          if (current.length > 1) runs.push(current);
+          return runs.map((run, runIndex) => {
+            const line = run.map(([px, py], i) => `${i === 0 ? "M" : "L"}${px},${py}`).join(" ");
+            const area = `${line} L${run[run.length - 1][0]},40 L${run[0][0]},40 Z`;
+            return (
+              <g key={`${index}-${runIndex}`}>
+                {data.series.length === 1 ? (
+                  <path d={area} fill="currentColor" fillOpacity={0.12} stroke="none" />
+                ) : null}
+                <path
+                  d={line}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </g>
+            );
+          });
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -186,7 +209,16 @@ export function SignalChart({
     .at(-1);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      <p className="flex items-baseline gap-2">
+        <span
+          data-tabular
+          className="text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-ink"
+        >
+          {formatSignal(latest?.[1] ?? null, unit)}
+        </span>
+        <span className="text-micro text-ink-muted">latest</span>
+      </p>
       {data.data_state === "stale" ? (
         <DataState
           kind="stale"
@@ -200,10 +232,7 @@ export function SignalChart({
           description="Only the first 12 series are shown; this chart does not cover every one."
         />
       ) : null}
-      <Plot data={data} />
-      <p className="text-[11px] text-ink-muted">
-        Latest: <span className="font-mono">{formatSignal(latest?.[1] ?? null, unit)}</span>
-      </p>
+      <Plot data={data} unit={unit} />
     </div>
   );
 }

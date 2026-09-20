@@ -5,10 +5,11 @@
  *
  * One question, answered in ten seconds: where is the problem?
  *
- * The layout follows that and nothing else. A triage strip of real counts, a
- * ranked list of the actual things that are wrong, and only then the standing
- * inventory — fleet, services, integrations, catalog. There is no hero, no
- * row of equal-sized vanity tiles, and no chart that exists to fill space.
+ * The layout follows that and nothing else. One operational verdict built
+ * from real counts, a ranked list of the actual things that are wrong, and
+ * only then the standing inventory — fleet, services, integrations, catalog.
+ * There is no hero, no row of five equal-sized KPI tiles (brief §9.3 forbids
+ * it), and no chart that exists to fill space.
  *
  * Every section is independently authorized. A caller without `cluster.view`
  * sees the fleet panel say "permission required" while the rest of the page
@@ -23,14 +24,22 @@
  * most dangerous thing a monitoring product can render.
  */
 
-import { ArrowRight, Boxes, Plug, RefreshCw, ShieldAlert, Siren, Waypoints } from "lucide-react";
+import { ArrowRight, Boxes, FolderKanban, Layers, RefreshCw, Server } from "lucide-react";
 import Link from "next/link";
+import { useState, type ReactNode } from "react";
 
-import { Donut, RingProgress } from "@/components/charts/visuals";
+import { RingProgress } from "@/components/charts/visuals";
+import { AttentionQueue } from "@/components/command-center/AttentionQueue";
+import { EvidenceCoverage } from "@/components/command-center/EvidenceCoverage";
+import { VerdictPanel } from "@/components/command-center/VerdictPanel";
+import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
+import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
+import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
-import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/controls";
+import { Modal } from "@/components/ui/overlay";
 import { FreshnessIndicator, RelativeTime } from "@/components/ui/identifiers";
 import {
   DeniedState,
@@ -38,9 +47,10 @@ import {
   LoadingSkeleton,
   NotConfiguredState,
 } from "@/components/ui/states";
-import type { AlertSummary } from "@/lib/alerting";
+import { alertListPath, type AlertInstance, type AlertSummary, type Page } from "@/lib/alerting";
 import type { CatalogContext, Cluster, IntegrationHealth } from "@/lib/catalog";
-import { humanize, toneForHealth, toneSpec, type StatusTone } from "@/lib/design/status";
+import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
+import { deploymentListPath, type DeploymentPage } from "@/lib/deployments";
 import type { IncidentSummary } from "@/lib/incidents";
 import {
   alertItems,
@@ -50,11 +60,16 @@ import {
   serviceItems,
   sortAttention,
   tallyByTone,
-  type AttentionItem,
 } from "@/lib/overview";
+import { certificateRiskItems, pvcRiskItems } from "@/lib/view-models/capacity-risk";
+import { buildHealthMatrix } from "@/lib/view-models/health-matrix";
+import { buildTimeline, type TimelineLane } from "@/lib/view-models/timeline";
+import { buildVerdict } from "@/lib/view-models/verdict";
+import { useClusterInventorySummaries } from "@/lib/clusterSummaries";
 import type { InventorySummary } from "@/lib/inventory";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
-import { useResource, type Resource } from "@/lib/useResource";
+import { resourceStatus, useResource, type Resource } from "@/lib/useResource";
 
 const REFRESH_MS = 60_000;
 
@@ -73,6 +88,15 @@ export default function CommandCenterPage() {
     "/v1/integrations/health",
     { refreshMs: REFRESH_MS },
   );
+  // Additive reads for the correlation timeline only — already-used
+  // endpoints, not part of the verdict's own sources-answered accounting.
+  const recentAlerts = useResource<Page<AlertInstance>>(alertListPath({ window: "24h" }), {
+    refreshMs: REFRESH_MS,
+  });
+  const recentDeployments = useResource<DeploymentPage>(
+    deploymentListPath({ startedWithin: "24h" }),
+    { refreshMs: REFRESH_MS },
+  );
 
   const sources = [
     { key: "incidents", label: "Incidents", resource: incidents },
@@ -85,9 +109,6 @@ export default function CommandCenterPage() {
   const anyLoading = sources.some(({ resource }) => resource.loading && !resource.data);
   const refreshing = sources.some(({ resource }) => resource.refreshing);
   const answered = sources.filter(({ resource }) => resource.data !== null);
-  const unavailable = sources.filter(
-    ({ resource }) => resource.data === null && !resource.loading,
-  );
 
   const attention = sortAttention([
     ...(incidents.data ? incidentItems(incidents.data.items) : []),
@@ -97,7 +118,98 @@ export default function CommandCenterPage() {
     ...(integrations.data ? integrationItems(integrations.data.integrations) : []),
   ]);
 
-  const reloadAll = () => sources.forEach(({ resource }) => resource.reload());
+  const timelineLanes = buildTimeline(
+    incidents.data?.items ?? [],
+    recentAlerts.data?.items ?? [],
+    recentDeployments.data?.items ?? [],
+  );
+
+  const clusterList = clusters.data?.clusters ?? [];
+  const clusterSummaries = useClusterInventorySummaries(clusterList);
+  const resolvedSummaries = new Map(
+    [...clusterSummaries]
+      .filter(([, state]) => state.data !== null)
+      .map(([id, state]) => [id, state.data as InventorySummary]),
+  );
+  const unassessedClusters = clusterList
+    .filter((cluster) => {
+      const state = clusterSummaries.get(cluster.id);
+      return state && !state.loading && state.data === null;
+    })
+    .map((cluster) => cluster.display_name || cluster.cluster_ref);
+  const capacityRiskItems = [
+    ...certificateRiskItems(clusterList, resolvedSummaries),
+    ...pvcRiskItems(clusterList, resolvedSummaries),
+  ];
+
+  const reloadAll = () => {
+    sources.forEach(({ resource }) => resource.reload());
+    recentAlerts.reload();
+    recentDeployments.reload();
+  };
+
+  // Below 1024px the reading order becomes verdict → attention queue →
+  // timeline summary (brief §9.4): a CSS `order` utility would move what a
+  // reader SEES without moving what Tab reaches, so the DOM itself reorders
+  // here instead, driven by an actual viewport match rather than a media
+  // query the accessibility tree can't see.
+  const isNarrow = useMediaQuery("(max-width: 1023px)");
+  const [timelineDialogOpen, setTimelineDialogOpen] = useState(false);
+
+  const timelineSection = (
+    <Panel data-testid="correlation-timeline">
+      <PanelHeader
+        title="Correlation timeline"
+        description="Incidents, alerts and deployments on one axis, related in time — not asserted as cause and effect."
+      />
+      {isNarrow ? (
+        <TimelineSummary lanes={timelineLanes} onExpand={() => setTimelineDialogOpen(true)} />
+      ) : (
+        <OperationalTimeline lanes={timelineLanes} />
+      )}
+    </Panel>
+  );
+
+  const healthMatrixSection = (
+    <Panel data-testid="health-matrix-panel">
+      <PanelHeader
+        title="Health matrix"
+        description="Every project and environment, worst service first — not an aggregate, so one degraded service never hides behind the healthy ones next to it."
+      />
+      <HealthMatrix cells={buildHealthMatrix(services.data?.items ?? [])} status={resourceStatus(services)} />
+    </Panel>
+  );
+
+  const capacityRiskSection = (
+    <Panel flush data-testid="capacity-risk-panel">
+      <PanelHeader
+        flush
+        title="Capacity risk"
+        description="Certificate expiry and volume health, from each cluster's own inventory report."
+      />
+      <CapacityRiskBoard items={capacityRiskItems} unassessedClusters={unassessedClusters} />
+    </Panel>
+  );
+
+  const attentionQueueSection = <AttentionQueue items={attention} loading={anyLoading} />;
+
+  const evidenceCoverageSection = (
+    <Panel data-testid="evidence-coverage-panel">
+      <PanelHeader
+        title="Evidence coverage"
+        description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
+      />
+      <EvidenceCoverage sources={sources} />
+    </Panel>
+  );
+
+  const verdict = (
+    <VerdictPanel
+      verdict={buildVerdict(attention, sources)}
+      onRefresh={reloadAll}
+      refreshing={refreshing}
+    />
+  );
 
   return (
     <PageFrame width="wide">
@@ -123,309 +235,145 @@ export default function CommandCenterPage() {
         }
       />
 
-      <TriageStrip
-        attention={attention}
-        incidents={incidents}
-        alerts={alerts}
-        clusters={clusters}
-        services={services}
-        integrations={integrations}
-      />
-
-      <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <NeedsAttention
-          items={attention}
-          loading={anyLoading}
-          answered={answered.map(({ label }) => label)}
-          unavailable={unavailable.map(({ label, resource }) => ({
-            label,
-            reason: resource.denied ? "permission required" : (resource.error ?? "unavailable"),
-          }))}
-        />
-        <div className="flex flex-col gap-4">
-          <CatalogPanel resource={context} />
-          <ServiceHealthPanel resource={services} />
+      {isNarrow ? (
+        <div className="flex flex-col gap-6">
+          <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
+            {verdict}
+          </div>
+          <Reveal delay={80}>{attentionQueueSection}</Reveal>
+          <Reveal delay={140}>{timelineSection}</Reveal>
+          <Reveal delay={200}>{healthMatrixSection}</Reveal>
+          <Reveal delay={260}>{capacityRiskSection}</Reveal>
+          <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
         </div>
-      </div>
-
-      <div className="mt-6">
-        <SectionHeader
-          title="Standing state"
-          description="What Drake is watching, and how current each source is."
-        />
-        <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <FleetPanel resource={clusters} />
-          <IntegrationsPanel resource={integrations} />
+      ) : (
+        /* Wide, airy rows: the lead verdict beside two summary cards, then
+           the working panels two-up at full height, never squeezed into a
+           narrow side column. */
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="h-full motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards] lg:col-span-2 2xl:col-span-1 [&>*]:h-full">
+              {verdict}
+            </div>
+            <Reveal delay={80} className="[&>*]:h-full">
+              <Panel flush>
+                <ServiceHealthPanel resource={services} />
+              </Panel>
+            </Reveal>
+            <Reveal delay={140} className="[&>*]:h-full">
+              <Panel flush>
+                <CatalogPanel resource={context} />
+              </Panel>
+            </Reveal>
+          </div>
+          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+            <Reveal delay={200} className="[&>*]:h-full">{attentionQueueSection}</Reveal>
+            <Reveal delay={260} className="[&>*]:h-full">{timelineSection}</Reveal>
+          </div>
+          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+            <Reveal delay={320} className="[&>*]:h-full">{healthMatrixSection}</Reveal>
+            <Reveal delay={380} className="[&>*]:h-full">{capacityRiskSection}</Reveal>
+          </div>
+          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+            <Reveal delay={440} className="[&>*]:h-full">
+              <Panel flush data-testid="estate-overview">
+                <FleetPanel resource={clusters} />
+              </Panel>
+            </Reveal>
+            <Reveal delay={500} className="[&>*]:h-full">
+              <Panel flush>
+                <IntegrationsPanel resource={integrations} />
+              </Panel>
+            </Reveal>
+          </div>
+          <Reveal delay={560}>{evidenceCoverageSection}</Reveal>
         </div>
-      </div>
+      )}
+
+      <Modal
+        open={timelineDialogOpen}
+        onClose={() => setTimelineDialogOpen(false)}
+        title="Correlation timeline"
+      >
+        <OperationalTimeline lanes={timelineLanes} />
+      </Modal>
+
+      {isNarrow ? (
+        <div className="mt-6 flex flex-col gap-6" data-testid="estate-overview">
+          <Panel flush><FleetPanel resource={clusters} /></Panel>
+          <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
+          <Panel flush><CatalogPanel resource={context} /></Panel>
+          <Panel flush><ServiceHealthPanel resource={services} /></Panel>
+        </div>
+      ) : null}
     </PageFrame>
   );
 }
 
 /**
- * The triage strip.
- *
- * Counts, not gauges, and each one is a link into the list it summarises. A
- * source that could not be read shows a dash and the reason — never `0`.
+ * A panel's entrance. One fade+rise pass, staggered by `delay` so a grid of
+ * panels arrives as a cascade rather than a flat pop — never a loop, never
+ * re-triggered on data refresh (this wraps the section once, not per render
+ * of its contents). `backwards` holds each panel at its `from` frame until
+ * its own delay elapses, so a later panel never flashes at full opacity
+ * before its turn. `className` carries layout concerns (grid dividers) that
+ * belong to the caller's arrangement, not to the entrance itself.
  */
-function TriageStrip({
-  attention,
-  incidents,
-  alerts,
-  clusters,
-  services,
-  integrations,
+function Reveal({
+  delay = 0,
+  className = "",
+  children,
 }: {
-  attention: AttentionItem[];
-  incidents: Resource<{ items: IncidentSummary[]; total: number }>;
-  alerts: Resource<AlertSummary>;
-  clusters: Resource<{ clusters: Cluster[] }>;
-  services: Resource<{ items: ServiceHealthRow[] }>;
-  integrations: Resource<{ integrations: IntegrationHealth[] }>;
+  delay?: number;
+  className?: string;
+  children: ReactNode;
 }) {
-  const countBy = (origin: AttentionItem["origin"], tone?: StatusTone) =>
-    attention.filter((item) => item.origin === origin && (!tone || item.tone === tone)).length;
-
-  const tiles = [
-    {
-      key: "incidents",
-      label: "Open incidents",
-      icon: Siren,
-      href: "/incidents",
-      resource: incidents,
-      value: incidents.data?.items.filter((item) => item.state !== "resolved").length ?? null,
-      total: incidents.data?.items.length ?? null,
-      tone: countBy("incident", "critical") > 0 ? ("critical" as const) : ("neutral" as const),
-      detail: incidents.data
-        ? `${incidents.data.items.filter((item) => item.state === "acknowledged").length} acknowledged`
-        : null,
-    },
-    {
-      key: "alerts",
-      label: "Firing alerts",
-      icon: ShieldAlert,
-      href: "/alerts",
-      resource: alerts,
-      value: alerts.data?.firing ?? null,
-      total: alerts.data ? alerts.data.firing + alerts.data.silenced : null,
-      tone:
-        (alerts.data?.p1 ?? 0) > 0
-          ? ("critical" as const)
-          : (alerts.data?.p2 ?? 0) > 0
-            ? ("warning" as const)
-            : ("neutral" as const),
-      detail: alerts.data ? `P1 ${alerts.data.p1} · P2 ${alerts.data.p2}` : null,
-    },
-    {
-      key: "clusters",
-      label: "Clusters needing attention",
-      icon: Boxes,
-      href: "/clusters",
-      resource: clusters,
-      value: clusters.data ? countBy("cluster") : null,
-      total: clusters.data?.clusters.length ?? null,
-      tone: countBy("cluster") > 0 ? ("warning" as const) : ("neutral" as const),
-      detail: clusters.data ? `${clusters.data.clusters.length} in scope` : null,
-    },
-    {
-      key: "services",
-      label: "Services not healthy",
-      icon: Waypoints,
-      href: "/service-health",
-      resource: services,
-      value: services.data ? countBy("service") : null,
-      total: services.data?.items.length ?? null,
-      tone:
-        countBy("service", "critical") > 0
-          ? ("critical" as const)
-          : countBy("service") > 0
-            ? ("warning" as const)
-            : ("neutral" as const),
-      detail: services.data ? `${services.data.items.length} tracked` : null,
-    },
-    {
-      key: "integrations",
-      label: "Integrations degraded",
-      icon: Plug,
-      href: "/integrations",
-      resource: integrations,
-      value: integrations.data ? countBy("integration") : null,
-      total:
-        integrations.data?.integrations.filter(
-          (entry) => entry.configuration_state === "configured",
-        ).length ?? null,
-      tone: countBy("integration") > 0 ? ("warning" as const) : ("neutral" as const),
-      detail: integrations.data
-        ? `${integrations.data.integrations.filter((entry) => entry.configuration_state === "configured").length} configured`
-        : null,
-    },
-  ];
-
   return (
     <div
-      className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5"
-      data-testid="triage-strip"
+      className={`min-w-0 motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] ${className}`}
+      style={{ animationDelay: `${delay}ms` }}
     >
-      {tiles.map((tile) => {
-        const spec = toneSpec(tile.value === 0 ? "neutral" : tile.tone);
-        const Icon = tile.icon;
-        const unreadable = tile.value === null;
-        return (
-          <Link
-            key={tile.key}
-            href={tile.href}
-            data-testid={`triage-${tile.key}`}
-            className="flex min-w-0 flex-col rounded-panel border border-border bg-surface px-3.5 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
-          >
-            <span className="flex items-center gap-1.5 text-caption text-ink-secondary">
-              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{tile.label}</span>
-            </span>
-            <span className="mt-1.5 flex items-baseline gap-2">
-              {tile.resource.loading && unreadable ? (
-                <span className="inline-block h-7 w-10 animate-pulse rounded bg-surface-3 motion-reduce:animate-none" />
-              ) : unreadable ? (
-                <span className="text-title font-semibold text-ink-muted">—</span>
-              ) : (
-                <span
-                  data-tabular
-                  className={`text-metric font-semibold ${
-                    tile.value === 0 ? "text-ink" : spec.text
-                  }`}
-                >
-                  {tile.value}
-                </span>
-              )}
-            </span>
-            {/* The share of what Drake watches that is affected. A bare count
-                cannot say whether 1 is one-of-two or one-of-four-hundred. */}
-            {!unreadable && tile.total ? (
-              <span
-                aria-hidden
-                className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-surface-3"
-              >
-                <span
-                  className={`block h-full rounded-full ${
-                    tile.value === 0 ? "bg-border-strong" : spec.dot
-                  }`}
-                  style={{
-                    width: `${Math.min(100, ((tile.value ?? 0) / tile.total) * 100)}%`,
-                  }}
-                />
-              </span>
-            ) : null}
-            <span className="mt-1 truncate text-micro text-ink-muted">
-              {unreadable
-                ? tile.resource.denied
-                  ? "permission required"
-                  : tile.resource.loading
-                    ? "loading"
-                    : "source unavailable"
-                : (tile.detail ?? "")}
-            </span>
-          </Link>
-        );
-      })}
+      {children}
     </div>
   );
 }
 
-function NeedsAttention({
-  items,
-  loading,
-  answered,
-  unavailable,
-}: {
-  items: AttentionItem[];
-  loading: boolean;
-  answered: string[];
-  unavailable: { label: string; reason: string }[];
-}) {
+/**
+ * The narrow-viewport stand-in for the full timeline track.
+ *
+ * Below 1024px the full multi-lane track competes too hard with the
+ * attention queue above it for the one thing a phone screen has little of:
+ * vertical space. This states the same facts in one line — how many events,
+ * and which lanes Drake has no history for — and opens the real
+ * `OperationalTimeline` in a dialog rather than losing it.
+ */
+function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand: () => void }) {
+  const events = lanes.flatMap((lane) => lane.events);
+  const unavailable = lanes.filter((lane) => !lane.historyAvailable);
   return (
-    <Panel flush data-testid="needs-attention">
-      <PanelHeader
-        flush
-        title="Needs attention"
-        description="Critical first, then warnings, then anything Drake cannot currently see."
-        meta={items.length > 0 ? <span>{items.length} items</span> : undefined}
-        actions={
-          items.length > 0 ? (
-            <Link
-              href="/incidents"
-              className="inline-flex items-center gap-1 rounded text-caption font-medium text-brand hover:underline"
-            >
-              All incidents
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-            </Link>
-          ) : undefined
-        }
-      />
-
-      {loading ? (
-        <div className="px-4 py-4">
-          <LoadingSkeleton variant="table" rows={4} label="Loading attention list" />
-        </div>
-      ) : items.length === 0 ? (
-        <div className="px-4 py-5" data-testid="attention-empty">
-          <p className="text-body font-medium text-ink">Nothing is currently flagged.</p>
-          <p className="mt-1 max-w-prose text-caption text-ink-secondary">
-            This is not a statement that the platform is healthy — it is the result of the
-            checks below. Anything Drake has no source for cannot appear here.
-          </p>
-          <dl className="mt-3 space-y-1.5 text-caption">
-            <div className="flex flex-wrap items-baseline gap-2">
-              <dt className="text-ink-muted">Checked:</dt>
-              <dd className="text-ink">{answered.join(", ") || "nothing"}</dd>
-            </div>
-            {unavailable.length > 0 ? (
-              <div className="flex flex-wrap items-baseline gap-2">
-                <dt className="text-ink-muted">Not checked:</dt>
-                <dd className="text-warning">
-                  {unavailable.map((entry) => `${entry.label} (${entry.reason})`).join(", ")}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        </div>
-      ) : (
-        <ul className="divide-y divide-border" data-testid="attention-list">
-          {items.map((item) => {
-            const spec = toneSpec(item.tone);
-            const Icon = spec.icon;
-            return (
-              <li key={item.key}>
-                <Link
-                  href={item.href}
-                  className={`flex items-start gap-3 border-l-2 px-4 py-2.5 transition-colors hover:bg-surface-hover ${spec.rail}`}
-                >
-                  <Icon aria-hidden className={`mt-0.5 h-4 w-4 shrink-0 ${spec.text}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="text-body font-medium text-ink">{item.subject}</span>
-                      <span className={`text-caption ${spec.text}`}>{item.state}</span>
-                    </span>
-                    <span className="mt-0.5 block truncate text-micro text-ink-muted">
-                      {item.context}
-                    </span>
-                  </span>
-                  {item.asOf ? (
-                    <span className="shrink-0 text-micro text-ink-muted">
-                      <RelativeTime value={item.asOf} />
-                    </span>
-                  ) : null}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </Panel>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-caption text-ink-secondary">
+        {events.length} event{events.length === 1 ? "" : "s"} across {lanes.length - unavailable.length} of{" "}
+        {lanes.length} lanes
+        {unavailable.length > 0 ? (
+          <span className="text-ink-muted"> — {unavailable.map((lane) => lane.label).join(", ")} unavailable</span>
+        ) : null}
+      </p>
+      <button
+        type="button"
+        onClick={onExpand}
+        data-testid="view-full-timeline"
+        className="shrink-0 rounded-control border border-border px-2.5 py-1 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
+      >
+        View full timeline
+      </button>
+    </div>
   );
 }
 
 function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
   return (
-    <Panel data-testid="catalog-counts">
+    <div data-testid="catalog-counts" className="flex h-full min-w-0 flex-col gap-6 p-7">
       <PanelHeader title="Your catalog" description="Records you are authorized to see." />
       {resource.loading && !resource.data ? (
         <LoadingSkeleton rows={2} />
@@ -435,41 +383,44 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
         <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
       ) : (
         /* A list of counts, not term/definition pairs: a <dl> whose children
-           are links is both wrong markup and an axe violation. */
-        <ul className="grid grid-cols-3 gap-2">
+           are links is both wrong markup and an axe violation. Drawn as the
+           chain the estate actually is — projects hold environments, which
+           run on clusters. */
+        <ul className="relative my-auto grid grid-cols-3 gap-2">
+          <span aria-hidden className="absolute top-[1.375rem] right-[16%] left-[16%] h-px bg-[repeating-linear-gradient(90deg,var(--border-strong)_0_4px,transparent_4px_8px)] opacity-60" />
           {(
             [
-              ["Projects", resource.data.projects, "/projects"],
-              ["Environments", resource.data.environments, null],
-              ["Clusters", resource.data.clusters, "/clusters"],
+              ["Projects", resource.data.projects, "/projects", FolderKanban],
+              ["Environments", resource.data.environments, null, Layers],
+              ["Clusters", resource.data.clusters, "/clusters", Boxes],
             ] as const
-          ).map(([label, count, href]) => {
+          ).map(([label, count, href, TileIcon]) => {
             const body = (
               <>
-                <span data-tabular className="text-title font-semibold text-ink">
+                <span aria-hidden className="relative mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-panel transition-transform group-hover:scale-105">
+                  <TileIcon className="h-[1.125rem] w-[1.125rem]" />
+                </span>
+                <span data-tabular className="mt-3 block text-center text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-ink">
                   {count}
                 </span>
-                <span className="mt-0.5 block text-micro text-ink-muted">{label}</span>
+                <span className="mt-1 block text-center text-caption text-ink-muted">{label}</span>
               </>
             );
             return (
               <li key={label}>
                 {href ? (
-                  <Link
-                    href={href}
-                    className="block rounded-control px-2 py-1.5 transition-colors hover:bg-surface-hover"
-                  >
+                  <Link href={href} className="group block rounded-[1rem] py-1 transition-colors hover:bg-surface-hover">
                     {body}
                   </Link>
                 ) : (
-                  <span className="block px-2 py-1.5">{body}</span>
+                  <span className="group block py-1">{body}</span>
                 )}
               </li>
             );
           })}
         </ul>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -477,7 +428,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
   const rows = resource.data?.items ?? [];
   const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
   return (
-    <Panel data-testid="service-health-rollup">
+    <div data-testid="service-health-rollup" className="flex h-full min-w-0 flex-col gap-6 p-7">
       <PanelHeader
         title="Service health"
         description="Every tracked service, by the state its own binding reports."
@@ -496,25 +447,65 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
         />
       ) : (
         <>
-          <Donut
-            label="Service health"
-            centerLabel={`${rows.length}`}
-            slices={tally.map((entry) => ({
-              name: toneSpec(entry.tone).label,
-              value: entry.count,
-              tone: entry.tone,
-            }))}
-          />
+          <div className="flex items-end justify-between gap-4">
+            <p>
+              <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
+                {rows.length}
+              </span>
+              <span className="ml-2 text-caption text-ink-muted">services</span>
+            </p>
+            <p className="text-right text-caption text-ink-muted">
+              <span data-tabular className="font-semibold text-ink">
+                {tally.find((entry) => entry.tone === "success")?.count ?? 0}
+              </span>{" "}
+              reporting healthy
+            </p>
+          </div>
+          {/* One tile per service, coloured by its own reported state: at
+              this scale a count you can literally see beats a pie. */}
+          <ul
+            aria-label={`Service health: ${tally.map((entry) => `${toneSpec(entry.tone).label} ${entry.count}`).join(", ")}`}
+            className="grid grid-cols-[repeat(auto-fill,minmax(1.75rem,1fr))] gap-1.5"
+          >
+            {[...rows]
+              .sort((x, y) => toneSpec(toneForHealth(x.health.status)).label.localeCompare(toneSpec(toneForHealth(y.health.status)).label))
+              .map((row) => {
+                const rowSpec = toneSpec(toneForHealth(row.health.status));
+                const name = row.display_name || row.service_key;
+                return (
+                  <li key={row.environment_service_id}>
+                    <Link
+                      href={`/service-health?project_id=${encodeURIComponent(row.project_id)}&environment_id=${encodeURIComponent(row.environment_id)}`}
+                      title={`${name} · ${row.project_key}/${row.environment_key} · ${rowSpec.label}`}
+                      aria-label={`${name}, ${rowSpec.label}`}
+                      className={`block aspect-square rounded-[0.5rem] transition-transform hover:scale-110 ${rowSpec.chip}`}
+                    />
+                  </li>
+                );
+              })}
+          </ul>
+          <ul className="flex flex-wrap gap-2">
+            {tally.map((entry) => (
+              <li
+                key={entry.tone}
+                className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary"
+              >
+                <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec(entry.tone).dot}`} />
+                {toneSpec(entry.tone).label}
+                <span data-tabular className="font-semibold text-ink">{entry.count}</span>
+              </li>
+            ))}
+          </ul>
           <Link
             href="/service-health"
-            className="inline-flex items-center gap-1 rounded text-caption font-medium text-brand hover:underline"
+            className="mt-auto inline-flex items-center gap-1 self-start rounded-full border border-border px-3.5 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
           >
             Open service health
             <ArrowRight className="h-3.5 w-3.5" aria-hidden />
           </Link>
         </>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -529,7 +520,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
 function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> }) {
   const clusters = resource.data?.clusters ?? [];
   return (
-    <Panel flush data-testid="fleet-panel">
+    <div data-testid="fleet-panel" className="flex min-w-0 flex-col">
       <PanelHeader
         flush
         title="Cluster fleet"
@@ -556,73 +547,57 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
           <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
         </div>
       ) : clusters.length === 0 ? (
-        <div className="px-4 py-2">
+        <div className="px-6 py-3">
           <NotConfiguredState compact title="No clusters in scope" />
         </div>
       ) : (
-        <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
-        <table className="w-full text-body" data-tabular>
-          <caption className="sr-only">
-            Clusters in your scope, with agent connection and inventory freshness
-          </caption>
-          <thead className="bg-surface-2 text-caption text-ink-secondary">
-            <tr>
-              <th scope="col" className="px-4 py-1.5 text-left font-medium">
-                Cluster
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                Agent
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                Inventory
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                Healthy / total
-              </th>
-              <th scope="col" className="px-4 py-1.5 text-right font-medium">
-                Observed
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {clusters.map((cluster) => (
-              <tr key={cluster.id} className="border-t border-border hover:bg-surface-hover">
-                <td className="px-4 py-2">
-                  <Link
-                    href={`/clusters/${cluster.id}`}
-                    className="rounded font-medium text-ink hover:text-brand"
-                  >
-                    {cluster.display_name || cluster.cluster_ref}
-                  </Link>
-                  <span className="block font-mono text-micro text-ink-muted">
-                    {cluster.cluster_ref}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
+        <ul className="divide-y divide-border" data-tabular>
+          {clusters.map((cluster) => (
+            <li
+              key={cluster.id}
+              className="flex flex-wrap items-center gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
+            >
+              <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink-secondary">
+                <Server className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <Link
+                  href={`/clusters/${cluster.id}`}
+                  className="font-semibold text-ink hover:text-brand"
+                >
+                  {cluster.display_name || cluster.cluster_ref}
+                </Link>
+                <span className="mt-0.5 block font-mono text-micro text-ink-muted">
+                  {cluster.cluster_ref}
+                </span>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
+                  <span className="text-ink-muted">Agent</span>
                   <StatusDot
                     status={toneForHealth(cluster.operational?.agent)}
                     label={humanize(cluster.operational?.agent ?? "unknown")}
                   />
-                </td>
-                <td className="px-3 py-2">
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
+                  <span className="text-ink-muted">Inventory</span>
                   <StatusDot
                     status={toneForHealth(cluster.operational?.inventory)}
                     label={humanize(cluster.operational?.inventory ?? "unknown")}
                   />
-                </td>
-                <td className="px-3 py-2">
-                  <FleetCounts cluster={cluster} />
-                </td>
-                <td className="px-4 py-2 text-right text-micro text-ink-muted">
+                  </span>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <FleetCounts cluster={cluster} />
+                <span className="text-micro text-ink-muted">
                   <RelativeTime value={cluster.as_of} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -716,7 +691,7 @@ function IntegrationsPanel({
   );
 
   return (
-    <Panel flush data-testid="integrations-panel">
+    <div data-testid="integrations-panel" className="flex min-w-0 flex-col">
       <PanelHeader
         flush
         title="Integrations"
@@ -745,33 +720,62 @@ function IntegrationsPanel({
       ) : (
         <>
           {all.length > 0 ? (
-            <div className="border-b border-border px-4 py-3">
-              <Donut
-                size={110}
-                thickness={12}
-                label="Integrations by state"
-                centerLabel={`${all.length}`}
-                slices={[
-                  {
-                    name: "Reporting ok",
-                    value: configured.filter((entry) => entry.observed_state === "ok").length,
-                    tone: "success",
-                  },
-                  {
-                    name: "Degraded",
-                    value: configured.filter((entry) => entry.observed_state !== "ok").length,
-                    tone: "warning",
-                  },
-                  { name: "Not connected", value: notConfigured, tone: "not-applicable" },
-                ]}
-              />
+            <div className="border-b border-border px-7 py-6">
+              <div className="flex items-end justify-between gap-4">
+                <p>
+                  <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
+                    {configured.length}
+                  </span>
+                  <span className="text-2xl font-semibold tracking-tight text-ink-muted">/{all.length}</span>
+                  <span className="ml-2 text-caption text-ink-muted">connected</span>
+                </p>
+                <span className="text-caption text-ink-muted">
+                  <span data-tabular className="font-semibold text-ink">
+                    {configured.filter((entry) => entry.observed_state === "ok").length}
+                  </span>{" "}
+                  reporting ok
+                </span>
+              </div>
+              {/* Every provider as an avatar: connected ones lit with their
+                  state ring, the rest visibly dormant — not a grey pie. */}
+              <ul className="mt-5 flex flex-wrap gap-3" aria-label="Integrations by state">
+                {[...configured, ...all.filter((entry) => entry.configuration_state !== "configured")].map((entry) => {
+                  const isConfigured = entry.configuration_state === "configured";
+                  const entrySpec = toneSpec(isConfigured ? toneForHealth(entry.observed_state) : "not-applicable");
+                  const name = humanize(entry.integration_type);
+                  return (
+                    <li
+                      key={`${entry.integration_type}:${entry.scope.ref}`}
+                      title={`${name} — ${isConfigured ? humanize(entry.observed_state) : "not connected"}`}
+                      className="relative"
+                    >
+                      <span
+                        className={`flex h-12 w-12 items-center justify-center rounded-full text-caption font-semibold ${
+                          isConfigured
+                            ? "bg-brand text-ink-inverse shadow-panel"
+                            : "border border-dashed border-border bg-surface-2 text-ink-muted"
+                        }`}
+                      >
+                        {name.slice(0, 2)}
+                      </span>
+                      <span
+                        aria-hidden
+                        className={`absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-surface ${isConfigured ? entrySpec.dot : "bg-surface-3"}`}
+                      />
+                      <span className="sr-only">
+                        {name}: {isConfigured ? humanize(entry.observed_state) : "not connected"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           ) : null}
           <ul className="divide-y divide-border">
             {sorted.map((integration) => (
               <li
                 key={`${integration.integration_type}:${integration.scope.ref}`}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-7 py-4"
               >
                 <span className="min-w-0">
                   <span className="block truncate text-body text-ink">
@@ -812,6 +816,6 @@ function IntegrationsPanel({
           ) : null}
         </>
       )}
-    </Panel>
+    </div>
   );
 }

@@ -13,18 +13,32 @@
  * answers and this screen keeps them apart.
  */
 
+import { CircleCheck, Flame, HelpCircle, Target, XCircle } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
-import { Donut } from "@/components/charts/visuals";
+import {
+  BreakdownRing,
+  CardTitle,
+  EmptyHero,
+  FactPill,
+  KpiTile,
+  PillSelect,
+  RowBubble,
+  ShareBar,
+  StatePad,
+  Toolbar,
+} from "@/components/incidents/OpsKit";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
-import { Card } from "@/components/ui/Card";
+import { Panel } from "@/components/ui/Panel";
+import type { StatusTone } from "@/lib/design/status";
 import {
   SLO_EXPLANATIONS,
+  SLO_LABELS,
   formatAge,
   formatBudget,
   formatRatio,
@@ -34,9 +48,6 @@ import {
   type Slo,
   type SloStatus,
 } from "@/lib/alerting";
-
-const SELECT_CLASS =
-  "rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-ink";
 
 const STATES: SloStatus[] = [
   "healthy",
@@ -49,67 +60,110 @@ const STATES: SloStatus[] = [
   "not_configured",
 ];
 
+/** Verdict → tone. The unmeasured states are never the healthy tone. */
+const SLO_TONE: Record<SloStatus, StatusTone> = {
+  healthy: "success",
+  warning: "warning",
+  critical: "critical",
+  exhausted: "critical",
+  insufficient_data: "unknown",
+  not_configured: "unknown",
+  stale: "stale",
+  query_failed: "critical",
+};
+
+/**
+ * One objective. Name, verdict and any active burn lead; then compliance
+ * and remaining budget as the two numbers this screen exists to keep apart,
+ * each with its own bar. The whole row opens the objective.
+ */
 function SloRow({ slo }: { slo: Slo }) {
   const evaluation = slo.evaluation;
   const activeBurn = evaluation?.burn_rates.find((rate) => rate.active) ?? null;
+  const tone: StatusTone = evaluation ? SLO_TONE[evaluation.status] : "unknown";
+  const remaining = evaluation?.error_budget_remaining ?? null;
   return (
-    <tr className="border-t border-border align-top" data-testid={`slo-row-${slo.slo_key}`}>
-      <td className="py-2.5 pr-3">
-        <div className="flex flex-col gap-1">
+    <li
+      data-testid={`slo-row-${slo.slo_key}`}
+      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-7 py-4 transition-colors hover:bg-surface-hover lg:grid-cols-[auto_minmax(0,1fr)_auto]"
+    >
+      <RowBubble icon={Target} tone={tone} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           <Link
             href={`/slo/${slo.id}`}
-            className="text-sm font-medium text-ink hover:underline"
+            className="truncate text-body font-semibold text-ink after:absolute after:inset-0 after:content-['']"
           >
             {slo.display_name}
           </Link>
-          <span className="font-mono text-[11px] text-ink-muted">
+          {evaluation ? (
+            <SloBadge status={evaluation.status} />
+          ) : (
+            /* Never "healthy" for something nobody has measured. */
+            <StatusBadge
+              status="unknown"
+              label="not evaluated"
+              size="compact"
+            />
+          )}
+          {activeBurn ? (
+            <StatusBadge
+              status={
+                activeBurn.severity === "critical" ? "critical" : "warning"
+              }
+              label={`${activeBurn.factor}× ${activeBurn.name}`}
+              size="compact"
+            />
+          ) : null}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
+          <span className="font-mono">
             {[slo.project_key, slo.environment_key, slo.service_key]
               .filter(Boolean)
               .join("/")}{" "}
             · {slo.indicator}
           </span>
+          <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
+          <span className="text-caption text-ink-secondary">
+            Target {formatRatio(slo.objective_ratio)} over{" "}
+            {formatWindow(slo.window_seconds)}
+          </span>
+          {!activeBurn ? <span>not burning</span> : null}
+          <span>{evaluation ? formatAge(evaluation.evaluated_for) : "—"}</span>
         </div>
-      </td>
-      <td className="py-2.5 pr-3 text-sm text-ink">
-        {formatRatio(slo.objective_ratio)}
-        <div className="text-[11px] text-ink-muted">
-          over {formatWindow(slo.window_seconds)}
+      </div>
+      <div className="col-span-2 grid grid-cols-2 gap-6 lg:col-span-1 lg:w-80">
+        <div>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-micro text-ink-muted">compliance</span>
+            <span data-tabular className="text-body font-semibold text-ink">
+              {formatRatio(evaluation?.compliance_ratio ?? null)}
+            </span>
+          </div>
+          <p className="mt-2 truncate text-micro text-ink-muted">
+            of {formatRatio(slo.objective_ratio)} target
+          </p>
         </div>
-      </td>
-      <td className="py-2.5 pr-3">
-        {evaluation ? (
-          <SloBadge status={evaluation.status} />
-        ) : (
-          /* Never "healthy" for something nobody has measured. */
-          <span className="text-[11px] italic text-ink-muted">not evaluated</span>
-        )}
-      </td>
-      <td className="py-2.5 pr-3 text-sm text-ink">
-        {formatRatio(evaluation?.compliance_ratio ?? null)}
-      </td>
-      <td className="py-2.5 pr-3 text-sm">
-        <span
-          className={
-            (evaluation?.error_budget_remaining ?? 0) < 0 ? "text-critical" : "text-ink"
-          }
-        >
-          {formatBudget(evaluation?.error_budget_remaining ?? null)}
-        </span>
-      </td>
-      <td className="py-2.5 pr-3">
-        {activeBurn ? (
-          <StatusBadge
-            status={activeBurn.severity === "critical" ? "critical" : "warning"}
-            label={`${activeBurn.factor}× ${activeBurn.name}`}
+        <div>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-micro text-ink-muted">budget left</span>
+            <span
+              data-tabular
+              className={`text-body font-semibold ${
+                (remaining ?? 0) < 0 ? "text-critical" : "text-ink"
+              }`}
+            >
+              {formatBudget(remaining)}
+            </span>
+          </div>
+          <ShareBar
+            share={remaining}
+            tone={(remaining ?? 0) < 0.25 ? "critical" : tone}
+            className="mt-2"
           />
-        ) : (
-          <span className="text-[11px] text-ink-muted">not burning</span>
-        )}
-      </td>
-      <td className="py-2.5 text-xs text-ink-secondary">
-        {evaluation ? formatAge(evaluation.evaluated_for) : "—"}
-      </td>
-    </tr>
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -117,158 +171,229 @@ function SloInner() {
   const [status, setStatus] = useState<string>("");
   const [page, retry] = useApi<Page<Slo>>(sloListPath({ status }));
 
+  const items = page.state === "ready" ? page.data.items : [];
+  const total = items.length;
+  const meeting = items.filter(
+    (slo) => slo.evaluation?.status === "healthy",
+  ).length;
+  const burning = items.filter(
+    (slo) => slo.evaluation?.status === "warning",
+  ).length;
+  const breached = items.filter((slo) =>
+    ["critical", "exhausted", "query_failed"].includes(
+      slo.evaluation?.status ?? "",
+    ),
+  ).length;
+  const stale = items.filter(
+    (slo) => slo.evaluation?.status === "stale",
+  ).length;
+  const neverMeasured = items.filter(
+    (slo) =>
+      !slo.evaluation ||
+      ["insufficient_data", "not_configured"].includes(slo.evaluation.status),
+  ).length;
+  const share = (count: number) => (total > 0 ? count / total : null);
+
   return (
     <PageFrame>
-      <div className="space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-ink">Service objectives</h1>
-        <p className="text-sm text-ink-secondary">
-          What was promised, what was measured, and how much room is left before the
-          promise is broken.
-        </p>
-      </header>
+      <PageHeader
+        title="Service objectives"
+        description="What was promised, what was measured, and how much room is left before the promise is broken."
+      />
+      <div className="flex flex-col gap-6">
+        {page.state === "ready" ? (
+          <div className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
+            <KpiTile
+              data-testid="alerting-kpi-meeting"
+              label="Meeting"
+              value={meeting}
+              icon={CircleCheck}
+              tone="success"
+              share={share(meeting)}
+              caption="within objective, not burning"
+            />
+            <KpiTile
+              data-testid="alerting-kpi-burning-fast"
+              label="Burning fast"
+              value={burning}
+              icon={Flame}
+              tone="warning"
+              share={share(burning)}
+              caption="budget going faster than allowed"
+            />
+            <KpiTile
+              data-testid="alerting-kpi-breached"
+              label="Breached"
+              value={breached}
+              icon={XCircle}
+              tone="critical"
+              share={share(breached)}
+              caption="critical, exhausted or unreadable"
+            />
+            <KpiTile
+              data-testid="alerting-kpi-never-measured"
+              label="Never measured"
+              value={neverMeasured}
+              icon={HelpCircle}
+              tone="unknown"
+              share={share(neverMeasured)}
+              caption="not the same as meeting it"
+            />
+          </div>
+        ) : null}
 
-      <Card title="Objectives">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <select
-            aria-label="SLO state"
-            className={SELECT_CLASS}
+        <Toolbar
+          data-testid="slo-filters"
+          summary={
+            page.state === "ready"
+              ? `${total} of ${page.data.total} shown`
+              : undefined
+          }
+        >
+          <PillSelect
+            label="State"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
-          >
-            <option value="">Any state</option>
-            {STATES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {page.state === "loading" ? (
-          <DataState kind="loading" />
-        ) : page.state === "error" ? (
-          page.notFound ? (
-            <DataState kind="permission-denied" />
-          ) : (
-            <DataState kind="error" description={page.message} onRetry={retry} />
-          )
-        ) : page.data.items.length === 0 ? (
-          <DataState
-            kind="empty"
-            title="No objectives in scope"
-            description="No service level objective is configured for anything you can see."
+            placeholder="Any state"
+            options={STATES.map((value) => ({
+              value,
+              label: SLO_LABELS[value],
+            }))}
+            onChange={setStatus}
           />
-        ) : (
-          <>
-            {/* insufficient_data and not_configured stay OUT of the healthy
-                wedge: nothing was measured, and a green slice for an
-                unmeasured objective is the most misleading thing here. */}
-            <div className="mb-4 border-b border-border pb-4">
-              <Donut
-                size={116}
-                thickness={13}
-                label="Objectives on this page by verdict"
-                centerLabel={`${page.data.items.length}`}
-                slices={[
-                  {
-                    name: "Meeting",
-                    value: page.data.items.filter((slo) => slo.evaluation?.status === "healthy")
-                      .length,
-                    tone: "success",
-                  },
-                  {
-                    name: "Burning fast",
-                    value: page.data.items.filter((slo) => slo.evaluation?.status === "warning")
-                      .length,
-                    tone: "warning",
-                  },
-                  {
-                    name: "Breached",
-                    value: page.data.items.filter((slo) =>
-                      ["critical", "exhausted", "query_failed"].includes(
-                        slo.evaluation?.status ?? "",
-                      ),
-                    ).length,
-                    tone: "critical",
-                  },
-                  {
-                    name: "Stale",
-                    value: page.data.items.filter((slo) => slo.evaluation?.status === "stale")
-                      .length,
-                    tone: "stale",
-                  },
-                  {
-                    name: "Never measured",
-                    value: page.data.items.filter(
-                      (slo) =>
-                        !slo.evaluation ||
-                        ["insufficient_data", "not_configured"].includes(slo.evaluation.status),
-                    ).length,
-                    tone: "unknown",
-                  },
-                ]}
-              />
-            </div>
-            <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-ink-muted">
-                <tr>
-                  <th className="pb-2 pr-3 font-medium">Objective</th>
-                  <th className="pb-2 pr-3 font-medium">Target</th>
-                  <th className="pb-2 pr-3 font-medium">State</th>
-                  <th className="pb-2 pr-3 font-medium">Compliance</th>
-                  <th className="pb-2 pr-3 font-medium">Budget left</th>
-                  <th className="pb-2 pr-3 font-medium">Burn</th>
-                  <th className="pb-2 font-medium">Evaluated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.data.items.map((slo) => (
-                  <SloRow key={slo.id} slo={slo} />
-                ))}
-              </tbody>
-            </table>
-            </div>
+        </Toolbar>
 
-            {/* Anything that is not a measurement is explained in words, so
-                nobody reads a dash as a zero. */}
-            {page.data.items.some(
-              (slo) =>
-                slo.evaluation === null ||
-                ["insufficient_data", "stale", "query_failed", "not_configured"].includes(
-                  slo.evaluation.status,
-                ),
-            ) ? (
-              <div className="mt-4 space-y-1.5" data-testid="slo-caveats">
-                {page.data.items
-                  .filter(
+        <div className="page-split">
+          <div className="page-main">
+            <Panel
+              flush
+              className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
+            >
+              <CardTitle
+                flush
+                icon={Target}
+                title="Objectives"
+                description="Compliance and remaining budget, side by side"
+              />
+              {page.state === "loading" ? (
+                <StatePad>
+                  <DataState kind="loading" />
+                </StatePad>
+              ) : page.state === "error" ? (
+                <StatePad>
+                  {page.notFound ? (
+                    <DataState kind="permission-denied" />
+                  ) : (
+                    <DataState
+                      kind="error"
+                      description={page.message}
+                      onRetry={retry}
+                    />
+                  )}
+                </StatePad>
+              ) : total === 0 ? (
+                <EmptyHero
+                  icon={Target}
+                  title="No objectives in scope"
+                  description="No service level objective is configured for anything you can see."
+                >
+                  <FactPill>
+                    State · {status ? SLO_LABELS[status as SloStatus] : "any"}
+                  </FactPill>
+                </EmptyHero>
+              ) : (
+                <>
+                  <ul className="divide-y divide-border">
+                    {items.map((slo) => (
+                      <SloRow key={slo.id} slo={slo} />
+                    ))}
+                  </ul>
+
+                  {/* Anything that is not a measurement is explained in words, so
+                    nobody reads a dash as a zero. */}
+                  {items.some(
                     (slo) =>
-                      slo.evaluation !== null &&
+                      slo.evaluation === null ||
                       [
                         "insufficient_data",
                         "stale",
                         "query_failed",
                         "not_configured",
                       ].includes(slo.evaluation.status),
-                  )
-                  .map((slo) => (
-                    <p key={slo.id} className="text-xs text-ink-secondary">
-                      <span className="font-medium text-ink">{slo.display_name}</span>{" "}
-                      — {SLO_EXPLANATIONS[slo.evaluation!.status]}
-                    </p>
-                  ))}
-                {page.data.items.some((slo) => slo.evaluation === null) ? (
-                  <p className="text-xs text-ink-secondary">
-                    Objectives marked <span className="italic">not evaluated</span> have
-                    never been measured. That is not the same as meeting the target.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </>
-        )}
-      </Card>
+                  ) ? (
+                    <div
+                      className="space-y-2 border-t border-border bg-surface-2/60 px-7 py-5"
+                      data-testid="slo-caveats"
+                    >
+                      {items
+                        .filter(
+                          (slo) =>
+                            slo.evaluation !== null &&
+                            [
+                              "insufficient_data",
+                              "stale",
+                              "query_failed",
+                              "not_configured",
+                            ].includes(slo.evaluation.status),
+                        )
+                        .map((slo) => (
+                          <p
+                            key={slo.id}
+                            className="text-caption text-ink-secondary"
+                          >
+                            <span className="font-semibold text-ink">
+                              {slo.display_name}
+                            </span>{" "}
+                            — {SLO_EXPLANATIONS[slo.evaluation!.status]}
+                          </p>
+                        ))}
+                      {items.some((slo) => slo.evaluation === null) ? (
+                        <p className="text-caption text-ink-secondary">
+                          Objectives marked{" "}
+                          <span className="italic">not evaluated</span> have
+                          never been measured. That is not the same as meeting
+                          the target.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </Panel>
+          </div>
+
+          {page.state === "ready" ? (
+            /* insufficient_data and not_configured stay OUT of the healthy
+               bucket: nothing was measured, and a green slice for an
+               unmeasured objective is the most misleading thing here. */
+            <div className="page-aside">
+              <Panel
+                data-testid="slo-overview"
+                className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]"
+              >
+                <CardTitle
+                  icon={Target}
+                  title="By verdict"
+                  description="Objectives on this page"
+                />
+                <BreakdownRing
+                  label="Objectives on this page by verdict"
+                  centerCaption="objectives"
+                  slices={[
+                    { name: "Meeting", value: meeting, tone: "success" },
+                    { name: "Burning fast", value: burning, tone: "warning" },
+                    { name: "Breached", value: breached, tone: "critical" },
+                    { name: "Stale", value: stale, tone: "stale" },
+                    {
+                      name: "Never measured",
+                      value: neverMeasured,
+                      tone: "unknown",
+                    },
+                  ]}
+                />
+              </Panel>
+            </div>
+          ) : null}
+        </div>
       </div>
     </PageFrame>
   );

@@ -18,12 +18,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { SectionHeader } from "@/components/ui/Panel";
 import { ErrorState, LoadingSkeleton } from "@/components/ui/states";
 import {
   KpiWidget,
   StatusWidget,
   TimeseriesWidget,
+  hasDrawableSeries,
   type WidgetState,
 } from "@/components/telemetry/widgets";
 import { ApiError } from "@/lib/api";
@@ -84,7 +84,8 @@ export function DashboardRenderer({
         if (!cancelled) setDashboard(definition);
       })
       .catch(() => {
-        if (!cancelled) setDashboardError("Could not load the dashboard definition.");
+        if (!cancelled)
+          setDashboardError("Could not load the dashboard definition.");
       });
     return () => {
       cancelled = true;
@@ -100,11 +101,17 @@ export function DashboardRenderer({
     const queue: string[] = [];
     for (const section of dashboard.sections) {
       for (const widget of section.widgets) {
-        if (widget.requiredProfile && widget.requiredProfile !== profile) continue;
-        if (!queue.includes(widget.queryTemplateKey)) queue.push(widget.queryTemplateKey);
+        if (widget.requiredProfile && widget.requiredProfile !== profile)
+          continue;
+        if (!queue.includes(widget.queryTemplateKey))
+          queue.push(widget.queryTemplateKey);
       }
     }
-    setStates(Object.fromEntries(queue.map((key) => [key, { kind: "loading" as const }])));
+    setStates(
+      Object.fromEntries(
+        queue.map((key) => [key, { kind: "loading" as const }]),
+      ),
+    );
 
     const csrfToken = me.csrf_token;
     // TRUE capacity-accounted scheduler: `active` is the single source of
@@ -118,7 +125,8 @@ export function DashboardRenderer({
     const retryTimers: ReturnType<typeof setTimeout>[] = [];
     const pump = (): void => {
       // A stale generation must not start queued work.
-      if (generation !== generationRef.current || controller.signal.aborted) return;
+      if (generation !== generationRef.current || controller.signal.aborted)
+        return;
       while (active < MAX_CONCURRENT_QUERIES && next < queue.length) {
         const key = queue[next];
         next += 1;
@@ -130,23 +138,36 @@ export function DashboardRenderer({
         )
           .then((envelope) => {
             if (generation === generationRef.current) {
-              setStates((previous) => ({ ...previous, [key]: { kind: "ready", envelope } }));
+              setStates((previous) => ({
+                ...previous,
+                [key]: { kind: "ready", envelope },
+              }));
             }
           })
           .catch((error: unknown) => {
             // Abort of an outdated generation is not an error state.
-            if (generation !== generationRef.current || controller.signal.aborted) return;
+            if (
+              generation !== generationRef.current ||
+              controller.signal.aborted
+            )
+              return;
             const state = classifyError(error);
             if (state.kind === "throttled" && !retried.has(key)) {
               retried.add(key); // at most ONE automatic retry per template
               retryTimers.push(
                 setTimeout(() => {
-                  if (generation !== generationRef.current || controller.signal.aborted) {
+                  if (
+                    generation !== generationRef.current ||
+                    controller.signal.aborted
+                  ) {
                     return;
                   }
                   // Re-enqueue only — the pump enforces capacity.
                   queue.push(key);
-                  setStates((previous) => ({ ...previous, [key]: { kind: "loading" } }));
+                  setStates((previous) => ({
+                    ...previous,
+                    [key]: { kind: "loading" },
+                  }));
                   pump();
                 }, THROTTLE_RETRY_DELAY_MS),
               );
@@ -173,46 +194,98 @@ export function DashboardRenderer({
   const retry = useCallback(() => setNonce((value) => value + 1), []);
 
   if (dashboardError) {
-    return <ErrorState title="Dashboard unavailable" description={dashboardError} onRetry={retry} />;
+    return (
+      <ErrorState
+        title="Dashboard unavailable"
+        description={dashboardError}
+        onRetry={retry}
+      />
+    );
   }
   if (!dashboard) {
-    return <LoadingSkeleton variant="chart" label="Loading dashboard definition" />;
+    return (
+      <LoadingSkeleton variant="chart" label="Loading dashboard definition" />
+    );
   }
 
   return (
-    <div className="space-y-5" data-testid={`dashboard-${dashboard.key}`}>
+    <div
+      className="flex flex-col gap-8"
+      data-testid={`dashboard-${dashboard.key}`}
+    >
       {dashboard.sections.map((section) => {
         const widgets = section.widgets.filter(
-          (widget) => !widget.requiredProfile || widget.requiredProfile === profile,
+          (widget) =>
+            !widget.requiredProfile || widget.requiredProfile === profile,
         );
         if (widgets.length === 0) return null;
+        const stateOf = (widget: (typeof widgets)[number]): WidgetState =>
+          states[widget.queryTemplateKey] ?? { kind: "loading" as const };
+        // Charts with a real series get the wide canvas; everything else —
+        // KPIs, statuses, and charts that currently have nothing to draw —
+        // sits in one row of equal tiles, so an empty chart never occupies a
+        // page-wide frame to say one sentence.
+        const charts = widgets.filter(
+          (widget) =>
+            widget.display === "timeseries" &&
+            hasDrawableSeries(stateOf(widget)),
+        );
+        const tiles = widgets.filter((widget) => !charts.includes(widget));
         return (
           <section key={section.key} aria-label={section.title}>
-            {showSectionHeadings ? <SectionHeader title={section.title} /> : null}
-            <div
-              className={`grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 ${
-                showSectionHeadings ? "mt-3" : ""
-              }`}
-            >
-              {widgets.map((widget) => {
-                const state = states[widget.queryTemplateKey] ?? { kind: "loading" as const };
-                const props = { widget, state, onRetry: retry };
-                const cell =
-                  widget.display === "timeseries" ? (
-                    <div className="sm:col-span-2 xl:col-span-4">
-                      <TimeseriesWidget {...props} />
+            {showSectionHeadings ? (
+              <h3 className="mb-4 text-micro font-semibold tracking-[0.08em] text-ink-muted uppercase">
+                {section.title}
+              </h3>
+            ) : null}
+            <div className="flex flex-col gap-6">
+              {tiles.length > 0 ? (
+                <div
+                  className={tiles.length > 1 ? "page-grid" : "grid"}
+                  // On the page's shared tracks: three tiles sit three-up, any
+                  // other count two-up — four-up squeezed every empty state.
+                  data-cols={tiles.length % 3 === 0 ? "3" : "2"}
+                >
+                  {tiles.map((widget) => {
+                    const props = {
+                      widget,
+                      state: stateOf(widget),
+                      onRetry: retry,
+                    };
+                    return (
+                      <div key={widget.key} className="min-w-0">
+                        {widget.display === "timeseries" ? (
+                          <TimeseriesWidget {...props} />
+                        ) : widget.display === "status" ? (
+                          <StatusWidget {...props} />
+                        ) : (
+                          <KpiWidget {...props} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {charts.length > 0 ? (
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                  {charts.map((widget, index) => (
+                    <div
+                      key={widget.key}
+                      className={`min-w-0 ${
+                        charts.length % 2 === 1 && index === 0
+                          ? "xl:col-span-2"
+                          : ""
+                      }`}
+                    >
+                      <TimeseriesWidget
+                        widget={widget}
+                        state={stateOf(widget)}
+                        onRetry={retry}
+                      />
                     </div>
-                  ) : widget.display === "status" ? (
-                    <StatusWidget {...props} />
-                  ) : (
-                    <KpiWidget {...props} />
-                  );
-                return (
-                  <div key={widget.key} className="contents">
-                    {cell}
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              ) : null}
             </div>
           </section>
         );
