@@ -71,12 +71,14 @@ async function horizontalOverflow(page: Page): Promise<number> {
   );
 }
 
-test("brand: the sidebar wordmark is pinned to the dark asset in both themes", async ({
+test("brand: the sidebar wordmark follows the theme of the rail it sits on", async ({
   page,
 }) => {
-  // The sidebar rail is obsidian in both themes (remake brief §6.2), so the
-  // lockup that lives on it stays the dark-background derivative regardless
-  // of the app's own light/dark choice — it no longer swaps.
+  // The rail is no longer obsidian in both themes — it follows the app's
+  // theme (--sidebar-canvas is #fafafa light, #121212 dark). So the lockup
+  // has to swap with it: the dark-ground derivative carries light ink, and
+  // on a near-white rail it would be all but invisible. Each derivative is
+  // asserted against the ground it was built for.
   await signIn(page);
   const wordmark = page.getByTestId("drake-wordmark");
   await expect(wordmark).toBeVisible();
@@ -85,7 +87,7 @@ test("brand: the sidebar wordmark is pinned to the dark asset in both themes", a
     wordmark.evaluate((node) => getComputedStyle(node).backgroundImage);
 
   await setTheme(page, "light");
-  expect(await backgroundFor()).toContain("drake-wordmark-dark.webp");
+  expect(await backgroundFor()).toContain("drake-wordmark-light.webp");
 
   await setTheme(page, "dark");
   expect(await backgroundFor()).toContain("drake-wordmark-dark.webp");

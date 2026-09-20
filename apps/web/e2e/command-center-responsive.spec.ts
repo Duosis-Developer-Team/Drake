@@ -85,21 +85,25 @@ test("at 390px, the DOM order is exactly verdict, attention queue, timeline — 
   await expect(page.getByTestId("operational-timeline")).toHaveCount(0);
 });
 
-test("at 1280px, the attention queue follows the full timeline, and no mobile trigger renders", async ({
+test("at 1280px, the attention queue leads the full timeline, and no mobile trigger renders", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
+  // Same reading order as the narrow layout above: what needs attention is
+  // the lead, and the timeline is the context you read it against. The two
+  // sit side by side at this width, but the queue is still first in the DOM,
+  // so keyboard and screen-reader order match the page's "worst first" claim.
   const order = await page.evaluate(() => {
     const attention = document.querySelector('[data-testid="needs-attention"]');
     const timeline = document.querySelector('[data-testid="correlation-timeline"]');
     if (!attention || !timeline) return null;
     return Boolean(
-      timeline.compareDocumentPosition(attention) & Node.DOCUMENT_POSITION_FOLLOWING,
+      attention.compareDocumentPosition(timeline) & Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
-  expect(order, "timeline must precede the attention queue in DOM order at 1280px").toBe(true);
+  expect(order, "the attention queue must precede the timeline in DOM order at 1280px").toBe(true);
 
   await expect(page.getByTestId("operational-timeline")).toBeVisible();
   await expect(page.getByTestId("view-full-timeline")).toHaveCount(0);

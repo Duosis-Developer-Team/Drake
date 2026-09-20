@@ -95,7 +95,9 @@ test("narrow environment user: only own environment/service; siblings 404", asyn
   // Authorized-child counts only:
   // Counts are their own tabular columns now, so they can be compared down
   // the list rather than read as prose.
-  const row = page.getByRole("row", { name: /Alpha/ });
+  // Scoped to the list: the portfolio risk map above it is a real table too,
+  // and its "medium criticality" row also carries Alpha's name and a count.
+  const row = page.getByTestId("project-list").getByRole("row", { name: /Alpha/ });
   await expect(row.getByText("1", { exact: true })).toBeVisible();
   await expect(row.getByText("2", { exact: true })).toBeVisible();
 
