@@ -142,7 +142,10 @@ test("project user cannot reach cluster detail; cluster viewer can", async ({ pa
   await expect(
     page.getByTestId("freshness-card").getByText("not configured"),
   ).toBeVisible();
-  await expect(page.getByText(/no authorized environments/i)).toBeVisible();
+  // The empty state is asserted by its test id, not its wording: the claim
+  // is that the page says "nothing here" rather than inventing environments,
+  // and that claim should survive a copy edit.
+  await expect(page.getByTestId("environments-empty")).toBeVisible();
   // Projects nav is permission-gated away for this user; the direct URL
   // still answers with an honest empty state (collection semantics).
   await expect(
@@ -187,7 +190,10 @@ test("integration health: safe fields for owner, empty for narrow env user", asy
   await signInAs(page, "user-owner");
   await page.getByRole("link", { name: "Integrations", exact: true }).click();
   await expect(page.getByTestId("integration-table")).toBeVisible();
-  await expect(page.getByTestId("integration-table")).toContainText("prometheus");
+  // The kind is presented as a label now ("Prometheus"), not the raw enum.
+  // What matters here is that the integration is listed at all, so the match
+  // is on the name rather than on how the page chooses to case it.
+  await expect(page.getByTestId("integration-table")).toContainText(/prometheus/i);
   await expect(page.getByTestId("integration-table")).toContainText("not_configured");
   await expect(page.getByTestId("integration-table")).toContainText("never");
   await expect(page.locator("body")).not.toContainText("config_ref");

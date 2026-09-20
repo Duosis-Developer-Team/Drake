@@ -34,6 +34,15 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:3456",
     trace: "retain-on-failure",
+    // The panels enter with a staggered fade (up to 500ms of delay on the
+    // Command Center, `backwards` fill). An axe scan that starts inside that
+    // window measures a half-faded element and reports a contrast failure
+    // against a colour the design never ships — which is exactly what it did,
+    // intermittently, depending on how fast the build served the route.
+    // The app gates every entrance behind `motion-safe:`, so asking the
+    // browser for reduced motion renders each panel at its settled state
+    // immediately. The suite then measures the page people actually read.
+    contextOptions: { reducedMotion: "reduce" },
   },
   webServer: [
     {
