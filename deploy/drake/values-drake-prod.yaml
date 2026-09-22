@@ -4,21 +4,23 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@be85372 by publish
-# run 35717976090. All three — API, web
+# Images are pinned to real digests published from main@fdef05c by publish
+# run 35728719932. All three — API, web
 # and migration — were built from that one commit, so they cannot drift
 # apart. Both digests were read back from the registry by commit-SHA tag
 # rather than from the build log: the log also prints a tooling image's
 # digest, and pinning that would have deployed something else entirely.
 #
-# This is the release that carries the PayFlow-style frontend rebuild
-# (PR #83). The code was on main since 2026-09-20 but nothing had published
-# an image from it, so revision 30 kept serving the 2026-08-15 build.
+# This is the release that carries Turkish language support (PR #85): the
+# EN/TR switch, every screen through the typed catalogue, ADR-0028.
 #
-# The digests these replaced (API `1dcc010a…0819`, web `937ee63d…0b2d`) named
-# main@76b3be9 and are what helm revision 30 served — the rollback target if
+# The digests these replaced (API `ad8bc09a…682a`, web `19d5a4f1…407b`) named
+# main@be85372 and are what helm revision 31 served — the rollback target if
 # this one has to come back. Read from the live Deployments before this edit
 # rather than assumed from the previous file.
+#
+# Before that (API `1dcc010a…0819`, web `937ee63d…0b2d`) named main@76b3be9,
+# served by revision 30.
 #
 # Before that (API `784942ca…9168`, web `e63ecb1c…a61b`) named main@40ad2d8,
 # served by revision 29.
@@ -118,11 +120,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit be85372518a91b242db1f83e38bf0c08db768403
+    # Source commit fdef05c67042c25318e9006e0bb78ebca571bb66
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:ad8bc09a3bb929d125563b0cd2c826730ad7786327696bff62dbe6956a07682a"
+    digest: "sha256:cd11da21c186168a163d867c4578fe6b4a7fe72d3f837cb45e629b635c84e608"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -134,8 +136,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit be85372518a91b242db1f83e38bf0c08db768403
-    digest: "sha256:19d5a4f161e3c79f09ccd454662c6211d784d75a51d045abf559955cc6b2407b"
+    # Source commit fdef05c67042c25318e9006e0bb78ebca571bb66
+    digest: "sha256:9deb9275263c6b1f428875b3f0733a0ae31287a4196103a62106a2f44fb7dfaf"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -146,7 +148,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:ad8bc09a3bb929d125563b0cd2c826730ad7786327696bff62dbe6956a07682a"
+    digest: "sha256:cd11da21c186168a163d867c4578fe6b4a7fe72d3f837cb45e629b635c84e608"
   backoffLimit: 0
 
 networkPolicy:
