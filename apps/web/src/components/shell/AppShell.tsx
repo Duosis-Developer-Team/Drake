@@ -18,24 +18,29 @@
 
 import { useCallback, useState } from "react";
 
+import { LanguageControl } from "@/components/shell/LanguageControl";
 import { Sidebar, useSidebarCollapse } from "@/components/shell/Sidebar";
 import { ThemeControl } from "@/components/shell/ThemeControl";
 import { SignedOut } from "@/components/shell/SignedOut";
 import { TopBar } from "@/components/shell/TopBar";
 import { LoadingSkeleton } from "@/components/ui/states";
 import { useDismissable, useScrollLock } from "@/components/ui/overlay";
+import { LocaleProvider, useT } from "@/lib/i18n";
 import { SessionProvider, useSession } from "@/lib/session";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <SessionProvider>
-      <SessionGate>{children}</SessionGate>
-    </SessionProvider>
+    <LocaleProvider>
+      <SessionProvider>
+        <SessionGate>{children}</SessionGate>
+      </SessionProvider>
+    </LocaleProvider>
   );
 }
 
 function SessionGate({ children }: { children: React.ReactNode }) {
   const { state } = useSession();
+  const t = useT("shell");
 
   if (state.status === "loading") {
     return (
@@ -45,7 +50,7 @@ function SessionGate({ children }: { children: React.ReactNode }) {
         className="flex min-h-screen items-center justify-center px-6"
       >
         <div className="w-72">
-          <LoadingSkeleton rows={3} label="Checking session" />
+          <LoadingSkeleton rows={3} label={t("session.checking")} />
         </div>
       </div>
     );
@@ -58,6 +63,8 @@ function SessionGate({ children }: { children: React.ReactNode }) {
 }
 
 function AuthenticatedShell({ children }: { children: React.ReactNode }) {
+  const t = useT("shell");
+  const common = useT("common");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, toggleCollapse] = useSidebarCollapse();
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
@@ -71,7 +78,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
         href="#main"
         className="sr-only rounded-control bg-brand px-3 py-2 text-body font-medium text-ink-inverse focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
       >
-        Skip to content
+        {common("a11y.skipToContent")}
       </a>
 
       {/* PayFlow frame: the rail is its own rounded slab floating on the
@@ -95,7 +102,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             ref={drawerRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Navigation"
+            aria-label={t("sidebar.navigation")}
             className="absolute inset-y-2 left-2 flex w-72 max-w-[85vw] flex-col shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
           >
             <Sidebar onNavigate={closeDrawer} footer={<ShellFooter />} />
@@ -135,14 +142,16 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
  */
 function ShellFooter() {
   const { state } = useSession();
+  const t = useT("shell");
   if (state.status !== "authenticated") return null;
   const scopeCount = Object.keys(state.me.scopes).length;
   const { identity } = state.me;
   const initial = (identity.display_name || "?").charAt(0).toUpperCase();
   return (
     <div className="space-y-2">
-      <div className="md:hidden">
+      <div className="flex flex-wrap items-center gap-2 md:hidden">
         <ThemeControl />
+        <LanguageControl />
       </div>
       <div className="flex items-center gap-3 rounded-[1.25rem] border border-sidebar-border bg-sidebar-nav p-2.5">
         <span
@@ -154,7 +163,7 @@ function ShellFooter() {
         <div className="min-w-0">
           <p className="truncate text-body font-medium text-sidebar-ink">{identity.display_name}</p>
           <p className="truncate text-micro text-sidebar-ink-muted">
-            {scopeCount === 1 ? "1 authorized scope" : `${scopeCount} authorized scopes`}
+            {t("sidebar.scopes", { count: scopeCount })}
           </p>
         </div>
       </div>

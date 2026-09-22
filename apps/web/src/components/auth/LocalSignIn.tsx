@@ -2,6 +2,8 @@
 
 import { useId, useState } from "react";
 
+import { useT } from "@/lib/i18n";
+
 /**
  * Email and password sign-in, shown inside the signed-out card when the
  * deployment verifies credentials itself rather than delegating to an
@@ -12,12 +14,11 @@ import { useId, useState } from "react";
  * the care taken on the server not to confirm who has access.
  */
 
-const GENERIC_ERROR = "That email and password did not match. Please try again.";
-
 export function LocalSignIn() {
   const emailId = useId();
   const passwordId = useId();
   const errorId = useId();
+  const t = useT("shell");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,13 +46,13 @@ export function LocalSignIn() {
       }
       setError(
         response.status === 429
-          ? "Too many attempts. Please wait a few minutes and try again."
+          ? t("localSignIn.errorRateLimited")
           : response.status >= 500
-            ? "Sign-in is unavailable right now. Please try again shortly."
-            : GENERIC_ERROR,
+            ? t("localSignIn.errorUnavailable")
+            : t("localSignIn.errorGeneric"),
       );
     } catch {
-      setError("Could not reach Drake. Check your connection and try again.");
+      setError(t("localSignIn.errorNetwork"));
     } finally {
       setPending(false);
     }
@@ -61,7 +62,7 @@ export function LocalSignIn() {
     <form onSubmit={submit} noValidate className="space-y-4 text-left">
       <div className="space-y-1">
         <label htmlFor={emailId} className="block text-sm font-medium text-ink">
-          Email
+          {t("localSignIn.email")}
         </label>
         <input
           id={emailId}
@@ -79,7 +80,7 @@ export function LocalSignIn() {
 
       <div className="space-y-1">
         <label htmlFor={passwordId} className="block text-sm font-medium text-ink">
-          Password
+          {t("localSignIn.password")}
         </label>
         <input
           id={passwordId}
@@ -108,7 +109,7 @@ export function LocalSignIn() {
         disabled={pending}
         className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-accent px-5 text-sm font-medium text-ink-inverse transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Signing in…" : "Sign in"}
+        {pending ? t("localSignIn.submitting") : t("localSignIn.submit")}
       </button>
     </form>
   );

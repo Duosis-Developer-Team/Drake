@@ -20,9 +20,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useCrumbLabels } from "@/lib/crumbs";
+import { useT, type Translator } from "@/lib/i18n";
 import { NAV_ITEMS } from "@/lib/navigation";
 
-/** Static segments that name a concept rather than an entity. */
+/**
+ * Static segments that name a concept rather than an entity. The English
+ * source; the rendered label comes from `shell.crumb.<segment>`.
+ */
 const SEGMENT_LABELS: Record<string, string> = {
   admin: "Audit & access",
   alerts: "Alerts",
@@ -64,15 +68,19 @@ export interface Crumb {
 export function buildCrumbs(
   pathname: string,
   labelFor: (id: string) => string | undefined = () => undefined,
+  t?: Translator<"shell">,
 ): Crumb[] {
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length === 0) return [{ label: "Command Center", href: null, mono: false }];
+  if (segments.length === 0) {
+    return [{ label: t ? t("breadcrumb.commandCenter") : "Command Center", href: null, mono: false }];
+  }
 
   const crumbs: Crumb[] = [];
   let path = "";
   for (const segment of segments) {
     path += `/${segment}`;
-    const known = SEGMENT_LABELS[segment];
+    const source = SEGMENT_LABELS[segment];
+    const known = source === undefined ? undefined : t ? t.dyn("crumb", segment, source) : source;
     const published = known ? undefined : labelFor(decodeURIComponent(segment));
     crumbs.push({
       label: known ?? published ?? decodeURIComponent(segment),
@@ -90,10 +98,11 @@ export function buildCrumbs(
 export function Breadcrumbs() {
   const pathname = usePathname() || "/";
   const labelFor = useCrumbLabels();
-  const crumbs = buildCrumbs(pathname, labelFor);
+  const t = useT("shell");
+  const crumbs = buildCrumbs(pathname, labelFor, t);
 
   return (
-    <nav aria-label="Breadcrumb" className="min-w-0">
+    <nav aria-label={t("breadcrumb.label")} className="min-w-0">
       <ol className="flex min-w-0 items-center gap-1 text-caption">
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1;

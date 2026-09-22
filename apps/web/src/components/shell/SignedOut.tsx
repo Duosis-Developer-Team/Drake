@@ -26,23 +26,13 @@ import { LocalSignIn } from "@/components/auth/LocalSignIn";
 import { DrakeMark, DrakeWordmark } from "@/components/shell/Brand";
 import { ThemeControl } from "@/components/shell/ThemeControl";
 import { toneSpec } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 
+/** Copy lives in `shell.signedOut.*`; only the tone is decided here. */
 const COPY = {
-  "signed-out": {
-    title: "Sign in to Drake",
-    body: "Observability and operations control plane. Sign in with your organization account.",
-    tone: "info" as const,
-  },
-  expired: {
-    title: "Session expired",
-    body: "Your session ended. Signing in again returns you to the page you were on.",
-    tone: "warning" as const,
-  },
-  unavailable: {
-    title: "Sign-in temporarily unavailable",
-    body: "The authentication service cannot be reached. This is a dependency outage, not a sign-out — no action is needed beyond trying again shortly.",
-    tone: "critical" as const,
-  },
+  "signed-out": { key: "signedOut" as const, tone: "info" as const },
+  expired: { key: "expired" as const, tone: "warning" as const },
+  unavailable: { key: "unavailable" as const, tone: "critical" as const },
 };
 
 export function SignedOut({
@@ -53,6 +43,7 @@ export function SignedOut({
   const pathname = usePathname();
   const loginHref = `/v1/auth/login?redirect=${encodeURIComponent(pathname || "/")}`;
   const copy = COPY[variant];
+  const t = useT("shell");
   const spec = toneSpec(copy.tone);
   const Icon = spec.icon;
 
@@ -97,7 +88,7 @@ export function SignedOut({
                 nothing about which one this is. It moves to a chip under the
                 title rather than disappearing with the icon it replaced. */}
             <h1 className="mt-8 text-display font-semibold tracking-tight text-ink">
-              {copy.title}
+              {t(`signedOut.${copy.key}.title`)}
             </h1>
             {variant === "signed-out" ? null : (
               <span
@@ -107,7 +98,7 @@ export function SignedOut({
                 {spec.label}
               </span>
             )}
-            <p className="mt-3 max-w-sm text-body text-ink-secondary">{copy.body}</p>
+            <p className="mt-3 max-w-sm text-body text-ink-secondary">{t(`signedOut.${copy.key}.body`)}</p>
           </div>
 
           {variant === "unavailable" ? null : (
@@ -120,7 +111,7 @@ export function SignedOut({
                   className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-control bg-brand px-4 text-body font-medium text-ink-inverse transition-colors hover:bg-brand-hover"
                 >
                   <LogIn className="h-4 w-4" aria-hidden />
-                  Sign in
+                  {t("signedOut.signIn")}
                 </a>
               )}
             </div>

@@ -17,9 +17,11 @@ import { Suspense } from "react";
 import { Breadcrumbs } from "@/components/shell/Breadcrumbs";
 import { CatalogSearch } from "@/components/shell/CatalogSearch";
 import { IdentityMenu } from "@/components/shell/IdentityMenu";
+import { LanguageControl } from "@/components/shell/LanguageControl";
 import { NotificationBell } from "@/components/shell/NotificationBell";
 import { ThemeControl } from "@/components/shell/ThemeControl";
 import { TimeRangeControl } from "@/components/telemetry/TimeRangeControl";
+import { useT } from "@/lib/i18n";
 
 /**
  * Whether this route reads a bounded time window from the URL.
@@ -37,13 +39,14 @@ export function isTelemetryRoute(pathname: string): boolean {
 export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const pathname = usePathname() || "/";
   const telemetry = isTelemetryRoute(pathname);
+  const t = useT("shell");
 
   return (
     <header className="sticky top-0 z-30 flex h-[4.5rem] shrink-0 items-center gap-3 rounded-t-[1.5rem] bg-canvas/85 px-3 backdrop-blur-md lg:rounded-t-[2rem] lg:px-10">
       <button
         type="button"
         onClick={onOpenSidebar}
-        aria-label="Open navigation"
+        aria-label={t("sidebar.openNavigation")}
         className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover lg:hidden"
       >
         <Menu className="h-4 w-4" aria-hidden />
@@ -68,8 +71,9 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             <TimeRangeControl />
           </Suspense>
         ) : null}
-        <div className="hidden md:block">
+        <div className="hidden items-center gap-2 md:flex">
           <ThemeControl compact />
+          <LanguageControl compact />
         </div>
         <NotificationBell />
         <IdentityMenu />

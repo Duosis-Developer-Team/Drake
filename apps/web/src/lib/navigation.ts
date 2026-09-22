@@ -33,6 +33,8 @@ import {
 } from "lucide-react";
 
 export interface NavItem {
+  /** Catalogue key under `shell.nav`; `label` is the English source string. */
+  key: string;
   label: string;
   href: string;
   icon: LucideIcon;
@@ -52,13 +54,14 @@ export const NAVIGATION: NavGroup[] = [
   {
     key: "overview",
     label: "Overview",
-    items: [{ label: "Command Center", href: "/", icon: LayoutDashboard }],
+    items: [{ key: "commandCenter", label: "Command Center", href: "/", icon: LayoutDashboard }],
   },
   {
     key: "estate",
     label: "Estate",
     items: [
       {
+        key: "projects",
         label: "Projects",
         href: "/projects",
         icon: FolderKanban,
@@ -66,6 +69,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["project.view", "environment.view"],
       },
       {
+        key: "serviceHealth",
         label: "Service health",
         href: "/service-health",
         icon: HeartPulse,
@@ -73,6 +77,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["environment.view"],
       },
       {
+        key: "clusters",
         label: "Clusters",
         href: "/clusters",
         icon: Boxes,
@@ -80,6 +85,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["cluster.view"],
       },
       {
+        key: "slo",
         label: "Objectives",
         href: "/slo",
         icon: Gauge,
@@ -93,6 +99,7 @@ export const NAVIGATION: NavGroup[] = [
     label: "Operations",
     items: [
       {
+        key: "incidents",
         label: "Incidents",
         href: "/incidents",
         icon: Siren,
@@ -100,6 +107,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["environment.view"],
       },
       {
+        key: "alerts",
         label: "Alerts",
         href: "/alerts",
         icon: Bell,
@@ -107,6 +115,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["alert.view"],
       },
       {
+        key: "deployments",
         label: "Deployments",
         href: "/deployments",
         icon: Rocket,
@@ -114,6 +123,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["environment.view", "cluster.view"],
       },
       {
+        key: "protection",
         label: "Protection",
         href: "/protection",
         icon: ShieldCheck,
@@ -127,6 +137,7 @@ export const NAVIGATION: NavGroup[] = [
     label: "Configuration",
     items: [
       {
+        key: "onboarding",
         label: "Onboard project",
         href: "/onboarding",
         icon: PackagePlus,
@@ -134,6 +145,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["onboarding.view", "onboarding.manage"],
       },
       {
+        key: "integrations",
         label: "Integrations",
         href: "/integrations",
         icon: Puzzle,
@@ -141,6 +153,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["project.view", "environment.view", "cluster.view"],
       },
       {
+        key: "notificationPolicies",
         label: "Notification routing",
         href: "/notification-policies",
         icon: Send,
@@ -148,6 +161,7 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["notification.view", "notification.manage"],
       },
       {
+        key: "admin",
         label: "Audit & access",
         href: "/admin",
         icon: Shield,
