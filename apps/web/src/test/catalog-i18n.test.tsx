@@ -65,7 +65,7 @@ describe("catalog screens in Turkish", () => {
     // A row: the recorded criticality chip and the "nothing observed yet"
     // evidence state, both from the catalogue's enum groups.
     const row = within(screen.getByTestId("project-list")).getByRole("row", { name: /Alpha/ });
-    expect(within(row).getByText("Yüksek kritiklik")).toBeInTheDocument();
+    expect(within(row).getByText("Kritiklik: Yüksek")).toBeInTheDocument();
     await waitFor(() => expect(within(row).getByText("Değerlendirilmedi")).toBeInTheDocument());
 
     // A partial collection: the header badge and the load-more action.

@@ -372,7 +372,7 @@ export const catalog = defineMessages({
       low: "Düşük",
       label: "Kritiklik",
       any: "Tüm kritiklik seviyeleri",
-      badge: "{level} kritiklik",
+      badge: "Kritiklik: {level}",
       fact: "Kritiklik · {level}",
     },
     runtime: {
