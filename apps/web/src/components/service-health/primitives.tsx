@@ -10,15 +10,77 @@
  * people believe.
  */
 
+import { useMemo } from "react";
+
 import {
   REASON_LABELS,
   SIGNAL_LABELS,
-  formatSignal,
   type ServiceHealthStatus,
   type SignalValue,
 } from "@/lib/serviceHealth";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
+
+const MISSING = "—";
+
+/**
+ * The locale-aware twin of `formatSignal` in lib/serviceHealth: same units,
+ * same "a dash, never a zero" rule, but digits and unit words come from
+ * `useFormat()` and the `common` catalogue. Components render through this;
+ * the lib function stays for code that is not a component.
+ */
+export function useSignalFormat(): (value: number | null | undefined, unit: string) => string {
+  const fmt = useFormat();
+  const tc = useT("common");
+  return useMemo(() => {
+    const fixed = (value: number, digits: number) =>
+      fmt.number(value, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    return (value, unit) => {
+      if (value === null || value === undefined || Number.isNaN(value)) return MISSING;
+      switch (unit) {
+        case "ratio":
+          return `${fixed(value * 100, 1)}%`;
+        case "cores":
+          return `${fixed(value, 2)} ${tc("unit.cores")}`;
+        case "bytes": {
+          const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+          let scaled = value;
+          let index = 0;
+          while (scaled >= 1024 && index < units.length - 1) {
+            scaled /= 1024;
+            index += 1;
+          }
+          return `${fixed(scaled, 1)} ${units[index]}`;
+        }
+        case "seconds":
+          return value < 1
+            ? tc("time.millisecondsShort", { count: Math.round(value * 1000) })
+            : tc("time.secondsShort", { count: fixed(value, 2) });
+        case "requests_per_second":
+          return `${fixed(value, 2)} ${tc("unit.requestsPerSecond")}`;
+        case "count":
+          return fmt.number(Math.round(value));
+        default:
+          return fixed(value, 2);
+      }
+    };
+  }, [fmt, tc]);
+}
+
+/** "4m ago" / "4 dk önce" from an age in seconds; a dash when nothing was measured. */
+export function useAge(): (seconds: number | null | undefined) => string {
+  const fmt = useFormat();
+  const tc = useT("common");
+  return useMemo(
+    () => (seconds) => {
+      if (seconds === null || seconds === undefined) return MISSING;
+      const whole = Math.max(0, Math.round(seconds));
+      return tc("time.ago", { value: fmt.duration(whole, { compact: true }) });
+    },
+    [fmt, tc],
+  );
+}
 
 /**
  * A round icon bubble, tinted by tone. The leading mark on rows, KPI cards
@@ -160,10 +222,17 @@ export const STATUS_LABELS: Record<ServiceHealthStatus, string> = {
 };
 
 export function HealthBadge({ status }: { status: ServiceHealthStatus }) {
-  return <StatusBadge status={BADGE_STATUS[status]} label={STATUS_LABELS[status]} />;
+  const t = useT("serviceHealth");
+  return (
+    <StatusBadge
+      status={BADGE_STATUS[status]}
+      label={t.dyn("status", status, STATUS_LABELS[status])}
+    />
+  );
 }
 
-/** What happened to one signal, in words, when it is not a plain value. */
+/** What happened to one signal, in words, when it is not a plain value.
+ * The catalogue's `signalState.*`; `ok` has no note. */
 const SIGNAL_STATE_LABELS: Record<string, string> = {
   empty: "no data",
   failed: "query failed",
@@ -177,13 +246,17 @@ const SIGNAL_STATE_LABELS: Record<string, string> = {
  * absent — never as `0`, and never as a blank cell that reads like zero.
  */
 export function SignalCell({ signal, unit }: { signal: SignalValue; unit: string }) {
-  const note = SIGNAL_STATE_LABELS[signal.state];
+  const t = useT("serviceHealth");
+  const formatSignal = useSignalFormat();
+  const note = SIGNAL_STATE_LABELS[signal.state]
+    ? t.dyn("signalState", signal.state, SIGNAL_STATE_LABELS[signal.state])
+    : undefined;
   return (
     <span className="inline-flex items-baseline gap-1.5" data-testid={`signal-${signal.state}`}>
       <span className="font-mono text-xs text-ink">{formatSignal(signal.value, unit)}</span>
       {note ? <span className="text-[11px] italic text-ink-muted">{note}</span> : null}
       {signal.state === "ok" && signal.from_cache ? (
-        <span className="text-[11px] italic text-ink-muted">cached</span>
+        <span className="text-[11px] italic text-ink-muted">{t("signalState.cached")}</span>
       ) : null}
     </span>
   );
@@ -191,6 +264,7 @@ export function SignalCell({ signal, unit }: { signal: SignalValue; unit: string
 
 /** A bare number that may be null. Same rule: a dash, never a zero. */
 export function Measure({ value, unit }: { value: number | null | undefined; unit: string }) {
+  const formatSignal = useSignalFormat();
   return (
     <span className="font-mono text-xs text-ink">
       {formatSignal(value ?? null, unit)}
@@ -209,8 +283,10 @@ export function ReasonList({
   tone?: StatusTone;
   size?: "compact" | "roomy";
 }) {
+  const t = useT("serviceHealth");
   if (reasons.length === 0) return null;
   const spec = toneSpec(tone);
+  const label = (reason: string) => t.dyn("reason", reason, REASON_LABELS[reason] ?? reason);
   if (size === "compact") {
     return (
       <ul className="flex flex-wrap gap-1.5" data-testid="reason-list">
@@ -221,7 +297,7 @@ export function ReasonList({
             className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-micro text-ink-secondary"
           >
             <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${spec.dot}`} />
-            <span className="font-medium">{REASON_LABELS[reason] ?? reason}</span>
+            <span className="font-medium">{label(reason)}</span>
           </li>
         ))}
       </ul>
@@ -239,9 +315,7 @@ export function ReasonList({
             <Icon className="h-3.5 w-3.5" />
           </span>
           <span className="min-w-0">
-            <span className="block text-body font-semibold text-ink">
-              {REASON_LABELS[reason] ?? reason}
-            </span>
+            <span className="block text-body font-semibold text-ink">{label(reason)}</span>
             {messages?.[index] ? (
               <span className="mt-0.5 block text-caption text-ink-muted">{messages[index]}</span>
             ) : null}
@@ -253,16 +327,17 @@ export function ReasonList({
 }
 
 export function MissingSignals({ missing }: { missing: string[] }) {
+  const t = useT("serviceHealth");
   if (missing.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="missing-signals">
-      <span className="mr-1 text-micro font-medium text-ink-secondary">Not measured:</span>
+      <span className="mr-1 text-micro font-medium text-ink-secondary">{t("missing.label")}</span>
       {missing.map((name) => (
         <span
           key={name}
           className="rounded-full border border-dashed border-border px-2.5 py-0.5 text-micro text-ink-muted"
         >
-          {SIGNAL_LABELS[name] ?? name}
+          {t.dyn("signal", name, SIGNAL_LABELS[name] ?? name)}
         </span>
       ))}
     </div>
@@ -288,9 +363,13 @@ export function FreshnessNotice({
   servedAt?: string;
   newestSampleAt?: string | null;
 }) {
+  const t = useT("serviceHealth");
   if (!partial && !servedFromLastGood) return null;
   const tone: StatusTone = servedFromLastGood ? "stale" : "warning";
   const Icon = toneSpec(tone).icon;
+  // The timestamps are evidence, so they stay as the API's own UTC instants;
+  // each sits behind a label rather than inside a sentence, because label +
+  // value reads the same in any word order.
   return (
     <div
       role="status"
@@ -302,27 +381,31 @@ export function FreshnessNotice({
       </span>
       <div className="min-w-0">
         {servedFromLastGood ? (
-          <p>
-            <span className="font-semibold">Last known values.</span> The datasource could not
-            be reached, so this is the most recent successful reading — computed{" "}
-            <time className="font-mono">{computedAt}</time>
-            {servedAt ? (
-              <>
-                {" "}
-                and served <time className="font-mono">{servedAt}</time>
-              </>
-            ) : null}
-            .
-          </p>
+          <>
+            <p>
+              <span className="font-semibold">{t("notice.lastKnownTitle")}</span>{" "}
+              {t("notice.lastKnownBody")}
+            </p>
+            <p className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 opacity-80">
+              <span>
+                {t("notice.computedAt")} <time className="font-mono">{computedAt}</time>
+              </span>
+              {servedAt ? (
+                <span>
+                  {t("notice.servedAt")} <time className="font-mono">{servedAt}</time>
+                </span>
+              ) : null}
+            </p>
+          </>
         ) : (
           <p>
-            <span className="font-semibold">Partial result.</span> Some signals were
-            unavailable, so this answer does not cover everything.
+            <span className="font-semibold">{t("notice.partialTitle")}</span>{" "}
+            {t("notice.partialBody")}
           </p>
         )}
         {newestSampleAt ? (
           <p className="mt-1 opacity-80">
-            Newest sample: <time className="font-mono">{newestSampleAt}</time>
+            {t("notice.newestSample")} <time className="font-mono">{newestSampleAt}</time>
           </p>
         ) : null}
       </div>
@@ -338,12 +421,13 @@ export function BindingStateBadge({
   lifecycle: string;
   resolved: boolean;
 }) {
+  const t = useT("serviceHealth");
   if (lifecycle !== "active") {
-    return <StatusBadge status="maintenance" label="Disabled" />;
+    return <StatusBadge status="maintenance" label={t("bindingState.disabled")} />;
   }
   return resolved ? (
-    <StatusBadge status="healthy" label="Resolved" />
+    <StatusBadge status="healthy" label={t("bindingState.resolved")} />
   ) : (
-    <StatusBadge status="unknown" label="Unresolved" />
+    <StatusBadge status="unknown" label={t("bindingState.unresolved")} />
   );
 }

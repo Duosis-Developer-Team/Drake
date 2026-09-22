@@ -24,6 +24,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import {
   CANDIDATE_BLOCKERS,
   ERROR_GUIDANCE,
@@ -47,6 +48,7 @@ export function StartOnboarding({
   csrfToken: string;
   canManage: boolean;
 }) {
+  const t = useT("onboarding");
   const router = useRouter();
   const params = useSearchParams();
   const requested = params.get("repository_id");
@@ -82,11 +84,11 @@ export function StartOnboarding({
       const denied = error instanceof ApiError && (error.status === 404 || error.status === 403);
       setListing({
         state: "error",
-        message: error instanceof ApiError ? error.message : "The list could not be loaded.",
+        message: error instanceof ApiError ? error.message : t("start.listFailed"),
         denied,
       });
     }
-  }, []);
+  }, [t]);
 
   const loadMore = useCallback(async () => {
     if (listing.state !== "ready" || !listing.nextCursor) return;
@@ -104,12 +106,12 @@ export function StartOnboarding({
       );
     } catch (error) {
       setFailure(
-        error instanceof ApiError ? error.message : "The next page could not be loaded.",
+        error instanceof ApiError ? error.message : t("start.nextPageFailed"),
       );
     } finally {
       setLoadingMore(false);
     }
-  }, [listing, search]);
+  }, [listing, search, t]);
 
   useEffect(() => {
     if (!canManage) {
@@ -149,12 +151,12 @@ export function StartOnboarding({
   if (!canManage) {
     return (
       <Panel>
-        <PanelHeader title="Start an onboarding" />
+        <PanelHeader title={t("start.title")} />
         <div data-testid="start-permission-denied">
           <DataState
             kind="permission-denied"
-            title="You cannot start an onboarding"
-            description="Starting one needs the onboarding manage permission on the scope the repository belongs to. You can still review sessions you have access to."
+            title={t("start.denied.title")}
+            description={t("start.denied.description")}
           />
         </div>
       </Panel>
@@ -175,10 +177,16 @@ export function StartOnboarding({
       const created = await createSession(csrfToken, selected.id);
       router.push(`/onboarding/${created.session_id}`);
     } catch (error) {
+      // Drake's own words for a code Drake defined, in the reader's language;
+      // the server's message is also Drake's, so the fallback leaks nothing.
       setFailure(
         error instanceof ApiError
-          ? (ERROR_GUIDANCE[error.code] ?? CANDIDATE_BLOCKERS[error.code] ?? error.message)
-          : "The session could not be started. Nothing was changed.",
+          ? t.has(`errorGuidance.${error.code}`)
+            ? t.dyn("errorGuidance", error.code, ERROR_GUIDANCE[error.code])
+            : t.has(`candidateBlocker.${error.code}`)
+              ? t.dyn("candidateBlocker", error.code, CANDIDATE_BLOCKERS[error.code])
+              : error.message
+          : t("start.startFailed"),
       );
       setStarting(false);
     }
@@ -190,15 +198,12 @@ export function StartOnboarding({
 
   return (
     <Panel>
-      <PanelHeader
-        title="Start an onboarding"
-        description="Search a repository the GitHub App can see, then start a session on it."
-      />
+      <PanelHeader title={t("start.title")} description={t("start.description")} />
       <div className="space-y-4" data-testid="start-onboarding">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-0 flex-1">
             <label htmlFor={inputId} className="block text-caption text-ink-muted">
-              Repository
+              {t("start.repository")}
             </label>
             {/*
               A native combobox: typing filters on the SERVER, and the
@@ -214,7 +219,7 @@ export function StartOnboarding({
               aria-controls={listId}
               autoComplete="off"
               data-testid="repository-search"
-              placeholder="Search repositories…"
+              placeholder={t("start.searchPlaceholder")}
               value={search}
               onChange={(event) => {
                 const value = event.target.value;
@@ -231,7 +236,7 @@ export function StartOnboarding({
               {items.map((item) => (
                 <option key={item.id} value={item.id} label={item.full_name}>
                   {item.full_name}
-                  {item.startable ? "" : " — unavailable"}
+                  {item.startable ? "" : t("start.unavailableSuffix")}
                 </option>
               ))}
             </datalist>
@@ -244,10 +249,10 @@ export function StartOnboarding({
             className="rounded-full border border-accent bg-accent-soft px-4 py-2 text-body font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {selected?.active_session_id
-              ? "Open existing session"
+              ? t("start.openExisting")
               : starting
-                ? "Starting…"
-                : "Start onboarding"}
+                ? t("start.starting")
+                : t("start.start")}
           </button>
         </div>
 
@@ -268,11 +273,9 @@ export function StartOnboarding({
           <div data-testid={search ? "start-no-matches" : "start-empty"}>
             <DataState
               kind="empty"
-              title={search ? "No repository matches that search" : "No repositories you can onboard"}
+              title={search ? t("start.noMatches.title") : t("start.empty.title")}
               description={
-                search
-                  ? "Nothing in a scope where you hold the onboarding manage permission matches. This is not a statement about which repositories exist."
-                  : "Drake projects no repository in a scope where you hold the onboarding manage permission. This is not a statement about which repositories exist."
+                search ? t("start.noMatches.description") : t("start.empty.description")
               }
             />
           </div>
@@ -296,7 +299,9 @@ export function StartOnboarding({
                 >
                   <span className="truncate text-ink">{item.full_name}</span>
                   {item.startable ? null : (
-                    <span className="shrink-0 text-micro text-warning">unavailable</span>
+                    <span className="shrink-0 text-micro text-warning">
+                      {t("start.unavailable")}
+                    </span>
                   )}
                 </button>
               </li>
@@ -312,37 +317,39 @@ export function StartOnboarding({
             onClick={() => void loadMore()}
             className="rounded-full border border-border px-3 py-1.5 text-caption text-ink-secondary hover:bg-surface-hover disabled:opacity-50"
           >
-            {loadingMore ? "Loading…" : "Load more repositories"}
+            {loadingMore ? t("start.loadingMore") : t("start.loadMore")}
           </button>
         ) : listing.state === "ready" && items.length > 0 ? (
           <p className="text-[11px] text-ink-muted" data-testid="repository-list-complete">
-            That is every repository you can onboard.
+            {t("start.complete")}
           </p>
         ) : null}
 
         {preselect === "loading" ? (
           <p className="text-xs text-ink-muted" data-testid="preselect-loading">
-            Looking up the repository from the link…
+            {t("start.preselectLoading")}
           </p>
         ) : null}
         {preselect === "denied" ? (
           <p className="text-xs text-warning" data-testid="preselect-denied">
-            That repository is not available to you here. Starting an onboarding needs the
-            onboarding manage permission on the scope it belongs to.
+            {t("start.preselectDenied")}
           </p>
         ) : null}
 
         {selected ? (
           <p className="text-xs text-ink-secondary" data-testid="repository-selected">
-            Selected: <span className="font-mono break-all">{selected.full_name}</span>
+            {t("start.selected")} <span className="font-mono break-all">{selected.full_name}</span>
           </p>
         ) : null}
 
         {selected && !selected.startable ? (
           <p className="text-xs text-warning" data-testid="repository-blocked">
             {/* Said in words, not only by the button being grey. */}
-            {CANDIDATE_BLOCKERS[selected.reason_code ?? ""] ??
-              "This repository cannot be onboarded right now."}
+            {t.dyn(
+              "candidateBlocker",
+              selected.reason_code,
+              CANDIDATE_BLOCKERS[selected.reason_code ?? ""] ?? t("start.cannotStart"),
+            )}
           </p>
         ) : null}
 
@@ -353,7 +360,7 @@ export function StartOnboarding({
         ) : null}
 
         <p className="text-xs text-ink-muted">
-          Starting a session reads nothing yet. The analysis is a separate, explicit step.
+          {t("start.readsNothing")}
         </p>
       </div>
     </Panel>

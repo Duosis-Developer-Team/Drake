@@ -22,6 +22,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight } from "lucide-react";
 import { formatUnit } from "@/lib/design/format";
 import type { StatusTone, Thresholds } from "@/lib/design/status";
 import { thresholdLabel, toneForThreshold, toneSpec } from "@/lib/design/status";
+import { useLocale, useT } from "@/lib/i18n";
 
 export interface Comparison {
   /** Same measurement over the previous window of equal length. */
@@ -61,8 +62,10 @@ export function Stat({
    *  extra border reads as a box inside a box. */
   bare?: boolean;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const tone = explicitTone ?? toneForThreshold(value, thresholds);
-  const spec = toneSpec(tone);
+  const spec = toneSpec(tone, locale);
   const Icon = spec.icon;
   const missing = value === null || value === undefined || Number.isNaN(value);
 
@@ -94,13 +97,13 @@ export function Stat({
             size === "large" ? "text-metric" : "text-title"
           } ${missing ? "text-ink-muted" : ""}`}
         >
-          {formatUnit(value, unit)}
+          {formatUnit(value, unit, {}, locale)}
         </span>
         {delta !== null && comparison ? (
           <span className={`inline-flex items-center gap-0.5 text-caption ${deltaTone}`}>
             <DeltaIcon aria-hidden className="h-3.5 w-3.5" />
             <span data-tabular>{`${delta > 0 ? "+" : ""}${delta.toFixed(1)}%`}</span>
-            <span className="text-ink-muted">vs {comparison.periodLabel}</span>
+            <span className="text-ink-muted">{t("stat.vs", { period: comparison.periodLabel })}</span>
           </span>
         ) : null}
       </div>
@@ -109,7 +112,7 @@ export function Stat({
       ) : null}
       {!missing && (thresholds || explicitTone) ? (
         <p className={`mt-1 text-micro ${spec.text}`}>
-          {explicitTone ? spec.label : thresholdLabel(tone, Boolean(thresholds))}
+          {explicitTone ? spec.label : thresholdLabel(tone, Boolean(thresholds), locale)}
         </p>
       ) : null}
       {detail ? <div className="mt-1 text-micro text-ink-muted">{detail}</div> : null}

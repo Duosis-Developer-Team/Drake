@@ -33,3 +33,4 @@ or operational details.
 | [ADR-0025](ADR-0025-authoritative-onboarding-and-plan-apply-parity.md) | One authoritative onboarding path; the approved plan is the instruction set |
 | [ADR-0026](ADR-0026-production-agent-listener-and-identity-persistence.md) | Two listeners for the agent bootstrap asymmetry; identity on a claim, not in memory |
 | [ADR-0027](ADR-0027-external-runtime-and-managed-dependencies.md) | Runtimes Drake does not run, and dependencies it does not manage |
+| [ADR-0028](ADR-0028-web-localisation.md) | Web localisation: English and Turkish from one typed catalogue |

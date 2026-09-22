@@ -71,8 +71,15 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             <TimeRangeControl />
           </Suspense>
         ) : null}
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="hidden md:block">
           <ThemeControl compact />
+        </div>
+        {/* The language control needs more room than the icon-only theme
+            control, and between md and lg the bar already holds search,
+            breadcrumb, time range, bell and identity; at 1024px one more
+            control pushed the page 35px sideways. Below lg it lives in the
+            drawer with the other settings, which exists exactly there. */}
+        <div className="hidden lg:block">
           <LanguageControl compact />
         </div>
         <NotificationBell />

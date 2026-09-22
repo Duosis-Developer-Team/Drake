@@ -11,6 +11,8 @@
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { useId } from "react";
 
+import { useT } from "@/lib/i18n";
+
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "default" | "compact";
 
@@ -150,7 +152,7 @@ export function SegmentedControl<T extends string>({
 export function SearchInput({
   value,
   onChange,
-  placeholder = "Search",
+  placeholder,
   label,
   className = "",
 }: {
@@ -160,6 +162,8 @@ export function SearchInput({
   label: string;
   className?: string;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   const id = useId();
   return (
     <div className={`relative min-w-0 ${className}`}>
@@ -174,14 +178,14 @@ export function SearchInput({
         id={id}
         type="search"
         value={value}
-        placeholder={placeholder}
+        placeholder={placeholder ?? common("action.search")}
         onChange={(event) => onChange(event.target.value)}
         className="h-9 w-full rounded-control border border-border bg-surface pr-8 pl-8 text-body text-ink placeholder:text-ink-muted"
       />
       {value ? (
         <button
           type="button"
-          aria-label="Clear search"
+          aria-label={t("search.clear")}
           onClick={() => onChange("")}
           className="absolute top-1/2 right-1.5 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-ink-muted hover:text-ink"
         >
@@ -214,7 +218,7 @@ export function Select<T extends string>({
     <div className="flex min-w-0 items-center gap-2">
       <label
         htmlFor={id}
-        className={hideLabel ? "sr-only" : "shrink-0 text-caption text-ink-secondary"}
+        className={hideLabel ? "sr-only" : "shrink-0 text-caption text-ink-secondary"} // i18n-ignore: CSS
       >
         {label}
       </label>
@@ -257,6 +261,7 @@ export function FilterBar({
   summary?: React.ReactNode;
   onReset?: () => void;
 }) {
+  const t = useT("ui");
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="filter-bar">
       {children}
@@ -267,7 +272,7 @@ export function FilterBar({
       ) : null}
       {onReset ? (
         <Button variant="ghost" size="compact" icon={X} onClick={onReset}>
-          Clear filters
+          {t("filter.clear")}
         </Button>
       ) : null}
     </div>

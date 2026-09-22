@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Status indicators.
  *
@@ -15,6 +17,7 @@
 
 import type { StatusTone } from "@/lib/design/status";
 import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
+import { useLocale } from "@/lib/i18n";
 
 export type { StatusTone };
 
@@ -49,8 +52,9 @@ export function StatusBadge({
   label?: string;
   size?: "default" | "compact";
 }) {
+  const { locale } = useLocale();
   const tone = resolve(status);
-  const spec = toneSpec(tone);
+  const spec = toneSpec(tone, locale);
   const Icon = spec.icon;
   return (
     <span
@@ -74,8 +78,9 @@ export function StatusDot({
   status: HealthStatus | StatusTone;
   label?: string;
 }) {
+  const { locale } = useLocale();
   const tone = resolve(status);
-  const spec = toneSpec(tone);
+  const spec = toneSpec(tone, locale);
   return (
     <span
       data-testid={`status-dot-${tone}`}
@@ -96,8 +101,9 @@ export function HealthIndicator({
   label?: string;
   detail?: React.ReactNode;
 }) {
+  const { locale } = useLocale();
   const tone = resolve(status);
-  const spec = toneSpec(tone);
+  const spec = toneSpec(tone, locale);
   const Icon = spec.icon;
   return (
     <span className="inline-flex items-start gap-2">
@@ -138,5 +144,6 @@ export function ToneAvatar({
 
 /** A raw backend health word, badged without the caller mapping it first. */
 export function HealthWord({ value, label }: { value: string | null | undefined; label?: string }) {
-  return <StatusBadge status={toneForHealth(value)} label={label ?? humanize(value)} />;
+  const { locale } = useLocale();
+  return <StatusBadge status={toneForHealth(value)} label={label ?? humanize(value, locale)} />;
 }

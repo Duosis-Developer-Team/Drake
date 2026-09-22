@@ -11,10 +11,15 @@
  *
  * `stale` is a warning, not an error. Nothing went wrong — the repository
  * simply moved, and the review needs redoing against the new commit.
+ *
+ * The words come from `onboarding.session.*` / `action.*` / `gitops.*`; the
+ * `*_LABELS` records in lib/onboarding stay the English source and the
+ * fallback for a token the catalogue does not know.
  */
 
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import type { StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import {
   ACTION_LABELS,
   GITOPS_LABELS,
@@ -74,13 +79,22 @@ export function sessionTone(state: SessionState): StatusTone {
 }
 
 export function SessionBadge({ state }: { state: SessionState }) {
-  return <StatusBadge status={SESSION_BADGE[state]} label={SESSION_LABELS[state]} />;
+  const t = useT("onboarding");
+  return (
+    <StatusBadge status={SESSION_BADGE[state]} label={t.dyn("session", state, SESSION_LABELS[state])} />
+  );
 }
 
 export function ActionBadge({ action }: { action: PlanAction }) {
-  return <StatusBadge status={ACTION_BADGE[action]} label={ACTION_LABELS[action]} />;
+  const t = useT("onboarding");
+  return (
+    <StatusBadge status={ACTION_BADGE[action]} label={t.dyn("action", action, ACTION_LABELS[action])} />
+  );
 }
 
 export function GitOpsBadge({ state }: { state: GitOpsState }) {
-  return <StatusBadge status={GITOPS_BADGE[state]} label={GITOPS_LABELS[state]} />;
+  const t = useT("onboarding");
+  return (
+    <StatusBadge status={GITOPS_BADGE[state]} label={t.dyn("gitops", state, GITOPS_LABELS[state])} />
+  );
 }

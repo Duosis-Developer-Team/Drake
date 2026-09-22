@@ -23,7 +23,7 @@ export function IdentityMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("identity.accountMenu")}
-        className="flex h-11 items-center gap-2 rounded-full border border-border bg-surface pr-1.5 pl-1.5 transition-colors hover:bg-surface-hover lg:pr-4"
+        className="flex h-11 items-center gap-2 rounded-full border border-border bg-surface pr-1.5 pl-1.5 transition-colors hover:bg-surface-hover xl:pr-4"
       >
         <span
           aria-hidden
@@ -31,7 +31,11 @@ export function IdentityMenu() {
         >
           {initial}
         </span>
-        <span className="hidden max-w-32 truncate text-sm text-ink lg:block">
+        {/* The name shows from xl: at 1024px the bar already holds search,
+            breadcrumb, time range, theme, language, bell and this button,
+            and the name was the 35px that pushed the page sideways. The
+            avatar stays, and the menu itself always carries the name. */}
+        <span className="hidden max-w-32 truncate text-sm text-ink xl:block">
           {identity.display_name}
         </span>
       </button>

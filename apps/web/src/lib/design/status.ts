@@ -34,6 +34,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { getTranslator, type Locale } from "@/lib/i18n";
+
 export type StatusTone =
   | "success"
   | "info"
@@ -78,7 +80,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-healthy",
     rail: "border-healthy",
     token: "--status-success",
-    label: "Healthy",
+    label: "Healthy", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   info: {
     icon: Info,
@@ -87,7 +89,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-info",
     rail: "border-info",
     token: "--status-info",
-    label: "Info",
+    label: "Info", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   warning: {
     icon: AlertTriangle,
@@ -96,7 +98,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-warning",
     rail: "border-warning",
     token: "--status-warning",
-    label: "Warning",
+    label: "Warning", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   critical: {
     icon: XCircle,
@@ -105,7 +107,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-critical",
     rail: "border-critical",
     token: "--status-critical",
-    label: "Critical",
+    label: "Critical", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   neutral: {
     icon: MinusCircle,
@@ -114,7 +116,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-neutral",
     rail: "border-neutral",
     token: "--status-neutral",
-    label: "Neutral",
+    label: "Neutral", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   unknown: {
     icon: HelpCircle,
@@ -123,7 +125,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-unknown",
     rail: "border-unknown",
     token: "--status-unknown",
-    label: "Unknown",
+    label: "Unknown", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   stale: {
     icon: Clock,
@@ -132,7 +134,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-stale",
     rail: "border-stale",
     token: "--status-stale",
-    label: "Stale",
+    label: "Stale", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   pending: {
     icon: Loader,
@@ -141,7 +143,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-info",
     rail: "border-info",
     token: "--status-info",
-    label: "Pending",
+    label: "Pending", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   "not-applicable": {
     icon: CircleSlash,
@@ -150,7 +152,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-ink-muted",
     rail: "border-border",
     token: "--text-muted",
-    label: "Not applicable",
+    label: "Not applicable", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
   denied: {
     icon: Ban,
@@ -159,7 +161,7 @@ export const TONES: Record<StatusTone, ToneSpec> = {
     dot: "bg-ink-muted",
     rail: "border-border",
     token: "--text-muted",
-    label: "Permission required",
+    label: "Permission required", // i18n-ignore: English default; toneSpec(tone, locale) localizes
   },
 };
 
@@ -187,8 +189,15 @@ export function compareTone(a: StatusTone, b: StatusTone): number {
   return TONE_SEVERITY[a] - TONE_SEVERITY[b];
 }
 
-export function toneSpec(tone: StatusTone): ToneSpec {
-  return TONES[tone] ?? TONES.unknown;
+/**
+ * The spec for a tone. With a `locale` the `label` is the catalogue's word
+ * for it (`ui.tone.*`); without one it is the English default, so every
+ * existing `toneSpec(tone).label` keeps reading exactly as it did.
+ */
+export function toneSpec(tone: StatusTone, locale: Locale = "en"): ToneSpec {
+  const spec = TONES[tone] ?? TONES.unknown;
+  if (locale === "en") return spec;
+  return { ...spec, label: getTranslator("ui", locale).dyn("tone", tone, spec.label) };
 }
 
 /**
@@ -261,11 +270,20 @@ export function toneForHealth(value: string | null | undefined): StatusTone {
   return HEALTH_TONES[value.toLowerCase()] ?? "unknown";
 }
 
-/** A raw backend token, as a word a person reads. */
-export function humanize(value: string | null | undefined): string {
-  if (!value) return "Unknown";
+/**
+ * A raw backend token, as a word a person reads.
+ *
+ * Known tokens come from the catalogue (`ui.token.*`, whose English entries
+ * equal the spaced-and-capitalised form below, so the default is unchanged);
+ * a token the catalogue does not know is still shown, spaced, rather than
+ * hidden — an unexpected backend word is information.
+ */
+export function humanize(value: string | null | undefined, locale: Locale = "en"): string {
+  if (!value) return getTranslator("common", locale)("state.unknown");
   const spaced = value.replace(/[_-]+/g, " ").trim();
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  const english = spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  if (locale === "en") return english;
+  return getTranslator("ui", locale).dyn("token", value.toLowerCase(), english);
 }
 
 /**
@@ -294,17 +312,22 @@ export function toneForThreshold(
   return "success";
 }
 
-export function thresholdLabel(tone: StatusTone, hasThresholds: boolean): string {
-  if (!hasThresholds) return "no threshold set";
+export function thresholdLabel(
+  tone: StatusTone,
+  hasThresholds: boolean,
+  locale: Locale = "en",
+): string {
+  const t = getTranslator("ui", locale);
+  if (!hasThresholds) return t("threshold.none");
   switch (tone) {
     case "critical":
-      return "critical threshold breached";
+      return t("threshold.critical");
     case "warning":
-      return "warning threshold breached";
+      return t("threshold.warning");
     case "success":
-      return "within threshold";
+      return t("threshold.success");
     default:
-      return "not measured";
+      return t("threshold.unmeasured");
   }
 }
 

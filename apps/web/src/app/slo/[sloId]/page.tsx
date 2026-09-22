@@ -29,17 +29,18 @@ import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
 import { Gauge, Sparkline } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Card } from "@/components/ui/Card";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   SLO_EXPLANATIONS,
-  formatAge,
   formatBudget,
   formatRatio,
-  formatWindow,
   type SloDetail,
   type SloEvaluation,
 } from "@/lib/alerting";
 
 export default function SloDetailPage() {
+  const t = useT("alerting");
+  const fmt = useFormat();
   const { sloId } = useParams<{ sloId: string }>();
   const [slo, retry] = useApi<SloDetail>(`/v1/slo/${sloId}`);
   const [history] = useApi<{ evaluations: SloEvaluation[] }>(
@@ -59,27 +60,33 @@ export default function SloDetailPage() {
                   {[data.project_key, data.environment_key, data.service_key]
                     .filter(Boolean)
                     .join("/")}{" "}
-                  · {data.indicator}
+                  · {t.dyn("indicator", data.indicator, data.indicator)}
                 </p>
               </div>
               {data.evaluation ? (
                 <SloBadge status={data.evaluation.status} />
               ) : (
-                <span className="text-xs italic text-ink-muted">not evaluated</span>
+                <span className="text-xs italic text-ink-muted">{t("sloDetail.notEvaluated")}</span>
               )}
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">
-              <Card title="The promise">
-                <MetaRow label="Objective">{formatRatio(data.objective_ratio)}</MetaRow>
-                <MetaRow label="Rolling window">
-                  {formatWindow(data.window_seconds)}
+              <Card title={t("sloDetail.promise.title")}>
+                <MetaRow label={t("sloDetail.promise.objective")}>
+                  {formatRatio(data.objective_ratio)}
                 </MetaRow>
-                <MetaRow label="Indicator">{data.indicator}</MetaRow>
+                <MetaRow label={t("sloDetail.promise.window")}>
+                  {fmt.duration(data.window_seconds, { compact: true })}
+                </MetaRow>
+                <MetaRow label={t("sloDetail.promise.indicator")}>
+                  {t.dyn("indicator", data.indicator, data.indicator)}
+                </MetaRow>
                 {data.threshold_profile_key ? (
-                  <MetaRow label="Latency profile">{data.threshold_profile_key}</MetaRow>
+                  <MetaRow label={t("sloDetail.promise.latencyProfile")}>
+                    {data.threshold_profile_key}
+                  </MetaRow>
                 ) : null}
-                <MetaRow label="Burn profile">{data.burn_profile_key}</MetaRow>
+                <MetaRow label={t("sloDetail.promise.burnProfile")}>{data.burn_profile_key}</MetaRow>
                 {/* Server-controlled, from a reviewed contract. There is no
                     field on this screen that changes any of it. */}
                 <p className="mt-2 text-xs text-ink-secondary" data-testid="measurement">
@@ -87,12 +94,12 @@ export default function SloDetailPage() {
                 </p>
               </Card>
 
-              <Card title="What was measured">
+              <Card title={t("sloDetail.measured.title")}>
                 {data.evaluation === null ? (
                   <DataState
                     kind="not-configured"
-                    title="Never evaluated"
-                    description="No measurement has been recorded for this objective. That is not the same as meeting it."
+                    title={t("sloDetail.measured.neverTitle")}
+                    description={t("sloDetail.measured.neverDescription")}
                   />
                 ) : (
                   <div className="space-y-1" data-testid="slo-evaluation">
@@ -102,7 +109,7 @@ export default function SloDetailPage() {
                         invented here. */}
                     <div className="flex flex-wrap items-center justify-around gap-3 pb-2">
                       <Gauge
-                        label="Compliance"
+                        label={t("sloDetail.measured.compliance")}
                         unit="ratio"
                         value={data.evaluation.compliance_ratio}
                         thresholds={{
@@ -110,11 +117,13 @@ export default function SloDetailPage() {
                           critical: data.evaluation.objective_ratio * 0.99,
                           direction: "below",
                         }}
-                        caption={`objective ${formatRatio(data.evaluation.objective_ratio)}`}
-                        missingReason="not measured"
+                        caption={t("sloDetail.measured.objectiveCaption", {
+                          ratio: formatRatio(data.evaluation.objective_ratio),
+                        })}
+                        missingReason={t("sloDetail.measured.notMeasured")}
                       />
                       <Gauge
-                        label="Budget remaining"
+                        label={t("sloDetail.measured.budgetRemaining")}
                         unit="ratio"
                         value={
                           data.evaluation.error_budget_total
@@ -128,16 +137,18 @@ export default function SloDetailPage() {
                         thresholds={{ warn: 0.25, critical: 0.05, direction: "below" }}
                         caption={
                           (data.evaluation.error_budget_remaining ?? 0) < 0
-                            ? "overspent"
-                            : `${formatBudget(data.evaluation.error_budget_consumed)} consumed`
+                            ? t("sloDetail.measured.overspent")
+                            : t("sloDetail.measured.consumedCaption", {
+                                value: formatBudget(data.evaluation.error_budget_consumed),
+                              })
                         }
-                        missingReason="no budget recorded"
+                        missingReason={t("sloDetail.measured.noBudget")}
                       />
                     </div>
-                    <MetaRow label="Budget consumed">
+                    <MetaRow label={t("sloDetail.measured.budgetConsumed")}>
                       {formatBudget(data.evaluation.error_budget_consumed)}
                     </MetaRow>
-                    <MetaRow label="Budget remaining">
+                    <MetaRow label={t("sloDetail.measured.budgetRemaining")}>
                       <span
                         className={
                           (data.evaluation.error_budget_remaining ?? 0) < 0
@@ -148,64 +159,71 @@ export default function SloDetailPage() {
                         {formatBudget(data.evaluation.error_budget_remaining)}
                       </span>
                     </MetaRow>
-                    <MetaRow label="Window">
-                      {formatAge(data.evaluation.window_start)} →{" "}
-                      {formatAge(data.evaluation.window_end)}
+                    <MetaRow label={t("sloDetail.measured.window")}>
+                      {fmt.relative(data.evaluation.window_start)} →{" "}
+                      {fmt.relative(data.evaluation.window_end)}
                     </MetaRow>
-                    <MetaRow label="Data quality">{data.evaluation.data_quality}</MetaRow>
-                    <MetaRow label="Samples">
-                      {String(data.evaluation.sample_count)}
+                    <MetaRow label={t("sloDetail.measured.dataQuality")}>
+                      {data.evaluation.data_quality}
+                    </MetaRow>
+                    <MetaRow label={t("sloDetail.measured.samples")}>
+                      {fmt.number(data.evaluation.sample_count)}
                     </MetaRow>
                     {/* The objective this measurement was judged against —
                         not necessarily the one configured today. */}
-                    <MetaRow label="Judged against">
+                    <MetaRow label={t("sloDetail.measured.judgedAgainst")}>
                       {formatRatio(data.evaluation.objective_ratio)} (v
                       {data.evaluation.definition_version})
                     </MetaRow>
                     <p className="mt-2 text-xs text-ink-secondary">
-                      {SLO_EXPLANATIONS[data.evaluation.status]}
+                      {t.dyn(
+                        "sloExplanation",
+                        data.evaluation.status,
+                        SLO_EXPLANATIONS[data.evaluation.status],
+                      )}
                     </p>
                   </div>
                 )}
               </Card>
             </div>
 
-            <Card title="Multi-window burn rate">
+            <Card title={t("sloDetail.burn.title")}>
               <BurnTable rates={data.evaluation?.burn_rates ?? []} />
-              <p className="mt-3 text-xs text-ink-muted">
-                A level is active only when its long and its short window both exceed the
-                threshold. One window alone is a spike or a memory.
-              </p>
-              <p className="mt-1 text-xs text-ink-muted">
-                Drake computes these for the dashboard. The authoritative paging signal is
-                PrometheusRule → Alertmanager; Drake does not page.
-              </p>
+              <p className="mt-3 text-xs text-ink-muted">{t("sloDetail.burn.bothWindows")}</p>
+              <p className="mt-1 text-xs text-ink-muted">{t("sloDetail.burn.notPaging")}</p>
             </Card>
 
-            <Card title="Around this objective">
+            <Card title={t("sloDetail.context.title")}>
               {data.context === null ? (
-                <DataState kind="empty" title="No nearby activity" />
+                <DataState kind="empty" title={t("sloDetail.context.empty")} />
               ) : (
                 <div className="grid gap-4 md:grid-cols-3" data-testid="slo-context">
                   <div>
-                    <p className="mb-1.5 text-xs font-medium text-ink">Deployments</p>
+                    <p className="mb-1.5 text-xs font-medium text-ink">
+                      {t("sloDetail.context.deployments")}
+                    </p>
                     {data.context.deployments.length === 0 ? (
-                      <p className="text-xs text-ink-muted">none recorded</p>
+                      <p className="text-xs text-ink-muted">{t("sloDetail.context.noneRecorded")}</p>
                     ) : (
                       <ul className="space-y-1">
                         {data.context.deployments.map((deployment) => (
                           <li key={deployment.id} className="text-xs text-ink-secondary">
-                            gen {deployment.generation} · {deployment.rollout_state} ·{" "}
-                            {formatAge(deployment.observed_at)}
+                            {t("sloDetail.context.deploymentRow", {
+                              generation: deployment.generation,
+                              state: deployment.rollout_state,
+                              when: fmt.relative(deployment.observed_at),
+                            })}
                           </li>
                         ))}
                       </ul>
                     )}
                   </div>
                   <div>
-                    <p className="mb-1.5 text-xs font-medium text-ink">Incidents</p>
+                    <p className="mb-1.5 text-xs font-medium text-ink">
+                      {t("sloDetail.context.incidents")}
+                    </p>
                     {data.context.incidents.length === 0 ? (
-                      <p className="text-xs text-ink-muted">none open</p>
+                      <p className="text-xs text-ink-muted">{t("sloDetail.context.noneOpen")}</p>
                     ) : (
                       <ul className="space-y-1">
                         {data.context.incidents.map((incident) => (
@@ -222,9 +240,11 @@ export default function SloDetailPage() {
                     )}
                   </div>
                   <div>
-                    <p className="mb-1.5 text-xs font-medium text-ink">Firing alerts</p>
+                    <p className="mb-1.5 text-xs font-medium text-ink">
+                      {t("sloDetail.context.alerts")}
+                    </p>
                     {data.context.alerts.length === 0 ? (
-                      <p className="text-xs text-ink-muted">none firing</p>
+                      <p className="text-xs text-ink-muted">{t("sloDetail.context.noneFiring")}</p>
                     ) : (
                       <ul className="space-y-1">
                         {data.context.alerts.map((alert) => (
@@ -249,18 +269,18 @@ export default function SloDetailPage() {
               ) : null}
             </Card>
 
-            <Card title="Evaluation history">
+            <Card title={t("sloDetail.history.title")}>
               {history.state === "loading" ? (
                 <DataState kind="loading" />
               ) : history.state === "error" ? (
                 <DataState kind="error" description={history.message} />
               ) : history.data.evaluations.length === 0 ? (
-                <DataState kind="empty" title="No evaluations yet" />
+                <DataState kind="empty" title={t("sloDetail.history.empty")} />
               ) : (
                 <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <Sparkline
-                    label="Compliance across recorded evaluations"
+                    label={t("sloDetail.history.sparkline")}
                     tone="info"
                     width={160}
                     height={32}
@@ -269,25 +289,25 @@ export default function SloDetailPage() {
                       .map((evaluation) => evaluation.compliance_ratio)}
                   />
                   <span className="text-caption text-ink-muted">
-                    Compliance, oldest to most recent
+                    {t("sloDetail.history.caption")}
                   </span>
                 </div>
                 <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
                 <table className="w-full text-left text-xs" data-testid="slo-history">
                   <thead className="text-ink-muted">
                     <tr>
-                      <th className="pb-1.5 pr-3 font-medium">Evaluated</th>
-                      <th className="pb-1.5 pr-3 font-medium">State</th>
-                      <th className="pb-1.5 pr-3 font-medium">Compliance</th>
-                      <th className="pb-1.5 pr-3 font-medium">Budget left</th>
-                      <th className="pb-1.5 font-medium">Objective</th>
+                      <th className="pb-1.5 pr-3 font-medium">{t("sloDetail.history.evaluated")}</th>
+                      <th className="pb-1.5 pr-3 font-medium">{t("sloDetail.history.state")}</th>
+                      <th className="pb-1.5 pr-3 font-medium">{t("sloDetail.history.compliance")}</th>
+                      <th className="pb-1.5 pr-3 font-medium">{t("sloDetail.history.budgetLeft")}</th>
+                      <th className="pb-1.5 font-medium">{t("sloDetail.history.objective")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.data.evaluations.map((evaluation) => (
                       <tr key={evaluation.evaluated_for} className="border-t border-border">
                         <td className="py-1.5 pr-3 text-ink-secondary">
-                          {formatAge(evaluation.evaluated_for)}
+                          {fmt.relative(evaluation.evaluated_for)}
                         </td>
                         <td className="py-1.5 pr-3">
                           <SloBadge status={evaluation.status} />

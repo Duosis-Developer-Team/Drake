@@ -22,6 +22,7 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet, apiMutate } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 interface Role {
@@ -46,6 +47,8 @@ type Loadable<T> =
   | { state: "ready"; data: T };
 
 export function RolesPanel() {
+  const t = useT("admin");
+  const common = useT("common");
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
 
@@ -69,11 +72,11 @@ export function RolesPanel() {
       setCatalog({ state: "ready", data: catalogBody.permissions });
     } catch (error) {
       const message =
-        error instanceof ApiError ? error.message : "request failed";
+        error instanceof ApiError ? error.message : t("error.request");
       setRoles({ state: "error", message });
       setCatalog({ state: "error", message });
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -98,7 +101,7 @@ export function RolesPanel() {
       setSelected(null);
       await load();
     } catch (error) {
-      setSaveError(error instanceof ApiError ? error.message : "save failed");
+      setSaveError(error instanceof ApiError ? error.message : t("error.save"));
     }
   };
 
@@ -113,7 +116,7 @@ export function RolesPanel() {
       await load();
     } catch (error) {
       setSaveError(
-        error instanceof ApiError ? error.message : "archive failed",
+        error instanceof ApiError ? error.message : t("error.archive"),
       );
     }
   };
@@ -129,7 +132,7 @@ export function RolesPanel() {
       setNewRoleName("");
       await load();
     } catch (error) {
-      setSaveError(error instanceof ApiError ? error.message : "create failed");
+      setSaveError(error instanceof ApiError ? error.message : t("error.create"));
     }
   };
 
@@ -156,38 +159,35 @@ export function RolesPanel() {
     <div className="space-y-6">
       {roles.state === "ready" ? (
         <div className="page-grid" data-cols="3">
-          <KpiTile icon={ShieldCheck} label="Roles" value={roleList.length}>
+          <KpiTile icon={ShieldCheck} label={t("roles.kpi.roles")} value={roleList.length}>
             <p className="text-micro text-ink-muted">
               <span data-tabular className="font-medium text-ink-secondary">
                 {activeCount}
               </span>{" "}
-              in use ·{" "}
+              {t("roles.kpi.inUse")} ·{" "}
               <span data-tabular className="font-medium text-ink-secondary">
                 {roleList.length - activeCount}
               </span>{" "}
-              archived
+              {t("roles.kpi.archived")}
             </p>
           </KpiTile>
           <KpiTile
             icon={Lock}
             tone="info"
-            label="System templates"
+            label={t("roles.kpi.templates")}
             value={templates}
           >
             <p className="text-micro text-ink-muted">
-              <span data-tabular className="font-medium text-ink-secondary">
-                {roleList.length - templates}
-              </span>{" "}
-              custom role{roleList.length - templates === 1 ? "" : "s"}
+              {t("roles.kpi.customRoles", { count: roleList.length - templates })}
             </p>
           </KpiTile>
           <KpiTile
             icon={KeyRound}
-            label="Permission catalog"
+            label={t("roles.kpi.catalog")}
             value={catalogSize}
           >
             <p className="text-micro text-ink-muted">
-              Distinct permissions a role can hold
+              {t("roles.kpi.catalogCaption")}
             </p>
           </KpiTile>
         </div>
@@ -198,8 +198,8 @@ export function RolesPanel() {
           <Panel flush>
             <PanelHeader
               flush
-              title="Roles"
-              description="Select a role to inspect its permissions"
+              title={t("roles.list.title")}
+              description={t("roles.list.description")}
             />
             {roles.state === "loading" ? (
               <div className="px-7 py-5">
@@ -219,8 +219,8 @@ export function RolesPanel() {
               <StateCard
                 kind="empty"
                 icon={ShieldCheck}
-                title="No roles"
-                description="Create the first custom role below."
+                title={t("roles.list.emptyTitle")}
+                description={t("roles.list.emptyDescription")}
               />
             ) : null}
             {roles.state === "ready" && roles.data.length > 0 ? (
@@ -264,8 +264,7 @@ export function RolesPanel() {
                               />
                             </span>
                             <span className="text-micro whitespace-nowrap text-ink-muted">
-                              {role.permissions.length} permission
-                              {role.permissions.length === 1 ? "" : "s"}
+                              {t("roles.list.permissions", { count: role.permissions.length })}
                             </span>
                           </span>
                         </span>
@@ -274,12 +273,12 @@ export function RolesPanel() {
                             status={
                               role.status === "active" ? "healthy" : "unknown"
                             }
-                            label={role.status}
+                            label={t.dyn("roles.status", role.status, role.status)}
                             size="compact"
                           />
                           {role.is_system ? (
                             <span className="rounded-full bg-surface-3 px-2 py-0.5 text-micro font-medium text-ink-muted">
-                              template
+                              {t("roles.list.template")}
                             </span>
                           ) : null}
                         </span>
@@ -300,13 +299,13 @@ export function RolesPanel() {
               <input
                 value={newRoleName}
                 onChange={(event) => setNewRoleName(event.target.value)}
-                placeholder="New role name"
-                aria-label="New role name"
+                placeholder={t("roles.list.newRoleName")}
+                aria-label={t("roles.list.newRoleName")}
                 className={`${PILL_FIELD} flex-1`}
               />
               <button type="submit" className={`${PILL_PRIMARY} shrink-0`}>
                 <Plus aria-hidden className="h-4 w-4" />
-                Create
+                {common("action.create")}
               </button>
             </form>
           </Panel>
@@ -319,12 +318,12 @@ export function RolesPanel() {
             <Panel className="flex-1">
               {!selected ? (
                 <>
-                  <PanelHeader title="Role details" />
+                  <PanelHeader title={t("roles.detail.title")} />
                   <StateCard
                     kind="empty"
                     icon={KeyRound}
-                    title="No role selected"
-                    description="Select a role to inspect or edit its permission set."
+                    title={t("roles.detail.noneTitle")}
+                    description={t("roles.detail.noneDescription")}
                   />
                   {saveError ? (
                     <p role="alert" className="text-caption text-critical">
@@ -342,27 +341,27 @@ export function RolesPanel() {
                     />
                     <div className="min-w-0 flex-1">
                       <h2 className="truncate text-[1.25rem] font-semibold tracking-[-0.01em] text-ink">
-                        Edit: {selected.name}
+                        {t("roles.detail.edit", { name: selected.name })}
                       </h2>
-                      <p className="text-caption text-ink-muted">
-                        <span data-tabular className="font-medium text-ink">
-                          {draftPermissions.length}
-                        </span>{" "}
-                        of <span data-tabular>{catalogSize}</span> permissions ·
-                        revision {selected.version}
+                      <p data-tabular className="text-caption text-ink-muted">
+                        {t("roles.detail.summary", {
+                          selected: draftPermissions.length,
+                          total: catalogSize,
+                          version: selected.version,
+                        })}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       {selected.is_system ? (
                         <span className="rounded-full bg-surface-3 px-2.5 py-1 text-micro font-medium text-ink-muted">
-                          template
+                          {t("roles.list.template")}
                         </span>
                       ) : null}
                       <StatusBadge
                         status={
                           selected.status === "active" ? "healthy" : "unknown"
                         }
-                        label={selected.status}
+                        label={t.dyn("roles.status", selected.status, selected.status)}
                       />
                     </div>
                   </div>
@@ -373,8 +372,7 @@ export function RolesPanel() {
                         aria-hidden
                         className="h-4 w-4 shrink-0 text-ink-muted"
                       />
-                      System templates are immutable. Create a custom role to
-                      tailor permissions.
+                      {t("roles.detail.immutable")}
                     </p>
                   ) : null}
 
@@ -386,7 +384,7 @@ export function RolesPanel() {
                       data-testid="permission-matrix"
                       className="max-h-[32rem] space-y-5 overflow-y-auto pr-1"
                     >
-                      <legend className="sr-only">Permissions</legend>
+                      <legend className="sr-only">{t("roles.detail.permissionsLegend")}</legend>
                       {groups.map(([prefix, permissions]) => (
                         <div key={prefix}>
                           <p className="mb-2 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
@@ -450,7 +448,7 @@ export function RolesPanel() {
                         onClick={() => void savePermissions()}
                         className={PILL_PRIMARY}
                       >
-                        Save permissions
+                        {t("roles.detail.save")}
                       </button>
                       <button
                         type="button"
@@ -458,7 +456,7 @@ export function RolesPanel() {
                         className={PILL_BUTTON}
                       >
                         <Archive aria-hidden className="h-3.5 w-3.5" />
-                        Archive role
+                        {t("roles.detail.archive")}
                       </button>
                     </div>
                   ) : null}

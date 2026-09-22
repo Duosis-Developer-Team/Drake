@@ -15,6 +15,7 @@ import Link from "next/link";
 
 import { Countdown } from "@/components/charts/visuals";
 import { toneSpec, compareTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import type { CapacityRiskItem } from "@/lib/view-models/capacity-risk";
 
 export function CapacityRiskBoard({
@@ -24,7 +25,16 @@ export function CapacityRiskBoard({
   items: CapacityRiskItem[];
   unassessedClusters: string[];
 }) {
+  const t = useT("commandCenter");
   const ranked = [...items].sort((a, b) => compareTone(a.tone, b.tone));
+  /** The detail line from the item's own numbers; an item built without
+   *  them (a PVC item from an older caller) keeps its given text. */
+  const detailOf = (item: CapacityRiskItem): string =>
+    item.kind === "certificate"
+      ? t("capacity.item.certificate.detail")
+      : item.counts
+        ? t("capacity.item.pvc.detail", item.counts)
+        : item.detail;
 
   return (
     <div data-testid="capacity-risk-board">
@@ -36,14 +46,14 @@ export function CapacityRiskBoard({
             <ShieldCheck className="relative h-7 w-7 text-healthy" />
           </span>
           <div>
-            <p className="text-body font-semibold text-ink">No capacity risk in sight</p>
+            <p className="text-body font-semibold text-ink">{t("capacity.emptyTitle")}</p>
             <p className="mt-1 max-w-sm text-caption text-ink-muted" data-testid="capacity-risk-empty">
-              No certificate or PVC risk reported by the sources checked.
+              {t("capacity.emptyBody")}
             </p>
           </div>
           <div className="flex gap-2 text-micro">
-            <span className="rounded-full bg-surface-2 px-3 py-1 text-ink-secondary">Certificates</span>
-            <span className="rounded-full bg-surface-2 px-3 py-1 text-ink-secondary">Persistent volumes</span>
+            <span className="rounded-full bg-surface-2 px-3 py-1 text-ink-secondary">{t("capacity.certificates")}</span>
+            <span className="rounded-full bg-surface-2 px-3 py-1 text-ink-secondary">{t("capacity.volumes")}</span>
           </div>
         </div>
       ) : (
@@ -63,12 +73,12 @@ export function CapacityRiskBoard({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       <span className="text-body font-medium text-ink">{item.clusterName}</span>
-                      <span className={`text-caption ${spec.text}`}>{item.label}</span>
+                      <span className={`text-caption ${spec.text}`}>{t(`capacity.item.${item.kind}.label`)}</span>
                     </div>
-                    <p className="mt-0.5 text-micro text-ink-muted">{item.detail}</p>
+                    <p className="mt-0.5 text-micro text-ink-muted">{detailOf(item)}</p>
                     {item.kind === "certificate" ? (
                       <div className="mt-1.5 max-w-xs">
-                        <Countdown deadline={item.deadline} label="Certificate expires" />
+                        <Countdown deadline={item.deadline} label={t("capacity.certificateExpires")} />
                       </div>
                     ) : null}
                   </div>
@@ -80,7 +90,7 @@ export function CapacityRiskBoard({
       )}
       {unassessedClusters.length > 0 ? (
         <p className="border-t border-border px-7 py-3 text-micro text-ink-muted" data-testid="capacity-risk-unassessed">
-          Forecast unavailable for {unassessedClusters.join(", ")} — no inventory summary reported.
+          {t("capacity.unassessed", { clusters: unassessedClusters.join(", ") })}
         </p>
       ) : null}
     </div>

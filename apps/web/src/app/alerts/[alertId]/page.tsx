@@ -32,14 +32,15 @@ import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import {
   MAPPING_EXPLANATIONS,
-  formatAge,
   type AlertDetail,
   type AlertEvent,
   type SilenceRequest,
 } from "@/lib/alerting";
 import type { StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 
 function SilenceRow({ silence }: { silence: SilenceRequest }) {
+  const fmt = useFormat();
   return (
     <li className="flex flex-wrap items-center gap-3 px-7 py-4">
       <SilenceBadge state={silence.state} />
@@ -51,13 +52,15 @@ function SilenceRow({ silence }: { silence: SilenceRequest }) {
         <span className="font-mono text-micro text-critical">{silence.error_code}</span>
       ) : null}
       <time className="ml-auto font-mono text-micro text-ink-muted">
-        {formatAge(silence.requested_at)}
+        {fmt.relative(silence.requested_at)}
       </time>
     </li>
   );
 }
 
 export default function AlertDetailPage() {
+  const t = useT("alerting");
+  const fmt = useFormat();
   const { alertId } = useParams<{ alertId: string }>();
   const [alert, retry] = useApi<AlertDetail>(`/v1/alerts/${alertId}`);
   const [events] = useApi<{ events: AlertEvent[] }>(`/v1/alerts/${alertId}/events`);
@@ -66,38 +69,47 @@ export default function AlertDetailPage() {
     <PageFrame>
       <LoadGate value={alert} retry={retry}>
         {(data) => {
+          const incidentState = data.incident
+            ? t.dyn("incidentState", data.incident.state, data.incident.state)
+            : null;
           const chain: { key: string; label: string; done: boolean; tone: StatusTone; caption?: string }[] = [
             {
               key: "firing",
-              label: "Firing",
+              label: t("detail.chain.firing"),
               done: true,
               tone: data.status === "firing" ? "critical" : "success",
-              caption: data.status === "firing" ? "still firing" : "resolved",
+              caption:
+                data.status === "firing" ? t("detail.chain.stillFiring") : t("detail.chain.resolved"),
             },
             {
               key: "mapped",
-              label: "Mapped",
+              label: t("detail.chain.mapped"),
               done: data.mapping_state === "mapped",
               tone: data.mapping_state === "mapped" ? "success" : "warning",
-              caption: data.mapping_state === "mapped" ? data.service_key ?? undefined : "no match",
+              caption:
+                data.mapping_state === "mapped"
+                  ? data.service_key ?? undefined
+                  : t("detail.chain.noMatch"),
             },
             {
               key: "incident",
-              label: "Incident",
+              label: t("detail.chain.incident"),
               done: Boolean(data.incident),
               tone: data.incident
                 ? data.incident.state === "resolved"
                   ? "success"
                   : "critical"
                 : "neutral",
-              caption: data.incident ? data.incident.state : "none opened",
+              caption: incidentState ?? t("detail.chain.noneOpened"),
             },
             {
               key: "notification",
-              label: "Notifying",
+              label: t("detail.chain.notifying"),
               done: true,
               tone: data.silenced ? "neutral" : "success",
-              caption: data.silenced ? "silenced" : "notifying",
+              caption: data.silenced
+                ? t("detail.chain.silenced")
+                : t("detail.chain.notifyingCaption"),
             },
           ];
 
@@ -115,14 +127,14 @@ export default function AlertDetailPage() {
                 meta={
                   <>
                     <Link href="/alerts" className="hover:text-ink">
-                      Alerts
+                      {t("detail.back")}
                     </Link>
                     <span className="font-mono">
                       {data.mapping_state === "mapped"
                         ? [data.project_key, data.environment_key, data.service_key]
                             .filter(Boolean)
                             .join("/")
-                        : "not mapped to the catalog"}
+                        : t("detail.notMapped")}
                     </span>
                   </>
                 }
@@ -130,51 +142,51 @@ export default function AlertDetailPage() {
 
               <Panel className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
                 <PanelHeader
-                  title="Chain"
-                  description="Where this alert stands right now, step by step. An absent step is an honest state, not a fault — a P3 with no incident and an unsilenced firing alert are both expected."
+                  title={t("detail.chain.title")}
+                  description={t("detail.chain.description")}
                 />
                 <AlertChain steps={chain} />
               </Panel>
 
               {data.mapping_state !== "mapped" ? (
                 <Panel tone="warning">
-                  <PanelHeader title="Catalog mapping" />
+                  <PanelHeader title={t("detail.mapping.title")} />
                   <div className="space-y-2" data-testid="mapping-explanation">
                     <MappingBadge state={data.mapping_state} />
                     <p className="text-body text-ink-secondary">
-                      {MAPPING_EXPLANATIONS[data.mapping_error_code ?? ""] ??
-                        "Drake could not resolve this alert into the catalog."}
+                      {t.dyn(
+                        "mappingExplanation",
+                        data.mapping_error_code,
+                        MAPPING_EXPLANATIONS[data.mapping_error_code ?? ""] ??
+                          t("detail.mapping.fallback"),
+                      )}
                     </p>
-                    <p className="text-caption text-ink-muted">
-                      Drake kept the alert as integration evidence and opened no incident.
-                      Filing it against a guessed project would send it to the wrong team.
-                    </p>
+                    <p className="text-caption text-ink-muted">{t("detail.mapping.kept")}</p>
                   </div>
                 </Panel>
               ) : null}
 
               <div className="grid gap-6 md:grid-cols-2">
                 <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
-                  <PanelHeader title="What Alertmanager said" />
+                  <PanelHeader title={t("detail.said.title")} />
                   <dl className="divide-y divide-border">
-                    <MetaRow label="Started">{formatAge(data.starts_at)}</MetaRow>
-                    <MetaRow label="Ended">
-                      {data.ends_at ? formatAge(data.ends_at) : "still firing"}
+                    <MetaRow label={t("detail.said.started")}>{fmt.relative(data.starts_at)}</MetaRow>
+                    <MetaRow label={t("detail.said.ended")}>
+                      {data.ends_at ? fmt.relative(data.ends_at) : t("detail.said.stillFiring")}
                     </MetaRow>
-                    <MetaRow label="Last seen">{formatAge(data.last_seen_at)}</MetaRow>
+                    <MetaRow label={t("detail.said.lastSeen")}>{fmt.relative(data.last_seen_at)}</MetaRow>
                     {/* Provider time and Drake time, side by side and never
                         merged: a late delivery is late, not a late outage. */}
-                    <MetaRow label="Received by Drake">{formatAge(data.ingested_at)}</MetaRow>
-                    <MetaRow label="Firing episodes">{String(data.occurrence)}</MetaRow>
+                    <MetaRow label={t("detail.said.received")}>{fmt.relative(data.ingested_at)}</MetaRow>
+                    <MetaRow label={t("detail.said.episodes")}>{fmt.number(data.occurrence)}</MetaRow>
                   </dl>
                   {data.severity === "unknown" ? (
-                    <p className="text-caption text-warning">
-                      This alert carried a severity Drake does not recognise. It was
-                      treated as P3 rather than guessed upward or downward.
-                    </p>
+                    <p className="text-caption text-warning">{t("detail.said.unknownSeverity")}</p>
                   ) : null}
                   <div>
-                    <p className="mb-1.5 text-caption font-medium text-ink">Labels</p>
+                    <p className="mb-1.5 text-caption font-medium text-ink">
+                      {t("detail.said.labels")}
+                    </p>
                     <LabelChips labels={data.labels} />
                   </div>
                   {Object.keys(data.annotations).length > 0 ? (
@@ -189,7 +201,7 @@ export default function AlertDetailPage() {
                 </Panel>
 
                 <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
-                  <PanelHeader title="Incident" />
+                  <PanelHeader title={t("detail.incident.title")} />
                   {data.incident ? (
                     <div className="space-y-2" data-testid="alert-incident">
                       <Link
@@ -199,31 +211,28 @@ export default function AlertDetailPage() {
                         {data.incident.title}
                       </Link>
                       <dl className="divide-y divide-border">
-                        <MetaRow label="State">{data.incident.state}</MetaRow>
-                        <MetaRow label="Acknowledged">
+                        <MetaRow label={t("detail.incident.state")}>{incidentState}</MetaRow>
+                        <MetaRow label={t("detail.incident.acknowledged")}>
                           {data.incident.acknowledged_at
-                            ? formatAge(data.incident.acknowledged_at)
-                            : "not acknowledged"}
+                            ? fmt.relative(data.incident.acknowledged_at)
+                            : t("detail.incident.notAcknowledged")}
                         </MetaRow>
-                        <MetaRow label="Assigned">
+                        <MetaRow label={t("detail.incident.assigned")}>
                           {data.incident.assigned_at
-                            ? formatAge(data.incident.assigned_at)
-                            : "unassigned"}
+                            ? fmt.relative(data.incident.assigned_at)
+                            : t("detail.incident.unassigned")}
                         </MetaRow>
                       </dl>
-                      <p className="text-caption text-ink-muted">
-                        Acknowledging says a human has seen this. It does not stop the
-                        alert and does not close the incident.
-                      </p>
+                      <p className="text-caption text-ink-muted">{t("detail.incident.note")}</p>
                     </div>
                   ) : (
                     <DataState
                       kind="empty"
-                      title="No incident"
+                      title={t("detail.incident.emptyTitle")}
                       description={
                         data.priority === "P3" || data.priority === "P4"
-                          ? "This priority is recorded and filterable, but does not page anyone."
-                          : "No incident has been opened for this alert."
+                          ? t("detail.incident.lowPriority")
+                          : t("detail.incident.none")
                       }
                     />
                   )}
@@ -234,13 +243,13 @@ export default function AlertDetailPage() {
                 flush
                 className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:80ms]"
               >
-                <PanelHeader flush title="Notification suppression" />
+                <PanelHeader flush title={t("detail.silences.title")} />
                 {data.silences.length === 0 ? (
                   <div className="px-7 py-8">
                     <DataState
                       kind="empty"
-                      title="Not silenced"
-                      description="Alertmanager is notifying normally for this alert."
+                      title={t("detail.silences.emptyTitle")}
+                      description={t("detail.silences.emptyDescription")}
                     />
                   </div>
                 ) : (
@@ -251,9 +260,7 @@ export default function AlertDetailPage() {
                   </ul>
                 )}
                 <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
-                  A silence suppresses Alertmanager notifications for a bounded time. It
-                  does not acknowledge the incident, does not resolve it, does not delete
-                  alert history, and does not make an SLO healthy.
+                  {t("detail.silences.note")}
                 </p>
               </Panel>
 
@@ -261,7 +268,7 @@ export default function AlertDetailPage() {
                 flush
                 className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
               >
-                <PanelHeader flush title="Timeline" />
+                <PanelHeader flush title={t("detail.timeline.title")} />
                 <div className="px-7 py-5">
                   {events.state === "loading" ? <DataState kind="loading" /> : null}
                   {events.state === "error" ? (

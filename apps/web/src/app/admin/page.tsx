@@ -14,12 +14,14 @@ import { GrantsPanel } from "@/components/admin/GrantsPanel";
 import { RolesPanel } from "@/components/admin/RolesPanel";
 import { PillTabs, StateCard } from "@/components/features/configure/kit";
 import { Panel } from "@/components/ui/Panel";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 type Tab = "roles" | "grants" | "audit";
 
 export default function AccessControlPage() {
+  const t = useT("admin");
   const { state, hasPermission } = useSession();
   const canManage = hasPermission("rbac.manage");
   const canAudit = hasPermission("audit.view");
@@ -40,15 +42,12 @@ export default function AccessControlPage() {
   if (!canManage && !canAudit) {
     return (
       <PageFrame width="narrow">
-        <PageHeader
-          title="Audit & access"
-          description="Dynamic roles, scoped grants, and the append-only audit trail."
-        />
+        <PageHeader title={t("page.title")} description={t("page.description")} />
         <Panel>
           <StateCard
             kind="permission-denied"
             icon={ShieldCheck}
-            description="Managing access requires rbac.manage; reading the audit trail requires audit.view."
+            description={t("page.denied")}
           />
         </Panel>
       </PageFrame>
@@ -56,17 +55,17 @@ export default function AccessControlPage() {
   }
 
   const tabs = [
-    { key: "roles" as Tab, label: "Roles", icon: ShieldCheck, visible: canManage },
-    { key: "grants" as Tab, label: "Grants", icon: KeyRound, visible: canManage },
-    { key: "audit" as Tab, label: "Audit", icon: ScrollText, visible: canAudit },
+    { key: "roles" as Tab, label: t("tabs.roles"), icon: ShieldCheck, visible: canManage },
+    { key: "grants" as Tab, label: t("tabs.grants"), icon: KeyRound, visible: canManage },
+    { key: "audit" as Tab, label: t("tabs.audit"), icon: ScrollText, visible: canAudit },
   ].filter((entry) => entry.visible);
 
   return (
     <PageFrame>
       <PageHeader
-        title="Audit & access"
-        description="Dynamic roles, scoped grants, and the append-only audit trail."
-        tabs={<PillTabs label="Access control sections" value={tab} tabs={tabs} onChange={setTab} />}
+        title={t("page.title")}
+        description={t("page.description")}
+        tabs={<PillTabs label={t("page.sections")} value={tab} tabs={tabs} onChange={setTab} />}
       />
       {tab === "roles" && canManage ? <RolesPanel /> : null}
       {tab === "grants" && canManage ? <GrantsPanel /> : null}

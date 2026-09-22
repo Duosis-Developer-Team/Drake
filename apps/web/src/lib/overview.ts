@@ -20,11 +20,27 @@ import type { Cluster, IntegrationHealth } from "@/lib/catalog";
 import type { IncidentSummary } from "@/lib/incidents";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
 
+/**
+ * Why a row is in the list, as data rather than as a sentence.
+ *
+ * `AttentionQueue` renders this through the `commandCenter.attention.*`
+ * catalogue; the `state`/`subject`/`context` strings on the item are the
+ * English rendering of the same facts, kept for non-React consumers (and
+ * for `buildVerdict`, which reads the project key out of `context`).
+ */
+export type AttentionReason =
+  | { kind: "incident"; state: "open" | "acknowledged" }
+  | { kind: "agent"; state: string }
+  | { kind: "inventory"; state: string }
+  | { kind: "service"; state: string }
+  | { kind: "integration"; name: string; state: string }
+  | { kind: "alerts"; priority: "p1" | "p2" | "unmapped"; count: number };
+
 /** One row in "needs attention". */
 export interface AttentionItem {
   key: string;
   tone: StatusTone;
-  /** What is wrong, in the API's own vocabulary. */
+  /** What is wrong, in the API's own vocabulary (English rendering). */
   state: string;
   /** What it is wrong with. */
   subject: string;
@@ -35,6 +51,9 @@ export interface AttentionItem {
   asOf?: string | null;
   /** Which surface it came from, so the list is traceable. */
   origin: "incident" | "alert" | "cluster" | "service" | "integration";
+  /** The structured form of `state` (and, for alerts and clusters, of
+   *  `subject`/`context`) — what a component translates. */
+  reason?: AttentionReason;
 }
 
 /** Tones that mean "somebody should look at this". */
@@ -56,6 +75,7 @@ export function incidentItems(incidents: IncidentSummary[]): AttentionItem[] {
       href: `/incidents/${incident.id}`,
       asOf: incident.last_critical_at || incident.opened_at,
       origin: "incident" as const,
+      reason: { kind: "incident" as const, state: incident.state === "open" ? ("open" as const) : ("acknowledged" as const) },
     }));
 }
 
@@ -84,6 +104,7 @@ export function clusterItems(clusters: Cluster[]): AttentionItem[] {
         href: `/clusters/${cluster.id}`,
         asOf: cluster.as_of,
         origin: "cluster",
+        reason: { kind: "agent", state: agent },
       });
     }
     const inventoryTone = toneForHealth(inventory);
@@ -97,6 +118,7 @@ export function clusterItems(clusters: Cluster[]): AttentionItem[] {
         href: `/clusters/${cluster.id}/inventory`,
         asOf: cluster.as_of,
         origin: "cluster",
+        reason: { kind: "inventory", state: inventory },
       });
     }
   }
@@ -119,6 +141,7 @@ export function serviceItems(services: ServiceHealthRow[]): AttentionItem[] {
       href: row.binding ? `/service-health/${row.binding.id}` : "/service-health",
       asOf: row.health.newest_sample_at ?? row.health.computed_at,
       origin: "service" as const,
+      reason: { kind: "service" as const, state: row.health.status },
     }));
 }
 
@@ -144,6 +167,11 @@ export function integrationItems(integrations: IntegrationHealth[]): AttentionIt
       href: "/integrations",
       asOf: integration.last_success_at ?? integration.as_of,
       origin: "integration" as const,
+      reason: {
+        kind: "integration" as const,
+        name: humanize(integration.integration_type),
+        state: integration.observed_state,
+      },
     }));
 }
 
@@ -158,6 +186,7 @@ export function alertItems(summary: AlertSummary): AttentionItem[] {
       context: "alerting",
       href: "/alerts?priority=P1",
       origin: "alert",
+      reason: { kind: "alerts", priority: "p1", count: summary.p1 },
     });
   }
   if (summary.p2 > 0) {
@@ -169,6 +198,7 @@ export function alertItems(summary: AlertSummary): AttentionItem[] {
       context: "alerting",
       href: "/alerts?priority=P2",
       origin: "alert",
+      reason: { kind: "alerts", priority: "p2", count: summary.p2 },
     });
   }
   if (summary.unmapped > 0) {
@@ -180,6 +210,7 @@ export function alertItems(summary: AlertSummary): AttentionItem[] {
       context: "alerting",
       href: "/alerts?mapping=unmapped",
       origin: "alert",
+      reason: { kind: "alerts", priority: "unmapped", count: summary.unmapped },
     });
   }
   return items;

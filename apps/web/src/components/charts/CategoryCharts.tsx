@@ -31,6 +31,7 @@ import { formatUnit } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";
 import { SERIES_TOKENS, type TokenName, type Tokens } from "@/lib/design/tokens";
+import { useLocale, useT } from "@/lib/i18n";
 
 export interface Category {
   name: string;
@@ -40,7 +41,8 @@ export interface Category {
   href?: string;
 }
 
-const OTHER = "other";
+/** A plotted row: a category, or the fold of everything past `limit`. */
+type Row = Category & { other?: boolean };
 
 /** `--status-warning` -> `status-warning`, so a tone can index the token map. */
 function tokenName(cssVariable: string): TokenName {
@@ -76,7 +78,9 @@ export function SortedBarChart({
   height?: number;
   deterministic?: boolean;
 }) {
-  const rows = useMemo(() => {
+  const t = useT("ui");
+  const { locale } = useLocale();
+  const rows = useMemo((): Row[] => {
     const sorted = [...categories].sort((a, b) => b.value - a.value);
     if (sorted.length <= limit) return sorted;
     const head = sorted.slice(0, limit - 1);
@@ -84,11 +88,12 @@ export function SortedBarChart({
     return [
       ...head,
       {
-        name: `${OTHER} (${tail.length} more)`,
+        name: t("chart.other", { count: tail.length }),
         value: tail.reduce((total, entry) => total + entry.value, 0),
+        other: true,
       },
     ];
-  }, [categories, limit]);
+  }, [categories, limit, t]);
 
   // Horizontal bars: category names are words, and words fit along a y axis.
   const plotted = useMemo(() => [...rows].reverse(), [rows]);
@@ -110,6 +115,8 @@ export function SortedBarChart({
               return `${item.name}<br/><span style="font-variant-numeric:tabular-nums">${formatUnit(
                 item.value ?? null,
                 unit,
+                {},
+                locale,
               )}</span>`;
             },
           },
@@ -131,7 +138,7 @@ export function SortedBarChart({
                   // custom properties.
                   color: entry.tone
                     ? tokens[tokenName(toneSpec(entry.tone).token)]
-                    : entry.name.startsWith(OTHER)
+                    : entry.other
                       ? tokens["text-muted"]
                       : tokens[SERIES_TOKENS[0]],
                   borderRadius: [0, 4, 4, 0],
@@ -144,19 +151,23 @@ export function SortedBarChart({
                 color: tokens["text-secondary"],
                 fontSize: 11,
                 formatter: (params: { value: number }) =>
-                  formatUnit(params.value, unit, { compact: true }),
+                  formatUnit(params.value, unit, { compact: true }, locale),
               },
             },
           ],
         };
       },
-    [plotted, unit],
+    [plotted, unit, locale],
   );
 
   const total = rows.reduce((sum, entry) => sum + entry.value, 0);
-  const summary = `${rows.length} categories, ${formatUnit(total, unit)} total. Largest: ${
-    rows[0] ? `${rows[0].name} at ${formatUnit(rows[0].value, unit)}` : "none"
-  }.`;
+  const summary = t("chart.categorySummary", {
+    count: rows.length,
+    total: formatUnit(total, unit, {}, locale),
+    largest: rows[0]
+      ? t("chart.largestAt", { name: rows[0].name, value: formatUnit(rows[0].value, unit, {}, locale) })
+      : t("chart.largestNone"),
+  });
 
   return (
     <ChartFrame
@@ -173,9 +184,9 @@ export function SortedBarChart({
       summary={summary}
       table={
         <ChartDataTable
-          categoryHeader="Category"
+          categoryHeader={t("chart.categoryColumn")}
           categories={rows.map((entry) => entry.name)}
-          series={[{ name: "Count", values: rows.map((entry) => entry.value) }]}
+          series={[{ name: t("chart.countColumn"), values: rows.map((entry) => entry.value) }]}
           unit={unit}
         />
       }
@@ -185,7 +196,7 @@ export function SortedBarChart({
         deps={[build]}
         height={resolvedHeight}
         deterministic={deterministic}
-        ariaLabel={`${typeof title === "string" ? title : "Distribution"}. ${summary}`}
+        ariaLabel={`${typeof title === "string" ? title : t("chart.distribution")}. ${summary}`}
       />
     </ChartFrame>
   );

@@ -7,6 +7,10 @@
  * rollout state from replica counts or an evidence grade from what happens
  * to be present — that arithmetic belongs to the server, where it can be
  * tested against a database.
+ *
+ * Labels come from the `deployments` catalogue via `t.dyn`; the English
+ * records in lib/deployments.ts are the fallback for a token the catalogue
+ * does not know.
  */
 
 import { PackageSearch } from "lucide-react";
@@ -16,6 +20,7 @@ import { RingProgress } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Panel } from "@/components/ui/Panel";
 import type { StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import {
   EVIDENCE_DESCRIPTIONS,
   EVIDENCE_LABELS,
@@ -42,6 +47,7 @@ export function DeploymentKpiTile({
   total: number;
   tone: StatusTone;
 }) {
+  const t = useT("deployments");
   const share = total > 0 ? count / total : null;
   return (
     <Panel data-testid={`deployment-kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}>
@@ -55,7 +61,13 @@ export function DeploymentKpiTile({
             {count}
           </p>
         </div>
-        <RingProgress value={share} unit="ratio" label={`${label} share`} tone={tone} size={48} />
+        <RingProgress
+          value={share}
+          unit="ratio"
+          label={t("kpi.share", { label })}
+          tone={tone}
+          size={48}
+        />
       </div>
     </Panel>
   );
@@ -145,33 +157,48 @@ export function SignalDirectionBadge({
 }: {
   direction: "improved" | "regressed" | "stable" | "unknown";
 }) {
+  const t = useT("deployments");
   return (
     <StatusBadge
       status={DIRECTION_BADGE[direction]}
-      label={direction === "unknown" ? "not measured" : direction}
+      label={t.dyn("direction", direction, direction)}
       size="compact"
     />
   );
 }
 
 export function RolloutBadge({ state }: { state: RolloutState }) {
-  return <StatusBadge status={ROLLOUT_BADGE[state]} label={ROLLOUT_LABELS[state]} />;
+  const t = useT("deployments");
+  return (
+    <StatusBadge status={ROLLOUT_BADGE[state]} label={t.dyn("rollout", state, ROLLOUT_LABELS[state])} />
+  );
 }
 
 export function EvidenceBadge({ state }: { state: EvidenceState }) {
+  const t = useT("deployments");
   return (
-    <span title={EVIDENCE_DESCRIPTIONS[state]}>
-      <StatusBadge status={EVIDENCE_BADGE[state]} label={EVIDENCE_LABELS[state]} />
+    <span title={t.dyn("evidenceDescription", state, EVIDENCE_DESCRIPTIONS[state])}>
+      <StatusBadge
+        status={EVIDENCE_BADGE[state]}
+        label={t.dyn("evidence", state, EVIDENCE_LABELS[state])}
+      />
     </span>
   );
 }
 
 export function VerdictBadge({ verdict }: { verdict: ComparisonVerdict }) {
-  return <StatusBadge status={VERDICT_BADGE[verdict]} label={VERDICT_LABELS[verdict]} />;
+  const t = useT("deployments");
+  return (
+    <StatusBadge
+      status={VERDICT_BADGE[verdict]}
+      label={t.dyn("verdict", verdict, VERDICT_LABELS[verdict])}
+    />
+  );
 }
 
 /** A digest or commit, shortened. The full value is on the detail record;
- * 64 hex characters in a table is noise, not information. */
+ * 64 hex characters in a table is noise, not information. `label` is the
+ * already-translated noun ("image digest"). */
 export function ShortRef({
   value,
   label,
@@ -179,8 +206,9 @@ export function ShortRef({
   value: string | null;
   label: string;
 }) {
+  const t = useT("deployments");
   if (!value) {
-    return <span className="text-xs italic text-ink-muted">no {label}</span>;
+    return <span className="text-xs italic text-ink-muted">{t("ref.missing", { label })}</span>;
   }
   return (
     <span className="font-mono text-[11px] text-ink-secondary" title={label}>

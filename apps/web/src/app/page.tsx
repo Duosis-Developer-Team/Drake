@@ -49,8 +49,9 @@ import {
 } from "@/components/ui/states";
 import { alertListPath, type AlertInstance, type AlertSummary, type Page } from "@/lib/alerting";
 import type { CatalogContext, Cluster, IntegrationHealth } from "@/lib/catalog";
-import { humanize, toneForHealth, toneSpec } from "@/lib/design/status";
+import { compareTone, humanize, toneForHealth, toneSpec } from "@/lib/design/status";
 import { deploymentListPath, type DeploymentPage } from "@/lib/deployments";
+import { useT } from "@/lib/i18n";
 import type { IncidentSummary } from "@/lib/incidents";
 import {
   alertItems,
@@ -74,6 +75,8 @@ import { resourceStatus, useResource, type Resource } from "@/lib/useResource";
 const REFRESH_MS = 60_000;
 
 export default function CommandCenterPage() {
+  const t = useT("commandCenter");
+  const common = useT("common");
   const context = useResource<CatalogContext>("/v1/catalog/context", { refreshMs: REFRESH_MS });
   const incidents = useResource<{ items: IncidentSummary[]; total: number }>(
     "/v1/incidents?state=open&limit=25",
@@ -99,11 +102,11 @@ export default function CommandCenterPage() {
   );
 
   const sources = [
-    { key: "incidents", label: "Incidents", resource: incidents },
-    { key: "alerts", label: "Alerts", resource: alerts },
-    { key: "clusters", label: "Clusters", resource: clusters },
-    { key: "services", label: "Service health", resource: services },
-    { key: "integrations", label: "Integrations", resource: integrations },
+    { key: "incidents", label: t("source.incidents"), resource: incidents },
+    { key: "alerts", label: t("source.alerts"), resource: alerts },
+    { key: "clusters", label: t("source.clusters"), resource: clusters },
+    { key: "services", label: t("source.services"), resource: services },
+    { key: "integrations", label: t("source.integrations"), resource: integrations },
   ] as const;
 
   const anyLoading = sources.some(({ resource }) => resource.loading && !resource.data);
@@ -158,10 +161,7 @@ export default function CommandCenterPage() {
 
   const timelineSection = (
     <Panel data-testid="correlation-timeline">
-      <PanelHeader
-        title="Correlation timeline"
-        description="Incidents, alerts and deployments on one axis, related in time — not asserted as cause and effect."
-      />
+      <PanelHeader title={t("timeline.title")} description={t("timeline.description")} />
       {isNarrow ? (
         <TimelineSummary lanes={timelineLanes} onExpand={() => setTimelineDialogOpen(true)} />
       ) : (
@@ -172,21 +172,14 @@ export default function CommandCenterPage() {
 
   const healthMatrixSection = (
     <Panel data-testid="health-matrix-panel">
-      <PanelHeader
-        title="Health matrix"
-        description="Every project and environment, worst service first — not an aggregate, so one degraded service never hides behind the healthy ones next to it."
-      />
+      <PanelHeader title={t("matrix.title")} description={t("matrix.description")} />
       <HealthMatrix cells={buildHealthMatrix(services.data?.items ?? [])} status={resourceStatus(services)} />
     </Panel>
   );
 
   const capacityRiskSection = (
     <Panel flush data-testid="capacity-risk-panel">
-      <PanelHeader
-        flush
-        title="Capacity risk"
-        description="Certificate expiry and volume health, from each cluster's own inventory report."
-      />
+      <PanelHeader flush title={t("capacity.title")} description={t("capacity.description")} />
       <CapacityRiskBoard items={capacityRiskItems} unassessedClusters={unassessedClusters} />
     </Panel>
   );
@@ -195,10 +188,7 @@ export default function CommandCenterPage() {
 
   const evidenceCoverageSection = (
     <Panel data-testid="evidence-coverage-panel">
-      <PanelHeader
-        title="Evidence coverage"
-        description="What Drake checked, and whether each answer is current — not a statement that anything is healthy."
-      />
+      <PanelHeader title={t("evidence.title")} description={t("evidence.description")} />
       <EvidenceCoverage sources={sources} />
     </Panel>
   );
@@ -214,23 +204,21 @@ export default function CommandCenterPage() {
   return (
     <PageFrame width="wide">
       <PageHeader
-        title="Command Center"
-        description="Everything that needs attention across your authorized scope, worst first."
+        title={t("page.title")}
+        description={t("page.description")}
         meta={
           <>
             <FreshnessIndicator
               asOf={context.fetchedAt}
               state={context.error ? "unknown" : "fresh"}
             />
-            <span>
-              {answered.length} of {sources.length} sources answered
-            </span>
-            {refreshing ? <span>refreshing…</span> : null}
+            <span>{t("page.sourcesAnswered", { answered: answered.length, total: sources.length })}</span>
+            {refreshing ? <span>{t("page.refreshing")}</span> : null}
           </>
         }
         actions={
           <Button icon={RefreshCw} onClick={reloadAll} disabled={refreshing}>
-            Refresh
+            {common("action.refresh")}
           </Button>
         }
       />
@@ -293,7 +281,7 @@ export default function CommandCenterPage() {
       <Modal
         open={timelineDialogOpen}
         onClose={() => setTimelineDialogOpen(false)}
-        title="Correlation timeline"
+        title={t("timeline.title")}
       >
         <OperationalTimeline lanes={timelineLanes} />
       </Modal>
@@ -348,15 +336,24 @@ function Reveal({
  * `OperationalTimeline` in a dialog rather than losing it.
  */
 function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand: () => void }) {
+  const t = useT("commandCenter");
   const events = lanes.flatMap((lane) => lane.events);
   const unavailable = lanes.filter((lane) => !lane.historyAvailable);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-caption text-ink-secondary">
-        {events.length} event{events.length === 1 ? "" : "s"} across {lanes.length - unavailable.length} of{" "}
-        {lanes.length} lanes
+        {t("timeline.summary", {
+          events: events.length,
+          available: lanes.length - unavailable.length,
+          total: lanes.length,
+        })}
         {unavailable.length > 0 ? (
-          <span className="text-ink-muted"> — {unavailable.map((lane) => lane.label).join(", ")} unavailable</span>
+          <span className="text-ink-muted">
+            {" "}
+            {t("timeline.summaryUnavailable", {
+              lanes: unavailable.map((lane) => t.dyn("timeline.lane", lane.key, lane.label)).join(", "),
+            })}
+          </span>
         ) : null}
       </p>
       <button
@@ -365,16 +362,17 @@ function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand:
         data-testid="view-full-timeline"
         className="shrink-0 rounded-control border border-border px-2.5 py-1 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
       >
-        View full timeline
+        {t("timeline.viewFull")}
       </button>
     </div>
   );
 }
 
 function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
+  const t = useT("commandCenter");
   return (
     <div data-testid="catalog-counts" className="flex h-full min-w-0 flex-col gap-6 p-7">
-      <PanelHeader title="Your catalog" description="Records you are authorized to see." />
+      <PanelHeader title={t("catalog.title")} description={t("catalog.description")} />
       {resource.loading && !resource.data ? (
         <LoadingSkeleton rows={2} />
       ) : resource.denied ? (
@@ -390,9 +388,9 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
           <span aria-hidden className="absolute top-[1.375rem] right-[16%] left-[16%] h-px bg-[repeating-linear-gradient(90deg,var(--border-strong)_0_4px,transparent_4px_8px)] opacity-60" />
           {(
             [
-              ["Projects", resource.data.projects, "/projects", FolderKanban],
-              ["Environments", resource.data.environments, null, Layers],
-              ["Clusters", resource.data.clusters, "/clusters", Boxes],
+              [t("catalog.projects"), resource.data.projects, "/projects", FolderKanban],
+              [t("catalog.environments"), resource.data.environments, null, Layers],
+              [t("catalog.clusters"), resource.data.clusters, "/clusters", Boxes],
             ] as const
           ).map(([label, count, href, TileIcon]) => {
             const body = (
@@ -425,14 +423,12 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
 }
 
 function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceHealthRow[] }> }) {
+  const t = useT("commandCenter");
   const rows = resource.data?.items ?? [];
   const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
   return (
     <div data-testid="service-health-rollup" className="flex h-full min-w-0 flex-col gap-6 p-7">
-      <PanelHeader
-        title="Service health"
-        description="Every tracked service, by the state its own binding reports."
-      />
+      <PanelHeader title={t("serviceHealth.title")} description={t("serviceHealth.description")} />
       {resource.loading && !resource.data ? (
         <LoadingSkeleton rows={2} />
       ) : resource.denied ? (
@@ -442,8 +438,8 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
       ) : rows.length === 0 ? (
         <NotConfiguredState
           compact
-          title="No services tracked"
-          description="Services appear here once an environment service is bound to a workload."
+          title={t("serviceHealth.emptyTitle")}
+          description={t("serviceHealth.emptyDescription")}
         />
       ) : (
         <>
@@ -452,32 +448,43 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
               <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
                 {rows.length}
               </span>
-              <span className="ml-2 text-caption text-ink-muted">services</span>
+              <span className="ml-2 text-caption text-ink-muted">{t("serviceHealth.services", { count: rows.length })}</span>
             </p>
             <p className="text-right text-caption text-ink-muted">
               <span data-tabular className="font-semibold text-ink">
                 {tally.find((entry) => entry.tone === "success")?.count ?? 0}
               </span>{" "}
-              reporting healthy
+              {t("serviceHealth.reportingHealthy")}
             </p>
           </div>
           {/* One tile per service, coloured by its own reported state: at
               this scale a count you can literally see beats a pie. */}
           <ul
-            aria-label={`Service health: ${tally.map((entry) => `${toneSpec(entry.tone).label} ${entry.count}`).join(", ")}`}
+            aria-label={t("serviceHealth.tilesLabel", {
+              breakdown: tally.map((entry) => `${t(`tone.${entry.tone}`)} ${entry.count}`).join(", "),
+            })}
             className="grid grid-cols-[repeat(auto-fill,minmax(1.75rem,1fr))] gap-1.5"
           >
+            {/* Worst first — the shared severity order, not an alphabetical
+                sort of whatever the status words happen to be in this locale. */}
             {[...rows]
-              .sort((x, y) => toneSpec(toneForHealth(x.health.status)).label.localeCompare(toneSpec(toneForHealth(y.health.status)).label))
+              .sort((x, y) => compareTone(toneForHealth(x.health.status), toneForHealth(y.health.status)))
               .map((row) => {
-                const rowSpec = toneSpec(toneForHealth(row.health.status));
+                const rowTone = toneForHealth(row.health.status);
+                const rowSpec = toneSpec(rowTone);
+                const status = t(`tone.${rowTone}`);
                 const name = row.display_name || row.service_key;
                 return (
                   <li key={row.environment_service_id}>
                     <Link
                       href={`/service-health?project_id=${encodeURIComponent(row.project_id)}&environment_id=${encodeURIComponent(row.environment_id)}`}
-                      title={`${name} · ${row.project_key}/${row.environment_key} · ${rowSpec.label}`}
-                      aria-label={`${name}, ${rowSpec.label}`}
+                      title={t("serviceHealth.tileTitle", {
+                        name,
+                        project: row.project_key,
+                        environment: row.environment_key,
+                        status,
+                      })}
+                      aria-label={t("serviceHealth.tileLabel", { name, status })}
                       className={`block aspect-square rounded-[0.5rem] transition-transform hover:scale-110 ${rowSpec.chip}`}
                     />
                   </li>
@@ -491,7 +498,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
                 className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary"
               >
                 <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec(entry.tone).dot}`} />
-                {toneSpec(entry.tone).label}
+                {t(`tone.${entry.tone}`)}
                 <span data-tabular className="font-semibold text-ink">{entry.count}</span>
               </li>
             ))}
@@ -500,7 +507,7 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
             href="/service-health"
             className="mt-auto inline-flex items-center gap-1 self-start rounded-full border border-border px-3.5 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
           >
-            Open service health
+            {t("serviceHealth.open")}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden />
           </Link>
         </>
@@ -518,19 +525,20 @@ function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceH
  * case an operator needs to catch.
  */
 function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> }) {
+  const t = useT("commandCenter");
   const clusters = resource.data?.clusters ?? [];
   return (
     <div data-testid="fleet-panel" className="flex min-w-0 flex-col">
       <PanelHeader
         flush
-        title="Cluster fleet"
-        description="Connection and inventory freshness are reported separately — connected is not healthy."
+        title={t("fleet.title")}
+        description={t("fleet.description")}
         actions={
           <Link
             href="/clusters"
             className="rounded text-caption font-medium text-brand hover:underline"
           >
-            All clusters
+            {t("fleet.all")}
           </Link>
         }
       />
@@ -548,7 +556,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
         </div>
       ) : clusters.length === 0 ? (
         <div className="px-6 py-3">
-          <NotConfiguredState compact title="No clusters in scope" />
+          <NotConfiguredState compact title={t("fleet.empty")} />
         </div>
       ) : (
         <ul className="divide-y divide-border" data-tabular>
@@ -572,17 +580,17 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
                 </span>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
-                  <span className="text-ink-muted">Agent</span>
+                  <span className="text-ink-muted">{t("fleet.agent")}</span>
                   <StatusDot
                     status={toneForHealth(cluster.operational?.agent)}
-                    label={humanize(cluster.operational?.agent ?? "unknown")}
+                    label={t.dyn("token", cluster.operational?.agent ?? "unknown", humanize(cluster.operational?.agent))}
                   />
                   </span>
                   <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
-                  <span className="text-ink-muted">Inventory</span>
+                  <span className="text-ink-muted">{t("fleet.inventory")}</span>
                   <StatusDot
                     status={toneForHealth(cluster.operational?.inventory)}
-                    label={humanize(cluster.operational?.inventory ?? "unknown")}
+                    label={t.dyn("token", cluster.operational?.inventory ?? "unknown", humanize(cluster.operational?.inventory))}
                   />
                   </span>
                 </div>
@@ -612,6 +620,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
  * the freshness column states, applied to the numbers themselves.
  */
 function FleetCounts({ cluster }: { cluster: Cluster }) {
+  const t = useT("commandCenter");
   const summary = useResource<InventorySummary>(
     `/v1/clusters/${cluster.id}/inventory/summary`,
   );
@@ -628,7 +637,7 @@ function FleetCounts({ cluster }: { cluster: Cluster }) {
     // here would present them as if they were now.
     return (
       <span className="text-micro text-ink-muted" data-testid="fleet-counts-unavailable">
-        no current sweep
+        {t("fleet.noSweep")}
       </span>
     );
   }
@@ -640,12 +649,14 @@ function FleetCounts({ cluster }: { cluster: Cluster }) {
           ["workloads", summary.data.workloads],
           ["pods", summary.data.pods],
         ] as const
-      ).map(([label, rollup]) => (
-        <span key={label} className="flex items-center gap-1.5">
+      ).map(([key, rollup]) => {
+        const label = t(`fleet.counts.${key}`);
+        return (
+        <span key={key} className="flex items-center gap-1.5">
           {/* The ring reads before the digits do; the digits stay exact. */}
           <RingProgress
             size={34}
-            label={`${label} healthy`}
+            label={t("fleet.healthyRing", { what: label })}
             value={rollup.total > 0 ? (rollup.healthy / rollup.total) * 100 : null}
             tone={
               rollup.unhealthy > 0
@@ -663,7 +674,8 @@ function FleetCounts({ cluster }: { cluster: Cluster }) {
             {label}
           </span>
         </span>
-      ))}
+        );
+      })}
     </span>
   );
 }
@@ -680,28 +692,34 @@ function IntegrationsPanel({
 }: {
   resource: Resource<{ integrations: IntegrationHealth[] }>;
 }) {
+  const t = useT("commandCenter");
   const all = resource.data?.integrations ?? [];
   const configured = all.filter((entry) => entry.configuration_state === "configured");
   const notConfigured = all.length - configured.length;
+  // Worst first, then by type — the shared severity order rather than an
+  // alphabetical sort of the status words.
   const sorted = [...configured].sort(
     (a, b) =>
-      toneSpec(toneForHealth(a.observed_state)).label.localeCompare(
-        toneSpec(toneForHealth(b.observed_state)).label,
-      ) || a.integration_type.localeCompare(b.integration_type),
+      compareTone(toneForHealth(a.observed_state), toneForHealth(b.observed_state)) ||
+      a.integration_type.localeCompare(b.integration_type),
   );
+  const stateOf = (entry: IntegrationHealth): string =>
+    entry.configuration_state === "configured"
+      ? t.dyn("token", entry.observed_state, humanize(entry.observed_state))
+      : t("integrations.notConnected");
 
   return (
     <div data-testid="integrations-panel" className="flex min-w-0 flex-col">
       <PanelHeader
         flush
-        title="Integrations"
-        description="Only configured providers report a state; the rest are simply not connected."
+        title={t("integrations.title")}
+        description={t("integrations.description")}
         actions={
           <Link
             href="/integrations"
             className="rounded text-caption font-medium text-brand hover:underline"
           >
-            Manage
+            {t("integrations.manage")}
           </Link>
         }
       />
@@ -727,18 +745,18 @@ function IntegrationsPanel({
                     {configured.length}
                   </span>
                   <span className="text-2xl font-semibold tracking-tight text-ink-muted">/{all.length}</span>
-                  <span className="ml-2 text-caption text-ink-muted">connected</span>
+                  <span className="ml-2 text-caption text-ink-muted">{t("integrations.connected")}</span>
                 </p>
                 <span className="text-caption text-ink-muted">
                   <span data-tabular className="font-semibold text-ink">
                     {configured.filter((entry) => entry.observed_state === "ok").length}
                   </span>{" "}
-                  reporting ok
+                  {t("integrations.reportingOk")}
                 </span>
               </div>
               {/* Every provider as an avatar: connected ones lit with their
                   state ring, the rest visibly dormant — not a grey pie. */}
-              <ul className="mt-5 flex flex-wrap gap-3" aria-label="Integrations by state">
+              <ul className="mt-5 flex flex-wrap gap-3" aria-label={t("integrations.byState")}>
                 {[...configured, ...all.filter((entry) => entry.configuration_state !== "configured")].map((entry) => {
                   const isConfigured = entry.configuration_state === "configured";
                   const entrySpec = toneSpec(isConfigured ? toneForHealth(entry.observed_state) : "not-applicable");
@@ -746,7 +764,7 @@ function IntegrationsPanel({
                   return (
                     <li
                       key={`${entry.integration_type}:${entry.scope.ref}`}
-                      title={`${name} — ${isConfigured ? humanize(entry.observed_state) : "not connected"}`}
+                      title={t("integrations.providerState", { name, state: stateOf(entry) })}
                       className="relative"
                     >
                       <span
@@ -763,7 +781,7 @@ function IntegrationsPanel({
                         className={`absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-surface ${isConfigured ? entrySpec.dot : "bg-surface-3"}`}
                       />
                       <span className="sr-only">
-                        {name}: {isConfigured ? humanize(entry.observed_state) : "not connected"}
+                        {t("integrations.providerStateShort", { name, state: stateOf(entry) })}
                       </span>
                     </li>
                   );
@@ -792,7 +810,7 @@ function IntegrationsPanel({
                   />
                   <StatusBadge
                     status={toneForHealth(integration.observed_state)}
-                    label={humanize(integration.observed_state)}
+                    label={stateOf(integration)}
                     size="compact"
                   />
                 </span>
@@ -803,15 +821,14 @@ function IntegrationsPanel({
             <div className="px-4 py-2">
               <NotConfiguredState
                 compact
-                title="No provider is connected"
-                description="Nothing reports a live state yet. Connect a provider from Integrations."
+                title={t("integrations.emptyTitle")}
+                description={t("integrations.emptyDescription")}
               />
             </div>
           ) : null}
           {notConfigured > 0 ? (
             <p className="border-t border-border px-4 py-2 text-micro text-ink-muted">
-              {notConfigured} further integration{notConfigured === 1 ? " is" : "s are"} not
-              configured and report no state.
+              {t("integrations.notConfigured", { count: notConfigured })}
             </p>
           ) : null}
         </>

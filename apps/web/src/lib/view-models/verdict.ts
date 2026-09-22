@@ -14,7 +14,10 @@ import type { AttentionItem } from "@/lib/overview";
 import { tallyByTone } from "@/lib/overview";
 
 export interface OperationalVerdict {
+  /** English rendering of `headlineKind`; `VerdictPanel` translates the kind. */
   headline: string;
+  /** Which sentence the headline is: the counts it needs are on the model. */
+  headlineKind: "critical" | "warning" | "clear";
   criticalCount: number;
   warningCount: number;
   affectedScope: { projects: number; services: number; clusters: number };
@@ -70,15 +73,17 @@ export function buildVerdict(
     if (!oldest || !oldest.asOf || item.asOf < oldest.asOf) oldest = item;
   }
 
+  const headlineKind = criticalCount > 0 ? "critical" : warningCount > 0 ? "warning" : "clear";
   const headline =
-    criticalCount > 0
+    headlineKind === "critical"
       ? `${criticalCount} critical path${criticalCount === 1 ? "" : "s"} need${criticalCount === 1 ? "s" : ""} attention`
-      : warningCount > 0
+      : headlineKind === "warning"
         ? `${warningCount} warning${warningCount === 1 ? "" : "s"} need attention`
         : `Nothing is currently flagged, ${sourcesAnswered} of ${sources.length} sources answered`;
 
   return {
     headline,
+    headlineKind,
     criticalCount,
     warningCount,
     affectedScope: { projects: projects.size, services: services.size, clusters: clusters.size },

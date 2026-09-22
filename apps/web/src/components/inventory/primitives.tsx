@@ -3,66 +3,73 @@
 /** Cluster inventory UI primitives. Honesty rules from ADR-0011/0017:
  * unknown, stale, reconciling, empty, and reconcile-required are DISTINCT
  * visual states; stale and unknown are never rendered in the healthy
- * color; counts always include the unknown bucket. */
+ * color; counts always include the unknown bucket.
+ *
+ * The words come from `clusters.enum.*`; only the tone is decided here. The
+ * badges print them lowercased (by locale), as they always have: inside a
+ * card they read as a state word, not as a heading. */
 
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
+import { useFormat, useT } from "@/lib/i18n";
 import type {
   AgentStatus,
   InventoryState,
   ResourceHealth,
 } from "@/lib/inventory";
 
-const AGENT_BADGE: Record<AgentStatus, { status: HealthStatus; label: string }> = {
-  not_configured: { status: "unknown", label: "not configured" },
-  enrolled: { status: "maintenance", label: "enrolled" },
-  connected: { status: "healthy", label: "connected" },
-  disconnected: { status: "warning", label: "disconnected" },
-  revoked: { status: "critical", label: "revoked" },
+const AGENT_TONE: Record<AgentStatus, HealthStatus> = {
+  not_configured: "unknown",
+  enrolled: "maintenance",
+  connected: "healthy",
+  disconnected: "warning",
+  revoked: "critical",
 };
 
 export function AgentBadge({ status }: { status: AgentStatus | string | undefined }) {
-  const spec = AGENT_BADGE[(status as AgentStatus) ?? "not_configured"] ?? {
-    status: "unknown" as HealthStatus,
-    label: String(status ?? "unknown"),
-  };
-  return <StatusBadge status={spec.status} label={spec.label} />;
+  const t = useT("clusters");
+  const fmt = useFormat();
+  const token = status ?? "not_configured";
+  const tone = AGENT_TONE[token as AgentStatus] ?? ("unknown" as HealthStatus);
+  return (
+    <StatusBadge status={tone} label={t.dyn("enum.agent", token).toLocaleLowerCase(fmt.tag)} />
+  );
 }
 
-const INVENTORY_BADGE: Record<InventoryState, { status: HealthStatus; label: string }> = {
-  not_configured: { status: "unknown", label: "not configured" },
-  empty: { status: "unknown", label: "empty" },
-  reconciling: { status: "maintenance", label: "reconciling" },
-  fresh: { status: "healthy", label: "fresh" },
+const INVENTORY_TONE: Record<InventoryState, HealthStatus> = {
+  not_configured: "unknown",
+  empty: "unknown",
+  reconciling: "maintenance",
+  fresh: "healthy",
   // Stale is stale — NEVER the healthy color, even though data exists.
-  stale: { status: "stale", label: "stale" },
-  reconcile_required: { status: "warning", label: "reconcile required" },
+  stale: "stale",
+  reconcile_required: "warning",
 };
 
 export function InventoryStateBadge({ state }: { state: InventoryState | string | undefined }) {
-  const spec = INVENTORY_BADGE[(state as InventoryState) ?? "not_configured"] ?? {
-    status: "unknown" as HealthStatus,
-    label: String(state ?? "unknown"),
-  };
-  return <StatusBadge status={spec.status} label={spec.label} />;
+  const t = useT("clusters");
+  const fmt = useFormat();
+  const token = state ?? "not_configured";
+  const tone = INVENTORY_TONE[token as InventoryState] ?? ("unknown" as HealthStatus);
+  return (
+    <StatusBadge status={tone} label={t.dyn("enum.inventory", token).toLocaleLowerCase(fmt.tag)} />
+  );
 }
 
-const HEALTH_BADGE: Record<ResourceHealth, { status: HealthStatus; label: string }> = {
-  healthy: { status: "healthy", label: "healthy" },
-  degraded: { status: "warning", label: "degraded" },
-  unhealthy: { status: "critical", label: "unhealthy" },
-  unknown: { status: "unknown", label: "unknown" },
+const HEALTH_TONE: Record<ResourceHealth, HealthStatus> = {
+  healthy: "healthy",
+  degraded: "warning",
+  unhealthy: "critical",
+  unknown: "unknown",
 };
 
 export function HealthBadge({ health }: { health: ResourceHealth | string }) {
-  const spec = HEALTH_BADGE[(health as ResourceHealth) ?? "unknown"] ?? HEALTH_BADGE.unknown;
-  return <StatusBadge status={spec.status} label={spec.label} />;
-}
-
-export function formatUtc(value: string | null | undefined): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toISOString().replace(".000Z", "Z");
-  } catch {
-    return value;
-  }
+  const t = useT("clusters");
+  const fmt = useFormat();
+  const token = HEALTH_TONE[health as ResourceHealth] ? health : "unknown";
+  return (
+    <StatusBadge
+      status={HEALTH_TONE[token as ResourceHealth]}
+      label={t.dyn("enum.health", token).toLocaleLowerCase(fmt.tag)}
+    />
+  );
 }

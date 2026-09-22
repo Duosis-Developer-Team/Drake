@@ -12,16 +12,20 @@ import Link from "next/link";
 
 import { useApi } from "@/components/catalog/primitives";
 import { IncidentStateBadge, ReasonLabel } from "@/components/incidents/primitives";
+import { STATUS_LABELS } from "@/components/service-health/primitives";
 import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
+import { useFormat, useT } from "@/lib/i18n";
 import {
-  formatDuration,
+  durationSeconds,
   type HealthTransition,
   type IncidentSummary,
 } from "@/lib/incidents";
 
 export function ServiceIncidents({ bindingId }: { bindingId: string }) {
+  const t = useT("incidents");
+  const fmt = useFormat();
   const [page, retry] = useApi<{ items: IncidentSummary[]; total: number }>(
     `/v1/service-health/bindings/${bindingId}/incidents`,
   );
@@ -29,7 +33,7 @@ export function ServiceIncidents({ bindingId }: { bindingId: string }) {
   const active = page.state === "ready" ? page.data.items.find((i) => i.state !== "resolved") : null;
 
   return (
-    <Card title="Incidents" data-testid="service-incidents">
+    <Card title={t("service.title")} data-testid="service-incidents">
       {active ? (
         // The one thing worth surfacing above everything else: this is a
         // live incident, and here is where to go.
@@ -38,10 +42,12 @@ export function ServiceIncidents({ bindingId }: { bindingId: string }) {
             href={`/incidents/${active.id}`}
             className="text-sm font-medium text-critical hover:underline"
           >
-            Open incident: {active.title}
+            {t("service.openIncident", { title: active.title })}
           </Link>
           <p className="mt-0.5 text-[11px] text-critical">
-            Running for {formatDuration(active.opened_at, null)}
+            {t("service.runningFor", {
+              duration: fmt.duration(durationSeconds(active.opened_at, null)),
+            })}
           </p>
         </div>
       ) : null}
@@ -53,8 +59,8 @@ export function ServiceIncidents({ bindingId }: { bindingId: string }) {
       {page.state === "ready" && page.data.items.length === 0 ? (
         <DataState
           kind="empty"
-          title="No incidents"
-          description="This service has not had an incident opened for it."
+          title={t("service.empty.title")}
+          description={t("service.empty.description")}
         />
       ) : null}
       {page.state === "ready" && page.data.items.length > 0 ? (
@@ -70,7 +76,7 @@ export function ServiceIncidents({ bindingId }: { bindingId: string }) {
               </Link>
               <span className="text-[11px] text-ink-muted">
                 <time className="font-mono">{incident.opened_at}</time> ·{" "}
-                {formatDuration(incident.opened_at, incident.resolved_at)}
+                {fmt.duration(durationSeconds(incident.opened_at, incident.resolved_at))}
               </span>
             </li>
           ))}
@@ -92,12 +98,16 @@ const TRANSITION_BADGE = {
 } as const;
 
 export function HealthTransitions({ bindingId }: { bindingId: string }) {
+  const t = useT("incidents");
+  // The status vocabulary is service health's; resolve it there and fall
+  // back to the English record until that namespace carries it.
+  const health = useT("serviceHealth");
   const [history, retry] = useApi<{ transitions: HealthTransition[] }>(
     `/v1/service-health/bindings/${bindingId}/transitions`,
   );
 
   return (
-    <Card title="Recent health changes" data-testid="health-transitions">
+    <Card title={t("service.transitions.title")} data-testid="health-transitions">
       {history.state === "loading" ? <DataState kind="loading" /> : null}
       {history.state === "error" ? (
         <DataState kind="error" description={history.message} onRetry={retry} />
@@ -105,8 +115,8 @@ export function HealthTransitions({ bindingId }: { bindingId: string }) {
       {history.state === "ready" && history.data.transitions.length === 0 ? (
         <DataState
           kind="empty"
-          title="No recorded changes"
-          description="Drake records a row when the status or its reasons change, not on every evaluation."
+          title={t("service.transitions.emptyTitle")}
+          description={t("service.transitions.emptyDescription")}
         />
       ) : null}
       {history.state === "ready" && history.data.transitions.length > 0 ? (
@@ -120,18 +130,24 @@ export function HealthTransitions({ bindingId }: { bindingId: string }) {
                 <>
                   <StatusBadge
                     status={TRANSITION_BADGE[entry.previous_status]}
-                    label={entry.previous_status}
+                    label={health.dyn(
+                      "status",
+                      entry.previous_status,
+                      STATUS_LABELS[entry.previous_status],
+                    )}
                   />
                   <span aria-hidden className="text-ink-muted">
                     →
                   </span>
                 </>
               ) : (
-                <span className="text-[11px] italic text-ink-muted">first observation</span>
+                <span className="text-[11px] italic text-ink-muted">
+                  {t("service.transitions.first")}
+                </span>
               )}
               <StatusBadge
                 status={TRANSITION_BADGE[entry.new_status]}
-                label={entry.new_status}
+                label={health.dyn("status", entry.new_status, STATUS_LABELS[entry.new_status])}
               />
               <span className="text-[11px] text-ink-secondary">
                 {entry.reasons.map((reason, index) => (

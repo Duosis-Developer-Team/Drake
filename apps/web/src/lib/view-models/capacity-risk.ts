@@ -14,12 +14,17 @@ export interface CapacityRiskItem {
   key: string;
   clusterId: string;
   clusterName: string;
+  /** Also the catalogue key: `commandCenter.capacity.item.<kind>.*`. */
   kind: "certificate" | "pvc";
+  /** English rendering of `kind`; `CapacityRiskBoard` translates the kind. */
   label: string;
   tone: StatusTone;
+  /** English rendering of the detail line (for a PVC item, of `counts`). */
   detail: string;
   deadline?: string | null;
   href: string;
+  /** A PVC item's own numbers, so the detail line can be translated. */
+  counts?: { unhealthy: number; degraded: number; total: number };
 }
 
 function nameOf(cluster: Cluster): string {
@@ -67,6 +72,7 @@ export function pvcRiskItems(
       tone: pvcs.unhealthy > 0 ? "critical" : "warning",
       detail: `${pvcs.unhealthy} unhealthy, ${pvcs.degraded} degraded of ${pvcs.total} total`,
       href: `/clusters/${cluster.id}/inventory`,
+      counts: { unhealthy: pvcs.unhealthy, degraded: pvcs.degraded, total: pvcs.total },
     });
   }
   return items;

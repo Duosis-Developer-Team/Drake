@@ -35,13 +35,13 @@ import {
 import {
   HealthBadge,
   InventoryStateBadge,
-  formatUtc,
 } from "@/components/inventory/primitives";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { RelativeTime } from "@/components/ui/identifiers";
 import { humanize, toneForHealth } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import type { InventoryResourceDetail } from "@/lib/inventory";
 
 /** Allowlisted key/value pairs, as pills. */
@@ -96,15 +96,13 @@ function SummaryPanel({
   entries: Record<string, string | number | boolean | null>;
   empty: string;
 }) {
+  const t = useT("clusters");
   const pairs = Object.entries(entries);
   return (
     <Panel className="h-full">
       <div className="flex items-center gap-3">
         <IconBubble icon={icon} />
-        <PanelHeader
-          title={title}
-          description="Bounded — allowlisted fields only"
-        />
+        <PanelHeader title={title} description={t("resource.summary.bounded")} />
       </div>
       {pairs.length === 0 ? (
         <p className="rounded-[1rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
@@ -125,6 +123,9 @@ function SummaryPanel({
 }
 
 export default function InventoryResourcePage() {
+  const t = useT("clusters");
+  const tc = useT("common");
+  const fmt = useFormat();
   const { clusterId, resourceId } = useParams<{
     clusterId: string;
     resourceId: string;
@@ -143,14 +144,14 @@ export default function InventoryResourcePage() {
             testId="state-not-found"
             icon={Boxes}
             tone="not-applicable"
-            title="Not found"
-            description="This resource does not exist in your authorized scope."
+            title={t("shared.notFoundTitle")}
+            description={t("shared.notFoundDescription")}
             action={
               <PillLink
                 LinkComponent={Link}
                 href={`/clusters/${clusterId}/inventory`}
               >
-                Back to inventory
+                {t("resource.backToInventory")}
               </PillLink>
             }
           />
@@ -159,11 +160,11 @@ export default function InventoryResourcePage() {
         {(data) => (
           <>
             <nav
-              aria-label="Breadcrumb"
+              aria-label={t("breadcrumb.label")}
               className="mb-3 flex min-w-0 flex-wrap items-center gap-1.5 text-micro text-ink-muted"
             >
               <Link href="/clusters" className="rounded hover:text-ink">
-                Clusters
+                {t("breadcrumb.clusters")}
               </Link>
               <ChevronRight aria-hidden className="h-3 w-3" />
               <Link
@@ -177,7 +178,7 @@ export default function InventoryResourcePage() {
                 href={`/clusters/${clusterId}/inventory`}
                 className="rounded hover:text-ink"
               >
-                Inventory
+                {t("breadcrumb.inventory")}
               </Link>
               <ChevronRight aria-hidden className="h-3 w-3" />
               <span className="font-mono text-ink-secondary">{data.kind}</span>
@@ -192,7 +193,7 @@ export default function InventoryResourcePage() {
                 <>
                   <HealthBadge health={data.health} />
                   {data.lifecycle === "missing" ? (
-                    <StatusBadge status="stale" label="missing" />
+                    <StatusBadge status="stale" label={t("resource.missing")} />
                   ) : null}
                 </>
               }
@@ -202,38 +203,38 @@ export default function InventoryResourcePage() {
               <StatTile
                 icon={Activity}
                 tone={toneForHealth(data.health)}
-                label="Health"
+                label={tc("field.health")}
                 value={
                   <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
-                    {humanize(data.health)}
+                    {t.dyn("enum.health", data.health, humanize(data.health))}
                   </span>
                 }
               >
                 <p className="text-micro text-ink-muted">
                   {data.health_reasons.length === 0
-                    ? "No adverse signals"
-                    : `${data.health_reasons.length} reason${data.health_reasons.length === 1 ? "" : "s"} recorded`}
+                    ? t("resource.tile.noAdverseSignals")
+                    : t("resource.tile.reasonsRecorded", { count: data.health_reasons.length })}
                 </p>
               </StatTile>
               <StatTile
                 icon={RefreshCw}
                 tone={toneForHealth(data.inventory.state)}
-                label="Inventory sweep"
+                label={t("shared.inventorySweep")}
                 value={
                   <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
-                    {humanize(data.inventory.state)}
+                    {t.dyn("enum.inventory", data.inventory.state, humanize(data.inventory.state))}
                   </span>
                 }
               >
                 <p className="text-micro text-ink-muted">
                   {data.lifecycle === "missing"
-                    ? "Gone from the cluster, still listed"
-                    : "Present in the last sweep"}
+                    ? t("resource.tile.gone")
+                    : t("resource.tile.present")}
                 </p>
               </StatTile>
               <StatTile
                 icon={CalendarClock}
-                label="First seen"
+                label={t("resource.tile.firstSeen")}
                 value={
                   <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
                     <RelativeTime value={data.first_seen_at} />
@@ -241,12 +242,12 @@ export default function InventoryResourcePage() {
                 }
               >
                 <p className="font-mono text-micro text-ink-muted">
-                  {formatUtc(data.first_seen_at)}
+                  {fmt.utc(data.first_seen_at)}
                 </p>
               </StatTile>
               <StatTile
                 icon={Eye}
-                label="Last seen"
+                label={t("resource.tile.lastSeen")}
                 value={
                   <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
                     <RelativeTime value={data.last_seen_at} />
@@ -254,7 +255,7 @@ export default function InventoryResourcePage() {
                 }
               >
                 <p className="font-mono text-micro text-ink-muted">
-                  {formatUtc(data.last_seen_at)}
+                  {fmt.utc(data.last_seen_at)}
                 </p>
               </StatTile>
             </div>
@@ -262,8 +263,8 @@ export default function InventoryResourcePage() {
             <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
               <Panel data-testid="health-card" className="h-full">
                 <PanelHeader
-                  title="Health"
-                  description="Reason codes behind the derived health"
+                  title={tc("field.health")}
+                  description={t("resource.health.description")}
                   actions={<HealthBadge health={data.health} />}
                 />
                 {data.health_reasons.length > 0 ? (
@@ -288,7 +289,7 @@ export default function InventoryResourcePage() {
                   <div className="flex items-center gap-3 rounded-[1rem] bg-surface-2 px-4 py-3">
                     <IconBubble icon={Activity} tone="success" size="small" />
                     <p className="text-caption text-ink-secondary">
-                      No adverse signals in the observed status.
+                      {t("resource.health.noSignals")}
                     </p>
                   </div>
                 )}
@@ -296,21 +297,21 @@ export default function InventoryResourcePage() {
 
               <Panel data-testid="observation-card" className="h-full">
                 <PanelHeader
-                  title="Observation"
-                  description="Where and when this was seen"
+                  title={t("resource.observation.title")}
+                  description={t("resource.observation.description")}
                 />
                 <DefinitionGrid
                   items={[
                     {
-                      label: "Observed at (source)",
+                      label: t("resource.observation.observedAt"),
                       value: (
                         <span className="font-mono text-caption">
-                          {formatUtc(data.observed_at)}
+                          {fmt.utc(data.observed_at)}
                         </span>
                       ),
                     },
                     {
-                      label: "Source",
+                      label: tc("field.source"),
                       value: (
                         <span className="font-mono text-caption">
                           {data.provenance.source}
@@ -318,7 +319,7 @@ export default function InventoryResourcePage() {
                       ),
                     },
                     {
-                      label: "Inventory sweep",
+                      label: t("shared.inventorySweep"),
                       value: (
                         <InventoryStateBadge state={data.inventory.state} />
                       ),
@@ -338,25 +339,27 @@ export default function InventoryResourcePage() {
 
             <div className="mt-6 grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
               <SummaryPanel
-                title="Spec summary"
+                title={t("resource.summary.spec")}
                 icon={ListChecks}
                 entries={data.spec_summary}
-                empty="No summarized spec fields."
+                empty={t("resource.summary.noSpec")}
               />
               <SummaryPanel
-                title="Status summary"
+                title={t("resource.summary.status")}
                 icon={Activity}
                 entries={data.status_summary}
-                empty="No summarized status fields."
+                empty={t("resource.summary.noStatus")}
               />
             </div>
 
             <Panel flush className="mt-6">
               <PanelHeader
                 flush
-                title="Conditions"
+                title={t("resource.conditions.title")}
                 meta={
-                  <span data-tabular>{data.conditions.length} reported</span>
+                  <span data-tabular>
+                    {t("resource.conditions.reported", { count: data.conditions.length })}
+                  </span>
                 }
               />
               {data.conditions.length === 0 ? (
@@ -364,8 +367,8 @@ export default function InventoryResourcePage() {
                   compact
                   testId="conditions-empty"
                   icon={ListChecks}
-                  title="No conditions"
-                  description="The source object carries no status conditions."
+                  title={t("resource.conditions.emptyTitle")}
+                  description={t("resource.conditions.emptyDescription")}
                 />
               ) : (
                 <ul className="divide-y divide-border">
@@ -410,22 +413,22 @@ export default function InventoryResourcePage() {
               <Panel className="h-full">
                 <div className="flex items-center gap-3">
                   <IconBubble icon={Tag} />
-                  <PanelHeader title="Labels" description="Allowlisted" />
+                  <PanelHeader title={tc("field.labels")} description={t("resource.allowlisted")} />
                 </div>
-                <BoundedMap entries={data.labels} empty="None recorded." />
+                <BoundedMap entries={data.labels} empty={t("resource.noneRecorded")} />
               </Panel>
               <Panel className="h-full">
                 <div className="flex items-center gap-3">
                   <IconBubble icon={Tag} />
-                  <PanelHeader title="Annotations" description="Allowlisted" />
+                  <PanelHeader title={tc("field.annotations")} description={t("resource.allowlisted")} />
                 </div>
-                <BoundedMap entries={data.annotations} empty="None recorded." />
+                <BoundedMap entries={data.annotations} empty={t("resource.noneRecorded")} />
               </Panel>
             </div>
 
             {data.owners.length > 0 ? (
               <Panel flush className="mt-6">
-                <PanelHeader flush title="Owners" />
+                <PanelHeader flush title={t("resource.owners")} />
                 <ul className="divide-y divide-border">
                   {data.owners.map((owner) => (
                     <li

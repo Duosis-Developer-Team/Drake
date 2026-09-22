@@ -15,6 +15,7 @@ import Link from "next/link";
 import { RelativeTime } from "@/components/ui/identifiers";
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import type { OperationalVerdict } from "@/lib/view-models/verdict";
 
 export function VerdictPanel({
@@ -26,6 +27,7 @@ export function VerdictPanel({
   onRefresh: () => void;
   refreshing: boolean;
 }) {
+  const t = useT("commandCenter");
   const worstTone = verdict.criticalCount > 0 ? "critical" : verdict.warningCount > 0 ? "warning" : "success";
   const { projects, services, clusters } = verdict.affectedScope;
   const allSourcesAnswered = verdict.sourcesAnswered >= verdict.sourcesTotal;
@@ -36,6 +38,12 @@ export function VerdictPanel({
   const numberTone = flagged > 0 ? spec.text : "text-ink";
   const scopeChip =
     "rounded-full border border-border bg-surface px-2.5 py-1 font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink";
+  const headline =
+    verdict.headlineKind === "critical"
+      ? t("verdict.headline.critical", { count: verdict.criticalCount })
+      : verdict.headlineKind === "warning"
+        ? t("verdict.headline.warning", { count: verdict.warningCount })
+        : t("verdict.headline.clear", { answered: verdict.sourcesAnswered, total: verdict.sourcesTotal });
 
   return (
     <Panel
@@ -51,9 +59,9 @@ export function VerdictPanel({
           </span>
           <div className="min-w-0">
             <p className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
-              Operational verdict
+              {t("verdict.title")}
             </p>
-            <p className="text-caption text-ink-muted">Across your authorized scope</p>
+            <p className="text-caption text-ink-muted">{t("verdict.scope")}</p>
           </div>
         </div>
         <span
@@ -65,10 +73,10 @@ export function VerdictPanel({
             className={`h-2 w-2 rounded-full ${allSourcesAnswered ? "bg-healthy" : "bg-warning"}`}
           />
           <span className="sr-only">
-            {verdict.sourcesAnswered} of {verdict.sourcesTotal} sources answered
+            {t("verdict.sourcesAnswered", { answered: verdict.sourcesAnswered, total: verdict.sourcesTotal })}
           </span>
           <span aria-hidden>
-            {verdict.sourcesAnswered}/{verdict.sourcesTotal} sources
+            {t("verdict.sourcesShort", { answered: verdict.sourcesAnswered, total: verdict.sourcesTotal })}
           </span>
         </span>
       </div>
@@ -84,12 +92,16 @@ export function VerdictPanel({
         <div className="flex flex-wrap items-center justify-between gap-6 px-6 pt-6 pb-5">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-caption text-ink-muted">Flagged right now</p>
+              <p className="text-caption text-ink-muted">{t("verdict.flagged")}</p>
               {/* "All clear" only when every source answered — a quiet page
                   with silent sources is a partial view, not a healthy one. */}
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-micro font-medium ${labelSpec.chip}`}>
                 <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${labelSpec.dot}`} />
-                {flagged > 0 ? spec.label : allSourcesAnswered ? "All clear" : "Partial view"}
+                {flagged > 0
+                  ? t(`tone.${worstTone}`)
+                  : allSourcesAnswered
+                    ? t("verdict.allClear")
+                    : t("verdict.partialView")}
               </span>
             </div>
             <p className="mt-2 flex items-baseline gap-2.5">
@@ -99,14 +111,14 @@ export function VerdictPanel({
               >
                 {flagged}
               </span>
-              <span className="text-body text-ink-muted">signal{flagged === 1 ? "" : "s"}</span>
+              <span className="text-body text-ink-muted">{t("verdict.signals", { count: flagged })}</span>
             </p>
             <p
               data-testid="verdict-headline"
               style={{ textWrap: "balance" }}
               className="mt-3 max-w-md text-body font-medium text-ink-secondary"
             >
-              {verdict.headline}
+              {headline}
             </p>
           </div>
           <SourceRing
@@ -122,7 +134,7 @@ export function VerdictPanel({
           <div className="flex items-center justify-between gap-3 px-6 py-4 sm:justify-start">
             <dt className="flex items-center gap-2 text-caption text-ink-muted">
               <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec("critical").dot}`} />
-              Critical
+              {t("tone.critical")}
             </dt>
             <dd
               data-tabular
@@ -135,7 +147,7 @@ export function VerdictPanel({
           <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4 sm:justify-start sm:border-t-0 sm:border-l">
             <dt className="flex items-center gap-2 text-caption text-ink-muted">
               <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec("warning").dot}`} />
-              Warning
+              {t("tone.warning")}
             </dt>
             <dd
               data-tabular
@@ -146,7 +158,7 @@ export function VerdictPanel({
             </dd>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border px-6 py-4 text-micro sm:border-t-0 sm:border-l">
-            <dt className="text-caption text-ink-muted">Affected</dt>
+            <dt className="text-caption text-ink-muted">{t("verdict.affected")}</dt>
             <dd className="flex min-w-0 flex-wrap items-center gap-2">
               <span
                 data-tabular
@@ -156,25 +168,25 @@ export function VerdictPanel({
               </span>
               {projects > 0 ? (
                 <Link href="/projects" data-testid="verdict-scope-projects" className={scopeChip}>
-                  {projects} project{projects === 1 ? "" : "s"}
+                  {t("verdict.projects", { count: projects })}
                 </Link>
               ) : null}
               {services > 0 ? (
                 <Link href="/service-health" data-testid="verdict-scope-services" className={scopeChip}>
-                  {services} service{services === 1 ? "" : "s"}
+                  {t("verdict.services", { count: services })}
                 </Link>
               ) : null}
               {clusters > 0 ? (
                 <Link href="/clusters" data-testid="verdict-scope-clusters" className={scopeChip}>
-                  {clusters} cluster{clusters === 1 ? "" : "s"}
+                  {t("verdict.clusters", { count: clusters })}
                 </Link>
               ) : null}
               {projects + services + clusters === 0 ? (
-                <span className="text-caption text-ink-muted">nothing in scope</span>
+                <span className="text-caption text-ink-muted">{t("verdict.nothingInScope")}</span>
               ) : null}
               {verdict.oldestSuspectEvidence ? (
                 <span data-testid="verdict-oldest-evidence" className="text-ink-muted">
-                  · oldest: {verdict.oldestSuspectEvidence.label}{" "}
+                  {t("verdict.oldest", { label: verdict.oldestSuspectEvidence.label })}{" "}
                   <RelativeTime value={verdict.oldestSuspectEvidence.asOf} />
                 </span>
               ) : null}
@@ -192,13 +204,17 @@ export function VerdictPanel({
           className="flex flex-1 items-center justify-center gap-2 rounded-full border border-border bg-surface px-6 py-3 text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
         >
           <RefreshCw aria-hidden className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? "Retrying…" : allSourcesAnswered ? "Re-check" : "Retry unanswered sources"}
+          {refreshing
+            ? t("verdict.retrying")
+            : allSourcesAnswered
+              ? t("verdict.recheck")
+              : t("verdict.retryUnanswered")}
         </button>
         <Link
           href="/incidents"
           className="flex flex-[2] items-center justify-center gap-2 rounded-full bg-brand py-3 text-ink-inverse transition-colors hover:bg-brand-hover"
         >
-          Open incidents
+          {t("verdict.openIncidents")}
           <ArrowUpRight aria-hidden className="h-4 w-4" />
         </Link>
       </div>
@@ -220,6 +236,7 @@ function SourceRing({
   total: number;
   complete: boolean;
 }) {
+  const t = useT("commandCenter");
   const size = 128;
   const stroke = 14;
   const fill = 8;
@@ -235,7 +252,7 @@ function SourceRing({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke={complete ? "var(--brand-accent)" : "var(--status-warning)"}
+          stroke={complete ? "var(--brand-accent)" : "var(--status-warning)" /* i18n-ignore: CSS */}
           strokeWidth={fill}
           strokeLinecap="round"
           strokeDasharray={`${circumference * share} ${circumference}`}
@@ -245,7 +262,7 @@ function SourceRing({
         <span data-tabular className="text-2xl leading-none font-semibold tracking-tight text-ink">
           {answered}/{total}
         </span>
-        <span className="mt-1 text-micro text-ink-muted">sources</span>
+        <span className="mt-1 text-micro text-ink-muted">{t("verdict.sources")}</span>
       </span>
     </div>
   );

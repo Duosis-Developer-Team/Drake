@@ -38,6 +38,7 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   EVENT_TYPES,
@@ -108,6 +109,8 @@ function PolicyForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const t = useT("notifications");
+  const c = useT("common");
   const { state: session, hasPermission } = useSession();
   const csrfToken =
     session.status === "authenticated" ? session.me.csrf_token : null;
@@ -180,10 +183,7 @@ function PolicyForm({
           enabled,
           expected_version: existing.version,
         });
-        setNotice({
-          kind: "saved",
-          message: "Saved. Only future incidents are affected.",
-        });
+        setNotice({ kind: "saved", message: t("policies.form.saved") });
       } else {
         await createPolicy(csrfToken, {
           display_name: name,
@@ -191,24 +191,16 @@ function PolicyForm({
           environment_id: environmentId || null,
           event_types: events,
         });
-        setNotice({
-          kind: "saved",
-          message:
-            "Created. It applies from now on — past incidents are not replayed.",
-        });
+        setNotice({ kind: "saved", message: t("policies.form.created") });
       }
       onSaved();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        setNotice({
-          kind: "conflict",
-          message:
-            "This policy changed while you were editing it — someone else saved first. Reload to see the current values before saving again.",
-        });
+        setNotice({ kind: "conflict", message: t("policies.form.conflict") });
       } else {
         setNotice({
           kind: "error",
-          message: error instanceof ApiError ? error.message : "request failed",
+          message: error instanceof ApiError ? error.message : c("state.error"),
         });
       }
     } finally {
@@ -223,12 +215,12 @@ function PolicyForm({
   return (
     <Panel>
       <PanelHeader
-        title={existing ? "Edit policy" : "New policy"}
-        description="Applies from the moment it is saved"
+        title={existing ? t("policies.form.editTitle") : t("policies.form.newTitle")}
+        description={t("policies.form.description")}
         actions={
           existing ? (
             <button type="button" onClick={onCancel} className={PILL_BUTTON}>
-              Cancel
+              {c("action.cancel")}
             </button>
           ) : (
             <IconBubble icon={Route} size="sm" />
@@ -239,7 +231,7 @@ function PolicyForm({
         <div className="rounded-[1.25rem] bg-surface-2 p-4">
           <DataState
             kind="permission-denied"
-            description="Managing notification policies needs notification.manage in this scope."
+            description={t("policies.form.forbidden")}
           />
         </div>
       ) : null}
@@ -247,11 +239,11 @@ function PolicyForm({
       <form
         onSubmit={submit}
         className="space-y-6"
-        aria-label="Notification policy"
+        aria-label={t("policies.form.label")}
       >
-        <Step number={1} title="Name this rule">
+        <Step number={1} title={t("policies.form.nameStep")}>
           <label htmlFor={nameId} className="sr-only">
-            Name
+            {c("field.name")}
           </label>
           <input
             id={nameId}
@@ -259,17 +251,17 @@ function PolicyForm({
             value={name}
             maxLength={120}
             disabled={!canManage || busy}
-            placeholder="e.g. Critical incidents"
+            placeholder={t("policies.form.namePlaceholder")}
             onChange={(event) => setName(event.target.value)}
             className={PILL_FIELD}
           />
         </Step>
 
-        <Step number={2} title="Scope">
+        <Step number={2} title={t("policies.form.scopeStep")}>
           <div className="space-y-3">
             <div>
               <label htmlFor={projectFieldId} className={FIELD_LABEL}>
-                Project
+                {c("field.project")}
               </label>
               <select
                 id={projectFieldId}
@@ -278,7 +270,7 @@ function PolicyForm({
                 disabled={!canManage || busy || Boolean(existing)}
                 onChange={(event) => chooseProject(event.target.value)}
               >
-                <option value="">Select a project…</option>
+                <option value="">{t("policies.form.selectProject")}</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.display_name || project.project_key}
@@ -289,7 +281,7 @@ function PolicyForm({
 
             <div>
               <label htmlFor={envFieldId} className={FIELD_LABEL}>
-                Environment (optional)
+                {t("policies.form.environment")}
               </label>
               <select
                 id={envFieldId}
@@ -299,7 +291,9 @@ function PolicyForm({
                 onChange={(event) => setEnvironmentId(event.target.value)}
               >
                 <option value="">
-                  {projectId ? "All environments" : "Choose a project first"}
+                  {projectId
+                    ? t("policies.form.allEnvironments")
+                    : t("policies.form.chooseProjectFirst")}
                 </option>
                 {environments.map((environment) => (
                   <option key={environment.id} value={environment.id}>
@@ -311,9 +305,9 @@ function PolicyForm({
           </div>
         </Step>
 
-        <Step number={3} title="Notify on">
+        <Step number={3} title={t("policies.form.notifyStep")}>
           <fieldset className="flex flex-wrap gap-2">
-            <legend className="sr-only">Notify on</legend>
+            <legend className="sr-only">{t("policies.form.notifyStep")}</legend>
             {(options.event_types ?? EVENT_TYPES).map((event) => {
               const checked = events.includes(event);
               return (
@@ -335,18 +329,16 @@ function PolicyForm({
                   {checked ? (
                     <CheckCheck aria-hidden className="h-3.5 w-3.5" />
                   ) : null}
-                  {EVENT_TYPE_LABELS[event]}
+                  {t.dyn("eventType", event, EVENT_TYPE_LABELS[event])}
                 </label>
               );
             })}
           </fieldset>
-          <p className="mt-2 text-micro text-ink-muted">
-            Severity is critical; recovery progress events are never notified.
-          </p>
+          <p className="mt-2 text-micro text-ink-muted">{t("policies.form.severityNote")}</p>
         </Step>
 
         {existing ? (
-          <Step number={4} title="Status">
+          <Step number={4} title={t("policies.form.statusStep")}>
             <label className="inline-flex cursor-pointer items-center gap-2 text-body text-ink">
               <input
                 type="checkbox"
@@ -355,7 +347,7 @@ function PolicyForm({
                 onChange={(event) => setEnabled(event.target.checked)}
                 className="h-4 w-4 rounded border-border-strong accent-[var(--accent)]"
               />
-              Enabled
+              {t("policies.form.enabled")}
             </label>
           </Step>
         ) : null}
@@ -366,8 +358,8 @@ function PolicyForm({
             <span data-tabular className="font-semibold text-ink">
               {destinations.length}
             </span>{" "}
-            destinations in scope. Webhook targets are chosen by name — there is
-            no address to enter here.
+            {t("policies.form.destinationsInScope", { count: destinations.length })}{" "}
+            {t("policies.form.destinationsNote")}
           </p>
         </div>
 
@@ -375,7 +367,7 @@ function PolicyForm({
           <div role="alert" data-testid="policy-conflict">
             <DataState
               kind="error"
-              title="Version conflict"
+              title={t("policies.form.conflictTitle")}
               description={notice.message}
             />
           </div>
@@ -401,7 +393,7 @@ function PolicyForm({
           disabled={!canManage || busy || !complete}
           className={`${PILL_PRIMARY} w-full`}
         >
-          {existing ? "Save changes" : "Create policy"}
+          {existing ? t("policies.form.saveChanges") : t("policies.form.create")}
         </button>
       </form>
     </Panel>
@@ -417,6 +409,8 @@ function RuleCard({
   onEdit: () => void;
   editing: boolean;
 }) {
+  const t = useT("notifications");
+  const c = useT("common");
   const scope = `${policy.project_key}${policy.environment_key ? `/${policy.environment_key}` : ""}${
     policy.service_key ? `/${policy.service_key}` : ""
   }`;
@@ -436,25 +430,27 @@ function RuleCard({
           <p className="truncate text-body font-semibold text-ink">
             {policy.display_name}
           </p>
-          <p className="text-micro text-ink-muted">Revision {policy.version}</p>
+          <p className="text-micro text-ink-muted">
+            {t("policies.card.revision", { version: policy.version })}
+          </p>
         </div>
         <StatusBadge
           status={policy.enabled ? "healthy" : "unknown"}
-          label={policy.enabled ? "Enabled" : "Disabled"}
+          label={policy.enabled ? t("policies.card.enabled") : t("policies.card.disabled")}
         />
         <button type="button" onClick={onEdit} className={PILL_BUTTON}>
           <Pencil aria-hidden className="h-3.5 w-3.5" />
-          Edit
+          {c("action.edit")}
         </button>
       </div>
       <div className="grid grid-cols-1 items-stretch gap-2 border-t border-border px-6 py-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
         <div className="h-full rounded-2xl bg-surface-2 px-4 py-3">
           <p className="flex items-center gap-1.5 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
-            <BellRing aria-hidden className="h-3 w-3" /> When
+            <BellRing aria-hidden className="h-3 w-3" /> {t("policies.card.when")}
           </p>
           <p className="mt-1 text-caption font-medium text-ink">
             {policy.event_types
-              .map((event) => EVENT_TYPE_LABELS[event] ?? event)
+              .map((event) => t.dyn("eventType", event, EVENT_TYPE_LABELS[event] ?? event))
               .join(", ")}
           </p>
         </div>
@@ -464,7 +460,7 @@ function RuleCard({
         />
         <div className="h-full rounded-2xl bg-surface-2 px-4 py-3">
           <p className="flex items-center gap-1.5 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
-            <Layers aria-hidden className="h-3 w-3" /> In
+            <Layers aria-hidden className="h-3 w-3" /> {t("policies.card.in")}
           </p>
           <p className="mt-1 truncate font-mono text-caption text-ink">
             {scope}
@@ -476,11 +472,10 @@ function RuleCard({
         />
         <div className="h-full rounded-2xl bg-surface-2 px-4 py-3">
           <p className="flex items-center gap-1.5 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
-            <Send aria-hidden className="h-3 w-3" /> Send to
+            <Send aria-hidden className="h-3 w-3" /> {t("policies.card.sendTo")}
           </p>
           <p className="mt-1 text-caption font-medium text-ink">
-            {policy.destination_count} destination
-            {policy.destination_count === 1 ? "" : "s"}
+            {t("policies.card.destinations", { count: policy.destination_count })}
           </p>
         </div>
       </div>
@@ -489,6 +484,8 @@ function RuleCard({
 }
 
 export default function NotificationPoliciesPage() {
+  const t = useT("notifications");
+  const c = useT("common");
   const [policies, setPolicies] = useState<NotificationPolicy[] | null>(null);
   const [destinations, setDestinations] = useState<NotificationDestination[]>(
     [],
@@ -526,14 +523,14 @@ export default function NotificationPoliciesPage() {
       .catch((problem: unknown) => {
         if (!cancelled) {
           setError(
-            problem instanceof ApiError ? problem.message : "request failed",
+            problem instanceof ApiError ? problem.message : c("state.error"),
           );
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [c]);
 
   useEffect(() => load(), [load]);
 
@@ -542,15 +539,21 @@ export default function NotificationPoliciesPage() {
     (d) => d.destination_type === "webhook",
   ).length;
 
+  const howSteps = [
+    { icon: BellRing, title: t("policies.rules.when"), line: t("policies.rules.whenLine") },
+    { icon: Layers, title: t("policies.rules.in"), line: t("policies.rules.inLine") },
+    { icon: Send, title: t("policies.rules.sendTo"), line: t("policies.rules.sendToLine") },
+  ];
+
   return (
     <PageFrame>
       <PageHeader
-        title="Notification policies"
-        description="Which incidents are routed, and to whom. Policies never replay past incidents."
+        title={t("policies.title")}
+        description={t("policies.description")}
         actions={
           <Link href="/notification-deliveries" className={PILL_BUTTON}>
             <Send aria-hidden className="h-3.5 w-3.5" />
-            Delivery audit
+            {t("policies.deliveryAudit")}
           </Link>
         }
       />
@@ -564,40 +567,38 @@ export default function NotificationPoliciesPage() {
 
         {policies !== null ? (
           <div className="page-grid" data-cols="3">
-            <KpiTile icon={Route} label="Policies" value={policies.length}>
-              <p className="text-micro text-ink-muted">
-                Routing rules in your scope
-              </p>
+            <KpiTile icon={Route} label={t("policies.kpi.policies")} value={policies.length}>
+              <p className="text-micro text-ink-muted">{t("policies.kpi.policiesCaption")}</p>
             </KpiTile>
             <KpiTile
               icon={CircleCheck}
               tone="success"
-              label="Enabled"
+              label={t("policies.kpi.enabled")}
               value={enabledCount}
-              suffix={`of ${policies.length}`}
+              suffix={t("policies.kpi.of", { total: policies.length })}
             >
               <ShareBar
                 value={enabledCount}
                 total={policies.length}
                 tone="success"
-                label="routing now"
+                label={t("policies.kpi.routingNow")}
               />
             </KpiTile>
             <KpiTile
               icon={Webhook}
               tone="info"
-              label="Destinations"
+              label={t("policies.kpi.destinations")}
               value={destinations.length}
             >
               <p className="text-micro text-ink-muted">
                 <span data-tabular className="font-medium text-ink-secondary">
                   {webhooks}
                 </span>{" "}
-                webhook ·{" "}
+                {t("policies.kpi.webhook")} ·{" "}
                 <span data-tabular className="font-medium text-ink-secondary">
                   {destinations.length - webhooks}
                 </span>{" "}
-                in-app
+                {t("policies.kpi.inApp")}
               </p>
             </KpiTile>
           </div>
@@ -611,11 +612,11 @@ export default function NotificationPoliciesPage() {
                   id="policies-heading"
                   className="text-[1.0625rem] font-semibold text-ink"
                 >
-                  Rules
+                  {t("policies.rules.title")}
                 </h2>
                 {policies !== null ? (
                   <span className="text-micro text-ink-muted">
-                    {policies.length} configured
+                    {t("policies.rules.configured", { count: policies.length })}
                   </span>
                 ) : null}
               </div>
@@ -624,32 +625,16 @@ export default function NotificationPoliciesPage() {
                   <StateCard
                     kind="empty"
                     icon={Route}
-                    title="No policies"
-                    description="Nothing is routed yet. Incidents still open and resolve; nobody is told about them."
+                    title={t("policies.rules.emptyTitle")}
+                    description={t("policies.rules.emptyDescription")}
                   />
                   <ol
                     className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-3 pb-2 sm:grid-cols-3"
-                    aria-label="How a rule reads"
+                    aria-label={t("policies.rules.howLabel")}
                   >
-                    {[
-                      {
-                        icon: BellRing,
-                        title: "When",
-                        line: "an incident opens or resolves",
-                      },
-                      {
-                        icon: Layers,
-                        title: "In",
-                        line: "a project or environment",
-                      },
-                      {
-                        icon: Send,
-                        title: "Send to",
-                        line: "people or a named webhook",
-                      },
-                    ].map((step) => (
+                    {howSteps.map((step, index) => (
                       <li
-                        key={step.title}
+                        key={index}
                         className="flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3"
                       >
                         <IconBubble icon={step.icon} size="sm" />

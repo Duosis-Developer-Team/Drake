@@ -17,6 +17,7 @@ import { useId } from "react";
 
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 
 /* ------------------------------------------------------------------ */
 /* KPI tile                                                            */
@@ -163,9 +164,10 @@ export function Toolbar({
   summary?: React.ReactNode;
   "data-testid"?: string;
 }) {
+  const t = useT("incidents");
   return (
     <div data-testid={testId} className="flex flex-wrap items-center gap-2.5">
-      <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2.5">
+      <div role="group" aria-label={t("toolbar.filters")} className="flex flex-wrap items-center gap-2.5">
         {children}
       </div>
       {summary ? (
@@ -260,7 +262,7 @@ export interface BreakdownSlice {
 export function BreakdownRing({
   slices,
   label,
-  centerCaption = "total",
+  centerCaption,
   size = 148,
 }: {
   slices: BreakdownSlice[];
@@ -268,6 +270,8 @@ export function BreakdownRing({
   centerCaption?: string;
   size?: number;
 }) {
+  const t = useT("incidents");
+  const center = centerCaption ?? t("ring.total");
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   const thickness = 14;
   const radius = (size - thickness) / 2;
@@ -303,7 +307,7 @@ export function BreakdownRing({
                 cy={size / 2}
                 r={radius}
                 fill="none"
-                stroke={`var(${toneSpec(slice.tone).token})`}
+                stroke={`var(${toneSpec(slice.tone).token})`} // i18n-ignore
                 strokeWidth={thickness}
                 strokeDasharray={`${Math.max(0, length - gap)} ${circumference - length + gap}`}
                 strokeDashoffset={-offset}
@@ -321,7 +325,7 @@ export function BreakdownRing({
           >
             {total}
           </span>
-          <span className="mt-1 text-micro text-ink-muted">{centerCaption}</span>
+          <span className="mt-1 text-micro text-ink-muted">{center}</span>
         </span>
       </div>
       <figcaption className="w-full">

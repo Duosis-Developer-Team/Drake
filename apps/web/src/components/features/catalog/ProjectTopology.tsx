@@ -12,25 +12,19 @@ import Link from "next/link";
 
 import { ServiceHealthLane } from "@/components/features/catalog/ServiceHealthLane";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { useT } from "@/lib/i18n";
 import type { EnvironmentLaneModel } from "@/lib/view-models/scope-health";
 
-const EVIDENCE_LABEL: Record<
-  Exclude<EnvironmentLaneModel["evidence"], "complete">,
-  string
-> = {
-  unassessed: "Unassessed",
-  incomplete: "Evidence incomplete",
-  "not-applicable": "Not applicable",
-};
-
 function LaneBadge({ lane }: { lane: EnvironmentLaneModel }) {
+  const t = useT("catalog");
   if (lane.evidence === "complete") return null;
-  return <StatusBadge status={lane.tone} label={EVIDENCE_LABEL[lane.evidence]} size="compact" />;
+  return <StatusBadge status={lane.tone} label={t(`evidence.${lane.evidence}`)} size="compact" />;
 }
 
 export function ProjectTopology({ lanes }: { lanes: EnvironmentLaneModel[] }) {
+  const t = useT("catalog");
   if (lanes.length === 0) {
-    return <p className="px-1 py-2 text-caption text-ink-muted">No environments in your scope.</p>;
+    return <p className="px-1 py-2 text-caption text-ink-muted">{t("topology.noEnvironments")}</p>;
   }
 
   return (

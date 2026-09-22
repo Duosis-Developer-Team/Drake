@@ -42,6 +42,7 @@ import {
   StatTile,
   TileState,
   ToneBar,
+  useToneLabel,
 } from "@/components/catalog/visuals";
 import { ProjectRiskMap } from "@/components/data-viz/ProjectRiskMap";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
@@ -61,6 +62,7 @@ import {
 } from "@/components/ui/states";
 import type { Project } from "@/lib/catalog";
 import { humanize, type StatusTone } from "@/lib/design/status";
+import { useT, type Translator } from "@/lib/i18n";
 import {
   serviceHealthListPath,
   type ServiceHealthPage,
@@ -83,18 +85,9 @@ const CRITICALITY_TONE: Record<string, StatusTone> = {
   low: "neutral",
 };
 
-const LIFECYCLE_OPTIONS = [
-  { value: "active", label: "Active" },
-  { value: "archived", label: "Archived" },
-  { value: "all", label: "All" },
-];
-
-const CRITICALITY_OPTIONS = [
-  { value: "critical", label: "Critical" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-];
+/** Filter values; their words are `catalog.lifecycle.*` / `catalog.criticality.*`. */
+const LIFECYCLE_VALUES = ["active", "archived", "all"] as const;
+const CRITICALITY_VALUES = ["critical", "high", "medium", "low"] as const;
 
 const PAGE_SIZE = 100;
 
@@ -145,6 +138,17 @@ function matchesRisk(item: ProjectRiskItem, risk: string): boolean {
   return item.tone === risk;
 }
 
+/** The health chip's word: a tone for complete evidence, else the evidence state. */
+function riskHealthLabel(
+  t: Translator<"catalog">,
+  toneLabel: (tone: StatusTone) => string,
+  risk: ProjectRiskItem,
+): string {
+  if (risk.evidence === "complete")
+    return t("list.row.health", { label: toneLabel(risk.tone) });
+  return t(`evidence.${risk.evidence}`);
+}
+
 function ProjectRow({
   project,
   risk,
@@ -154,6 +158,8 @@ function ProjectRow({
   risk: ProjectRiskItem | undefined;
   onOpen: () => void;
 }) {
+  const t = useT("catalog");
+  const toneLabel = useToneLabel();
   return (
     <div
       role="row"
@@ -181,7 +187,7 @@ function ProjectRow({
             </Link>
             <StatusBadge
               status={project.lifecycle === "active" ? "success" : "neutral"}
-              label={humanize(project.lifecycle)}
+              label={t.dyn("lifecycle", project.lifecycle, humanize(project.lifecycle))}
               size="compact"
             />
           </div>
@@ -210,13 +216,15 @@ function ProjectRow({
       >
         <StatusBadge
           status={CRITICALITY_TONE[project.criticality] ?? "neutral"}
-          label={`${humanize(project.criticality)} criticality`}
+          label={t("criticality.badge", {
+            level: t.dyn("criticality", project.criticality, humanize(project.criticality)),
+          })}
           size="compact"
         />
         {risk ? (
           <StatusBadge
             status={risk.tone}
-            label={`${risk.healthLabel} health`}
+            label={riskHealthLabel(t, toneLabel, risk)}
             size="compact"
           />
         ) : (
@@ -231,7 +239,7 @@ function ProjectRow({
           {project.counts.environments}
         </span>
         <span className="text-micro text-ink-muted lg:hidden">
-          environments
+          {t("list.row.environments")}
         </span>
       </div>
       <div role="cell" className="flex items-baseline gap-1.5 lg:justify-end">
@@ -241,7 +249,7 @@ function ProjectRow({
         >
           {project.counts.services}
         </span>
-        <span className="text-micro text-ink-muted lg:hidden">services</span>
+        <span className="text-micro text-ink-muted lg:hidden">{t("list.row.services")}</span>
       </div>
       <div role="cell" aria-hidden className="hidden text-ink-muted lg:block">
         <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
@@ -251,6 +259,8 @@ function ProjectRow({
 }
 
 function ProjectsInner() {
+  const t = useT("catalog");
+  const toneLabel = useToneLabel();
   const router = useRouter();
   const params = useSearchParams();
   const search = params.get("search") ?? "";
@@ -351,27 +361,36 @@ function ProjectsInner() {
   const summary = firstLoad
     ? undefined
     : risk && !model.complete
-      ? `Filtered within ${projects.length} loaded project${projects.length === 1 ? "" : "s"}`
-      : `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}${
-          filtered ? " matching" : ""
-        }`;
+      ? t("list.summaryFilteredPartial", { count: projects.length })
+      : filtered
+        ? t("list.summaryMatching", { count: visibleProjects.length })
+        : t("list.summary", { count: visibleProjects.length });
 
   const showRisk = model.items.length > 0;
+
+  const lifecycleOptions = LIFECYCLE_VALUES.map((value) => ({
+    value,
+    label: t(`lifecycle.${value}`),
+  }));
+  const criticalityOptions = CRITICALITY_VALUES.map((value) => ({
+    value,
+    label: t(`criticality.${value}`),
+  }));
 
   return (
     <PageFrame>
       <PageHeader
-        title="Projects"
-        description="Your authorized project catalog — criticality, footprint and observed health."
+        title={t("list.title")}
+        description={t("list.description")}
         meta={
           projects.length > 0 ? (
             <>
-              <span>{environmentTotal} environments</span>
-              <span>{serviceTotal} services</span>
+              <span>{t("list.environments", { count: environmentTotal })}</span>
+              <span>{t("list.services", { count: serviceTotal })}</span>
               {!projectsCollection.complete ? (
                 <StatusBadge
                   status="unknown"
-                  label="Partial view"
+                  label={t("evidence.partialView")}
                   size="compact"
                 />
               ) : null}
@@ -385,13 +404,13 @@ function ProjectsInner() {
           <div className="page-grid motion-safe:animate-[fade-in_320ms_var(--ease-entrance)_backwards]">
             <StatTile
               icon={FolderKanban}
-              label="Projects"
+              label={t("list.kpi.projects")}
               value={projects.length}
-              suffix="in scope"
+              suffix={t("list.kpi.inScope")}
             >
               <ToneBar
-                label="Projects by criticality"
-                counts={CRITICALITY_OPTIONS.map((option) => ({
+                label={t("list.kpi.byCriticality")}
+                counts={criticalityOptions.map((option) => ({
                   tone: CRITICALITY_TONE[option.value],
                   label: option.label,
                   count: projects.filter(
@@ -402,12 +421,12 @@ function ProjectsInner() {
             </StatTile>
             <StatTile
               icon={Layers}
-              label="Environments"
+              label={t("list.kpi.environments")}
               value={environmentTotal}
-              suffix="across projects"
+              suffix={t("list.kpi.acrossProjects")}
             >
               <MiniBars
-                label="Environments per project"
+                label={t("list.kpi.environmentsPerProject")}
                 items={projects.map((project) => ({
                   key: project.id,
                   label: project.display_name,
@@ -417,12 +436,12 @@ function ProjectsInner() {
             </StatTile>
             <StatTile
               icon={Boxes}
-              label="Services"
+              label={t("list.kpi.services")}
               value={serviceTotal}
-              suffix="in catalog"
+              suffix={t("list.kpi.inCatalog")}
             >
               <MiniBars
-                label="Services per project"
+                label={t("list.kpi.servicesPerProject")}
                 items={projects.map((project) => ({
                   key: project.id,
                   label: project.display_name,
@@ -432,19 +451,19 @@ function ProjectsInner() {
             </StatTile>
             <StatTile
               icon={Radar}
-              label="Evidence"
+              label={t("list.kpi.evidence")}
               value={assessed}
-              suffix={`of ${model.items.length} assessed`}
+              suffix={t("list.kpi.assessed", { total: model.items.length })}
             >
               <ToneBar
-                label="Projects by observed health"
-                counts={toneCounts(model.items, (item) => item.tone)}
+                label={t("list.kpi.byHealth")}
+                counts={toneCounts(model.items, (item) => item.tone, toneLabel)}
               />
             </StatTile>
           </div>
         ) : null}
 
-        <div className={showRisk ? "page-split" : "flex flex-col"}>
+        <div className={showRisk ? "page-split" : "flex flex-col"}> {/* i18n-ignore: CSS classes */}
           <div className="page-main">
             {/* Card-less pill toolbar */}
             <div
@@ -452,25 +471,25 @@ function ProjectsInner() {
               data-testid="filter-bar"
             >
               <SearchInput
-                label="Search projects by key or name"
-                placeholder="Key or name…"
+                label={t("list.filter.search")}
+                placeholder={t("list.filter.placeholder")}
                 value={draft}
                 onChange={setDraft}
                 className="w-full sm:w-56 [&_input]:h-10 [&_input]:rounded-full [&_input]:pl-9"
               />
               <SegmentedControl
-                label="Lifecycle"
+                label={t("list.filter.lifecycle")}
                 value={lifecycle}
-                options={LIFECYCLE_OPTIONS}
+                options={lifecycleOptions}
                 onChange={(value) => updateParams({ lifecycle: value })}
               />
               <div className="[&_select]:h-10 [&_select]:rounded-full [&_select]:pl-4">
                 <Select
-                  label="Criticality"
+                  label={t("criticality.label")}
                   hideLabel
                   value={criticality}
-                  placeholder="Any criticality"
-                  options={CRITICALITY_OPTIONS}
+                  placeholder={t("criticality.any")}
+                  options={criticalityOptions}
                   onChange={(value) => updateParams({ criticality: value })}
                 />
               </div>
@@ -497,7 +516,7 @@ function ProjectsInner() {
                         router.replace("/projects", { scroll: false });
                       }}
                     >
-                      Clear filters
+                      {t("list.filter.clear")}
                     </Button>
                   ) : null}
                 </div>
@@ -507,7 +526,7 @@ function ProjectsInner() {
                   <LoadingSkeleton
                     variant="table"
                     rows={4}
-                    label="Loading projects"
+                    label={t("load.projects")}
                   />
                 </div>
               ) : projectsCollection.denied ? (
@@ -532,20 +551,20 @@ function ProjectsInner() {
                           testId="state-empty"
                           title={
                             filtered
-                              ? "No projects match these filters"
-                              : "No projects in your scope"
+                              ? t("list.empty.filteredTitle")
+                              : t("list.empty.title")
                           }
                           description={
                             filtered
-                              ? "Clear the filters to see everything you are authorized for."
-                              : "Projects you are authorized to see appear here once onboarded."
+                              ? t("list.empty.filteredBody")
+                              : t("list.empty.body")
                           }
                         />
                       </div>
                     ) : (
                       <div
                         role="table"
-                        aria-label="Projects in your authorized scope"
+                        aria-label={t("list.table.label")}
                       >
                         <div
                           role="rowgroup"
@@ -556,19 +575,19 @@ function ProjectsInner() {
                             className={`px-7 py-3 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase ${ROW_GRID}`}
                           >
                             <span role="columnheader" className="pl-14">
-                              Project
+                              {t("list.table.project")}
                             </span>
                             <span role="columnheader">
-                              Criticality · health
+                              {t("list.table.criticalityHealth")}
                             </span>
                             <span role="columnheader" className="text-right">
-                              Envs
+                              {t("list.table.envs")}
                             </span>
                             <span role="columnheader" className="text-right">
-                              Services
+                              {t("list.table.services")}
                             </span>
                             <span role="columnheader">
-                              <span className="sr-only">Open</span>
+                              <span className="sr-only">{t("list.table.open")}</span>
                             </span>
                           </div>
                         </div>
@@ -597,8 +616,8 @@ function ProjectsInner() {
                           size="compact"
                         >
                           {projectsCollection.loadingMore
-                            ? "Loading…"
-                            : "Load more projects"}
+                            ? t("list.loading")
+                            : t("list.loadMoreProjects")}
                         </Button>
                       ) : null}
                       {!servicesCollection.complete ? (
@@ -609,8 +628,8 @@ function ProjectsInner() {
                           variant="secondary"
                         >
                           {servicesCollection.loadingMore
-                            ? "Loading…"
-                            : "Load more evidence"}
+                            ? t("list.loading")
+                            : t("list.loadMoreEvidence")}
                         </Button>
                       ) : null}
                     </div>
@@ -627,8 +646,8 @@ function ProjectsInner() {
                 className="motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards] [animation-delay:120ms]"
               >
                 <PanelHeader
-                  title="Portfolio risk"
-                  description="Recorded criticality against observed health."
+                  title={t("list.risk.title")}
+                  description={t("list.risk.description")}
                   level={2}
                 />
                 <ProjectRiskMap
@@ -645,15 +664,18 @@ function ProjectsInner() {
   );
 }
 
+function ProjectsFallback() {
+  const t = useT("catalog");
+  return (
+    <PageFrame>
+      <LoadingSkeleton variant="table" rows={5} label={t("load.projects")} />
+    </PageFrame>
+  );
+}
+
 export default function ProjectsPage() {
   return (
-    <Suspense
-      fallback={
-        <PageFrame>
-          <LoadingSkeleton variant="table" rows={5} label="Loading projects" />
-        </PageFrame>
-      }
-    >
+    <Suspense fallback={<ProjectsFallback />}>
       <ProjectsInner />
     </Suspense>
   );

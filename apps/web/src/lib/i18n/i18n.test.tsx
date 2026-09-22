@@ -58,7 +58,11 @@ describe("catalogue completeness", () => {
       for (const [k, v] of Object.entries(en)) {
         const other = (tr as Record<string, unknown>)[k];
         if (typeof v === "string") {
-          if (v === other && !allowed.test(v)) violations.push(`${prefix}${k} = ${JSON.stringify(v)}`);
+          // A template made only of placeholders and punctuation ("{count} {label}",
+          // "{name} · {scope}") has nothing to translate.
+          const withoutPlaceholders = v.replace(/\{[^}]*\}/g, "");
+          const templateOnly = !/[A-Za-z]/.test(withoutPlaceholders);
+          if (v === other && !templateOnly && !allowed.test(v)) violations.push(`${prefix}${k} = ${JSON.stringify(v)}`);
         } else walk(v as object, other as object, `${prefix}${k}.`);
       }
     };

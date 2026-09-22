@@ -45,8 +45,11 @@ import {
   PILL_SECONDARY,
   ReasonList,
   SignalCell,
+  STATUS_LABELS,
   StateCard,
   toneForServiceStatus,
+  useAge,
+  useSignalFormat,
 } from "@/components/service-health/primitives";
 import { Gauge, RingProgress } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
@@ -56,10 +59,9 @@ import {
   toneSpec,
   type StatusTone,
 } from "@/lib/design/status";
+import { useT, type Translator } from "@/lib/i18n";
 import {
   SIGNAL_LABELS,
-  formatAge,
-  formatSignal,
   type MetricSummary,
   type SeriesRange,
   type ServiceHealth,
@@ -78,18 +80,25 @@ const CHARTABLE: { signal: string; unit: string }[] = [
 const BIG_NUMBER =
   "text-[2.25rem] leading-none font-semibold tracking-[-0.03em] text-ink";
 
+function signalLabel(t: Translator<"serviceHealth">, name: string): string {
+  return t.dyn("signal", name, SIGNAL_LABELS[name] ?? name);
+}
+
 /**
  * One of the four sections behind the verdict, as a hero stat card: icon,
  * title and the section's own status chip; a big number and its visual;
  * the section's reasons as quiet pills underneath.
  */
 function SectionCard({
+  id,
   title,
   icon,
   status,
   reasons,
   children,
 }: {
+  /** The section's stable name — the test id, whatever language the title is in. */
+  id: "availability" | "stability" | "resources" | "application";
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   status: ServiceHealth["availability"]["status"];
@@ -98,7 +107,7 @@ function SectionCard({
 }) {
   const tone = toneForServiceStatus(status);
   return (
-    <Panel data-testid={`section-${title.toLowerCase()}`} className="h-full">
+    <Panel data-testid={`section-${id}`} className="h-full">
       <div className="flex items-start justify-between gap-3">
         <IconBubble
           icon={icon}
@@ -135,6 +144,8 @@ function UsageLine({
   ratio: number | null;
   thresholds: { warn: number; critical: number; direction: "above" } | null;
 }) {
+  const t = useT("serviceHealth");
+  const formatSignal = useSignalFormat();
   const tone: StatusTone =
     ratio === null
       ? "unknown"
@@ -151,10 +162,12 @@ function UsageLine({
       </div>
       <MiniMeter fraction={ratio} tone={tone} className="mt-1.5" />
       <span className="mt-1 block truncate text-micro text-ink-muted">
-        {formatSignal(used, unit)}
         {limit !== null
-          ? ` of ${formatSignal(limit, unit)}`
-          : " · no limit set"}
+          ? t("detail.resources.ofLimit", {
+              used: formatSignal(used, unit),
+              limit: formatSignal(limit, unit),
+            })
+          : `${formatSignal(used, unit)} · ${t("detail.resources.noLimit")}`}
       </span>
     </div>
   );
@@ -242,12 +255,14 @@ function Gate<T>({
   retry: () => void;
   children: (data: T) => React.ReactNode;
 }) {
+  const t = useT("serviceHealth");
+  const tc = useT("common");
   if (value.state === "loading") return <DataState kind="loading" />;
   if (value.state === "error") {
     const back = (
       <Link href="/service-health" className={PILL_SECONDARY}>
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-        Back to service health
+        {t("detail.back")}
       </Link>
     );
     return (
@@ -258,8 +273,8 @@ function Gate<T>({
           <div data-testid="state-not-found" role="status">
             <StateCard
               icon={SearchX}
-              title="Not found"
-              description="This resource does not exist in your authorized scope."
+              title={tc("state.notFound")}
+              description={t("detail.notFound.description")}
               action={back}
             />
           </div>
@@ -267,7 +282,7 @@ function Gate<T>({
           <StateCard
             icon={RotateCcw}
             tone="critical"
-            title="Health could not be loaded"
+            title={t("detail.loadFailed")}
             description={value.message}
             action={
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -277,7 +292,7 @@ function Gate<T>({
                   className={PILL_SECONDARY}
                 >
                   <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-                  Retry
+                  {tc("action.retry")}
                 </button>
                 {back}
               </div>
@@ -285,7 +300,7 @@ function Gate<T>({
           >
             {value.correlationId ? (
               <p className="text-center text-micro text-ink-muted">
-                Correlation ID:{" "}
+                {t("detail.correlationId")}{" "}
                 <span className="font-mono">{value.correlationId}</span>
               </p>
             ) : null}
@@ -298,6 +313,10 @@ function Gate<T>({
 }
 
 export default function ServiceHealthDetailPage() {
+  const t = useT("serviceHealth");
+  const tc = useT("common");
+  const formatSignal = useSignalFormat();
+  const age = useAge();
   const { bindingId } = useParams<{ bindingId: string }>();
   const [health, retryHealth] = useApi<ServiceHealth>(
     `/v1/service-health/bindings/${bindingId}/health`,
@@ -338,7 +357,7 @@ export default function ServiceHealthDetailPage() {
             <>
               <p className="mb-3 flex items-center gap-1.5 text-micro text-ink-muted">
                 <Link href="/service-health" className="hover:text-ink">
-                  Service health
+                  {t("detail.crumb")}
                 </Link>
                 <span>/</span>
                 <span className="font-mono text-ink-secondary">
@@ -368,7 +387,7 @@ export default function ServiceHealthDetailPage() {
                       {binding.workload_name}
                     </span>
                     <span>
-                      newest sample {formatAge(data.freshness_age_seconds)}
+                      {t("detail.newestSample", { age: age(data.freshness_age_seconds) })}
                     </span>
                   </>
                 }
@@ -378,7 +397,7 @@ export default function ServiceHealthDetailPage() {
                     className={PILL_SECONDARY}
                   >
                     <Pencil className="h-3.5 w-3.5" aria-hidden />
-                    Edit binding
+                    {t("detail.editBinding")}
                   </Link>
                 }
               />
@@ -395,7 +414,8 @@ export default function ServiceHealthDetailPage() {
                 {/* Hero row: the four sections behind the verdict. */}
                 <div className="page-grid">
                   <SectionCard
-                    title="Availability"
+                    id="availability"
+                    title={t("detail.section.availability")}
                     icon={ServerCog}
                     status={availability.status}
                     reasons={availability.reasons}
@@ -411,12 +431,12 @@ export default function ServiceHealthDetailPage() {
                           </span>
                         </span>
                         <span className="mt-1.5 block text-caption text-ink-muted">
-                          replicas ready
+                          {t("detail.availability.replicasReady")}
                         </span>
                       </span>
                       <RingProgress
                         size={60}
-                        label="Replicas ready"
+                        label={t("detail.availability.ring")}
                         value={
                           availability.desired_replicas
                             ? ((availability.ready_replicas ?? 0) /
@@ -429,13 +449,14 @@ export default function ServiceHealthDetailPage() {
                     </div>
                     {availability.scaled_to_zero ? (
                       <p className="rounded-full bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary">
-                        Scaled to zero — deliberately not running
+                        {t("detail.availability.scaledToZero")}
                       </p>
                     ) : null}
                   </SectionCard>
 
                   <SectionCard
-                    title="Stability"
+                    id="stability"
+                    title={t("detail.section.stability")}
                     icon={Activity}
                     status={stability.status}
                     reasons={stability.reasons}
@@ -445,14 +466,14 @@ export default function ServiceHealthDetailPage() {
                         {stability.restarts_in_window ?? "—"}
                       </span>
                       <span className="mt-1.5 block text-caption text-ink-muted">
-                        restarts in window
+                        {t("detail.stability.restartsInWindow")}
                       </span>
                     </span>
                     <div className="grid grid-cols-1 gap-2">
                       {(
                         [
-                          ["Crash loop", stability.crash_looping],
-                          ["OOM killed", stability.oom_killed],
+                          [t("detail.stability.crashLoop"), stability.crash_looping],
+                          [t("detail.stability.oomKilled"), stability.oom_killed],
                         ] as const
                       ).map(([label, flagged]) => (
                         <span
@@ -465,7 +486,7 @@ export default function ServiceHealthDetailPage() {
                         >
                           {label}
                           <span className="font-semibold">
-                            {flagged ? "Yes" : "No"}
+                            {flagged ? tc("state.yes") : tc("state.no")}
                           </span>
                         </span>
                       ))}
@@ -473,7 +494,8 @@ export default function ServiceHealthDetailPage() {
                   </SectionCard>
 
                   <SectionCard
-                    title="Resources"
+                    id="resources"
+                    title={t("detail.section.resources")}
                     icon={Cpu}
                     status={resources.status}
                     reasons={resources.reasons}
@@ -483,12 +505,12 @@ export default function ServiceHealthDetailPage() {
                         {formatSignal(resources.cpu_utilization, "ratio")}
                       </span>
                       <span className="mt-1.5 block text-caption text-ink-muted">
-                        CPU of limit
+                        {t("detail.resources.cpuOfLimit")}
                       </span>
                     </span>
                     <div className="space-y-3">
                       <UsageLine
-                        label="CPU"
+                        label={t("detail.resources.cpu")}
                         used={resources.cpu_cores_used}
                         limit={resources.cpu_limit_cores}
                         unit="cores"
@@ -496,7 +518,7 @@ export default function ServiceHealthDetailPage() {
                         thresholds={utilisation}
                       />
                       <UsageLine
-                        label="Memory"
+                        label={t("detail.resources.memory")}
                         used={resources.memory_bytes_used}
                         limit={resources.memory_limit_bytes}
                         unit="bytes"
@@ -507,7 +529,8 @@ export default function ServiceHealthDetailPage() {
                   </SectionCard>
 
                   <SectionCard
-                    title="Application"
+                    id="application"
+                    title={t("detail.section.application")}
                     icon={Globe}
                     status={application.status}
                     reasons={application.reasons}
@@ -519,13 +542,13 @@ export default function ServiceHealthDetailPage() {
                             {formatSignal(application.error_ratio, "ratio")}
                           </span>
                           <span className="mt-1.5 block text-caption text-ink-muted">
-                            error ratio
+                            {t("detail.application.errorRatio")}
                           </span>
                         </span>
                         <div className="grid grid-cols-1 gap-2">
                           <span className="flex items-center justify-between gap-2 rounded-full bg-surface-2 px-3.5 py-1.5 text-caption">
                             <span className="text-ink-secondary">
-                              Request rate
+                              {t("detail.application.requestRate")}
                             </span>
                             <Measure
                               value={application.request_rate}
@@ -534,7 +557,7 @@ export default function ServiceHealthDetailPage() {
                           </span>
                           <span className="flex items-center justify-between gap-2 rounded-full bg-surface-2 px-3.5 py-1.5 text-caption">
                             <span className="text-ink-secondary">
-                              Latency (p95)
+                              {t("detail.application.latencyP95")}
                             </span>
                             <Measure
                               value={application.latency_p95_seconds}
@@ -546,11 +569,10 @@ export default function ServiceHealthDetailPage() {
                     ) : (
                       <div className="rounded-[1rem] border border-dashed border-border px-4 py-3.5">
                         <p className="text-body font-semibold text-ink">
-                          No application metrics
+                          {t("detail.application.noMetrics")}
                         </p>
                         <p className="mt-0.5 text-caption text-ink-muted">
-                          No request metrics are published — not counted against
-                          its health.
+                          {t("detail.application.noMetricsNote")}
                         </p>
                       </div>
                     )}
@@ -569,15 +591,15 @@ export default function ServiceHealthDetailPage() {
                       </span>
                       <div className="min-w-0">
                         <h2 className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
-                          Why
+                          {t("detail.why.title")}
                         </h2>
                         <p className="text-caption text-ink-muted">
-                          The reasons behind the{" "}
-                          <span className="font-medium text-ink-secondary">
-                            {toneSpec(verdictTone).label.toLowerCase()}
-                          </span>{" "}
-                          verdict, from policy{" "}
-                          <span className="font-mono">{data.policy_key}</span>.
+                          {t("detail.why.description", {
+                            verdict: t
+                              .dyn("status", data.status, STATUS_LABELS[data.status])
+                              .toLocaleLowerCase(t.locale),
+                            policy: data.policy_key,
+                          })}
                         </p>
                       </div>
                     </div>
@@ -588,8 +610,7 @@ export default function ServiceHealthDetailPage() {
                           aria-hidden
                         />
                         <p className="text-caption text-ink-secondary">
-                          Every signal this policy reads is within its
-                          thresholds.
+                          {t("detail.why.allWithin")}
                         </p>
                       </div>
                     ) : (
@@ -603,25 +624,24 @@ export default function ServiceHealthDetailPage() {
                     <div className="mt-auto space-y-3 border-t border-border pt-4">
                       <MissingSignals missing={data.missing_signals} />
                       <p className="flex flex-wrap gap-x-4 gap-y-1 text-micro text-ink-muted">
+                        <span>{t("detail.why.computed", { when: data.computed_at })}</span>
                         <span>
-                          Computed{" "}
-                          <time className="font-mono">{data.computed_at}</time>
+                          {t("detail.why.newestSample", {
+                            age: age(data.freshness_age_seconds),
+                          })}
                         </span>
-                        <span>
-                          Newest sample {formatAge(data.freshness_age_seconds)}
-                        </span>
-                        {data.cached ? <span>From cache</span> : null}
+                        {data.cached ? <span>{t("detail.why.fromCache")}</span> : null}
                       </p>
                     </div>
                   </Panel>
 
                   <Panel className="h-full">
                     <PanelHeader
-                      title="Resource pressure"
+                      title={t("detail.pressure.title")}
                       description={
                         resources.limits_configured === false
-                          ? "No limits configured — usage is reported, pressure is not judged."
-                          : "Utilisation against configured limits."
+                          ? t("detail.pressure.noLimits")
+                          : t("detail.pressure.withLimits")
                       }
                     />
                     {/* Utilisation against a limit is exactly what a gauge is
@@ -631,66 +651,48 @@ export default function ServiceHealthDetailPage() {
                       <div className="flex justify-center rounded-[1.125rem] bg-surface-2 px-2 py-4">
                         <Gauge
                           size="compact"
-                          label="CPU"
+                          label={t("detail.pressure.cpu")}
                           unit="ratio"
                           value={resources.cpu_utilization}
                           thresholds={utilisation}
-                          missingReason="not measured"
+                          missingReason={t("detail.pressure.notMeasured")}
                           caption={
-                            resources.cpu_limit_cores !== null ? (
-                              <>
-                                <Measure
-                                  value={resources.cpu_cores_used}
-                                  unit="cores"
-                                />{" "}
-                                of{" "}
-                                <Measure
-                                  value={resources.cpu_limit_cores}
-                                  unit="cores"
-                                />
-                              </>
-                            ) : (
-                              "no limit set"
-                            )
+                            resources.cpu_limit_cores !== null
+                              ? t("detail.resources.ofLimit", {
+                                  used: formatSignal(resources.cpu_cores_used, "cores"),
+                                  limit: formatSignal(resources.cpu_limit_cores, "cores"),
+                                })
+                              : t("detail.resources.noLimit")
                           }
                         />
                       </div>
                       <div className="flex justify-center rounded-[1.125rem] bg-surface-2 px-2 py-4">
                         <Gauge
                           size="compact"
-                          label="Memory"
+                          label={t("detail.pressure.memory")}
                           unit="ratio"
                           value={resources.memory_utilization}
                           thresholds={utilisation}
-                          missingReason="not measured"
+                          missingReason={t("detail.pressure.notMeasured")}
                           caption={
-                            resources.memory_limit_bytes !== null ? (
-                              <>
-                                <Measure
-                                  value={resources.memory_bytes_used}
-                                  unit="bytes"
-                                />{" "}
-                                of{" "}
-                                <Measure
-                                  value={resources.memory_limit_bytes}
-                                  unit="bytes"
-                                />
-                              </>
-                            ) : (
-                              "no limit set"
-                            )
+                            resources.memory_limit_bytes !== null
+                              ? t("detail.resources.ofLimit", {
+                                  used: formatSignal(resources.memory_bytes_used, "bytes"),
+                                  limit: formatSignal(resources.memory_limit_bytes, "bytes"),
+                                })
+                              : t("detail.resources.noLimit")
                           }
                         />
                       </div>
                       <div className="flex justify-center rounded-[1.125rem] bg-surface-2 px-2 py-4">
                         <Gauge
                           size="compact"
-                          label="CPU throttling"
+                          label={t("detail.pressure.throttling")}
                           unit="ratio"
                           value={resources.cpu_throttled_ratio}
                           thresholds={THROTTLE_THRESHOLDS}
-                          missingReason="not measured"
-                          caption="periods throttled"
+                          missingReason={t("detail.pressure.notMeasured")}
+                          caption={t("detail.pressure.throttledPeriods")}
                         />
                       </div>
                     </div>
@@ -698,16 +700,16 @@ export default function ServiceHealthDetailPage() {
                 </div>
 
                 {chartable.length > 0 ? (
-                  <section aria-label="Signal history" className="space-y-4">
+                  <section aria-label={t("detail.history.title")} className="space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <IconBubble icon={GaugeIcon} />
                         <div>
                           <h2 className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
-                            Signal history
+                            {t("detail.history.title")}
                           </h2>
                           <p className="text-caption text-ink-muted">
-                            Only the signals this binding&apos;s preset reads.
+                            {t("detail.history.description")}
                           </p>
                         </div>
                       </div>
@@ -717,8 +719,8 @@ export default function ServiceHealthDetailPage() {
                       {chartable.map((entry) => (
                         <Panel key={entry.signal}>
                           <PanelHeader
-                            title={SIGNAL_LABELS[entry.signal] ?? entry.signal}
-                            meta={<span>last {range}</span>}
+                            title={t.dyn("signal", entry.signal, SIGNAL_LABELS[entry.signal] ?? entry.signal)}
+                            meta={<span>{t("detail.history.last", { range })}</span>}
                           />
                           <SignalChart
                             bindingId={binding.id}
@@ -741,13 +743,13 @@ export default function ServiceHealthDetailPage() {
                 <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   <Panel className="h-full">
                     <PanelHeader
-                      title="Binding"
-                      description="What this service is measured as."
+                      title={t("detail.binding.title")}
+                      description={t("detail.binding.description")}
                     />
                     <DefinitionGrid
                       items={[
                         {
-                          label: "Workload",
+                          label: t("detail.binding.workload"),
                           value: (
                             <span className="font-mono">
                               {binding.workload_kind}/{binding.workload_name}
@@ -755,7 +757,7 @@ export default function ServiceHealthDetailPage() {
                           ),
                         },
                         {
-                          label: "Cluster · namespace",
+                          label: t("detail.binding.clusterNamespace"),
                           value: (
                             <span className="font-mono">
                               {binding.cluster_ref} · {binding.namespace}
@@ -763,7 +765,7 @@ export default function ServiceHealthDetailPage() {
                           ),
                         },
                         {
-                          label: "Metric preset",
+                          label: t("detail.binding.preset"),
                           value: (
                             <span className="font-mono">
                               {binding.preset_key}
@@ -771,7 +773,7 @@ export default function ServiceHealthDetailPage() {
                           ),
                         },
                         {
-                          label: "Health policy",
+                          label: t("detail.binding.policy"),
                           value: (
                             <span className="font-mono">
                               {binding.health_policy_key}
@@ -779,16 +781,16 @@ export default function ServiceHealthDetailPage() {
                           ),
                         },
                         {
-                          label: "Datasource",
+                          label: t("detail.binding.datasource"),
                           value: binding.datasource_configured
-                            ? "Configured"
-                            : "Not configured",
+                            ? t("detail.binding.configured")
+                            : t("detail.binding.notConfigured"),
                         },
                         {
-                          label: "Resolved",
+                          label: t("detail.binding.resolved"),
                           value: binding.resolved
-                            ? (binding.resolved_at ?? "yes")
-                            : "not seen in cluster inventory",
+                            ? (binding.resolved_at ?? t("detail.binding.resolvedYes"))
+                            : t("detail.binding.unresolved"),
                         },
                       ]}
                     />
@@ -798,51 +800,51 @@ export default function ServiceHealthDetailPage() {
                     <Panel flush className="h-full">
                       <PanelHeader
                         flush
-                        title="Signals"
-                        description="The latest reading of every signal, with its state."
+                        title={t("detail.signals.title")}
+                        description={t("detail.signals.description")}
                       />
                       <ul className="divide-y divide-border py-1">
                         <SignalRow
-                          label={SIGNAL_LABELS.desired_replicas}
+                          label={signalLabel(t, "desired_replicas")}
                           signal={
                             summary.data.metrics.availability.desired_replicas
                           }
                           unit="count"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.ready_replicas}
+                          label={signalLabel(t, "ready_replicas")}
                           signal={
                             summary.data.metrics.availability.ready_replicas
                           }
                           unit="count"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.restarts}
+                          label={signalLabel(t, "restarts")}
                           signal={summary.data.metrics.stability.restarts}
                           unit="count"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.cpu_usage}
+                          label={signalLabel(t, "cpu_usage")}
                           signal={summary.data.metrics.resources.cpu_usage}
                           unit="cores"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.memory_usage}
+                          label={signalLabel(t, "memory_usage")}
                           signal={summary.data.metrics.resources.memory_usage}
                           unit="bytes"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.request_rate}
+                          label={signalLabel(t, "request_rate")}
                           signal={summary.data.metrics.application.request_rate}
                           unit="requests_per_second"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.error_ratio}
+                          label={signalLabel(t, "error_ratio")}
                           signal={summary.data.metrics.application.error_ratio}
                           unit="ratio"
                         />
                         <SignalRow
-                          label={SIGNAL_LABELS.freshness}
+                          label={signalLabel(t, "freshness")}
                           signal={summary.data.metrics.freshness}
                           unit="ratio"
                         />

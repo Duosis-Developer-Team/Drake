@@ -12,9 +12,54 @@
 
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 
 import { humanize, toneForHealth, toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import type { OperationalState } from "@/lib/catalog";
+
+/**
+ * A design tone as the word a person reads, in the current locale.
+ * `toneSpec(tone).label` is the English fallback the catalogue mirrors.
+ */
+export function useToneLabel(): (tone: StatusTone) => string {
+  const t = useT("catalog");
+  return useCallback((tone: StatusTone) => t.dyn("tone", tone, toneSpec(tone).label), [t]);
+}
+
+/**
+ * A service-health status word in the current locale.
+ *
+ * The lane view model hands components an already-humanized English label
+ * (`"Insufficient data"`), not the backend token, so the token is recovered
+ * from it and looked up in the service-health area's `status.*` keys; the
+ * English label stays the fallback until that catalogue has the word.
+ */
+export function useServiceStatusLabel(): (label: string) => string {
+  const t = useT("serviceHealth");
+  return useCallback(
+    (label: string) => t.dyn("status", label.trim().toLowerCase().replace(/\s+/g, "_"), label),
+    [t],
+  );
+}
+
+/**
+ * A relative time for use inside a sentence (`"accepted {when}"`), safe to
+ * hydrate: the server has no clock the client agrees with, so the first
+ * render prints the UTC instant and the mounted client swaps in "4m ago".
+ * Standalone timestamps keep using `RelativeTime`, which does the same.
+ */
+export function useWhen(): (value: string | null | undefined) => string {
+  const fmt = useFormat();
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
+  return useCallback(
+    (value: string | null | undefined) => (now ? fmt.relative(value, now) : fmt.utc(value)),
+    [fmt, now],
+  );
+}
 
 export const BIG_NUMBER =
   "text-[2.25rem] leading-none font-semibold tracking-[-0.03em] text-ink";
@@ -109,13 +154,15 @@ export function ToneBar({
   counts,
   label,
   legend = true,
-  emptyLabel = "Nothing observed yet",
+  emptyLabel: emptyOverride,
 }: {
   counts: ToneCount[];
   label: string;
   legend?: boolean;
   emptyLabel?: string;
 }) {
+  const t = useT("catalog");
+  const emptyLabel = emptyOverride ?? t("toneBar.empty");
   const drawn = counts.filter((entry) => entry.count > 0);
   const total = drawn.reduce((sum, entry) => sum + entry.count, 0);
   return (
@@ -174,6 +221,7 @@ export function MiniBars({
   label: string;
   limit?: number;
 }) {
+  const common = useT("common");
   const max = Math.max(1, ...items.map((item) => item.value));
   const shown = [...items].sort((a, b) => b.value - a.value).slice(0, limit);
   return (
@@ -193,7 +241,7 @@ export function MiniBars({
         </li>
       ))}
       {items.length > limit ? (
-        <li className="text-micro text-ink-muted">+{items.length - limit} more</li>
+        <li className="text-micro text-ink-muted">{common("count.more", { count: items.length - limit })}</li>
       ) : null}
     </ul>
   );
@@ -207,6 +255,15 @@ export function capabilityTone(state: OperationalState | string): StatusTone {
 
 export function capabilityLabel(state: OperationalState | string): string {
   return state === "ok" ? "Reporting" : humanize(state);
+}
+
+/** `capabilityLabel` in the current locale; the English word is the fallback. */
+export function useCapabilityLabel(): (state: OperationalState | string) => string {
+  const t = useT("catalog");
+  return useCallback(
+    (state: OperationalState | string) => t.dyn("capability.state", state, capabilityLabel(state)),
+    [t],
+  );
 }
 
 /**
@@ -224,6 +281,7 @@ export function CapabilityTile({
   state: OperationalState | string;
   href?: string | null;
 }) {
+  const stateLabel = useCapabilityLabel();
   const tone = capabilityTone(state);
   const spec = toneSpec(tone);
   const StateIcon = spec.icon;
@@ -235,7 +293,7 @@ export function CapabilityTile({
         <span className="block truncate text-body font-semibold text-ink">{label}</span>
         <span className={`mt-0.5 inline-flex items-center gap-1 text-micro font-medium ${configured ? spec.text : "text-ink-muted"}`}>
           <StateIcon aria-hidden className="h-3 w-3" />
-          {capabilityLabel(state)}
+          {stateLabel(state)}
         </span>
       </span>
     </>

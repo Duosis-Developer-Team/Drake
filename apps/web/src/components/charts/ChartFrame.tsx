@@ -32,8 +32,9 @@ import {
 } from "@/components/ui/states";
 import { FreshnessIndicator } from "@/components/ui/identifiers";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
-import { MISSING, formatUnit, formatUtc } from "@/lib/design/format";
+import { MISSING, formatUnit } from "@/lib/design/format";
 import { SERIES_DASH, SERIES_TOKENS } from "@/lib/design/tokens";
+import { useFormat, useLocale, useT } from "@/lib/i18n";
 
 export type ChartStatus =
   | "loading"
@@ -80,6 +81,7 @@ export function ChartLegend({
   onToggle?: (name: string) => void;
   unit: string;
 }) {
+  const { locale } = useLocale();
   if (series.length < 2 && !onToggle) return null;
   return (
     <ul className="flex flex-wrap items-center gap-2" data-testid="chart-legend">
@@ -97,7 +99,7 @@ export function ChartLegend({
                 y1="4"
                 x2="16"
                 y2="4"
-                stroke={`var(--${token})`}
+                stroke={`var(--${token})`} // i18n-ignore: CSS
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeDasharray={dash ? dash.map((part) => part * 0.6).join(" ") : undefined}
@@ -105,7 +107,7 @@ export function ChartLegend({
             </svg>
             <span className={`truncate ${isHidden ? "line-through" : ""}`}>{entry.name}</span>
             <span data-tabular className="font-semibold text-ink">
-              {formatUnit(entry.latest, unit)}
+              {formatUnit(entry.latest, unit, {}, locale)}
             </span>
           </>
         );
@@ -183,6 +185,9 @@ export function ChartFrame({
   height?: number;
   children: React.ReactNode;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
+  const fmt = useFormat();
   const meta = (
     <>
       <span className="inline-flex h-5 items-center rounded-full bg-surface-2 px-2 font-medium text-ink-secondary">
@@ -190,12 +195,12 @@ export function ChartFrame({
       </span>
       {chartWindow ? (
         <span data-tabular>
-          {formatUtc(chartWindow.from)} → {formatUtc(chartWindow.to)}
+          {fmt.utc(chartWindow.from)} → {fmt.utc(chartWindow.to)}
         </span>
       ) : null}
       {chartWindow?.stepAdjusted && chartWindow.stepSeconds ? (
         <span className="inline-flex h-5 items-center rounded-full bg-warning-soft px-2 font-medium text-warning">
-          step widened to {chartWindow.stepSeconds}s
+          {t("chart.stepWidened", { seconds: chartWindow.stepSeconds })}
         </span>
       ) : null}
       {asOf !== undefined ? <FreshnessIndicator asOf={asOf} state={freshness} /> : null}
@@ -223,7 +228,15 @@ export function ChartFrame({
       {status === "ready" && partial ? <PartialBanner /> : null}
 
       {status === "loading" ? (
-        <LoadingSkeleton variant="chart" height={height} label={`Loading ${title}`} />
+        <LoadingSkeleton
+          variant="chart"
+          height={height}
+          label={
+            typeof title === "string"
+              ? common("state.loadingDetail", { what: title })
+              : common("state.loading")
+          }
+        />
       ) : null}
       {status === "denied" ? placeholder(<DeniedState compact layout="centered" />) : null}
       {status === "not-configured"
@@ -265,7 +278,7 @@ export function ChartFrame({
                 <details className="group ml-auto flex flex-col items-end text-micro text-ink-muted open:basis-full">
                   <summary className="inline-flex h-8 cursor-pointer list-none items-center gap-1.5 self-end rounded-full border border-border bg-surface px-3 text-caption font-medium text-ink-secondary transition-colors select-none hover:bg-surface-hover hover:text-ink [&::-webkit-details-marker]:hidden">
                     <Table2 aria-hidden className="h-3.5 w-3.5" />
-                    View as table
+                    {t("chart.viewAsTable")}
                     <ChevronDown
                       aria-hidden
                       className="h-3.5 w-3.5 transition-transform duration-[var(--duration-control)] group-open:rotate-180"
@@ -294,19 +307,21 @@ export function ChartDataTable({
   categories,
   series,
   unit,
-  categoryHeader = "Time",
+  categoryHeader,
 }: {
   categories: string[];
   series: { name: string; values: (number | null)[] }[];
   unit: string;
   categoryHeader?: string;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   return (
     <table className="w-full text-left text-caption" data-tabular>
       <thead className="sticky top-0 bg-surface-2 text-micro tracking-[0.08em] text-ink-muted uppercase">
         <tr>
           <th scope="col" className="px-4 py-2.5 font-medium">
-            {categoryHeader}
+            {categoryHeader ?? t("chart.timeColumn")}
           </th>
           {series.map((entry) => (
             <th key={entry.name} scope="col" className="px-4 py-2.5 text-right font-medium">
@@ -325,7 +340,9 @@ export function ChartDataTable({
               const value = entry.values[index];
               return (
                 <td key={entry.name} className="px-4 py-2 text-right font-medium text-ink">
-                  {value === null || value === undefined ? MISSING : formatUnit(value, unit)}
+                  {value === null || value === undefined
+                    ? MISSING
+                    : formatUnit(value, unit, {}, locale)}
                 </td>
               );
             })}

@@ -14,6 +14,7 @@ import { formatUnit } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";
 import { SERIES_TOKENS } from "@/lib/design/tokens";
+import { useLocale, useT } from "@/lib/i18n";
 
 /**
  * One horizontal stacked bar: a composition, in a single row.
@@ -31,11 +32,13 @@ export function CompositionBar({
   unit?: string;
   label: string;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const total = segments.reduce((sum, entry) => sum + entry.value, 0);
   if (total === 0) {
     return (
       <p className="text-caption text-ink-muted" data-testid="composition-empty">
-        Nothing to break down — every bucket is zero.
+        {t("visual.nothingToBreakDown")}
       </p>
     );
   }
@@ -80,7 +83,7 @@ export function CompositionBar({
             />
             {entry.name}
             <span data-tabular className="text-ink">
-              {formatUnit(entry.value, unit)}
+              {formatUnit(entry.value, unit, {}, locale)}
             </span>
           </li>
         ))}
@@ -112,6 +115,8 @@ export function CapacityBar({
   /** Where to draw the warn/critical ticks, as fractions of the total. */
   thresholdRatios?: { warn?: number; critical?: number };
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const known = used !== null && total !== null && total > 0;
   const ratio = known ? Math.min(1, used / total) : 0;
   const spec = toneSpec(tone);
@@ -122,10 +127,13 @@ export function CapacityBar({
         <span data-tabular className="text-caption text-ink">
           {known ? (
             <>
-              {formatUnit(used, unit)} <span className="text-ink-muted">of {formatUnit(total, unit)}</span>
+              {formatUnit(used, unit, {}, locale)}{" "}
+              <span className="text-ink-muted">
+                {t("visual.of", { total: formatUnit(total, unit, {}, locale) })}
+              </span>
             </>
           ) : (
-            <span className="text-ink-muted">not reported</span>
+            <span className="text-ink-muted">{t("visual.notReported")}</span>
           )}
         </span>
       </div>

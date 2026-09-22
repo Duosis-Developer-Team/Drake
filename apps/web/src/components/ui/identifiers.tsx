@@ -18,7 +18,8 @@
 import { Check, Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { MISSING, formatRelative, formatUtc } from "@/lib/design/format";
+import { MISSING } from "@/lib/design/format";
+import { useFormat, useT } from "@/lib/i18n";
 
 export function InlineCode({
   children,
@@ -55,6 +56,7 @@ export function CopyableIdentifier({
   truncate?: number;
   className?: string;
 }) {
+  const t = useT("ui");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -88,7 +90,7 @@ export function CopyableIdentifier({
       <button
         type="button"
         onClick={copy}
-        aria-label={copied ? `${label} copied` : `Copy ${label}`}
+        aria-label={copied ? t("copy.done", { label }) : t("copy.action", { label })}
         className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
       >
         {copied ? (
@@ -98,7 +100,7 @@ export function CopyableIdentifier({
         )}
       </button>
       <span aria-live="polite" className="sr-only">
-        {copied ? `${label} copied to clipboard` : ""}
+        {copied ? t("copy.announce", { label }) : ""}
       </span>
     </span>
   );
@@ -148,6 +150,7 @@ export function RelativeTime({
   value: string | null | undefined;
   className?: string;
 }) {
+  const fmt = useFormat();
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -156,10 +159,10 @@ export function RelativeTime({
   }, []);
 
   if (!value) return <span className="text-ink-muted">{MISSING}</span>;
-  const absolute = formatUtc(value);
+  const absolute = fmt.utc(value);
   return (
     <time dateTime={value} title={absolute} className={`whitespace-nowrap ${className}`}>
-      {now ? formatRelative(value, now) : absolute}
+      {now ? fmt.relative(value, now) : absolute}
       <span className="sr-only"> ({absolute})</span>
     </time>
   );
@@ -173,10 +176,11 @@ export function Timestamp({
   value: string | null | undefined;
   className?: string;
 }) {
+  const fmt = useFormat();
   if (!value) return <span className="text-ink-muted">{MISSING}</span>;
   return (
     <time dateTime={value} className={`font-mono text-micro whitespace-nowrap ${className}`}>
-      {formatUtc(value)}
+      {fmt.utc(value)}
     </time>
   );
 }
@@ -198,6 +202,7 @@ export function FreshnessIndicator({
   state?: "fresh" | "stale" | "unknown" | "not_configured" | string | null;
   source?: string | null;
 }) {
+  const t = useT("ui");
   const stale = state === "stale";
   const unknown = state === "unknown" || !asOf;
   const dot = stale ? "bg-stale" : unknown ? "bg-unknown" : "bg-ink-muted";
@@ -210,10 +215,10 @@ export function FreshnessIndicator({
     >
       <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
       {unknown ? (
-        <>freshness unknown</>
+        <>{t("freshness.unknown")}</>
       ) : (
         <>
-          {stale ? "stale as of" : "as of"} <RelativeTime value={asOf} />
+          {stale ? t("freshness.staleAsOf") : t("freshness.asOf")} <RelativeTime value={asOf} />
         </>
       )}
       {source ? <span className="text-ink-muted">· {source}</span> : null}

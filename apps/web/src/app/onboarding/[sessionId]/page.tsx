@@ -20,12 +20,13 @@ import { useRef, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { LoadGate, MetaRow, useApi } from "@/components/catalog/primitives";
+import { RichMessage } from "@/components/github/primitives";
 import { ActionBadge, GitOpsBadge, SessionBadge } from "@/components/onboarding/primitives";
 import { SessionActions } from "@/components/onboarding/SessionActions";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { useFormat, useT, type Translator } from "@/lib/i18n";
 import {
-  formatAge,
   shortSha,
   type Analysis,
   type ApplyResult,
@@ -47,25 +48,25 @@ import { useSession } from "@/lib/session";
  * grouping that could mislead: an item that rewrites a display name is not
  * a no-op, and filing it under one hides the only part of an apply that
  * edits an existing row.
+ *
+ * Each group is keyed by its first action; the title lives at
+ * `detail.plan.group.<key>` and an optional note at `detail.plan.note.<key>`.
  */
-const GROUPS: { title: string; actions: string[]; note?: string }[] = [
-  { title: "Would create", actions: ["create"] },
-  { title: "Would link to an existing catalog row", actions: ["link"] },
-  {
-    title: "Would update metadata",
-    actions: ["update_metadata"],
-    note: "These rewrite fields on rows that already exist. Approving accepts these exact values.",
-  },
-  { title: "No change", actions: ["no_change"] },
-  {
-    title: "Needs a decision",
-    actions: ["conflict", "unmapped", "unsupported"],
-    note: "Apply is blocked until each of these is resolved. Drake refuses to choose rather than filing something under the wrong project.",
-  },
+const GROUPS: {
+  key: "create" | "link" | "update_metadata" | "no_change" | "conflict";
+  actions: string[];
+  note?: "update_metadata" | "conflict";
+}[] = [
+  { key: "create", actions: ["create"] },
+  { key: "link", actions: ["link"] },
+  { key: "update_metadata", actions: ["update_metadata"], note: "update_metadata" },
+  { key: "no_change", actions: ["no_change"] },
+  { key: "conflict", actions: ["conflict", "unmapped", "unsupported"], note: "conflict" },
 ];
 
 /** Before and after, side by side. Never a raw JSON blob. */
 function Changes({ item }: { item: PlanItem }) {
+  const t = useT("onboarding");
   const fields = Object.entries(item.changes ?? {});
   if (fields.length === 0) return null;
   return (
@@ -75,12 +76,12 @@ function Changes({ item }: { item: PlanItem }) {
           <dt className="font-mono text-ink-secondary">{field}</dt>
           <dd className="ml-3 flex flex-wrap gap-x-3">
             <span className="text-ink-muted">
-              before:{" "}
-              <span className="font-mono text-ink-secondary">{renderValue(pair.before)}</span>
+              {t("detail.plan.before")}{" "}
+              <span className="font-mono text-ink-secondary">{renderValue(pair.before, t)}</span>
             </span>
             <span className="text-ink-muted">
-              after:{" "}
-              <span className="font-mono text-ink">{renderValue(pair.after)}</span>
+              {t("detail.plan.after")}{" "}
+              <span className="font-mono text-ink">{renderValue(pair.after, t)}</span>
             </span>
           </dd>
         </div>
@@ -97,16 +98,20 @@ function Changes({ item }: { item: PlanItem }) {
  * `""` would make "there was no display name" look like "the display name
  * was blank".
  */
-function renderValue(value: unknown): string {
+function renderValue(value: unknown, t: Translator<"onboarding">): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string") return value === "" ? "—" : value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   // Objects and arrays are summarised, never dumped: a plan review is not a
   // place to read serialized JSON.
-  return Array.isArray(value) ? `${value.length} item(s)` : "(structured value)";
+  return Array.isArray(value)
+    ? t("detail.plan.listValue", { count: value.length })
+    : t("detail.plan.structuredValue");
 }
 
 export default function OnboardingSessionPage() {
+  const t = useT("onboarding");
+  const fmt = useFormat();
   const { sessionId } = useParams<{ sessionId: string }>();
   const { state: auth } = useSession();
   const csrfToken = auth.status === "authenticated" ? auth.me.csrf_token : "";
@@ -157,12 +162,12 @@ export default function OnboardingSessionPage() {
             <div className="space-y-6">
               {data.repository.security_gate ? (
                 <Panel tone="critical">
-                  <PanelHeader title="Security gate" />
+                  <PanelHeader title={t("detail.gate.title")} />
                   <div data-testid="security-gate">
                     <DataState
                       kind="permission-denied"
-                      title="Closed by a manual security gate"
-                      description="This repository cannot be onboarded until an operator closes the gate. Drake makes no provider call and issues no token for it."
+                      title={t("detail.gate.cardTitle")}
+                      description={t("detail.gate.description")}
                     />
                   </div>
                 </Panel>
@@ -170,12 +175,12 @@ export default function OnboardingSessionPage() {
 
               {data.state === "stale" ? (
                 <Panel tone="warning">
-                  <PanelHeader title="Out of date" />
+                  <PanelHeader title={t("detail.stale.title")} />
                   <div data-testid="stale-notice">
                     <DataState
                       kind="stale"
-                      title="The repository moved"
-                      description="This plan describes a commit that is no longer the branch head. A review of a commit is not a review of its successor, so it cannot be applied. Analyse again."
+                      title={t("detail.stale.cardTitle")}
+                      description={t("detail.stale.description")}
                     />
                   </div>
                 </Panel>
@@ -194,7 +199,7 @@ export default function OnboardingSessionPage() {
 
               <div className="grid gap-6 md:grid-cols-2">
                 <Panel>
-                  <PanelHeader title="Safe discovery" />
+                  <PanelHeader title={t("detail.discovery.title")} />
                   {findings.state === "loading" ? (
                     <DataState kind="loading" />
                   ) : findings.state === "error" ? (
@@ -202,55 +207,54 @@ export default function OnboardingSessionPage() {
                   ) : findings.data.analysis === null ? (
                     <DataState
                       kind="empty"
-                      title="Not analysed yet"
-                      description="No repository has been read for this session."
+                      title={t("detail.discovery.notAnalysed.title")}
+                      description={t("detail.discovery.notAnalysed.description")}
                     />
                   ) : (
                     <div data-testid="analysis">
                       <dl className="divide-y divide-border">
-                        <MetaRow label="Commit">
+                        <MetaRow label={t("detail.discovery.commit")}>
                           {shortSha(findings.data.analysis.commit_sha)}
                         </MetaRow>
-                        <MetaRow label="Files read">
+                        <MetaRow label={t("detail.discovery.filesRead")}>
                           {String(findings.data.analysis.files_read)}
                         </MetaRow>
-                        <MetaRow label="Manifest">
-                          {findings.data.analysis.manifest_found ? "found" : "absent"}
+                        <MetaRow label={t("detail.discovery.manifest")}>
+                          {findings.data.analysis.manifest_found
+                            ? t("detail.discovery.found")
+                            : t("detail.discovery.absent")}
                         </MetaRow>
-                        <MetaRow label="Analysed">
-                          {formatAge(findings.data.analysis.analyzed_at)}
+                        <MetaRow label={t("detail.discovery.analysed")}>
+                          {fmt.relative(findings.data.analysis.analyzed_at)}
                         </MetaRow>
                       </dl>
                       {findings.data.analysis.truncated ? (
                         <div className="mt-2" data-testid="analysis-truncated">
                           <DataState
                             kind="partial"
-                            title="Partial analysis"
-                            description="The analysis stopped at a budget, so this describes part of the repository. It is not a complete picture."
+                            title={t("detail.discovery.partial.title")}
+                            description={t("detail.discovery.partial.description")}
                           />
                         </div>
                       ) : null}
-                      <p className="mt-3 text-xs text-ink-muted">
-                        Paths and digests only. Drake stores no file content, and never reads
-                        environment files, private keys, credentials or cluster configuration.
-                      </p>
+                      <p className="mt-3 text-xs text-ink-muted">{t("detail.discovery.pathsOnly")}</p>
                     </div>
                   )}
                 </Panel>
 
                 <Panel>
-                  <PanelHeader title="Session" />
+                  <PanelHeader title={t("detail.session.title")} />
                   <dl className="divide-y divide-border">
-                    <MetaRow label="State">{data.state}</MetaRow>
-                    <MetaRow label="Plan version">
+                    <MetaRow label={t("detail.session.state")}>{data.state}</MetaRow>
+                    <MetaRow label={t("detail.session.planVersion")}>
                       {data.plan ? `v${data.plan.plan_version}` : "—"}
                     </MetaRow>
-                    <MetaRow label="Approved">
+                    <MetaRow label={t("detail.session.approved")}>
                       {data.approved_at
-                        ? `v${data.approved_plan_version} · ${formatAge(data.approved_at)}`
-                        : "not approved"}
+                        ? `v${data.approved_plan_version} · ${fmt.relative(data.approved_at)}`
+                        : t("detail.session.notApproved")}
                     </MetaRow>
-                    <MetaRow label="Imported">
+                    <MetaRow label={t("detail.session.imported")}>
                       {data.imported_project_key ? (
                         <Link
                           href={`/projects/${data.imported_project_id}`}
@@ -259,7 +263,7 @@ export default function OnboardingSessionPage() {
                           {data.imported_project_key}
                         </Link>
                       ) : (
-                        "not imported"
+                        t("detail.session.notImported")
                       )}
                     </MetaRow>
                   </dl>
@@ -270,7 +274,7 @@ export default function OnboardingSessionPage() {
               </div>
 
               <Panel>
-                <PanelHeader title="Proposed changes" />
+                <PanelHeader title={t("detail.plan.title")} />
                 {plan.state === "loading" ? (
                   <DataState kind="loading" />
                 ) : plan.state === "error" ? (
@@ -278,8 +282,8 @@ export default function OnboardingSessionPage() {
                 ) : plan.data.plan === null ? (
                   <DataState
                     kind="empty"
-                    title="No plan yet"
-                    description="Analyse the repository to produce a proposal."
+                    title={t("detail.plan.empty.title")}
+                    description={t("detail.plan.empty.description")}
                   />
                 ) : (
                   <div className="space-y-5" data-testid="plan">
@@ -292,21 +296,32 @@ export default function OnboardingSessionPage() {
                     */}
                     <div className="flex min-w-0 flex-wrap gap-4 rounded-2xl bg-surface-2 px-4 py-3 text-caption text-ink-secondary">
                       <span>
-                        Plan <span className="font-mono">v{plan.data.plan.plan_version}</span>
+                        <RichMessage
+                          template={t("detail.plan.version")}
+                          parts={{
+                            version: <span className="font-mono">v{plan.data.plan.plan_version}</span>,
+                          }}
+                        />
                       </span>
                       <span>
-                        Commit{" "}
-                        <span className="font-mono">
-                          {shortSha(plan.data.plan.commit_sha)}
-                        </span>
+                        <RichMessage
+                          template={t("detail.plan.commit")}
+                          parts={{
+                            sha: <span className="font-mono">{shortSha(plan.data.plan.commit_sha)}</span>,
+                          }}
+                        />
                       </span>
                       <span>
-                        Digest{" "}
-                        <span className="font-mono break-all">
-                          {plan.data.plan.plan_digest}
-                        </span>
+                        <RichMessage
+                          template={t("detail.plan.digest")}
+                          parts={{
+                            digest: (
+                              <span className="font-mono break-all">{plan.data.plan.plan_digest}</span>
+                            ),
+                          }}
+                        />
                       </span>
-                      <span>{plan.data.plan.total_items} items</span>
+                      <span>{t("detail.plan.items", { count: plan.data.plan.total_items })}</span>
                     </div>
 
                     {GROUPS.map((group) => {
@@ -315,8 +330,10 @@ export default function OnboardingSessionPage() {
                       );
                       if (items.length === 0) return null;
                       return (
-                        <div key={group.title} data-testid={`plan-group-${group.actions[0]}`}>
-                          <p className="mb-2 text-caption font-medium text-ink">{group.title}</p>
+                        <div key={group.key} data-testid={`plan-group-${group.actions[0]}`}>
+                          <p className="mb-2 text-caption font-medium text-ink">
+                            {t(`detail.plan.group.${group.key}`)}
+                          </p>
                           <ul className="space-y-1.5">
                             {items.map((item) => (
                               <li
@@ -341,7 +358,7 @@ export default function OnboardingSessionPage() {
                                     className="text-[11px] text-ink-muted"
                                     data-testid="deployment-source-note"
                                   >
-                                    Recorded as evidence only — no catalog row is written for it.
+                                    {t("detail.plan.evidenceOnly")}
                                   </span>
                                 ) : null}
                                 <Changes item={item} />
@@ -349,7 +366,9 @@ export default function OnboardingSessionPage() {
                             ))}
                           </ul>
                           {group.note ? (
-                            <p className="mt-1.5 text-[11px] text-ink-muted">{group.note}</p>
+                            <p className="mt-1.5 text-[11px] text-ink-muted">
+                              {t(`detail.plan.note.${group.note}`)}
+                            </p>
                           ) : null}
                         </div>
                       );
@@ -358,16 +377,15 @@ export default function OnboardingSessionPage() {
                     <div className="border-t border-border pt-3">
                       {plan.data.plan.applicable && data.can_apply ? (
                         <p className="text-xs text-ink-secondary" data-testid="apply-available">
-                          This plan can be applied. Applying writes to Drake&apos;s catalog and
-                          changes nothing in the repository.
+                          {t("detail.plan.applyAvailable")}
                         </p>
                       ) : (
                         <p className="text-xs text-warning" data-testid="apply-blocked">
                           {plan.data.plan.blocking_items > 0
-                            ? `Apply is blocked: ${plan.data.plan.blocking_items} item(s) need a decision.`
+                            ? t("detail.plan.applyBlocked", { count: plan.data.plan.blocking_items })
                             : data.can_apply === false
-                              ? "You can review this plan but not apply it. Applying needs the onboarding apply permission."
-                              : "This plan is not currently applicable."}
+                              ? t("detail.plan.applyNoPermission")
+                              : t("detail.plan.applyNotApplicable")}
                         </p>
                       )}
                     </div>
@@ -377,7 +395,7 @@ export default function OnboardingSessionPage() {
 
               {data.gitops_requests && data.gitops_requests.length > 0 ? (
                 <Panel>
-                  <PanelHeader title="Manifest pull requests" />
+                  <PanelHeader title={t("detail.gitopsRequests.title")} />
                   <ul className="space-y-2" data-testid="gitops-requests">
                     {data.gitops_requests.map((entry) => (
                       <li key={entry.id} className="flex min-w-0 flex-wrap items-baseline gap-2">
@@ -397,7 +415,9 @@ export default function OnboardingSessionPage() {
                             data-testid={`gitops-pr-link-${entry.id}`}
                             className="text-xs text-ink hover:underline"
                           >
-                            Open draft pull request #{entry.provider_pr_number} →
+                            {t("detail.gitopsRequests.openDraft", {
+                              number: entry.provider_pr_number,
+                            })}
                           </a>
                         ) : null}
                         {entry.error_code ? (
@@ -409,15 +429,17 @@ export default function OnboardingSessionPage() {
                     ))}
                   </ul>
                   <p className="mt-3 text-xs text-ink-muted">
-                    The pull request Drake opens is a <strong>draft</strong>, and deliberately
-                    incomplete: every <span className="font-mono">REPLACE_ME</span> in it is a
-                    decision a person has to make. Fill them in and merge it in GitHub.
+                    <RichMessage
+                      template={t("detail.gitopsRequests.draftNote")}
+                      parts={{
+                        draft: <strong>{t("detail.gitopsRequests.draft")}</strong>,
+                        // The placeholder token is what the file literally
+                        // contains, so it is code, not copy.
+                        token: <span className="font-mono">REPLACE_ME</span>,
+                      }}
+                    />
                   </p>
-                  <p className="mt-1.5 text-xs text-ink-muted">
-                    Merging it does not import anything into Drake — it puts the manifest in the
-                    repository, which is where Drake reads intent from. Analyse again afterwards
-                    and approve the plan; the import happens there.
-                  </p>
+                  <p className="mt-1.5 text-xs text-ink-muted">{t("detail.gitopsRequests.mergeNote")}</p>
                 </Panel>
               ) : null}
             </div>

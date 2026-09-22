@@ -12,6 +12,7 @@ import { useId } from "react";
 
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 
 /** A round tinted bubble around an icon. `neutral` reads as a quiet surface. */
 export function IconBubble({
@@ -96,53 +97,18 @@ export function KpiTile({
 
 export type StateKind = "empty" | "unknown" | "permission-denied" | "error" | "not-configured" | "stale" | "partial";
 
+/** Tone and test id per state; the copy lives in `protection.states.*`. */
 const STATE_META: Record<
   StateKind,
-  { tone: StatusTone; testId: string; title: string; description: string }
+  { tone: StatusTone; testId: string; copy: "empty" | "unknown" | "permissionDenied" | "error" | "notConfigured" | "stale" | "partial" }
 > = {
-  empty: {
-    tone: "neutral",
-    testId: "state-empty",
-    title: "Nothing here yet",
-    description: "This collection has no entries in your authorized scope.",
-  },
-  unknown: {
-    tone: "unknown",
-    testId: "state-unknown",
-    title: "Unknown",
-    description: "Nothing has been measured yet.",
-  },
-  "permission-denied": {
-    tone: "denied",
-    testId: "state-permission-denied",
-    title: "Permission required",
-    description:
-      "Your current scope does not include this. Whether anything exists here is not disclosed.",
-  },
-  error: {
-    tone: "critical",
-    testId: "state-error",
-    title: "Query failed",
-    description: "The request did not complete. This is not the same as empty.",
-  },
-  "not-configured": {
-    tone: "unknown",
-    testId: "state-not-configured",
-    title: "Not configured",
-    description: "No source has been connected for this yet.",
-  },
-  stale: {
-    tone: "stale",
-    testId: "state-stale",
-    title: "Out of date",
-    description: "This describes an earlier state.",
-  },
-  partial: {
-    tone: "warning",
-    testId: "state-partial",
-    title: "Partial",
-    description: "The answer does not cover the whole scope.",
-  },
+  empty: { tone: "neutral", testId: "state-empty", copy: "empty" },
+  unknown: { tone: "unknown", testId: "state-unknown", copy: "unknown" },
+  "permission-denied": { tone: "denied", testId: "state-permission-denied", copy: "permissionDenied" },
+  error: { tone: "critical", testId: "state-error", copy: "error" },
+  "not-configured": { tone: "unknown", testId: "state-not-configured", copy: "notConfigured" },
+  stale: { tone: "stale", testId: "state-stale", copy: "stale" },
+  partial: { tone: "warning", testId: "state-partial", copy: "partial" },
 };
 
 /**
@@ -167,6 +133,7 @@ export function StateCard({
   align?: "center" | "start";
   children?: React.ReactNode;
 }) {
+  const t = useT("protection");
   const meta = STATE_META[kind];
   const spec = toneSpec(meta.tone);
   const Icon = icon ?? spec.icon;
@@ -188,8 +155,10 @@ export function StateCard({
         <Icon className={centered ? "h-6 w-6" : "h-5 w-5"} />
       </span>
       <div className={`min-w-0 ${centered ? "max-w-md" : "flex-1"}`}>
-        <p className="text-body font-semibold text-ink">{title ?? meta.title}</p>
-        <p className="mt-1 text-caption text-ink-secondary">{description ?? meta.description}</p>
+        <p className="text-body font-semibold text-ink">{title ?? t(`states.${meta.copy}.title`)}</p>
+        <p className="mt-1 text-caption text-ink-secondary">
+          {description ?? t(`states.${meta.copy}.description`)}
+        </p>
         {children ? <div className="mt-3">{children}</div> : null}
         {action ? (
           <div className={`mt-4 flex ${centered ? "justify-center" : ""}`}>{action}</div>

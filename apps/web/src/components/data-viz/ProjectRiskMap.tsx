@@ -16,18 +16,14 @@
 import Link from "next/link";
 
 import { TONE_SEVERITY, toneSpec, type StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import type {
   PortfolioRiskModel,
   ProjectRiskItem,
 } from "@/lib/view-models/portfolio-risk";
 
+/** Criticality bands, worst first. Their words are `common.severity.*`. */
 const CRITICALITY_ORDER = ["critical", "high", "medium", "low"] as const;
-const CRITICALITY_LABELS: Record<(typeof CRITICALITY_ORDER)[number], string> = {
-  critical: "Critical",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
 
 export interface ProjectRiskMapProps {
   model: PortfolioRiskModel;
@@ -49,7 +45,16 @@ function presentTones(items: ProjectRiskItem[]): StatusTone[] {
 }
 
 function ProjectLink({ item }: { item: ProjectRiskItem }) {
+  const t = useT("commandCenter");
   const spec = toneSpec(item.tone);
+  // The health word follows the evidence, not the English `healthLabel` the
+  // view-model also carries for non-React readers.
+  const health =
+    item.evidence === "unassessed"
+      ? t("riskMap.health.unassessed")
+      : item.evidence === "incomplete"
+        ? t("riskMap.health.incomplete")
+        : t(`tone.${item.tone}`);
   return (
     <Link
       href={item.href}
@@ -62,7 +67,7 @@ function ProjectLink({ item }: { item: ProjectRiskItem }) {
       <span className="truncate text-caption font-medium text-ink">
         {item.displayName}
       </span>
-      <span className="sr-only">— {item.healthLabel}</span>
+      <span className="sr-only">— {health}</span>
     </Link>
   );
 }
@@ -76,6 +81,7 @@ function ToneHeaderButton({
   active: boolean;
   onToggle: () => void;
 }) {
+  const t = useT("commandCenter");
   const spec = toneSpec(tone);
   return (
     <button
@@ -92,7 +98,7 @@ function ToneHeaderButton({
         aria-hidden
         className={`h-2 w-2 rounded-full ${active ? "bg-ink-inverse" : spec.dot}`}
       />
-      {spec.label}
+      {t(`tone.${tone}`)}
     </button>
   );
 }
@@ -106,6 +112,8 @@ function Grid({
   activeTone: string | null;
   onToneChange: (tone: string | null) => void;
 }) {
+  const t = useT("commandCenter");
+  const common = useT("common");
   const criticalities = presentCriticalities(items);
   const tones = presentTones(items);
 
@@ -118,9 +126,7 @@ function Grid({
           wrap as a chip row, each criticality becomes a label over its
           non-empty cells, and each cell names its tone itself. */}
       <table className="block w-full border-separate border-spacing-2 text-caption @md/risk:table">
-        <caption className="sr-only">
-          Projects by criticality and observed health
-        </caption>
+        <caption className="sr-only">{t("riskMap.caption")}</caption>
         <thead className="block @md/risk:table-header-group">
           <tr className="flex flex-wrap gap-1.5 @md/risk:table-row">
             <th scope="col" className="hidden w-20 @md/risk:table-cell" />
@@ -151,7 +157,7 @@ function Grid({
                 scope="row"
                 className="block pr-1 text-left align-middle text-micro font-medium tracking-[0.08em] text-ink-muted uppercase @md/risk:table-cell"
               >
-                {CRITICALITY_LABELS[criticality]}
+                {common(`severity.${criticality}`)}
               </th>
               {tones.map((tone) => {
                 const cellItems = items.filter(
@@ -179,7 +185,7 @@ function Grid({
                             aria-hidden
                             className="truncate text-micro text-ink-secondary @md/risk:hidden"
                           >
-                            {toneSpec(tone).label}
+                            {t(`tone.${tone}`)}
                           </span>
                         </span>
                         <div className="flex flex-col gap-1.5">
@@ -211,10 +217,11 @@ function Disclosure({
   items: ProjectRiskItem[];
   compact: boolean;
 }) {
+  const common = useT("common");
   const criticalities = presentCriticalities(items);
   return (
     <div
-      className={compact ? "" : "lg:hidden"}
+      className={compact ? "" : "lg:hidden" /* i18n-ignore: CSS */}
       data-testid="project-risk-map-disclosure"
     >
       <ul className="flex flex-col gap-2">
@@ -225,7 +232,7 @@ function Disclosure({
               className="rounded-[1rem] border border-border px-3 py-2"
             >
               <summary className="cursor-pointer text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
-                {CRITICALITY_LABELS[criticality]}
+                {common(`severity.${criticality}`)}
               </summary>
               <ul className="flex flex-wrap gap-1.5 pt-2">
                 {items
@@ -250,6 +257,7 @@ export function ProjectRiskMap({
   activeTone,
   onToneChange,
 }: ProjectRiskMapProps) {
+  const t = useT("commandCenter");
   return (
     <div
       data-testid="project-risk-map"
@@ -263,10 +271,10 @@ export function ProjectRiskMap({
         }`}
       >
         {model.complete
-          ? "All projects assessed"
-          : `Showing ${model.servicesLoaded}${
-              model.servicesTotal !== null ? ` of ${model.servicesTotal}` : ""
-            } services loaded so far.`}
+          ? t("riskMap.allAssessed")
+          : model.servicesTotal !== null
+            ? t("riskMap.partial", { shown: model.servicesLoaded, total: model.servicesTotal })
+            : t("riskMap.partialUnknownTotal", { shown: model.servicesLoaded })}
       </p>
       {!compact ? (
         <Grid

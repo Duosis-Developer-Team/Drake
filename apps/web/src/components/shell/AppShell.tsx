@@ -149,9 +149,13 @@ function ShellFooter() {
   const initial = (identity.display_name || "?").charAt(0).toUpperCase();
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2 md:hidden">
-        <ThemeControl />
-        <LanguageControl />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="md:hidden">
+          <ThemeControl />
+        </div>
+        <div className="lg:hidden">
+          <LanguageControl />
+        </div>
       </div>
       <div className="flex items-center gap-3 rounded-[1.25rem] border border-sidebar-border bg-sidebar-nav p-2.5">
         <span
