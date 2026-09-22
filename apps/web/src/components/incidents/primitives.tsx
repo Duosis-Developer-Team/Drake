@@ -25,6 +25,7 @@ import { RingProgress } from "@/components/charts/visuals";
 import { Panel } from "@/components/ui/Panel";
 import { DataState } from "@/components/state/DataState";
 import type { StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 
 /**
  * One KPI tile for a list screen's summary row: a big honest count with a
@@ -43,6 +44,7 @@ export function IncidentKpiTile({
   total: number;
   tone: StatusTone;
 }) {
+  const t = useT("incidents");
   const share = total > 0 ? count / total : null;
   return (
     <Panel data-testid={`incident-kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}>
@@ -56,7 +58,13 @@ export function IncidentKpiTile({
             {count}
           </p>
         </div>
-        <RingProgress value={share} unit="ratio" label={`${label} of shown incidents`} tone={tone} size={48} />
+        <RingProgress
+          value={share}
+          unit="ratio"
+          label={t("kpi.shareLabel", { label })}
+          tone={tone}
+          size={48}
+        />
       </div>
     </Panel>
   );
@@ -97,20 +105,27 @@ const STATE_BADGE: Record<IncidentState, HealthStatus> = {
 };
 
 export function IncidentStateBadge({ state }: { state: IncidentState }) {
-  return <StatusBadge status={STATE_BADGE[state]} label={STATE_LABELS[state]} />;
+  const t = useT("incidents");
+  return <StatusBadge status={STATE_BADGE[state]} label={t.dyn("state", state, STATE_LABELS[state])} />;
 }
 
 export function SeverityBadge({ severity }: { severity: IncidentSeverity }) {
-  return <StatusBadge status="critical" label={severity} />;
+  const t = useT("incidents");
+  return <StatusBadge status="critical" label={t.dyn("severity", severity, severity)} />;
 }
 
+/** The reason vocabulary belongs to service health; its owner keys the
+ * catalogue by the same codes, so this resolves there and falls back to the
+ * English record until that lands. */
 export function ReasonLabel({ reason }: { reason: string }) {
-  return <span>{REASON_LABELS[reason] ?? reason}</span>;
+  const health = useT("serviceHealth");
+  return <span>{health.dyn("reason", reason, REASON_LABELS[reason] ?? reason)}</span>;
 }
 
 export function ReasonList({ reasons }: { reasons: string[] }) {
+  const t = useT("incidents");
   if (reasons.length === 0) {
-    return <p className="text-caption italic text-ink-muted">No reason codes recorded.</p>;
+    return <p className="text-caption italic text-ink-muted">{t("reasons.none")}</p>;
   }
   return (
     <ul className="flex flex-wrap gap-1.5" data-testid="incident-reasons">
@@ -143,15 +158,16 @@ export function IncidentLifecycle({
   acknowledgedAt: string | null;
   resolvedAt: string | null;
 }) {
+  const t = useT("incidents");
   const steps: { key: string; label: string; time: string | null; tone: StatusTone }[] = [
-    { key: "opened", label: "Opened", time: openedAt, tone: "critical" },
+    { key: "opened", label: t("step.opened"), time: openedAt, tone: "critical" },
     {
       key: "acknowledged",
-      label: "Acknowledged",
+      label: t("step.acknowledged"),
       time: acknowledgedAt,
       tone: "warning",
     },
-    { key: "resolved", label: "Resolved", time: resolvedAt, tone: "success" },
+    { key: "resolved", label: t("step.resolved"), time: resolvedAt, tone: "success" },
   ];
   return (
     <div className="flex items-start" data-testid="incident-lifecycle">
@@ -195,8 +211,9 @@ export function IncidentLifecycle({
  * can tidy up afterwards is not evidence of anything.
  */
 export function IncidentTimeline({ events }: { events: IncidentEvent[] }) {
+  const t = useT("incidents");
   if (events.length === 0) {
-    return <p className="text-sm text-ink-secondary">No lifecycle events recorded yet.</p>;
+    return <p className="text-sm text-ink-secondary">{t("timeline.empty")}</p>;
   }
   return (
     <ol className="space-y-3" data-testid="incident-timeline">
@@ -209,9 +226,11 @@ export function IncidentTimeline({ events }: { events: IncidentEvent[] }) {
             ) : null}
           </div>
           <div className="min-w-0 pb-1">
-            <p className="text-sm font-medium text-ink">{EVENT_LABELS[event.event_type]}</p>
+            <p className="text-sm font-medium text-ink">
+              {t.dyn("event", event.event_type, EVENT_LABELS[event.event_type])}
+            </p>
             <p className="text-xs text-ink-secondary">
-              {EVENT_DESCRIPTIONS[event.event_type]}
+              {t.dyn("eventDescription", event.event_type, EVENT_DESCRIPTIONS[event.event_type])}
             </p>
             <p className="mt-0.5 text-[11px] text-ink-muted">
               <time className="font-mono">{event.occurred_at}</time>

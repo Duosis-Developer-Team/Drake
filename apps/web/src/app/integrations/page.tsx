@@ -22,11 +22,12 @@ import {
   ShareBar,
   StateCard,
 } from "@/components/features/configure/kit";
+import { RichMessage } from "@/components/github/primitives";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import type { IntegrationHealth } from "@/lib/catalog";
-import { formatRelative, formatUtc } from "@/lib/design/format";
+import { useFormat, useT, type Translator } from "@/lib/i18n";
 
 const OBSERVED_STATUS: Record<string, HealthStatus> = {
   ok: "healthy",
@@ -36,31 +37,24 @@ const OBSERVED_STATUS: Record<string, HealthStatus> = {
   not_configured: "unknown",
 };
 
-const PROVIDERS: Record<
-  string,
-  { name: string; icon: LucideIcon; blurb: string }
-> = {
-  github: { name: "GitHub", icon: Github, blurb: "Repository governance" },
-  "cluster-agent": {
-    name: "Cluster agent",
-    icon: Boxes,
-    blurb: "Kubernetes inventory",
-  },
-  "backup-reporter": {
-    name: "Backup reporter",
-    icon: DatabaseBackup,
-    blurb: "Backup evidence",
-  },
+/** Providers the screen knows by name; their words live in `provider.<type>`. */
+const PROVIDER_ICONS: Record<string, LucideIcon> = {
+  github: Github,
+  "cluster-agent": Boxes,
+  "backup-reporter": DatabaseBackup,
 };
 
-function providerSpec(type: string) {
-  return (
-    PROVIDERS[type] ?? {
-      name: type.replace(/[-_]+/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
-      icon: Plug,
-      blurb: "Connector",
-    }
-  );
+function providerSpec(type: string, t: Translator<"integrations">) {
+  const known = t.has(`provider.${type}.name`);
+  return {
+    // An unknown connector type is an identifier, not copy: shown as itself,
+    // lightly tidied.
+    name: known
+      ? t.dyn(`provider.${type}`, "name", type)
+      : type.replace(/[-_]+/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
+    icon: PROVIDER_ICONS[type] ?? Plug,
+    blurb: known ? t.dyn(`provider.${type}`, "blurb", "") : t("provider.genericBlurb"),
+  };
 }
 
 /** Where the screen has a place to manage a provider, the tile links to it.
@@ -76,6 +70,7 @@ function IntegrationsOverview({
 }: {
   integrations: IntegrationHealth[];
 }) {
+  const t = useT("integrations");
   const providers = new Set(integrations.map((i) => i.integration_type)).size;
   const scopes = new Set(integrations.map(scopeKey)).size;
   const configured = integrations.filter(
@@ -91,55 +86,46 @@ function IntegrationsOverview({
 
   return (
     <div className="page-grid" data-testid="integrations-stats">
-      <KpiTile icon={Plug} label="Providers" value={providers}>
+      <KpiTile icon={Plug} label={t("stats.providers")} value={providers}>
         <p className="text-micro text-ink-muted">
-          <span data-tabular className="font-medium text-ink-secondary">
-            {integrations.length}
-          </span>{" "}
-          connectors across{" "}
-          <span data-tabular className="font-medium text-ink-secondary">
-            {scopes}
-          </span>{" "}
-          scope{scopes === 1 ? "" : "s"}
+          {t("stats.connectorsAcross", { connectors: integrations.length, scopes })}
         </p>
       </KpiTile>
       <KpiTile
         icon={Layers}
         tone="info"
-        label="Connected"
+        label={t("stats.connected")}
         value={configured}
-        suffix={`of ${integrations.length}`}
+        suffix={t("stats.of", { total: integrations.length })}
       >
         <ShareBar
           value={configured}
           total={integrations.length}
           tone="info"
-          label="configured"
+          label={t("stats.configured")}
         />
       </KpiTile>
       <KpiTile
         icon={CircleCheck}
         tone="success"
-        label="Answering OK"
+        label={t("stats.answeringOk")}
         value={ok}
-        suffix={`of ${integrations.length}`}
+        suffix={t("stats.of", { total: integrations.length })}
       >
         <ShareBar
           value={ok}
           total={integrations.length}
           tone="success"
-          label="reporting normally"
+          label={t("stats.reportingNormally")}
         />
       </KpiTile>
       <KpiTile
         icon={TriangleAlert}
         tone={attention > 0 ? "warning" : undefined}
-        label="Needs attention"
+        label={t("stats.needsAttention")}
         value={attention}
       >
-        <p className="text-micro text-ink-muted">
-          Degraded, stale or erroring connectors
-        </p>
+        <p className="text-micro text-ink-muted">{t("stats.needsAttentionHint")}</p>
       </KpiTile>
     </div>
   );
@@ -152,7 +138,9 @@ function ProviderTile({
   type: string;
   entries: IntegrationHealth[];
 }) {
-  const spec = providerSpec(type);
+  const t = useT("integrations");
+  const fmt = useFormat();
+  const spec = providerSpec(type, t);
   const connected = entries.filter(
     (e) => e.configuration_state === "configured",
   ).length;
@@ -202,10 +190,7 @@ function ProviderTile({
             ))}
           </div>
           <span className="truncate text-micro text-ink-muted">
-            <span data-tabular className="font-medium text-ink-secondary">
-              {connected}/{entries.length}
-            </span>{" "}
-            scopes
+            {t("provider.scopes", { connected, total: entries.length })}
           </span>
         </div>
         <span
@@ -219,7 +204,7 @@ function ProviderTile({
             aria-hidden
             className={`h-1.5 w-1.5 rounded-full ${connected > 0 ? "bg-info" : "bg-ink-muted"}`}
           />
-          {connected > 0 ? "Connected" : "Not connected"}
+          {connected > 0 ? t("provider.connected") : t("provider.notConnected")}
         </span>
       </div>
 
@@ -234,17 +219,22 @@ function ProviderTile({
                 {integration.scope.ref}
               </p>
               <p className="truncate text-micro text-ink-muted">
-                {integration.scope.type} · last sync{" "}
-                {integration.last_success_at ? (
-                  <time
-                    dateTime={integration.last_success_at}
-                    title={formatUtc(integration.last_success_at)}
-                  >
-                    {formatRelative(integration.last_success_at)}
-                  </time>
-                ) : (
-                  <span>never</span>
-                )}
+                <RichMessage
+                  template={t("provider.lastSync")}
+                  parts={{
+                    type: integration.scope.type,
+                    time: integration.last_success_at ? (
+                      <time
+                        dateTime={integration.last_success_at}
+                        title={fmt.utc(integration.last_success_at)}
+                      >
+                        {fmt.relative(integration.last_success_at)}
+                      </time>
+                    ) : (
+                      <span>{t("provider.never")}</span>
+                    ),
+                  }}
+                />
               </p>
               {integration.last_error_code ? (
                 <p className="mt-0.5 font-mono text-micro text-critical">
@@ -273,25 +263,25 @@ function ProviderTile({
       <div className="mt-auto flex items-center justify-between gap-3 border-t border-border px-6 py-4">
         <span className="min-w-0 truncate text-micro text-ink-muted">
           {latest ? (
-            <>
-              Latest success{" "}
-              <time dateTime={latest}>{formatRelative(latest)}</time>
-            </>
+            <RichMessage
+              template={t("provider.latestSuccess")}
+              parts={{ time: <time dateTime={latest}>{fmt.relative(latest)}</time> }}
+            />
           ) : (
-            "No successful sync yet"
+            t("provider.noSuccess")
           )}
         </span>
         {manageHref ? (
           <Link href={manageHref} className={PILL_BUTTON}>
-            Manage
+            {t("provider.manage")}
             <ArrowRight aria-hidden className="h-3.5 w-3.5" />
           </Link>
         ) : (
           <span
             className="rounded-full bg-surface-2 px-3 py-1.5 text-micro font-medium whitespace-nowrap text-ink-muted"
-            title="Connected by an operator; there is nothing to set here."
+            title={t("provider.operatorManagedHint")}
           >
-            Operator-managed
+            {t("provider.operatorManaged")}
           </span>
         )}
       </div>
@@ -304,6 +294,8 @@ function HealthSummary({
 }: {
   integrations: IntegrationHealth[];
 }) {
+  const t = useT("integrations");
+  const tc = useT("common");
   const count = (state: string) =>
     integrations.filter((i) => i.observed_state === state).length;
   const ok = count("ok");
@@ -316,25 +308,25 @@ function HealthSummary({
     <div className="page-aside">
       <Panel className="h-full">
         <PanelHeader
-          title="Observed health"
-          description="Every connector, by what Drake last saw"
+          title={t("health.title")}
+          description={t("health.description")}
         />
         <Donut
-          label="Observed connector state"
+          label={t("health.donutLabel")}
           size={148}
           thickness={16}
           slices={[
-            { name: "OK", value: ok, tone: "success" },
-            { name: "Degraded", value: degraded, tone: "critical" },
-            { name: "Stale", value: stale, tone: "stale" },
-            { name: "Not reporting", value: rest, tone: "unknown" },
+            { name: t("health.ok"), value: ok, tone: "success" },
+            { name: tc("health.degraded"), value: degraded, tone: "critical" },
+            { name: tc("health.stale"), value: stale, tone: "stale" },
+            { name: t("health.notReporting"), value: rest, tone: "unknown" },
           ]}
         />
       </Panel>
       <Panel className="h-full">
         <PanelHeader
-          title="Coverage by scope"
-          description="Connected providers per scope"
+          title={t("health.coverageTitle")}
+          description={t("health.coverageDescription")}
         />
         <ul className="space-y-4">
           {scopes.map((key) => {
@@ -356,12 +348,16 @@ function HealthSummary({
                   </div>
                   <div className="mt-1.5 flex gap-1" aria-hidden>
                     {inScope.map((i) => {
-                      const Icon = providerSpec(i.integration_type).icon;
+                      const spec = providerSpec(i.integration_type, t);
+                      const Icon = spec.icon;
                       const on = i.configuration_state === "configured";
                       return (
                         <span
                           key={i.integration_type}
-                          title={`${providerSpec(i.integration_type).name}: ${on ? "connected" : "not connected"}`}
+                          title={t(
+                            on ? "provider.coverageConnected" : "provider.coverageNotConnected",
+                            { name: spec.name },
+                          )}
                           className={`flex h-6 flex-1 items-center justify-center rounded-full ${
                             on
                               ? "bg-info-soft text-info"
@@ -384,6 +380,7 @@ function HealthSummary({
 }
 
 export default function IntegrationsPage() {
+  const t = useT("integrations");
   const [health, retry] = useApi<{
     integrations: IntegrationHealth[];
     next_cursor: string | null;
@@ -392,12 +389,12 @@ export default function IntegrationsPage() {
   return (
     <PageFrame>
       <PageHeader
-        title="Integration Health"
-        description="Connector configuration and observed state per scope."
+        title={t("overview.title")}
+        description={t("overview.description")}
         actions={
           <Link href="/integrations/github" className={PILL_BUTTON}>
             <Github aria-hidden className="h-4 w-4" />
-            GitHub App integration
+            {t("overview.githubLink")}
           </Link>
         }
       />
@@ -410,8 +407,8 @@ export default function IntegrationsPage() {
                   <StateCard
                     kind="empty"
                     icon={Plug}
-                    title="No integrations in your scope"
-                    description="Integrations registered on scopes you can read will appear here."
+                    title={t("overview.empty.title")}
+                    description={t("overview.empty.description")}
                   />
                 </Panel>
               );
@@ -435,7 +432,7 @@ export default function IntegrationsPage() {
                       id="provider-gallery"
                       className="-mb-2 text-[1.0625rem] font-semibold text-ink"
                     >
-                      Providers
+                      {t("overview.providersHeading")}
                     </h2>
                     <div
                       className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2"

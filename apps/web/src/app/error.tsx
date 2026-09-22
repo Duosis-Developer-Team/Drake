@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { PageFrame } from "@/components/shell/AppShell";
 import { Panel } from "@/components/ui/Panel";
 import { CopyableIdentifier } from "@/components/ui/identifiers";
+import { useT } from "@/lib/i18n";
 
 /**
  * The route error boundary.
@@ -26,6 +27,8 @@ export default function RouteError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   useEffect(() => {
     // The browser console is where an operator looks first; the message is
     // already sanitised by Next in production builds.
@@ -35,12 +38,9 @@ export default function RouteError({
   return (
     <PageFrame width="narrow">
       <Panel tone="critical" className="mt-6">
-        <p className="text-caption font-medium text-critical">Screen failed to render</p>
-        <h1 className="mt-1 text-title font-semibold text-ink">Something in this page broke</h1>
-        <p className="mt-1.5 text-body text-ink-secondary">
-          This is a fault in the interface, not a statement about the systems Drake monitors —
-          nothing here should be read as a health signal. Other screens are unaffected.
-        </p>
+        <p className="text-caption font-medium text-critical">{t("error.kicker")}</p>
+        <h1 className="mt-1 text-title font-semibold text-ink">{t("error.title")}</h1>
+        <p className="mt-1.5 text-body text-ink-secondary">{t("error.body")}</p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -48,19 +48,19 @@ export default function RouteError({
             className="inline-flex h-9 items-center gap-1.5 rounded-control bg-brand px-3 text-body font-medium text-ink-inverse transition-colors hover:bg-brand-hover"
           >
             <RefreshCw className="h-4 w-4" aria-hidden />
-            Try again
+            {common("action.tryAgain")}
           </button>
           <Link
             href="/"
             className="inline-flex h-9 items-center rounded-control border border-border px-3 text-body font-medium text-ink transition-colors hover:bg-surface-hover"
           >
-            Command Center
+            {t("error.commandCenter")}
           </Link>
         </div>
         {error.digest ? (
           <p className="mt-3 text-micro text-ink-muted">
-            Reference{" "}
-            <CopyableIdentifier value={error.digest} label="error reference" />
+            {t("error.reference")}{" "}
+            <CopyableIdentifier value={error.digest} label={t("error.referenceLabel")} />
           </p>
         ) : null}
       </Panel>

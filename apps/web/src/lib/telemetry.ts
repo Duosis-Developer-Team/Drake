@@ -5,15 +5,23 @@
  */
 
 import { apiGet, apiMutate } from "@/lib/api";
+import { getTranslator, type Locale } from "@/lib/i18n";
 
 export type RangePreset = "1h" | "24h" | "7d";
 
+/** `label` is the English default; components render `rangePresetLabel`. */
 export const RANGE_PRESETS: { key: RangePreset; label: string; seconds: number; step: number }[] =
   [
-    { key: "1h", label: "Last 1h", seconds: 3600, step: 60 },
-    { key: "24h", label: "Last 24h", seconds: 86400, step: 300 },
-    { key: "7d", label: "Last 7d", seconds: 604800, step: 1800 },
+    { key: "1h", label: "Last 1h" /* i18n-ignore: English default; rangePresetLabel localizes */, seconds: 3600, step: 60 },
+    { key: "24h", label: "Last 24h" /* i18n-ignore: English default; rangePresetLabel localizes */, seconds: 86400, step: 300 },
+    { key: "7d", label: "Last 7d" /* i18n-ignore: English default; rangePresetLabel localizes */, seconds: 604800, step: 1800 },
   ];
+
+/** The preset's label in the reader's language (`ui.range.*`). */
+export function rangePresetLabel(key: RangePreset, locale: Locale = "en"): string {
+  const preset = RANGE_PRESETS.find((entry) => entry.key === key);
+  return getTranslator("ui", locale).dyn("range", key, preset?.label ?? key);
+}
 
 /** Invalid/unknown values fall back to the safe default (24h). */
 export function parseRangePreset(raw: string | null): RangePreset {
@@ -128,15 +136,20 @@ export async function queryTelemetry(
 }
 
 /** Unit-aware display formatting (tabular, honest about magnitude). */
-export function formatValue(value: number | null, unit: string): string {
+export function formatValue(value: number | null, unit: string, locale: Locale = "en"): string {
   if (value === null || Number.isNaN(value)) return "—";
+  const common = getTranslator("common", locale);
   switch (unit) {
     case "requests_per_second":
-      return `${value.toFixed(2)} req/s`;
+      return `${value.toFixed(2)} ${common("unit.requestsPerSecond")}`;
     case "ratio":
       return `${(value * 100).toFixed(2)}%`;
     case "seconds":
-      return value < 1 ? `${(value * 1000).toFixed(0)} ms` : `${value.toFixed(2)} s`;
+      if (value < 1) return common("time.millisecondsShort", { count: (value * 1000).toFixed(0) });
+      // English keeps its literal "4.20 s"; Turkish reads "4.20 sn" from the catalogue.
+      return locale === "en"
+        ? `${value.toFixed(2)} s`
+        : common("time.secondsShort", { count: value.toFixed(2) });
     case "bytes": {
       const units = ["B", "KiB", "MiB", "GiB", "TiB"];
       let scaled = value;
@@ -148,7 +161,7 @@ export function formatValue(value: number | null, unit: string): string {
       return `${scaled.toFixed(1)} ${units[index]}`;
     }
     case "cores":
-      return `${value.toFixed(2)} cores`;
+      return `${value.toFixed(2)} ${common("unit.cores")}`;
     case "restarts":
       return `${Math.round(value)}`;
     default:

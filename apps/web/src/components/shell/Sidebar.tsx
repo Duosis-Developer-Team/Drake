@@ -23,6 +23,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { DrakeMark, DrakeWordmark } from "@/components/shell/Brand";
+import { useT } from "@/lib/i18n";
 import { NAVIGATION, activeNavHref } from "@/lib/navigation";
 import { useSession } from "@/lib/session";
 
@@ -70,6 +71,7 @@ export function Sidebar({
   const pathname = usePathname() || "/";
   const { hasPermission } = useSession();
   const active = activeNavHref(pathname);
+  const t = useT("shell");
 
   return (
     <div
@@ -82,7 +84,7 @@ export function Sidebar({
         <Link
           href="/"
           onClick={onNavigate}
-          aria-label="Drake home"
+          aria-label={t("sidebar.home")}
           className="flex min-w-0 items-center rounded"
         >
           {collapsed ? (
@@ -95,8 +97,8 @@ export function Sidebar({
           <button
             type="button"
             onClick={onToggleCollapse}
-            aria-label="Collapse navigation"
-            title="Collapse navigation"
+            aria-label={t("sidebar.collapse")}
+            title={t("sidebar.collapse")}
             aria-expanded
             className="ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
           >
@@ -109,8 +111,8 @@ export function Sidebar({
         <button
           type="button"
           onClick={onToggleCollapse}
-          aria-label="Expand navigation"
-          title="Expand navigation"
+          aria-label={t("sidebar.expand")}
+          title={t("sidebar.expand")}
           aria-expanded={false}
           className="mx-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
         >
@@ -121,7 +123,7 @@ export function Sidebar({
       {/* The nav sits on its own inset slab, the way the reference groups its
           menu — the rail reads as layered, not as a flat list on black. */}
       <nav
-        aria-label="Primary"
+        aria-label={t("sidebar.primary")}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-[1.375rem] border border-sidebar-border bg-sidebar-nav p-2 [scrollbar-width:none]"
       >
         {NAVIGATION.map((group) => {
@@ -131,6 +133,7 @@ export function Sidebar({
               item.anyPermission.some((permission) => hasPermission(permission)),
           );
           if (items.length === 0) return null;
+          const groupLabel = t.dyn("nav.group", group.key, group.label);
           return (
             <div key={group.key} className="mb-3 last:mb-0">
               {collapsed ? (
@@ -140,22 +143,23 @@ export function Sidebar({
                   aria-hidden
                   className="px-3 pt-2 pb-1.5 text-[0.625rem] font-semibold tracking-[0.12em] text-sidebar-ink-muted uppercase"
                 >
-                  {group.label}
+                  {groupLabel}
                 </p>
               )}
               {/* The group name lives on the list, not on a heading: these sit
                   above the page's h1 and would put the outline out of order. */}
-              <ul className="space-y-1" aria-label={group.label}>
+              <ul className="space-y-1" aria-label={groupLabel}>
                 {items.map((item) => {
                   const isActive = active === item.href;
                   const Icon = item.icon;
+                  const label = t.dyn("nav", item.key, item.label);
                   return (
                     <li key={item.href}>
                       <Link
                         href={item.href}
                         onClick={onNavigate}
                         aria-current={isActive ? "page" : undefined}
-                        title={collapsed ? item.label : undefined}
+                        title={collapsed ? label : undefined}
                         className={`group relative flex h-11 items-center rounded-full text-body transition-colors duration-[var(--duration-micro)] ${
                           collapsed ? "justify-center" : "gap-3 pr-3 pl-1.5"
                         } ${
@@ -175,9 +179,9 @@ export function Sidebar({
                           <Icon className="h-4 w-4" aria-hidden />
                         </span>
                         {collapsed ? (
-                          <span className="sr-only">{item.label}</span>
+                          <span className="sr-only">{label}</span>
                         ) : (
-                          <span className="truncate">{item.label}</span>
+                          <span className="truncate">{label}</span>
                         )}
                       </Link>
                     </li>

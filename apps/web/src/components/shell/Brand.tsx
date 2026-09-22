@@ -41,7 +41,7 @@ export function DrakeWordmark({
   return (
     <span
       role="img"
-      aria-label="Drake"
+      aria-label="Drake" // i18n-ignore: the product name is a proper noun
       data-testid="drake-wordmark"
       style={{ height, width: Math.round(height * WORDMARK_RATIO) }}
       className={`block shrink-0 bg-contain bg-left bg-no-repeat ${background} ${className}`}
@@ -71,7 +71,7 @@ export function DrakeMark({
   return (
     <span
       role="img"
-      aria-label="Drake"
+      aria-label="Drake" // i18n-ignore: the product name is a proper noun
       data-testid="drake-mark"
       style={{ height, width: Math.round(height * MARK_RATIO) }}
       className={`block shrink-0 bg-contain bg-center bg-no-repeat ${background} ${className}`}

@@ -193,3 +193,13 @@ export function formatDuration(fromIso: string, toIso: string | null): string {
   if (hours < 24) return `${hours}h ${minutes % 60}m`;
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
+
+/** Seconds between two server timestamps (or from one until now), for
+ * `useFormat().duration` to render in the viewer's language. `null` when a
+ * timestamp does not parse — the formatter prints a dash for that. */
+export function durationSeconds(fromIso: string, toIso: string | null): number | null {
+  const from = Date.parse(fromIso);
+  const to = toIso ? Date.parse(toIso) : Date.now();
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.max(0, Math.round((to - from) / 1000));
+}

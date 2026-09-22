@@ -26,6 +26,7 @@ import Link from "next/link";
 
 import { toneSpec } from "@/lib/design/status";
 import { DeniedState, ErrorState, LoadingSkeleton, NotConfiguredState } from "@/components/ui/states";
+import { useT } from "@/lib/i18n";
 import { worstToneOf, type HealthMatrixCell } from "@/lib/view-models/health-matrix";
 
 type ResourceStatus = "loading" | "denied" | "not-found" | "error" | "ready";
@@ -43,28 +44,31 @@ function Swatch({
   projectKey: string;
   environmentKey: string;
 }) {
+  const t = useT("commandCenter");
   if (!cell) {
     return (
       <span
         className="flex w-full items-center justify-center rounded-[0.875rem] border border-dashed border-border py-3 text-micro text-ink-muted"
-        aria-label={`${projectKey} / ${environmentKey}: no services here`}
+        aria-label={t("matrix.emptyCell", { project: projectKey, environment: environmentKey })}
       >
         —
       </span>
     );
   }
-  const spec = toneSpec(worstToneOf(cell));
+  const worst = worstToneOf(cell);
+  const spec = toneSpec(worst);
+  const status = t(`tone.${worst}`);
   const count = cell.services.length;
   const href = `/service-health?project_id=${encodeURIComponent(cell.projectId)}&environment_id=${encodeURIComponent(cell.environmentId)}`;
   return (
     <Link
       href={href}
-      aria-label={`${projectKey} / ${environmentKey}: worst status ${spec.label}, ${count} service${count === 1 ? "" : "s"} — open service health`}
+      aria-label={t("matrix.cell", { project: projectKey, environment: environmentKey, status, count })}
       className={`flex w-full items-center justify-between gap-3 rounded-[0.875rem] px-3.5 py-3 text-caption font-medium transition-[opacity,transform] hover:-translate-y-px hover:opacity-90 ${spec.chip}`}
     >
       <span className="flex min-w-0 items-center gap-2">
         <span aria-hidden className={`h-2.5 w-2.5 shrink-0 rounded-full ${spec.dot}`} />
-        <span className="truncate">{spec.label}</span>
+        <span className="truncate">{status}</span>
       </span>
       <span className="flex items-baseline gap-1">
         <span data-tabular className="rounded-full bg-surface/70 px-2 py-0.5 text-micro font-semibold">({count})</span>
@@ -74,6 +78,7 @@ function Swatch({
 }
 
 function Grid({ cells }: { cells: HealthMatrixCell[] }) {
+  const t = useT("commandCenter");
   const projects = [...new Set(cells.map((cell) => cell.projectKey))];
   const environments = [...new Set(cells.map((cell) => cell.environmentKey))];
   const byKey = new Map(cells.map((cell) => [cellKey(cell.projectKey, cell.environmentKey), cell]));
@@ -81,7 +86,7 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
   return (
     <div className="hidden overflow-x-auto xl:block" data-testid="health-matrix-grid">
       <table className="w-full border-separate border-spacing-0 text-caption">
-        <caption className="sr-only">Service health by project and environment</caption>
+        <caption className="sr-only">{t("matrix.caption")}</caption>
         <thead>
           <tr>
             <th scope="col" className="w-32" />
@@ -122,7 +127,7 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
 function Disclosure({ cells, compact }: { cells: HealthMatrixCell[]; compact: boolean }) {
   const projects = [...new Set(cells.map((cell) => cell.projectKey))];
   return (
-    <div className={compact ? "" : "xl:hidden"} data-testid="health-matrix-disclosure">
+    <div className={compact ? "" : "xl:hidden" /* i18n-ignore: CSS */} data-testid="health-matrix-disclosure">
       <ul className="divide-y divide-border">
         {projects.map((project) => (
           <li key={project}>
@@ -157,8 +162,9 @@ export function HealthMatrix({
   status: ResourceStatus;
   compact?: boolean;
 }) {
+  const t = useT("commandCenter");
   if (status === "loading") {
-    return <LoadingSkeleton variant="table" rows={3} label="Loading service health" />;
+    return <LoadingSkeleton variant="table" rows={3} label={t("matrix.loading")} />;
   }
   if (status === "denied") {
     return <DeniedState compact />;
@@ -170,8 +176,8 @@ export function HealthMatrix({
     return (
       <NotConfiguredState
         compact
-        title="No services to map"
-        description="No service in your authorized scope has reported health yet."
+        title={t("matrix.emptyTitle")}
+        description={t("matrix.emptyDescription")}
       />
     );
   }

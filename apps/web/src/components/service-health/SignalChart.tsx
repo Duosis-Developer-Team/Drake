@@ -15,12 +15,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { useSignalFormat } from "@/components/service-health/primitives";
 import { DataState } from "@/components/state/DataState";
 import { ApiError, apiGet } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import {
   SERIES_RANGES,
   SIGNAL_LABELS,
-  formatSignal,
   type HealthSeries,
   type SeriesRange,
 } from "@/lib/serviceHealth";
@@ -37,10 +38,11 @@ export function RangeSelector({
   value: SeriesRange;
   onChange: (next: SeriesRange) => void;
 }) {
+  const tc = useT("common");
   return (
     <div
       role="group"
-      aria-label="Time range"
+      aria-label={tc("time.timeRange")}
       className="inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-1"
     >
       {SERIES_RANGES.map((range) => (
@@ -63,6 +65,8 @@ export function RangeSelector({
 }
 
 function Plot({ data, unit }: { data: HealthSeries; unit: string }) {
+  const t = useT("serviceHealth");
+  const formatSignal = useSignalFormat();
   const points = data.series.flatMap((series) => series.points);
   const values = points
     .map(([, value]) => value)
@@ -97,7 +101,10 @@ function Plot({ data, unit }: { data: HealthSeries; unit: string }) {
         viewBox="0 0 100 40"
         preserveAspectRatio="none"
         role="img"
-        aria-label={`${SIGNAL_LABELS[data.signal] ?? data.signal} over the last ${data.range_key}`}
+        aria-label={t("chart.aria", {
+          signal: t.dyn("signal", data.signal, SIGNAL_LABELS[data.signal] ?? data.signal),
+          range: data.range_key,
+        })}
         className="relative h-36 w-full"
         style={{ color: "var(--series-1)" }}
         data-testid="signal-chart"
@@ -154,6 +161,8 @@ export function SignalChart({
   unit: string;
   range: SeriesRange;
 }) {
+  const t = useT("serviceHealth");
+  const formatSignal = useSignalFormat();
   const [state, setState] = useState<State>({ kind: "loading" });
 
   const load = useCallback(() => {
@@ -174,13 +183,13 @@ export function SignalChart({
             correlationId: error.correlationId,
           });
         } else {
-          setState({ kind: "error", message: "request failed" });
+          setState({ kind: "error", message: t("chart.requestFailed") });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [bindingId, signal, range]);
+  }, [bindingId, signal, range, t]);
 
   useEffect(() => load(), [load]);
 
@@ -191,13 +200,13 @@ export function SignalChart({
 
   const { data } = state;
   if (data.data_state === "not_configured") {
-    return <DataState kind="not-configured" description="No telemetry datasource is configured." />;
+    return <DataState kind="not-configured" description={t("chart.notConfigured")} />;
   }
   if (data.series.length === 0 || data.data_state === "empty") {
     return (
       <DataState
         kind="no-data"
-        description={`The datasource returned no samples for the last ${data.range_key}.`}
+        description={t("chart.noSamples", { range: data.range_key })}
       />
     );
   }
@@ -217,19 +226,19 @@ export function SignalChart({
         >
           {formatSignal(latest?.[1] ?? null, unit)}
         </span>
-        <span className="text-micro text-ink-muted">latest</span>
+        <span className="text-micro text-ink-muted">{t("chart.latest")}</span>
       </p>
       {data.data_state === "stale" ? (
         <DataState
           kind="stale"
-          description="Showing the last successful reading; the datasource has not refreshed in time."
+          description={t("chart.stale")}
           lastSuccessAt={data.as_of ?? undefined}
         />
       ) : null}
       {data.series_truncated ? (
         <DataState
           kind="partial"
-          description="Only the first 12 series are shown; this chart does not cover every one."
+          description={t("chart.truncated")}
         />
       ) : null}
       <Plot data={data} unit={unit} />

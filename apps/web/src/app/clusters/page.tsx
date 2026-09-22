@@ -49,6 +49,7 @@ import {
   toneForHealth,
   type StatusTone,
 } from "@/lib/design/status";
+import { useT, type Translator } from "@/lib/i18n";
 import { needsAttention } from "@/lib/overview";
 import { useResource } from "@/lib/useResource";
 
@@ -77,10 +78,15 @@ function attentionTone(cluster: Cluster): StatusTone | null {
   return tones.sort(compareTone).at(-1) ?? null;
 }
 
-/** Clusters grouped by the word the API reported, in first-seen order. */
+/**
+ * Clusters grouped by the word the API reported, in first-seen order. The
+ * label is the catalogue's word for that token; an unexpected token still
+ * shows, humanized, rather than vanishing.
+ */
 function groupBy(
   clusters: Cluster[],
   pick: (cluster: Cluster) => string | undefined,
+  labelOf: (key: string) => string,
 ): Segment[] {
   const counts = new Map<string, number>();
   for (const cluster of clusters) {
@@ -89,13 +95,19 @@ function groupBy(
   }
   return [...counts.entries()].map(([key, value]) => ({
     key,
-    label: humanize(key),
+    label: labelOf(key),
     value,
     tone: toneForHealth(key),
   }));
 }
 
+/** `t.dyn` over one enum group, with the humanized token as the fallback. */
+function enumLabel(t: Translator<"clusters">, group: string) {
+  return (key: string) => t.dyn(`enum.${group}`, key, humanize(key));
+}
+
 function ClusterRow({ cluster }: { cluster: Cluster }) {
+  const t = useT("clusters");
   const tone = attentionTone(cluster);
   const environments = cluster.referenced_environments?.length ?? 0;
   return (
@@ -114,7 +126,7 @@ function ClusterRow({ cluster }: { cluster: Cluster }) {
           </Link>
           <StatusBadge
             status={cluster.lifecycle === "active" ? "success" : "neutral"}
-            label={humanize(cluster.lifecycle)}
+            label={t.dyn("enum.lifecycle", cluster.lifecycle, humanize(cluster.lifecycle))}
             size="compact"
           />
         </div>
@@ -125,15 +137,14 @@ function ClusterRow({ cluster }: { cluster: Cluster }) {
           </span>
           <span
             className="inline-flex items-center gap-1"
-            title="Authorized environments on this cluster"
+            title={t("list.row.environmentsTitle")}
           >
             <Layers aria-hidden className="h-3.5 w-3.5" />
-            <span data-tabular>{environments}</span>
-            {environments === 1 ? "environment" : "environments"}
+            <span data-tabular>{t("list.row.environments", { count: environments })}</span>
           </span>
           <span
             className="inline-flex items-center gap-1"
-            title="When this record was observed"
+            title={t("list.row.observedTitle")}
           >
             <Clock aria-hidden className="h-3.5 w-3.5" />
             <RelativeTime value={cluster.as_of} />
@@ -143,18 +154,18 @@ function ClusterRow({ cluster }: { cluster: Cluster }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-1 pl-3 text-micro">
-          <span className="text-ink-muted">Agent</span>
+          <span className="text-ink-muted">{t("list.row.agent")}</span>
           <StatusBadge
             status={agentTone(cluster)}
-            label={humanize(cluster.operational?.agent ?? "unknown")}
+            label={enumLabel(t, "agent")(cluster.operational?.agent ?? "unknown")}
             size="compact"
           />
         </span>
         <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-1 pl-3 text-micro">
-          <span className="text-ink-muted">Inventory</span>
+          <span className="text-ink-muted">{t("list.row.inventory")}</span>
           <StatusBadge
             status={inventoryTone(cluster)}
-            label={humanize(cluster.operational?.inventory ?? "unknown")}
+            label={enumLabel(t, "inventory")(cluster.operational?.inventory ?? "unknown")}
             size="compact"
           />
         </span>
@@ -166,6 +177,7 @@ function ClusterRow({ cluster }: { cluster: Cluster }) {
 }
 
 export default function ClustersPage() {
+  const t = useT("clusters");
   const resource = useResource<{
     clusters: Cluster[];
     next_cursor: string | null;
@@ -185,38 +197,37 @@ export default function ClustersPage() {
 
   return (
     <PageFrame>
-      <PageHeader
-        title="Clusters"
-        description="Agent connection and inventory freshness — two separate claims, each observed."
-      />
+      <PageHeader title={t("list.title")} description={t("list.description")} />
 
       {resource.data && total > 0 ? (
         <div className="page-grid mb-6">
           <StatTile
             icon={Server}
-            label="In scope"
+            label={t("list.stat.inScope")}
             value={total}
-            suffix={total === 1 ? "cluster" : "clusters"}
+            suffix={t("list.stat.clusters", { count: total })}
           >
             <SegmentBar
-              label="Clusters by lifecycle"
-              segments={groupBy(clusters, (cluster) => cluster.lifecycle).map(
-                (segment) => ({
-                  ...segment,
-                  tone: segment.key === "active" ? "info" : "neutral",
-                }),
-              )}
+              label={t("list.stat.byLifecycle")}
+              segments={groupBy(
+                clusters,
+                (cluster) => cluster.lifecycle,
+                enumLabel(t, "lifecycle"),
+              ).map((segment) => ({
+                ...segment,
+                tone: segment.key === "active" ? "info" : "neutral",
+              }))}
             />
           </StatTile>
           <StatTile
             icon={AlertTriangle}
             tone={attention.length > 0 ? "warning" : null}
-            label="Need attention"
+            label={t("list.stat.needAttention")}
             value={attention.length}
-            suffix={`of ${total}`}
+            suffix={t("list.stat.ofTotal", { total })}
           >
             <ShareBar
-              label="Clusters needing attention"
+              label={t("list.stat.needingAttention")}
               value={attention.length}
               total={total}
               tone="warning"
@@ -224,12 +235,12 @@ export default function ClustersPage() {
           </StatTile>
           <StatTile
             icon={Plug}
-            label="Agent connected"
+            label={t("list.stat.agentConnected")}
             value={connected.length}
-            suffix={`of ${total}`}
+            suffix={t("list.stat.ofTotal", { total })}
           >
             <ShareBar
-              label="Agents connected"
+              label={t("list.stat.agentsConnected")}
               value={connected.length}
               total={total}
               tone="success"
@@ -237,12 +248,12 @@ export default function ClustersPage() {
           </StatTile>
           <StatTile
             icon={RefreshCw}
-            label="Inventory fresh"
+            label={t("list.stat.inventoryFresh")}
             value={fresh.length}
-            suffix={`of ${total}`}
+            suffix={t("list.stat.ofTotal", { total })}
           >
             <ShareBar
-              label="Inventories fresh"
+              label={t("list.stat.inventoriesFresh")}
               value={fresh.length}
               total={total}
               tone="success"
@@ -252,21 +263,21 @@ export default function ClustersPage() {
       ) : null}
 
       <div
-        className={resource.data && total > 0 ? "page-split" : "flex flex-col"}
+        className={resource.data && total > 0 ? "page-split" : "flex flex-col"} // i18n-ignore
       >
         <div className="page-main">
           <Panel flush>
             <PanelHeader
               flush
-              title="Fleet"
-              description="Every cluster in your authorized scope"
+              title={t("list.fleet.title")}
+              description={t("list.fleet.description")}
               actions={
                 resource.data ? (
                   <span
                     data-tabular
                     className="rounded-full bg-surface-2 px-3 py-1 text-micro font-medium text-ink-secondary"
                   >
-                    {total} shown
+                    {t("list.fleet.shown", { count: total })}
                   </span>
                 ) : undefined
               }
@@ -276,7 +287,7 @@ export default function ClustersPage() {
                 <LoadingSkeleton
                   variant="table"
                   rows={4}
-                  label="Loading clusters"
+                  label={t("list.fleet.loading")}
                 />
               </div>
             ) : resource.denied ? (
@@ -297,12 +308,12 @@ export default function ClustersPage() {
                   <StateCard
                     testId="state-empty"
                     icon={Server}
-                    title="No clusters in your scope"
-                    description="Clusters you are authorized to see appear here once they are registered in the catalog."
+                    title={t("list.fleet.emptyTitle")}
+                    description={t("list.fleet.emptyDescription")}
                   />
                 ) : (
                   <ul
-                    aria-label="Clusters in your authorized scope, with agent connection and inventory freshness"
+                    aria-label={t("list.fleet.listLabel")}
                     className="divide-y divide-border"
                   >
                     {clusters.map((cluster) => (
@@ -319,42 +330,44 @@ export default function ClustersPage() {
           <div className="page-aside">
             <Panel data-testid="fleet-signals">
               <PanelHeader
-                title="Fleet signals"
-                description="How the fleet splits on each claim"
+                title={t("list.signals.title")}
+                description={t("list.signals.description")}
               />
               <div className="space-y-6">
                 <div>
                   <p className="mb-2.5 flex items-center justify-between text-caption font-medium text-ink">
                     <span className="flex items-center gap-2">
                       <Plug aria-hidden className="h-4 w-4 text-ink-muted" />
-                      Agent connection
+                      {t("list.signals.agentConnection")}
                     </span>
                   </p>
                   <SegmentBar
-                    label="Clusters by agent connection"
+                    label={t("list.signals.byAgent")}
                     segments={groupBy(
                       clusters,
                       (cluster) => cluster.operational?.agent,
+                      enumLabel(t, "agent"),
                     )}
                   />
                 </div>
                 <div className="border-t border-border pt-6">
                   <p className="mb-2.5 flex items-center gap-2 text-caption font-medium text-ink">
                     <RefreshCw aria-hidden className="h-4 w-4 text-ink-muted" />
-                    Inventory freshness
+                    {t("list.signals.inventoryFreshness")}
                   </p>
                   <SegmentBar
-                    label="Clusters by inventory freshness"
+                    label={t("list.signals.byInventory")}
                     segments={groupBy(
                       clusters,
                       (cluster) => cluster.operational?.inventory,
+                      enumLabel(t, "inventory"),
                     )}
                   />
                 </div>
                 <div className="flex items-center justify-between border-t border-border pt-6">
                   <span className="flex items-center gap-2 text-caption font-medium text-ink">
                     <Layers aria-hidden className="h-4 w-4 text-ink-muted" />
-                    Environments referenced
+                    {t("list.signals.environmentsReferenced")}
                   </span>
                   <span
                     data-tabular

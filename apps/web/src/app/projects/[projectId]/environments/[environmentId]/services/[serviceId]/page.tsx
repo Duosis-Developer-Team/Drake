@@ -34,12 +34,14 @@ import {
   StatTile,
   TileState,
   capabilityTone,
+  useCapabilityLabel,
+  useWhen,
 } from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { InlineCode, RelativeTime } from "@/components/ui/identifiers";
+import { InlineCode } from "@/components/ui/identifiers";
 import {
   DeniedState,
   ErrorState,
@@ -49,15 +51,13 @@ import {
 import type { ServiceDetail } from "@/lib/catalog";
 import { useCrumbLabel } from "@/lib/crumbs";
 import { humanize, toneSpec } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import { parseRangePreset } from "@/lib/telemetry";
 import { useResource } from "@/lib/useResource";
 
-const CAPABILITY_LABELS: Record<string, string> = {
-  metrics: "Golden signals",
-  logs: "Logs",
-  traces: "Traces",
-  deployments: "Deploy history",
-};
+/** Service capabilities, in display order; their names are
+ *  `catalog.service.capability.*`. */
+const CAPABILITY_KEYS = ["metrics", "logs", "traces", "deployments"] as const;
 
 const CAPABILITY_ICONS: Record<string, typeof Activity> = {
   metrics: Activity,
@@ -66,7 +66,24 @@ const CAPABILITY_ICONS: Record<string, typeof Activity> = {
   deployments: Rocket,
 };
 
+function ServiceLoading() {
+  const t = useT("catalog");
+  return (
+    <PageFrame width="wide">
+      <LoadingSkeleton rows={4} label={t("load.service")} />
+    </PageFrame>
+  );
+}
+
+function SignalsFallback() {
+  const t = useT("catalog");
+  return <LoadingSkeleton variant="chart" label={t("load.signals")} />;
+}
+
 function ServiceDetailInner() {
+  const t = useT("catalog");
+  const capabilityLabel = useCapabilityLabel();
+  const when = useWhen();
   const { projectId, environmentId, serviceId } = useParams<{
     projectId: string;
     environmentId: string;
@@ -85,16 +102,12 @@ function ServiceDetailInner() {
   useCrumbLabel(serviceId, resource.data?.service_key);
 
   if (resource.loading && !resource.data) {
-    return (
-      <PageFrame width="wide">
-        <LoadingSkeleton rows={4} label="Loading service" />
-      </PageFrame>
-    );
+    return <ServiceLoading />;
   }
   if (resource.notFound) {
     return (
       <PageFrame width="wide">
-        <NotFoundState description="This service does not exist in your authorized scope." />
+        <NotFoundState description={t("service.notFound")} />
       </PageFrame>
     );
   }
@@ -121,13 +134,11 @@ function ServiceDetailInner() {
   const selector = Object.entries(service.workload_selector);
   const probes = Object.entries(service.health);
 
-  const capabilityEntries = Object.entries(CAPABILITY_LABELS).map(
-    ([key, label]) => ({
-      key,
-      label,
-      state: service.operational?.[key] ?? "unknown",
-    }),
-  );
+  const capabilityEntries = CAPABILITY_KEYS.map((key) => ({
+    key,
+    label: t(`service.capability.${key}`),
+    state: service.operational?.[key] ?? "unknown",
+  }));
   const connected = capabilityEntries.filter(
     (entry) => entry.state === "ok",
   ).length;
@@ -142,21 +153,20 @@ function ServiceDetailInner() {
         status={
           <StatusBadge
             status={service.lifecycle === "active" ? "success" : "neutral"}
-            label={humanize(service.lifecycle)}
+            label={t.dyn("lifecycle", service.lifecycle, humanize(service.lifecycle))}
           />
         }
         meta={
           <>
             <span className="font-mono">{service.scope.ref}</span>
             <span>
-              component <InlineCode>{service.component}</InlineCode>
+              {t("service.meta.component")} <InlineCode>{service.component}</InlineCode>
             </span>
             <span>
-              profile <InlineCode>{service.metrics_profile}</InlineCode>
+              {t("service.meta.profile")} <InlineCode>{service.metrics_profile}</InlineCode>
             </span>
-            <span>
-              catalog record accepted{" "}
-              <RelativeTime value={service.source.accepted_at} />
+            <span title={service.source.accepted_at}>
+              {t("record.accepted", { when: when(service.source.accepted_at) })}
             </span>
           </>
         }
@@ -166,18 +176,18 @@ function ServiceDetailInner() {
         <div className="page-grid motion-safe:animate-[fade-in_320ms_var(--ease-entrance)_backwards]">
           <StatTile
             icon={ShieldCheck}
-            label="Capabilities"
+            label={t("capability.title")}
             value={connected}
-            suffix={`of ${capabilityEntries.length} reporting`}
+            suffix={t("capability.reporting", { total: capabilityEntries.length })}
           >
             <ul
               className="grid grid-cols-4 gap-1.5"
-              aria-label="Capability states"
+              aria-label={t("capability.states")}
             >
               {capabilityEntries.map((entry) => (
                 <li
                   key={entry.key}
-                  title={`${entry.label}: ${entry.state === "ok" ? "Reporting" : humanize(entry.state)}`}
+                  title={`${entry.label}: ${capabilityLabel(entry.state)}`}
                   className={`h-2 rounded-full ${
                     entry.state === "ok"
                       ? toneSpec(capabilityTone(entry.state)).dot
@@ -189,9 +199,9 @@ function ServiceDetailInner() {
           </StatTile>
           <StatTile
             icon={ScanSearch}
-            label="Workload selector"
+            label={t("service.kpi.selector")}
             value={selector.length}
-            suffix={selector.length === 1 ? "label" : "labels"}
+            suffix={t("service.kpi.labels", { count: selector.length })}
           >
             {selector.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -202,14 +212,14 @@ function ServiceDetailInner() {
                 ))}
               </div>
             ) : (
-              <p className="text-micro text-ink-muted">Not configured</p>
+              <p className="text-micro text-ink-muted">{t("service.kpi.notConfigured")}</p>
             )}
           </StatTile>
           <StatTile
             icon={HeartPulse}
-            label="Health paths"
+            label={t("service.kpi.healthPaths")}
             value={probes.length}
-            suffix={probes.length === 1 ? "probe" : "probes"}
+            suffix={t("service.kpi.probes", { count: probes.length })}
           >
             {probes.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -220,12 +230,12 @@ function ServiceDetailInner() {
                 ))}
               </div>
             ) : (
-              <p className="text-micro text-ink-muted">Not configured</p>
+              <p className="text-micro text-ink-muted">{t("service.kpi.notConfigured")}</p>
             )}
           </StatTile>
           <StatTile
             icon={GitCommitHorizontal}
-            label="Catalog record"
+            label={t("record.title")}
             value={`v${service.version}`}
           >
             <div className="flex flex-wrap gap-1.5">
@@ -235,9 +245,7 @@ function ServiceDetailInner() {
           </StatTile>
         </div>
 
-        <Suspense
-          fallback={<LoadingSkeleton variant="chart" label="Loading signals" />}
-        >
+        <Suspense fallback={<SignalsFallback />}>
           <DashboardRenderer
             templateKey="service-golden-signals-v1"
             scopeType="service"
@@ -247,22 +255,22 @@ function ServiceDetailInner() {
           />
         </Suspense>
 
-        <section aria-label="What Drake measures here">
+        <section aria-label={t("service.measures.title")}>
           <div className="mb-5">
             <h2 className="text-[1.25rem] leading-7 font-semibold tracking-[-0.015em] text-ink">
-              What Drake measures here
+              {t("service.measures.title")}
             </h2>
             <p className="mt-0.5 text-caption text-ink-muted">
-              The binding and the capabilities behind the signals above.
+              {t("service.measures.description")}
             </p>
           </div>
           <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
             <Panel>
-              <PanelHeader title="Workload binding" level={3} />
+              <PanelHeader title={t("service.binding.title")} level={3} />
               <DefinitionGrid
                 items={[
                   {
-                    label: "Selector",
+                    label: t("service.binding.selector"),
                     wide: true,
                     value:
                       selector.length > 0 ? (
@@ -273,12 +281,12 @@ function ServiceDetailInner() {
                         </span>
                       ) : (
                         <span className="text-caption text-ink-muted italic">
-                          not configured
+                          {t("service.binding.notConfigured")}
                         </span>
                       ),
                   },
                   {
-                    label: "Health paths",
+                    label: t("service.binding.healthPaths"),
                     wide: true,
                     value:
                       probes.length > 0 ? (
@@ -289,16 +297,16 @@ function ServiceDetailInner() {
                         </span>
                       ) : (
                         <span className="text-caption text-ink-muted italic">
-                          not configured
+                          {t("service.binding.notConfigured")}
                         </span>
                       ),
                   },
                   {
-                    label: "Runtime",
+                    label: t("service.binding.runtime"),
                     value: <InlineCode>{service.runtime}</InlineCode>,
                   },
                   {
-                    label: "Catalog version",
+                    label: t("record.version"),
                     value: <span data-tabular>v{service.version}</span>,
                   },
                 ]}
@@ -307,8 +315,8 @@ function ServiceDetailInner() {
 
             <Panel>
               <PanelHeader
-                title="Capabilities"
-                description="An unconfigured capability is an absence, not a failure."
+                title={t("capability.title")}
+                description={t("service.capabilities.description")}
                 level={3}
               />
               <ul
@@ -329,8 +337,8 @@ function ServiceDetailInner() {
                 <TileState
                   icon={Network}
                   testId="state-not-configured"
-                  title="No capability is connected yet"
-                  description="Signals appear here as their sources are configured for this environment."
+                  title={t("service.capabilities.emptyTitle")}
+                  description={t("service.capabilities.emptyBody")}
                 />
               ) : null}
             </Panel>
@@ -339,14 +347,14 @@ function ServiceDetailInner() {
 
         <div className="flex flex-wrap items-center gap-2 text-micro text-ink-muted">
           <span className="font-medium tracking-[0.08em] uppercase">
-            Catalog source
+            {t("service.source.title")}
           </span>
           <FactPill
             mono
           >{`${service.source.kind}:${service.source.ref}`}</FactPill>
-          <FactPill mono>{`revision ${service.source.revision}`}</FactPill>
-          <span>
-            accepted <RelativeTime value={service.source.accepted_at} />
+          <FactPill mono>{t("service.source.revision", { revision: service.source.revision })}</FactPill>
+          <span title={service.source.accepted_at}>
+            {t("record.acceptedShort", { when: when(service.source.accepted_at) })}
           </span>
         </div>
       </div>
@@ -356,13 +364,7 @@ function ServiceDetailInner() {
 
 export default function ServiceDetailPage() {
   return (
-    <Suspense
-      fallback={
-        <PageFrame width="wide">
-          <LoadingSkeleton rows={4} label="Loading service" />
-        </PageFrame>
-      }
-    >
+    <Suspense fallback={<ServiceLoading />}>
       <ServiceDetailInner />
     </Suspense>
   );

@@ -39,6 +39,8 @@ import {
   StatTile,
   TileState,
   capabilityTone,
+  useCapabilityLabel,
+  useWhen,
 } from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Provenance } from "@/components/provenance/Provenance";
@@ -59,6 +61,7 @@ import {
   toneSpec,
   type StatusTone,
 } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import { useResource } from "@/lib/useResource";
 
 const CRITICALITY_TONE: Record<string, StatusTone> = {
@@ -69,14 +72,10 @@ const CRITICALITY_TONE: Record<string, StatusTone> = {
 };
 
 /** Same four capabilities the project page reports, scoped to this
- * environment. A capability that is not configured is an absence, not a
- * fault, and never renders as anything healthier than what was observed. */
-const CAPABILITY_LABELS: Record<string, string> = {
-  workloads: "Workloads & pods",
-  targets: "Scrape targets",
-  quotas: "Resource quotas",
-  drift: "Config drift",
-};
+ * environment; their names are `catalog.environment.capability.*`. A
+ * capability that is not configured is an absence, not a fault, and never
+ * renders as anything healthier than what was observed. */
+const CAPABILITY_KEYS = ["workloads", "targets", "quotas", "drift"] as const;
 
 const CAPABILITY_ICONS: Record<string, typeof Boxes> = {
   workloads: Boxes,
@@ -86,6 +85,10 @@ const CAPABILITY_ICONS: Record<string, typeof Boxes> = {
 };
 
 export default function EnvironmentDetailPage() {
+  const t = useT("catalog");
+  const health = useT("serviceHealth");
+  const capabilityLabel = useCapabilityLabel();
+  const when = useWhen();
   const { projectId, environmentId } = useParams<{
     projectId: string;
     environmentId: string;
@@ -107,14 +110,14 @@ export default function EnvironmentDetailPage() {
   if (environment.loading && !environment.data) {
     return (
       <PageFrame width="wide">
-        <LoadingSkeleton rows={4} label="Loading environment" />
+        <LoadingSkeleton rows={4} label={t("load.environment")} />
       </PageFrame>
     );
   }
   if (environment.notFound) {
     return (
       <PageFrame width="wide">
-        <NotFoundState description="This environment does not exist in your authorized scope." />
+        <NotFoundState description={t("environment.notFound")} />
       </PageFrame>
     );
   }
@@ -141,13 +144,11 @@ export default function EnvironmentDetailPage() {
   const serviceList = services.data?.services ?? [];
   const isExternal = data.runtime === "external";
 
-  const capabilityEntries = Object.entries(CAPABILITY_LABELS).map(
-    ([key, label]) => ({
-      key,
-      label,
-      state: data.operational?.[key] ?? "unknown",
-    }),
-  );
+  const capabilityEntries = CAPABILITY_KEYS.map((key) => ({
+    key,
+    label: t(`environment.capability.${key}`),
+    state: data.operational?.[key] ?? "unknown",
+  }));
   const reporting = capabilityEntries.filter(
     (entry) => entry.state === "ok",
   ).length;
@@ -164,35 +165,36 @@ export default function EnvironmentDetailPage() {
             {data.health ? (
               <>
                 <span className="text-caption text-ink-muted">
-                  Measured health
+                  {t("measuredHealth")}
                 </span>
                 <StatusBadge
                   status={toneForHealth(data.health.status)}
-                  label={humanize(data.health.status)}
+                  label={health.dyn("status", data.health.status, humanize(data.health.status))}
                 />
               </>
             ) : null}
             <StatusBadge
               status={CRITICALITY_TONE[data.criticality] ?? "neutral"}
-              label={`${humanize(data.criticality)} criticality`}
+              label={t("criticality.badge", {
+                level: t.dyn("criticality", data.criticality, humanize(data.criticality)),
+              })}
             />
             <StatusBadge
               status={data.lifecycle === "active" ? "success" : "neutral"}
-              label={humanize(data.lifecycle)}
+              label={t.dyn("lifecycle", data.lifecycle, humanize(data.lifecycle))}
             />
           </>
         }
         meta={
           <>
             <span>
-              runtime <InlineCode>{data.runtime}</InlineCode>
+              {t("environment.meta.runtime")} <InlineCode>{data.runtime}</InlineCode>
             </span>
             <span>
-              branch <InlineCode>{data.branch || "—"}</InlineCode>
+              {t("environment.meta.branch")} <InlineCode>{data.branch || "—"}</InlineCode>
             </span>
-            <span>
-              catalog record accepted{" "}
-              <RelativeTime value={data.source.accepted_at} />
+            <span title={data.source.accepted_at}>
+              {t("record.accepted", { when: when(data.source.accepted_at) })}
             </span>
           </>
         }
@@ -202,9 +204,9 @@ export default function EnvironmentDetailPage() {
         <div className="page-grid motion-safe:animate-[fade-in_320ms_var(--ease-entrance)_backwards]">
           <StatTile
             icon={Boxes}
-            label="Services"
+            label={t("environment.kpi.services")}
             value={services.data ? serviceList.length : "—"}
-            suffix={services.data ? "bound here" : "could not load"}
+            suffix={services.data ? t("environment.kpi.boundHere") : t("environment.kpi.couldNotLoad")}
           >
             {serviceList.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -216,24 +218,24 @@ export default function EnvironmentDetailPage() {
               </div>
             ) : (
               <p className="text-micro text-ink-muted">
-                No service bindings yet
+                {t("environment.kpi.noBindings")}
               </p>
             )}
           </StatTile>
           <StatTile
             icon={ShieldCheck}
-            label="Capabilities"
+            label={t("capability.title")}
             value={reporting}
-            suffix={`of ${capabilityEntries.length} reporting`}
+            suffix={t("capability.reporting", { total: capabilityEntries.length })}
           >
             <ul
               className="grid grid-cols-4 gap-1.5"
-              aria-label="Capability states"
+              aria-label={t("capability.states")}
             >
               {capabilityEntries.map((entry) => (
                 <li
                   key={entry.key}
-                  title={`${entry.label}: ${entry.state === "ok" ? "Reporting" : humanize(entry.state)}`}
+                  title={`${entry.label}: ${capabilityLabel(entry.state)}`}
                   className={`h-2 rounded-full ${
                     entry.state === "ok"
                       ? toneSpec(capabilityTone(entry.state)).dot
@@ -245,11 +247,11 @@ export default function EnvironmentDetailPage() {
           </StatTile>
           <StatTile
             icon={ServerCog}
-            label="Runtime"
-            value={humanize(data.runtime)}
+            label={t("environment.kpi.runtime")}
+            value={t.dyn("runtime", data.runtime, humanize(data.runtime))}
           >
             <div className="flex flex-wrap gap-1.5">
-              <FactPill mono>{`branch ${data.branch || "—"}`}</FactPill>
+              <FactPill mono>{t("environment.kpi.branch", { branch: data.branch || "—" })}</FactPill>
               {data.cluster ? (
                 <FactPill mono>
                   {data.cluster.display_name || data.cluster.ref}
@@ -259,11 +261,11 @@ export default function EnvironmentDetailPage() {
           </StatTile>
           <StatTile
             icon={Cpu}
-            label="Catalog record"
+            label={t("record.title")}
             value={`v${data.version}`}
           >
-            <p className="text-micro text-ink-muted">
-              accepted <RelativeTime value={data.source.accepted_at} />
+            <p className="text-micro text-ink-muted" title={data.source.accepted_at}>
+              {t("record.acceptedShort", { when: when(data.source.accepted_at) })}
             </p>
           </StatTile>
         </div>
@@ -277,14 +279,11 @@ export default function EnvironmentDetailPage() {
             >
               <PanelHeader
                 flush
-                title="Services"
-                description="Every service bound to this environment."
+                title={t("environment.services.title")}
+                description={t("environment.services.description")}
                 meta={
                   services.data ? (
-                    <span>
-                      {serviceList.length} service
-                      {serviceList.length === 1 ? "" : "s"}
-                    </span>
+                    <span>{t("environment.services.count", { count: serviceList.length })}</span>
                   ) : undefined
                 }
               />
@@ -310,8 +309,8 @@ export default function EnvironmentDetailPage() {
                   <TileState
                     icon={Boxes}
                     testId="state-empty"
-                    title="No service bindings"
-                    description="Services appear here once one is bound to this environment."
+                    title={t("environment.services.emptyTitle")}
+                    description={t("environment.services.emptyBody")}
                   />
                 </div>
               ) : (
@@ -349,7 +348,7 @@ export default function EnvironmentDetailPage() {
                                 ? "success"
                                 : "neutral"
                             }
-                            label={humanize(service.lifecycle)}
+                            label={t.dyn("lifecycle", service.lifecycle, humanize(service.lifecycle))}
                             size="compact"
                           />
                         </span>
@@ -367,8 +366,8 @@ export default function EnvironmentDetailPage() {
               className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
             >
               <PanelHeader
-                title="Capabilities"
-                description="What Drake can observe here."
+                title={t("capability.title")}
+                description={t("environment.capabilities.description")}
                 level={3}
               />
               {/* The aside is one KPI track wide: let long capability names wrap. */}
@@ -389,20 +388,20 @@ export default function EnvironmentDetailPage() {
               flush
               className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:120ms]"
             >
-              <PanelHeader flush title="Environment metadata" level={3} />
+              <PanelHeader flush title={t("environment.metadata.title")} level={3} />
               <div className="px-7 py-6 [&>dl]:grid-cols-1 [&>dl>div]:col-span-1">
                 <DefinitionGrid
                   items={[
                     {
-                      label: "Runtime",
+                      label: t("environment.metadata.runtime"),
                       value: <InlineCode>{data.runtime}</InlineCode>,
                     },
                     {
-                      label: "Branch",
+                      label: t("environment.metadata.branch"),
                       value: <InlineCode>{data.branch || "—"}</InlineCode>,
                     },
                     {
-                      label: "Cluster / namespace",
+                      label: t("environment.metadata.clusterNamespace"),
                       wide: true,
                       value: data.cluster ? (
                         <InlineCode>{`${data.cluster.ref} / ${data.namespace}`}</InlineCode>
@@ -412,18 +411,18 @@ export default function EnvironmentDetailPage() {
                         // Kubernetes environment that had genuinely lost its
                         // cluster was described as "external runtime".
                         <span className="text-caption text-ink-muted italic">
-                          Not applicable
+                          {t("environment.metadata.notApplicable")}
                         </span>
                       ) : (
                         <span className="text-caption text-ink-muted italic">
-                          Not recorded
+                          {t("environment.metadata.notRecorded")}
                         </span>
                       ),
                     },
                     ...(isExternal
                       ? [
                           {
-                            label: "Hosting provider",
+                            label: t("environment.metadata.hostingProvider"),
                             value: (
                               <InlineCode>
                                 {data.hosting_provider ?? "unknown"}
@@ -431,15 +430,15 @@ export default function EnvironmentDetailPage() {
                             ),
                           },
                           {
-                            label: "Agent",
+                            label: t("environment.metadata.agent"),
                             value: (
                               <span className="text-caption text-ink-muted italic">
-                                Not applicable
+                                {t("environment.metadata.notApplicable")}
                               </span>
                             ),
                           },
                           {
-                            label: "Health source",
+                            label: t("environment.metadata.healthSource"),
                             value: (
                               <InlineCode>
                                 {data.health?.source.status ?? "not_configured"}
@@ -447,7 +446,7 @@ export default function EnvironmentDetailPage() {
                             ),
                           },
                           {
-                            label: "Freshness",
+                            label: t("environment.metadata.freshness"),
                             value: (
                               <InlineCode>
                                 {data.health?.freshness ?? "unavailable"}
@@ -457,7 +456,7 @@ export default function EnvironmentDetailPage() {
                           ...(data.health?.last_observed_at
                             ? [
                                 {
-                                  label: "Last observed",
+                                  label: t("environment.metadata.lastObserved"),
                                   value: (
                                     <RelativeTime
                                       value={data.health.last_observed_at}
@@ -469,7 +468,7 @@ export default function EnvironmentDetailPage() {
                         ]
                       : []),
                     {
-                      label: "Catalog version",
+                      label: t("record.version"),
                       value: <span data-tabular>v{data.version}</span>,
                     },
                   ]}

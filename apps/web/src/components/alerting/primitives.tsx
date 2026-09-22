@@ -22,13 +22,13 @@ import { RingProgress } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   MAPPING_LABELS,
   PRIORITY_LABELS,
   SEVERITY_LABELS,
   SILENCE_LABELS,
   SLO_LABELS,
-  formatAge,
   formatBurn,
   type AlertEvent,
   type BurnRate,
@@ -55,6 +55,7 @@ export function AlertingKpiTile({
   total: number;
   tone: StatusTone;
 }) {
+  const t = useT("alerting");
   const share = total > 0 ? count / total : null;
   return (
     <Panel data-testid={`alerting-kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}>
@@ -68,7 +69,13 @@ export function AlertingKpiTile({
             {count}
           </p>
         </div>
-        <RingProgress value={share} unit="ratio" label={`${label} share`} tone={tone} size={48} />
+        <RingProgress
+          value={share}
+          unit="ratio"
+          label={t("kpi.shareLabel", { label })}
+          tone={tone}
+          size={48}
+        />
       </div>
     </Panel>
   );
@@ -142,32 +149,47 @@ const SILENCE_BADGE: Record<SilenceState, HealthStatus> = {
 };
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
-  return <StatusBadge status={SEVERITY_BADGE[severity]} label={SEVERITY_LABELS[severity]} />;
+  const t = useT("alerting");
+  return (
+    <StatusBadge
+      status={SEVERITY_BADGE[severity]}
+      label={t.dyn("severity", severity, SEVERITY_LABELS[severity])}
+    />
+  );
 }
 
+/** P1–P4 is an identifier in every language; the record is the label. */
 export function PriorityBadge({ priority }: { priority: Priority }) {
   return <StatusBadge status={PRIORITY_BADGE[priority]} label={PRIORITY_LABELS[priority]} />;
 }
 
 export function StatusPill({ status }: { status: "firing" | "resolved" }) {
+  const t = useT("alerting");
   return (
     <StatusBadge
       status={status === "firing" ? "critical" : "healthy"}
-      label={status === "firing" ? "Firing" : "Resolved"}
+      label={t.dyn("status", status, status)}
     />
   );
 }
 
 export function MappingBadge({ state }: { state: MappingState }) {
-  return <StatusBadge status={MAPPING_BADGE[state]} label={MAPPING_LABELS[state]} />;
+  const t = useT("alerting");
+  return (
+    <StatusBadge status={MAPPING_BADGE[state]} label={t.dyn("mapping", state, MAPPING_LABELS[state])} />
+  );
 }
 
 export function SloBadge({ status }: { status: SloStatus }) {
-  return <StatusBadge status={SLO_BADGE[status]} label={SLO_LABELS[status]} />;
+  const t = useT("alerting");
+  return <StatusBadge status={SLO_BADGE[status]} label={t.dyn("slo", status, SLO_LABELS[status])} />;
 }
 
 export function SilenceBadge({ state }: { state: SilenceState }) {
-  return <StatusBadge status={SILENCE_BADGE[state]} label={SILENCE_LABELS[state]} />;
+  const t = useT("alerting");
+  return (
+    <StatusBadge status={SILENCE_BADGE[state]} label={t.dyn("silence", state, SILENCE_LABELS[state])} />
+  );
 }
 
 /**
@@ -178,23 +200,20 @@ export function SilenceBadge({ state }: { state: SilenceState }) {
  * level did or did not fire, which is the question an operator actually has.
  */
 export function BurnTable({ rates }: { rates: BurnRate[] }) {
+  const t = useT("alerting");
   if (rates.length === 0) {
-    return (
-      <p className="text-xs text-ink-secondary">
-        No burn-rate profile has been evaluated for this objective yet.
-      </p>
-    );
+    return <p className="text-xs text-ink-secondary">{t("burn.empty")}</p>;
   }
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
     <table className="w-full text-left text-xs" data-testid="burn-table">
       <thead className="text-ink-muted">
         <tr>
-          <th className="pb-1.5 pr-3 font-medium">Level</th>
-          <th className="pb-1.5 pr-3 font-medium">Threshold</th>
-          <th className="pb-1.5 pr-3 font-medium">Long window</th>
-          <th className="pb-1.5 pr-3 font-medium">Short window</th>
-          <th className="pb-1.5 font-medium">State</th>
+          <th className="pb-1.5 pr-3 font-medium">{t("burn.level")}</th>
+          <th className="pb-1.5 pr-3 font-medium">{t("burn.threshold")}</th>
+          <th className="pb-1.5 pr-3 font-medium">{t("burn.longWindow")}</th>
+          <th className="pb-1.5 pr-3 font-medium">{t("burn.shortWindow")}</th>
+          <th className="pb-1.5 font-medium">{t("burn.state")}</th>
         </tr>
       </thead>
       <tbody>
@@ -212,10 +231,10 @@ export function BurnTable({ rates }: { rates: BurnRate[] }) {
               {rate.active ? (
                 <StatusBadge
                   status={rate.severity === "critical" ? "critical" : "warning"}
-                  label="Active"
+                  label={t("burn.active")}
                 />
               ) : (
-                <span className="text-ink-muted">Not active</span>
+                <span className="text-ink-muted">{t("burn.notActive")}</span>
               )}
             </td>
           </tr>
@@ -249,13 +268,6 @@ export function CountChip({
   );
 }
 
-/**
- * Allowlisted alert labels, rendered as key/value chips.
- *
- * The backend already dropped everything outside its allowlist and every
- * value carrying a URL scheme, so there is nothing here to sanitize — but
- * these are still rendered as TEXT and never as links.
- */
 /**
  * The alert's chain, as a horizontal stepper: firing → mapped into the
  * catalog → an incident opened → still notifying. Each step's tone is a
@@ -304,6 +316,8 @@ export function AlertChain({
   );
 }
 
+/** English fallbacks for event tokens; the catalogue's `alertEvent.*` is
+ * keyed by the same tokens. An unknown token renders as itself. */
 const ALERT_EVENT_LABELS: Record<string, string> = {
   firing: "Started firing",
   resolved: "Alertmanager reported resolved",
@@ -316,8 +330,10 @@ const ALERT_EVENT_LABELS: Record<string, string> = {
 /** The alert's event history as a dot timeline, matching the incident
  *  timeline's shape rather than a column of plain text lines. */
 export function AlertTimeline({ events }: { events: AlertEvent[] }) {
+  const t = useT("alerting");
+  const fmt = useFormat();
   if (events.length === 0) {
-    return <p className="text-caption text-ink-secondary">No transitions recorded.</p>;
+    return <p className="text-caption text-ink-secondary">{t("timeline.empty")}</p>;
   }
   return (
     <ol className="space-y-3" data-testid="alert-timeline">
@@ -334,11 +350,11 @@ export function AlertTimeline({ events }: { events: AlertEvent[] }) {
           </div>
           <div className="min-w-0 pb-1">
             <p className="text-caption font-medium text-ink">
-              {ALERT_EVENT_LABELS[event.event_type] ?? event.event_type}
+              {t.dyn("alertEvent", event.event_type, ALERT_EVENT_LABELS[event.event_type] ?? event.event_type)}
             </p>
             <p className="mt-0.5 text-micro text-ink-muted">
-              <time className="font-mono">{formatAge(event.source_event_at)}</time> · episode{" "}
-              {event.occurrence}
+              <time className="font-mono">{fmt.relative(event.source_event_at)}</time> ·{" "}
+              {t("timeline.episode", { number: event.occurrence })}
             </p>
           </div>
         </li>
@@ -347,10 +363,18 @@ export function AlertTimeline({ events }: { events: AlertEvent[] }) {
   );
 }
 
+/**
+ * Allowlisted alert labels, rendered as key/value chips.
+ *
+ * The backend already dropped everything outside its allowlist and every
+ * value carrying a URL scheme, so there is nothing here to sanitize — but
+ * these are still rendered as TEXT and never as links.
+ */
 export function LabelChips({ labels }: { labels: Record<string, string> }) {
+  const t = useT("alerting");
   const entries = Object.entries(labels);
   if (entries.length === 0) {
-    return <p className="text-xs text-ink-secondary">This alert carries no safe labels.</p>;
+    return <p className="text-xs text-ink-secondary">{t("labels.none")}</p>;
   }
   return (
     <div className="flex flex-wrap gap-1.5" data-testid="alert-labels">

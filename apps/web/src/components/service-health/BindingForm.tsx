@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   createBinding,
@@ -66,6 +67,8 @@ const SELECT_CLASS =
   "h-9 w-full rounded-control border border-border bg-surface px-2.5 text-body text-ink disabled:opacity-50";
 
 export function BindingForm({ environmentServiceId, existing, onSaved }: Props) {
+  const t = useT("serviceHealth");
+  const tc = useT("common");
   const { state, hasPermission } = useSession();
   const csrfToken = state.status === "authenticated" ? state.me.csrf_token : null;
   // UI gating is a convenience; the API remains the authority and answers
@@ -95,12 +98,12 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setLoadError(error instanceof ApiError ? error.message : "request failed");
+        setLoadError(error instanceof ApiError ? error.message : t("form.requestFailed"));
       });
     return () => {
       cancelled = true;
     };
-  }, [environmentServiceId, clusterId, namespace]);
+  }, [environmentServiceId, clusterId, namespace, t]);
 
   useEffect(() => load(), [load]);
 
@@ -122,11 +125,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
   const failed = (error: unknown) => {
     if (error instanceof ApiError) {
       if (error.status === 409) {
-        setNotice({
-          kind: "conflict",
-          message:
-            "This binding changed since you opened it — someone else edited it. Reload to see the current values before saving again.",
-        });
+        setNotice({ kind: "conflict", message: t("form.conflict.message") });
         return;
       }
       setNotice({
@@ -136,7 +135,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
       });
       return;
     }
-    setNotice({ kind: "error", message: "request failed" });
+    setNotice({ kind: "error", message: t("form.requestFailed") });
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -154,8 +153,8 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
         setNotice({
           kind: "saved",
           message: result.changed
-            ? `Saved. This binding is now revision ${result.revision}.`
-            : "Nothing to save — the preset and policy are unchanged.",
+            ? t("form.saved.revision", { revision: result.revision })
+            : t("form.saved.unchanged"),
         });
         onSaved?.(existing.id);
       } else {
@@ -171,9 +170,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
         });
         setNotice({
           kind: "saved",
-          message: created.resolved
-            ? "Bound. The workload was found in cluster inventory."
-            : "Bound. The workload has not been reported by the cluster agent yet, so health is unresolved rather than unhealthy.",
+          message: created.resolved ? t("form.saved.resolved") : t("form.saved.unresolved"),
         });
         onSaved?.(created.id);
       }
@@ -208,35 +205,31 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
 
   return (
     <Panel>
-      <PanelHeader title={existing ? "Edit binding" : "Bind a workload"} />
+      <PanelHeader title={existing ? t("form.editTitle") : t("form.createTitle")} />
       {!canManage ? (
-        <DataState
-          kind="permission-denied"
-          description="Binding a service to a workload needs integration.manage in this scope."
-        />
+        <DataState kind="permission-denied" description={t("form.denied")} />
       ) : null}
 
-      <form onSubmit={submit} className="space-y-5" aria-label="Workload binding">
+      <form onSubmit={submit} className="space-y-5" aria-label={t("form.ariaLabel")}>
         {existing ? (
           <p className="rounded-control border border-border bg-surface-2 px-3 py-2.5 text-caption text-ink-secondary">
-            Bound to{" "}
+            {t("form.boundTo")}{" "}
             <span className="font-mono">
               {existing.cluster_ref}/{existing.namespace}/{existing.workload_kind}/
               {existing.workload_name}
             </span>
-            . Pointing a service at a different workload is a new binding, so its health
-            history always refers to one thing.
+            <span className="mt-1 block">{t("form.boundToNote")}</span>
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Field label="Cluster">
+            <Field label={tc("field.cluster")}>
               <select
                 className={SELECT_CLASS}
                 value={clusterId}
                 disabled={!canManage || busy}
                 onChange={(event) => chooseCluster(event.target.value)}
               >
-                <option value="">Select a cluster…</option>
+                <option value="">{t("form.selectCluster")}</option>
                 {options.clusters.map((cluster) => (
                   <option key={cluster.id} value={cluster.id}>
                     {cluster.display_name || cluster.cluster_ref}
@@ -245,7 +238,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
               </select>
             </Field>
 
-            <Field label="Namespace">
+            <Field label={tc("field.namespace")}>
               <select
                 className={SELECT_CLASS}
                 value={namespace}
@@ -253,7 +246,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
                 onChange={(event) => chooseNamespace(event.target.value)}
               >
                 <option value="">
-                  {clusterId ? "Select a namespace…" : "Choose a cluster first"}
+                  {clusterId ? t("form.selectNamespace") : t("form.chooseClusterFirst")}
                 </option>
                 {options.namespaces.map((entry) => (
                   <option key={entry} value={entry}>
@@ -263,7 +256,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
               </select>
             </Field>
 
-            <Field label="Workload">
+            <Field label={tc("field.workload")}>
               <select
                 className={SELECT_CLASS}
                 value={workload}
@@ -271,7 +264,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
                 onChange={(event) => setWorkload(event.target.value)}
               >
                 <option value="">
-                  {namespace ? "Select a workload…" : "Choose a namespace first"}
+                  {namespace ? t("form.selectWorkload") : t("form.chooseNamespaceFirst")}
                 </option>
                 {options.workloads.map((entry) => (
                   <option key={`${entry.kind}/${entry.name}`} value={`${entry.kind}/${entry.name}`}>
@@ -285,7 +278,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field
-            label="Metric preset"
+            label={t("form.field.preset")}
             hint={
               options.presets.find((preset) => preset.key === presetKey)?.description ??
               undefined
@@ -305,7 +298,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
             </select>
           </Field>
 
-          <Field label="Health policy">
+          <Field label={t("form.field.policy")}>
             <select
               className={SELECT_CLASS}
               value={policyKey}
@@ -327,18 +320,18 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
         >
           {/* State only. A datasource is configured by someone with
               integration access, never typed into this form. */}
-          Telemetry datasource:{" "}
+          {t("form.datasource.label")}{" "}
           <span className="font-medium text-ink">
-            {options.datasource?.configured ? "configured" : "not configured"}
+            {options.datasource?.configured
+              ? t("form.datasource.configured")
+              : t("form.datasource.notConfigured")}
           </span>
-          {options.datasource?.configured
-            ? null
-            : " — health will report as not configured until an integration is set up for this project."}
+          {options.datasource?.configured ? null : <> {t("form.datasource.note")}</>}
         </div>
 
         {notice.kind === "conflict" ? (
           <div role="alert" data-testid="version-conflict">
-            <DataState kind="error" title="Version conflict" description={notice.message} />
+            <DataState kind="error" title={t("form.conflict.title")} description={notice.message} />
           </div>
         ) : null}
         {notice.kind === "error" ? (
@@ -346,7 +339,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
             <DataState kind="error" description={notice.message} />
             {notice.correlationId ? (
               <p className="mt-1 text-micro text-ink-muted">
-                Correlation ID: <span className="font-mono">{notice.correlationId}</span>
+                {t("form.correlationId")} <span className="font-mono">{notice.correlationId}</span>
               </p>
             ) : null}
           </div>
@@ -363,7 +356,7 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
             disabled={!canManage || busy || (!existing && !complete)}
             className="rounded-full bg-brand px-4 py-1.5 text-caption font-medium text-ink-inverse transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {existing ? "Save changes" : "Create binding"}
+            {existing ? t("form.saveChanges") : t("form.createBinding")}
           </button>
 
           {existing ? (
@@ -374,12 +367,12 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
                 onClick={() =>
                   act(
                     () => resolveBinding(csrfToken!, existing.id),
-                    "Re-checked cluster inventory.",
+                    t("form.saved.reResolved"),
                   )
                 }
                 className="rounded-full border border-border px-4 py-1.5 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Re-resolve
+                {t("form.reResolve")}
               </button>
               <button
                 type="button"
@@ -394,13 +387,13 @@ export function BindingForm({ environmentServiceId, existing, onSaved }: Props) 
                         existing.revision,
                       ),
                     existing.lifecycle === "active"
-                      ? "Binding disabled. It is kept, not deleted."
-                      : "Binding re-enabled.",
+                      ? t("form.saved.disabled")
+                      : t("form.saved.reEnabled"),
                   )
                 }
                 className="rounded-full border border-border px-4 py-1.5 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {existing.lifecycle === "active" ? "Disable" : "Re-enable"}
+                {existing.lifecycle === "active" ? tc("action.disable") : t("form.reEnable")}
               </button>
             </>
           ) : null}

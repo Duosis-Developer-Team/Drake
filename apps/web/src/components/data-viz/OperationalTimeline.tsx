@@ -23,7 +23,8 @@ import Link from "next/link";
 import { useId, useState } from "react";
 
 import { toneSpec } from "@/lib/design/status";
-import type { TimelineLane } from "@/lib/view-models/timeline";
+import { useFormat, useT, type Locale } from "@/lib/i18n";
+import type { TimelineEvent, TimelineLane } from "@/lib/view-models/timeline";
 
 function laneIcon(key: string): LucideIcon {
   if (key.includes("incident")) return Siren;
@@ -32,6 +33,8 @@ function laneIcon(key: string): LucideIcon {
   return HeartPulse;
 }
 
+/** A UTC clock time. `en-GB` for the 24-hour, zero-padded digits — the
+ *  digits are the same in every locale, so this is not a translation. */
 function formatClock(at: string): string {
   const date = new Date(at);
   if (Number.isNaN(date.getTime())) return at;
@@ -42,6 +45,17 @@ function formatClock(at: string): string {
   })} UTC`;
 }
 
+/** The day-month for an axis endpoint: "10 Aug" / "10 Ağu". The month is a
+ *  word, so it follows the locale; the day stays the UTC day. `en` maps to
+ *  `en-GB` for day-before-month order. */
+function formatDay(epochMs: number, locale: Locale): string {
+  return new Date(epochMs).toLocaleDateString(locale === "en" ? "en-GB" : locale, {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
 /** The UTC calendar day, so the axis can tell "different day" from "earlier
  *  today" — a bare clock time reads as going backward once the window
  *  crosses midnight. */
@@ -49,18 +63,6 @@ function utcDateKey(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
-/** An axis endpoint: a bare clock time within one day, or a dated one once
- *  the window's start and end fall on different UTC days. */
-function formatAxisPoint(epochMs: number, includeDate: boolean): string {
-  const iso = new Date(epochMs).toISOString();
-  if (!includeDate) return formatClock(iso);
-  const day = new Date(epochMs).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
-  return `${day}, ${formatClock(iso)}`;
-}
 
 /** Keeps a dot's tooltip inside the track instead of centering blindly:
  *  a dot near either edge anchors the tooltip to that same edge, so the
@@ -72,9 +74,29 @@ function tooltipAlignmentClass(position: number): string {
 }
 
 export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
+  const t = useT("commandCenter");
+  const fmt = useFormat();
   const [tableOpen, setTableOpen] = useState(false);
   const tableId = useId();
   const allEvents = lanes.flatMap((lane) => lane.events);
+
+  /** An event's name: from its kind and subject when the view-model carried
+   *  them, otherwise the label it was given. */
+  const eventLabel = (event: TimelineEvent): string =>
+    event.subject === undefined
+      ? event.label
+      : t(`timeline.event.${event.kind}`, {
+          subject: event.subject,
+          revision: event.revision ?? t("timeline.unknownRevision"),
+        });
+  const laneLabel = (lane: TimelineLane): string => t.dyn("timeline.lane", lane.key, lane.label);
+
+  /** An axis endpoint: a bare clock time within one day, or a dated one once
+   *  the window's start and end fall on different UTC days. */
+  const axisPoint = (epochMs: number, includeDate: boolean): string => {
+    const time = formatClock(new Date(epochMs).toISOString());
+    return includeDate ? t("timeline.axisPoint", { day: formatDay(epochMs, fmt.locale), time }) : time;
+  };
 
   const times = allEvents
     .map((event) => new Date(event.at).getTime())
@@ -100,8 +122,8 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
             className="flex flex-1 items-center justify-between text-micro text-ink-muted"
             data-testid="timeline-axis"
           >
-            <span>{formatAxisPoint(min, axisSpansMultipleDays)}</span>
-            <span>{formatAxisPoint(max, axisSpansMultipleDays)}</span>
+            <span>{axisPoint(min, axisSpansMultipleDays)}</span>
+            <span>{axisPoint(max, axisSpansMultipleDays)}</span>
           </div>
         </div>
       ) : null}
@@ -120,8 +142,8 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                 >
                   <Icon className="h-4 w-4" />
                 </span>
-                <span className="min-w-0 truncate text-caption font-medium text-ink" title={lane.label}>
-                  {lane.label}
+                <span className="min-w-0 truncate text-caption font-medium text-ink" title={laneLabel(lane)}>
+                  {laneLabel(lane)}
                 </span>
                 <span
                   data-tabular
@@ -132,10 +154,11 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
               </span>
               {!lane.historyAvailable ? (
                 <span
-                  className="block h-8 min-w-0 flex-1 truncate rounded-full border border-dashed border-border px-4 text-micro leading-[1.875rem] text-ink-muted" title="History unavailable — Drake has no state-transition source for this lane yet."
+                  className="block h-8 min-w-0 flex-1 truncate rounded-full border border-dashed border-border px-4 text-micro leading-[1.875rem] text-ink-muted"
+                  title={t("timeline.historyUnavailable")}
                   data-testid={`lane-unavailable-${lane.key}`}
                 >
-                  History unavailable — Drake has no state-transition source for this lane yet.
+                  {t("timeline.historyUnavailable")}
                 </span>
               ) : lane.events.length === 0 ? (
                 <span className="relative flex h-8 min-w-0 flex-1 items-center overflow-hidden rounded-full bg-surface px-4 text-micro text-ink-muted">
@@ -143,7 +166,7 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                     aria-hidden
                     className="absolute inset-x-4 top-1/2 h-px -translate-y-1/2 bg-[repeating-linear-gradient(90deg,var(--border-subtle)_0_6px,transparent_6px_12px)]"
                   />
-                  <span className="relative truncate bg-surface pr-3">No events in the selected window.</span>
+                  <span className="relative truncate bg-surface pr-3">{t("timeline.emptyWindow")}</span>
                 </span>
               ) : (
                 <div className="relative h-8 flex-1 rounded-full bg-surface">
@@ -158,7 +181,7 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                       >
                         <Link
                           href={event.href}
-                          aria-label={`${event.label}, ${formatClock(event.at)}`}
+                          aria-label={t("timeline.eventAt", { event: eventLabel(event), time: formatClock(event.at) })}
                           className={`block h-3.5 w-3.5 rounded-full ring-4 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot}`}
                         />
                         {/* Visible on hover AND keyboard focus; anchored to the
@@ -167,7 +190,7 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                           role="tooltip"
                           className={`pointer-events-none absolute bottom-full z-10 mb-2 max-w-[12rem] whitespace-normal rounded-control bg-ink px-2 py-1 text-micro text-ink-inverse opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${tooltipAlignmentClass(position)}`}
                         >
-                          {event.label} — {formatClock(event.at)}
+                          {t("timeline.eventTooltip", { event: eventLabel(event), time: formatClock(event.at) })}
                         </span>
                       </span>
                     );
@@ -185,32 +208,32 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
         onToggle={(event) => setTableOpen(event.currentTarget.open)}
       >
         <summary className="cursor-pointer text-caption font-medium text-brand">
-          View as table ({allEvents.length} event{allEvents.length === 1 ? "" : "s"})
+          {t("timeline.viewAsTable", { count: allEvents.length })}
         </summary>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full text-caption" id={tableId}>
             <thead>
               <tr className="border-b border-border text-left text-micro uppercase tracking-wide text-ink-muted">
-                <th className="py-1.5 pr-3 font-medium">Lane</th>
-                <th className="py-1.5 pr-3 font-medium">Event</th>
-                <th className="py-1.5 font-medium">When</th>
+                <th className="py-1.5 pr-3 font-medium">{t("timeline.column.lane")}</th>
+                <th className="py-1.5 pr-3 font-medium">{t("timeline.column.event")}</th>
+                <th className="py-1.5 font-medium">{t("timeline.column.when")}</th>
               </tr>
             </thead>
             <tbody>
               {allEvents.length === 0 ? (
                 <tr>
                   <td colSpan={3} className="py-3 text-center text-ink-muted">
-                    No events to list.
+                    {t("timeline.noEvents")}
                   </td>
                 </tr>
               ) : (
                 lanes.flatMap((lane) =>
                   lane.events.map((event) => (
                     <tr key={event.id} className="border-b border-border last:border-0">
-                      <td className="py-1.5 pr-3 text-ink-secondary">{lane.label}</td>
+                      <td className="py-1.5 pr-3 text-ink-secondary">{laneLabel(lane)}</td>
                       <td className="py-1.5 pr-3">
                         <Link href={event.href} className="text-ink hover:underline">
-                          {event.label}
+                          {eventLabel(event)}
                         </Link>
                       </td>
                       <td className="py-1.5 text-ink-muted">{formatClock(event.at)}</td>

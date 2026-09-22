@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, apiGet } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import type { SearchResult } from "@/lib/catalog";
 import { NAV_ITEMS, type NavItem } from "@/lib/navigation";
 import { useSession } from "@/lib/session";
@@ -119,6 +120,7 @@ function pushRecent(entry: RecentEntry): void {
 export function CatalogSearch() {
   const router = useRouter();
   const { hasPermission } = useSession();
+  const t = useT("shell");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [state, setState] = useState<SearchState>({ phase: "idle" });
@@ -205,7 +207,7 @@ export function CatalogSearch() {
           if (!controller.signal.aborted) {
             setState({
               phase: "error",
-              message: error instanceof ApiError ? error.message : "search failed",
+              message: error instanceof ApiError ? error.message : t("search.failed"),
             });
           }
         });
@@ -214,13 +216,15 @@ export function CatalogSearch() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+    // `t` changes only with the locale; a locale switch mid-search restarting
+    // the request is the right behaviour.
+  }, [query, t]);
 
   const trimmed = query.trim();
   const pageMatches: PaletteResult[] = trimmed
     ? pages
+        .map((item) => ({ source: "page" as const, label: t.dyn("nav", item.key, item.label), href: item.href, icon: item.icon }))
         .filter((item) => item.label.toLowerCase().includes(trimmed.toLowerCase()))
-        .map((item) => ({ source: "page" as const, label: item.label, href: item.href, icon: item.icon }))
     : [];
   const catalogMatches: PaletteResult[] =
     state.phase === "ready" ? state.results.map((result) => ({ source: "catalog" as const, result })) : [];
@@ -271,7 +275,7 @@ export function CatalogSearch() {
           <Clock className="h-3.5 w-3.5 shrink-0 text-ink-muted" aria-hidden />
         ) : (
           <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-muted">
-            {result.source === "page" ? "page" : result.result.kind}
+            {result.source === "page" ? t("search.page") : t.dyn("search.kind", result.result.kind)}
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">{paletteLabel(result)}</span>
@@ -289,16 +293,16 @@ export function CatalogSearch() {
         type="button"
         onClick={() => setOpen(true)}
         className="hidden h-11 w-72 items-center gap-2.5 rounded-full border border-border bg-surface pr-1.5 pl-4 text-sm text-ink-muted transition-colors hover:text-ink md:flex"
-        aria-label="Search Drake"
+        aria-label={t("search.open")}
       >
         <Search className="h-4 w-4" aria-hidden />
-        <span className="flex-1 text-left">Search Drake…</span>
+        <span className="flex-1 text-left">{t("search.placeholderShort")}</span>
         <kbd className="rounded-full bg-surface-3 px-2.5 py-1 text-[11px] font-medium text-ink-secondary">⌘K</kbd>
       </button>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Search Drake"
+        aria-label={t("search.open")}
         className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary hover:bg-surface-hover md:hidden"
       >
         <Search className="h-4 w-4" aria-hidden />
@@ -308,13 +312,13 @@ export function CatalogSearch() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Search Drake"
+          aria-label={t("search.open")}
           className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]"
           onKeyDown={onDialogKey}
         >
           <button
             type="button"
-            aria-label="Close search"
+            aria-label={t("search.close")}
             onClick={close}
             className="absolute inset-0 bg-[var(--scrim)] motion-safe:animate-[fade-in_140ms_ease-out]"
             tabIndex={-1}
@@ -326,8 +330,8 @@ export function CatalogSearch() {
                 ref={inputRef}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search pages, projects, environments, services, clusters…"
-                aria-label="Search query"
+                placeholder={t("search.placeholder")}
+                aria-label={t("search.query")}
                 className="h-12 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
               />
               <kbd className="rounded border border-border px-1.5 text-[10px] text-ink-muted">
@@ -336,19 +340,19 @@ export function CatalogSearch() {
             </div>
             <div
               role="listbox"
-              aria-label="Search results"
+              aria-label={t("search.results")}
               className="max-h-80 overflow-y-auto p-2"
             >
               {!trimmed && recentResults.length === 0 ? (
                 <p className="px-3 py-6 text-center text-sm text-ink-muted">
-                  Type to search pages and your authorized catalog.
+                  {t("search.hint")}
                 </p>
               ) : null}
 
               {!trimmed && recentResults.length > 0 ? (
                 <div data-testid="palette-group-recent">
                   <p aria-hidden className="px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-ink-muted">
-                    Recently visited
+                    {t("search.recent")}
                   </p>
                   {recentResults.map(renderOption)}
                 </div>
@@ -357,7 +361,7 @@ export function CatalogSearch() {
               {trimmed && pageMatches.length > 0 ? (
                 <div data-testid="palette-group-pages">
                   <p aria-hidden className="px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-ink-muted">
-                    Pages
+                    {t("search.pages")}
                   </p>
                   {pageMatches.map(renderOption)}
                 </div>
@@ -365,7 +369,7 @@ export function CatalogSearch() {
 
               {trimmed && catalogAttempted && state.phase === "loading" ? (
                 <p role="status" className="px-3 py-3 text-center text-sm text-ink-muted">
-                  Searching…
+                  {t("search.searching")}
                 </p>
               ) : null}
               {trimmed && catalogAttempted && state.phase === "error" ? (
@@ -376,7 +380,7 @@ export function CatalogSearch() {
               {trimmed && catalogMatches.length > 0 ? (
                 <div data-testid="palette-group-catalog">
                   <p aria-hidden className="px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-ink-muted">
-                    Catalog
+                    {t("search.catalog")}
                   </p>
                   {catalogMatches.map(renderOption)}
                 </div>
@@ -384,7 +388,7 @@ export function CatalogSearch() {
 
               {showNoResults ? (
                 <p role="status" className="px-3 py-6 text-center text-sm text-ink-muted">
-                  No authorized results.
+                  {t("search.noResults")}
                 </p>
               ) : null}
             </div>

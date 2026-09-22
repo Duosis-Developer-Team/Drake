@@ -52,8 +52,8 @@ import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
 import {
   MAPPING_EXPLANATIONS,
+  PRIORITY_LABELS,
   alertListPath,
-  formatAge,
   type AlertInstance,
   type AlertStatus,
   type AlertSummary,
@@ -61,6 +61,7 @@ import {
   type Priority,
 } from "@/lib/alerting";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 
 const STATUSES: AlertStatus[] = ["firing", "resolved"];
 const PRIORITIES: Priority[] = ["P1", "P2", "P3", "P4"];
@@ -72,6 +73,8 @@ const PRIORITIES: Priority[] = ["P1", "P2", "P3", "P4"];
  * separate facts, never collapsed into one tick (see the file header).
  */
 function AlertRow({ alert }: { alert: AlertInstance }) {
+  const t = useT("alerting");
+  const fmt = useFormat();
   const firing = alert.status === "firing";
   return (
     <li
@@ -95,7 +98,7 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
               ? [alert.project_key, alert.environment_key, alert.service_key]
                   .filter(Boolean)
                   .join("/")
-              : "no catalog match"}
+              : t("row.noCatalogMatch")}
           </span>
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-secondary">
@@ -107,17 +110,17 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
               className="relative z-10 inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-0.5 text-ink hover:bg-surface-3"
             >
               <Siren aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
-              {alert.incident.state}
-              {alert.incident.acknowledged_at ? " · acknowledged" : ""}
+              {t.dyn("incidentState", alert.incident.state, alert.incident.state)}
+              {alert.incident.acknowledged_at ? ` · ${t("row.acknowledged")}` : ""}
             </Link>
           ) : (
-            <span className="text-ink-muted">no incident</span>
+            <span className="text-ink-muted">{t("row.noIncident")}</span>
           )}
           <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
           {alert.silenced ? (
-            <StatusBadge status="maintenance" label="Silenced" size="compact" />
+            <StatusBadge status="maintenance" label={t("row.silenced")} size="compact" />
           ) : (
-            <span className="text-ink-muted">notifying</span>
+            <span className="text-ink-muted">{t("row.notifying")}</span>
           )}
           {alert.owner_team ? (
             <>
@@ -141,11 +144,11 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
         <PriorityBadge priority={alert.priority} />
         <div className="ml-2 w-24 text-right text-micro leading-4 text-ink-muted">
           <div className="font-medium text-ink-secondary">
-            {formatAge(alert.last_seen_at)}
+            {fmt.relative(alert.last_seen_at)}
           </div>
           {/* Drake's own receipt time, kept visible so a late delivery is not
               mistaken for a late outage. */}
-          <div>received {formatAge(alert.ingested_at)}</div>
+          <div>{t("row.received", { when: fmt.relative(alert.ingested_at) })}</div>
         </div>
       </div>
     </li>
@@ -192,15 +195,17 @@ function MiniStat({
   label,
   count,
   tone,
+  "data-testid": testId,
 }: {
   icon: LucideIcon;
   label: string;
   count: number;
   tone: StatusTone;
+  "data-testid": string;
 }) {
   return (
     <div
-      data-testid={`count-${label.toLowerCase().replace(/\s+/g, "-")}`}
+      data-testid={testId}
       className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 px-4 py-3"
     >
       <span
@@ -222,6 +227,7 @@ function MiniStat({
 }
 
 function AlertsInner() {
+  const t = useT("alerting");
   const [status, setStatus] = useState<string>("firing");
   const [priority, setPriority] = useState<string>("");
   const [summary] = useApi<AlertSummary>("/v1/alerts/summary");
@@ -231,12 +237,13 @@ function AlertsInner() {
 
   const firing = summary.state === "ready" ? summary.data.firing : 0;
   const shareOfFiring = (count: number) => (firing > 0 ? count / firing : null);
+  const ofFiring = firing > 0 ? t("list.kpi.ofFiring", { count: firing }) : t("list.kpi.nothingFiring");
 
   return (
     <PageFrame>
       <PageHeader
-        title="Alerts"
-        description="What Alertmanager decided, where it belongs in your catalog, and what happened next."
+        title={t("list.title")}
+        description={t("list.description")}
       />
       <div className="flex flex-col gap-6">
         {summary.state === "loading" ? (
@@ -254,39 +261,39 @@ function AlertsInner() {
           >
             <KpiTile
               data-testid="alerting-kpi-firing"
-              label="Firing"
+              label={t("list.kpi.firing")}
               value={summary.data.firing}
               icon={BellRing}
               tone="critical"
               share={firing > 0 ? summary.data.with_incident / firing : null}
-              caption={`${summary.data.with_incident} with an incident`}
+              caption={t("list.kpi.firingCaption", { count: summary.data.with_incident })}
             />
             <KpiTile
               data-testid="alerting-kpi-p1"
-              label="P1 · page now"
+              label={t("list.kpi.p1")}
               value={summary.data.p1}
               icon={Zap}
               tone="critical"
               share={shareOfFiring(summary.data.p1)}
-              caption={firing > 0 ? `of ${firing} firing` : "nothing firing"}
+              caption={ofFiring}
             />
             <KpiTile
               data-testid="alerting-kpi-p2"
-              label="P2 · urgent"
+              label={t("list.kpi.p2")}
               value={summary.data.p2}
               icon={Siren}
               tone="warning"
               share={shareOfFiring(summary.data.p2)}
-              caption={firing > 0 ? `of ${firing} firing` : "nothing firing"}
+              caption={ofFiring}
             />
             <KpiTile
               data-testid="alerting-kpi-unmapped"
-              label="Unmapped"
+              label={t("list.kpi.unmapped")}
               value={summary.data.unmapped}
               icon={Link2Off}
               tone="warning"
               share={shareOfFiring(summary.data.unmapped)}
-              caption="no catalog match, no incident"
+              caption={t("list.kpi.unmappedCaption")}
             />
           </div>
         )}
@@ -296,22 +303,22 @@ function AlertsInner() {
         <Toolbar
           summary={
             page.state === "ready"
-              ? `${page.data.items.length} of ${page.data.total} shown`
+              ? t("list.shown", { shown: page.data.items.length, total: page.data.total })
               : undefined
           }
         >
           <PillSelect
-            label="Status"
+            label={t("list.filter.status")}
             value={status}
-            placeholder="Any status"
-            options={STATUSES.map((value) => ({ value, label: value }))}
+            placeholder={t("list.filter.anyStatus")}
+            options={STATUSES.map((value) => ({ value, label: t.dyn("status", value, value) }))}
             onChange={setStatus}
           />
           <PillSelect
-            label="Priority"
+            label={t("list.filter.priority")}
             value={priority}
-            placeholder="Any priority"
-            options={PRIORITIES.map((value) => ({ value, label: value }))}
+            placeholder={t("list.filter.anyPriority")}
+            options={PRIORITIES.map((value) => ({ value, label: PRIORITY_LABELS[value] }))}
             onChange={setPriority}
           />
         </Toolbar>
@@ -327,12 +334,12 @@ function AlertsInner() {
                 icon={BellRing}
                 title={
                   status === "resolved"
-                    ? "Resolved alerts"
+                    ? t("list.heading.resolved")
                     : status === "firing"
-                      ? "Firing alerts"
-                      : "All alerts"
+                      ? t("list.heading.firing")
+                      : t("list.heading.all")
                 }
-                description="Newest signal first, as Alertmanager reported it"
+                description={t("list.heading.description")}
               />
               {page.state === "loading" ? (
                 <StatePad>
@@ -353,11 +360,17 @@ function AlertsInner() {
               ) : page.data.items.length === 0 ? (
                 <EmptyHero
                   icon={BellOff}
-                  title="No alerts match"
-                  description="No alert in your scope reached Drake for these filters — not a claim that nothing is wrong."
+                  title={t("list.empty.title")}
+                  description={t("list.empty.description")}
                 >
-                  <FactPill>Status · {status || "any"}</FactPill>
-                  <FactPill>Priority · {priority || "any"}</FactPill>
+                  <FactPill>
+                    {t("list.empty.status", {
+                      value: status ? t.dyn("status", status, status) : t("list.empty.any"),
+                    })}
+                  </FactPill>
+                  <FactPill>
+                    {t("list.empty.priority", { value: priority || t("list.empty.any") })}
+                  </FactPill>
                 </EmptyHero>
               ) : (
                 <>
@@ -374,7 +387,7 @@ function AlertsInner() {
                       data-testid="unmapped-note"
                     >
                       <p className="text-caption font-semibold text-ink">
-                        Unmapped alerts
+                        {t("list.unmapped.title")}
                       </p>
                       {page.data.items
                         .filter((alert) => alert.mapping_state !== "mapped")
@@ -385,10 +398,12 @@ function AlertsInner() {
                           >
                             <MappingBadge state={alert.mapping_state} />
                             <span className="text-caption text-ink-secondary">
-                              {MAPPING_EXPLANATIONS[
-                                alert.mapping_error_code ?? ""
-                              ] ??
-                                "Drake could not place this alert in the catalog, so it opened no incident."}
+                              {t.dyn(
+                                "mappingExplanation",
+                                alert.mapping_error_code,
+                                MAPPING_EXPLANATIONS[alert.mapping_error_code ?? ""] ??
+                                  t("list.unmapped.fallback"),
+                              )}
                             </span>
                           </div>
                         ))}
@@ -404,8 +419,8 @@ function AlertsInner() {
               <Panel className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
                 <CardTitle
                   icon={Siren}
-                  title="Now"
-                  description="Firing alerts, by priority"
+                  title={t("list.now.title")}
+                  description={t("list.now.description")}
                 />
                 <div
                   data-testid="alert-summary"
@@ -415,22 +430,22 @@ function AlertsInner() {
                     what is firing outside P1/P2 — computed, never negative. */}
                   <ul
                     className="space-y-4"
-                    aria-label="Firing alerts by priority"
+                    aria-label={t("list.now.ringLabel")}
                   >
                     <PriorityLane
-                      label="P1"
+                      label={PRIORITY_LABELS.P1}
                       count={summary.data.p1}
                       total={firing}
                       tone="critical"
                     />
                     <PriorityLane
-                      label="P2"
+                      label={PRIORITY_LABELS.P2}
                       count={summary.data.p2}
                       total={firing}
                       tone="warning"
                     />
                     <PriorityLane
-                      label="Other"
+                      label={t("list.now.other")}
                       count={Math.max(
                         0,
                         firing - summary.data.p1 - summary.data.p2,
@@ -441,20 +456,23 @@ function AlertsInner() {
                   </ul>
                   <div className="grid gap-2.5">
                     <MiniStat
+                      data-testid="count-silenced"
                       icon={VolumeX}
-                      label="Silenced"
+                      label={t("list.now.silenced")}
                       count={summary.data.silenced}
                       tone="neutral"
                     />
                     <MiniStat
+                      data-testid="count-unmapped"
                       icon={Link2Off}
-                      label="Unmapped"
+                      label={t("list.now.unmapped")}
                       count={summary.data.unmapped}
                       tone="warning"
                     />
                     <MiniStat
+                      data-testid="count-with-incident"
                       icon={Siren}
-                      label="With incident"
+                      label={t("list.now.withIncident")}
                       count={summary.data.with_incident}
                       tone="info"
                     />

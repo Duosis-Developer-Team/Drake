@@ -12,6 +12,7 @@
  */
 
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import type { Resource } from "@/lib/useResource";
 
 export type SourceCoverageState =
@@ -24,8 +25,11 @@ export type SourceCoverageState =
 
 export interface SourceCoverage {
   key: string;
+  /** The source's name as the caller wants it read — already translated. */
   label: string;
+  /** Also the catalogue key: `commandCenter.evidence.state.<state>`. */
   state: SourceCoverageState;
+  /** Backend error text, quoted as-is. */
   detail?: string;
 }
 
@@ -36,15 +40,6 @@ const STATE_TONE: Record<SourceCoverageState, StatusTone> = {
   "not-configured": "not-applicable",
   "permission-denied": "denied",
   unavailable: "critical",
-};
-
-const STATE_LABEL: Record<SourceCoverageState, string> = {
-  loading: "Checking…",
-  "configured-fresh": "Answered",
-  "configured-stale": "Last known good",
-  "not-configured": "Not configured",
-  "permission-denied": "Permission required",
-  unavailable: "Unavailable",
 };
 
 export function classifySource(source: { key: string; label: string; resource: Resource<unknown> }): SourceCoverage {
@@ -67,6 +62,7 @@ export function EvidenceCoverage({
 }: {
   sources: readonly { key: string; label: string; resource: Resource<unknown> }[];
 }) {
+  const t = useT("commandCenter");
   const rows = sources.map(classifySource);
   const answered = rows.filter((row) => row.state === "configured-fresh").length;
   const share = rows.length > 0 ? (answered / rows.length) * 100 : 0;
@@ -77,7 +73,7 @@ export function EvidenceCoverage({
           {answered}
           <span className="text-ink-muted">/{rows.length}</span>
         </span>
-        <span className="text-caption text-ink-muted">sources answered with current data</span>
+        <span className="text-caption text-ink-muted">{t("evidence.answered")}</span>
         <span aria-hidden className="ml-auto hidden h-2 w-48 overflow-hidden rounded-full bg-surface-3 sm:block">
           <span className="block h-full rounded-full bg-healthy" style={{ width: `${share}%` }} />
         </span>
@@ -100,7 +96,7 @@ export function EvidenceCoverage({
               </span>
               <span className="min-w-0">
                 <span className="block text-body font-semibold text-ink">{row.label}</span>
-                <span className={`mt-0.5 block text-caption ${spec.text}`}>{STATE_LABEL[row.state]}</span>
+                <span className={`mt-0.5 block text-caption ${spec.text}`}>{t(`evidence.state.${row.state}`)}</span>
               </span>
             </li>
           );

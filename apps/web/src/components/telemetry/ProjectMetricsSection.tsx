@@ -14,9 +14,12 @@ import { IconBubble, TileState } from "@/components/catalog/visuals";
 import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
 import { Select } from "@/components/ui/controls";
 import type { Environment } from "@/lib/catalog";
+import { useT } from "@/lib/i18n";
 import { parseRangePreset } from "@/lib/telemetry";
 
 export function ProjectMetricsSection({ environments }: { environments: Environment[] }) {
+  const t = useT("ui");
+  const common = useT("common");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -29,14 +32,14 @@ export function ProjectMetricsSection({ environments }: { environments: Environm
 
   if (!selected) {
     return (
-      <section aria-label="Signals">
-        <SignalsHeading description="Telemetry for one environment at a time." />
+      <section aria-label={t("signals.title")}>
+        <SignalsHeading description={t("signals.descriptionNone")} />
         <div className="rounded-[1.5rem] border border-border bg-surface p-7 shadow-panel">
           <TileState
             icon={Activity}
             testId="state-not-configured"
-            title="No environment to measure"
-            description="Signals appear once this project has an active environment you are authorized to see."
+            title={t("signals.noEnvironmentTitle")}
+            description={t("signals.noEnvironmentDescription")}
           />
         </div>
       </section>
@@ -50,13 +53,13 @@ export function ProjectMetricsSection({ environments }: { environments: Environm
   };
 
   return (
-    <section aria-label="Signals" data-testid="project-metrics">
+    <section aria-label={t("signals.title")} data-testid="project-metrics">
       <SignalsHeading
-        description={`Telemetry for ${selected.environment_key} — one environment at a time, range in the top bar.`}
+        description={t("signals.description", { environment: selected.environment_key })}
         actions={
           active.length > 1 ? (
             <Select
-              label="Environment"
+              label={common("field.environment")}
               value={selected.id}
               options={active.map((environment) => ({
                 value: environment.id,
@@ -90,12 +93,15 @@ function SignalsHeading({
   description: string;
   actions?: React.ReactNode;
 }) {
+  const t = useT("ui");
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
       <div className="flex min-w-0 items-center gap-3">
         <IconBubble icon={Activity} />
         <div className="min-w-0">
-          <h2 className="text-[1.25rem] leading-7 font-semibold tracking-[-0.015em] text-ink">Signals</h2>
+          <h2 className="text-[1.25rem] leading-7 font-semibold tracking-[-0.015em] text-ink">
+            {t("signals.title")}
+          </h2>
           <p className="text-caption text-ink-muted">{description}</p>
         </div>
       </div>

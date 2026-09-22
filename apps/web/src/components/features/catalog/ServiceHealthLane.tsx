@@ -13,12 +13,15 @@
 
 import Link from "next/link";
 
+import { useServiceStatusLabel } from "@/components/catalog/visuals";
 import { StatusBadge, ToneAvatar } from "@/components/ui/StatusBadge";
+import { useT } from "@/lib/i18n";
 import type { ServiceLaneModel } from "@/lib/view-models/scope-health";
 
 function BindingSummary({ binding }: { binding: ServiceLaneModel["binding"] }) {
+  const t = useT("catalog");
   if (!binding) {
-    return <span className="text-micro text-ink-muted">Not bound to a workload</span>;
+    return <span className="text-micro text-ink-muted">{t("card.notBound")}</span>;
   }
   return (
     <span className="font-mono text-micro text-ink-muted">
@@ -28,11 +31,11 @@ function BindingSummary({ binding }: { binding: ServiceLaneModel["binding"] }) {
 }
 
 export function ServiceHealthLane({ services }: { services: ServiceLaneModel[] }) {
+  const t = useT("catalog");
+  const statusLabel = useServiceStatusLabel();
   if (services.length === 0) {
     return (
-      <p className="px-1 py-2 text-caption text-ink-muted">
-        No services observed in this environment yet.
-      </p>
+      <p className="px-1 py-2 text-caption text-ink-muted">{t("topology.noServices")}</p>
     );
   }
 
@@ -55,9 +58,13 @@ export function ServiceHealthLane({ services }: { services: ServiceLaneModel[] }
             </span>
             <span className="flex items-center gap-1.5">
               {service.partial ? (
-                <span className="text-micro italic text-ink-muted">partial</span>
+                <span className="text-micro italic text-ink-muted">{t("card.partial")}</span>
               ) : null}
-              <StatusBadge status={service.tone} label={service.statusLabel} size="compact" />
+              <StatusBadge
+                status={service.tone}
+                label={statusLabel(service.statusLabel)}
+                size="compact"
+              />
             </span>
           </Link>
         </li>

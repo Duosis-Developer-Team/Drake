@@ -66,6 +66,7 @@ import {
 } from "@/components/ui/states";
 import { humanize, toneForHealth } from "@/lib/design/status";
 import { ApiError, apiGet } from "@/lib/api";
+import { useFormat, useT, type Translator } from "@/lib/i18n";
 import {
   INVENTORY_KINDS,
   type HealthRollup,
@@ -75,26 +76,26 @@ import {
 } from "@/lib/inventory";
 import { useResource } from "@/lib/useResource";
 
-const HEALTH_OPTIONS = [
-  { value: "healthy", label: "Healthy" },
-  { value: "degraded", label: "Degraded" },
-  { value: "unhealthy", label: "Unhealthy" },
-  { value: "unknown", label: "Unknown" },
-];
+const HEALTH_VALUES = ["healthy", "degraded", "unhealthy", "unknown"] as const;
 
 // Events are overwhelmingly Normal — 5717 of 5983 in the production
 // cluster — so listing them unfiltered buries the ones worth reading.
-const EVENT_TYPE_OPTIONS = [
-  { value: "", label: "All events" },
-  { value: "Warning", label: "Warnings only" },
-  { value: "Normal", label: "Normal only" },
-];
+// `Warning` and `Normal` are the Kubernetes event types, never translated.
+function eventTypeOptions(t: Translator<"clusters">) {
+  return [
+    { value: "", label: t("inventory.filter.allEvents") },
+    { value: "Warning", label: t("inventory.filter.warningsOnly") },
+    { value: "Normal", label: t("inventory.filter.normalOnly") },
+  ];
+}
 
-const LIFECYCLE_OPTIONS = [
-  { value: "active", label: "Active" },
-  { value: "missing", label: "Missing" },
-  { value: "all", label: "All" },
-];
+function lifecycleOptions(t: Translator<"clusters">, tc: Translator<"common">) {
+  return [
+    { value: "active", label: t("enum.resourceLifecycle.active") },
+    { value: "missing", label: t("enum.resourceLifecycle.missing") },
+    { value: "all", label: tc("count.all") },
+  ];
+}
 
 function buildQuery(filters: {
   kind: string;
@@ -123,29 +124,29 @@ function buildQuery(filters: {
   return encoded ? `?${encoded}` : "";
 }
 
-function rollupSegments(rollup: HealthRollup) {
+function rollupSegments(t: Translator<"clusters">, rollup: HealthRollup) {
   return [
     {
       key: "healthy",
-      label: "Healthy",
+      label: t("enum.health.healthy"),
       value: rollup.healthy,
       tone: "success" as const,
     },
     {
       key: "degraded",
-      label: "Degraded",
+      label: t("enum.health.degraded"),
       value: rollup.degraded,
       tone: "warning" as const,
     },
     {
       key: "unhealthy",
-      label: "Unhealthy",
+      label: t("enum.health.unhealthy"),
       value: rollup.unhealthy,
       tone: "critical" as const,
     },
     {
       key: "unknown",
-      label: "Unknown",
+      label: t("enum.health.unknown"),
       value: rollup.unknown,
       tone: "unknown" as const,
     },
@@ -157,6 +158,9 @@ const HEADER_CELL =
 const BODY_CELL = "h-14 px-4 align-middle first:pl-7 last:pr-7";
 
 function InventoryInner() {
+  const t = useT("clusters");
+  const tc = useT("common");
+  const fmt = useFormat();
   const { clusterId } = useParams<{ clusterId: string }>();
   const router = useRouter();
   const params = useSearchParams();
@@ -239,11 +243,11 @@ function InventoryInner() {
       })
       .catch((error: unknown) => {
         setMoreError(
-          error instanceof ApiError ? error.message : "request failed",
+          error instanceof ApiError ? error.message : t("inventory.table.requestFailed"),
         );
       })
       .finally(() => setLoadingMore(false));
-  }, [clusterId, kind, health, lifecycle, search, eventType, nextCursor]);
+  }, [clusterId, kind, health, lifecycle, search, eventType, nextCursor, t]);
 
   const rows = useMemo(
     () => [...(page.data?.resources ?? []), ...extraRows],
@@ -269,13 +273,17 @@ function InventoryInner() {
   return (
     <PageFrame width="wide">
       <PageHeader
-        title="Inventory"
-        description="Observed Kubernetes resources with derived health — a resource that disappears stays listed as missing."
+        title={t("inventory.title")}
+        description={t("inventory.description")}
         status={
           page.data ? (
             <StatusBadge
               status={toneForHealth(page.data.inventory.state)}
-              label={humanize(page.data.inventory.state)}
+              label={t.dyn(
+                "enum.inventory",
+                page.data.inventory.state,
+                humanize(page.data.inventory.state),
+              )}
             />
           ) : undefined
         }
@@ -293,7 +301,7 @@ function InventoryInner() {
             href={`/clusters/${clusterId}`}
             icon={Server}
           >
-            Cluster detail
+            {t("inventory.clusterDetail")}
           </PillLink>
         }
       />
@@ -302,22 +310,22 @@ function InventoryInner() {
         <div className="page-grid mb-6">
           <StatTile
             icon={Boxes}
-            label="Active resources"
+            label={t("inventory.tile.activeResources")}
             value={summary.data.inventory.active_resources ?? 0}
-            suffix="observed"
+            suffix={t("inventory.tile.observed")}
           >
             <SegmentBar
-              label="Resources by lifecycle"
+              label={t("shared.resourcesByLifecycle")}
               segments={[
                 {
                   key: "active",
-                  label: "Active",
+                  label: t("enum.resourceLifecycle.active"),
                   value: summary.data.inventory.active_resources ?? 0,
                   tone: "info",
                 },
                 {
                   key: "missing",
-                  label: "Missing",
+                  label: t("enum.resourceLifecycle.missing"),
                   value: missingCount,
                   tone: "stale",
                 },
@@ -327,21 +335,21 @@ function InventoryInner() {
           <StatTile
             icon={EyeOff}
             tone={missingCount > 0 ? "stale" : null}
-            label="Missing"
+            label={t("inventory.tile.missing")}
             value={missingCount}
-            suffix="gone from the cluster"
+            suffix={t("inventory.tile.missingSuffix")}
           >
             <p className="text-micro text-ink-muted">
               {missingCount > 0 && lifecycle === "active"
-                ? "Hidden by the active-only filter below"
-                : "Kept in the list, never silently dropped"}
+                ? t("inventory.tile.missingHidden")
+                : t("inventory.tile.missingKept")}
             </p>
           </StatTile>
           <StatTile
             icon={Shapes}
-            label="Kinds observed"
+            label={t("inventory.tile.kindsObserved")}
             value={kindCategories.length}
-            suffix="kinds"
+            suffix={t("inventory.tile.kindsSuffix")}
           >
             {topKinds.length > 0 ? (
               <ul className="flex flex-wrap gap-1.5">
@@ -359,17 +367,17 @@ function InventoryInner() {
               </ul>
             ) : (
               <p className="text-micro text-ink-muted">
-                No allowlisted kind recorded yet
+                {t("inventory.tile.noKinds")}
               </p>
             )}
           </StatTile>
           <StatTile
             icon={RefreshCw}
             tone={inventoryState ? toneForHealth(inventoryState) : null}
-            label="Inventory sweep"
+            label={t("shared.inventorySweep")}
             value={
               <span className="block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] text-ink">
-                {humanize(inventoryState)}
+                {t.dyn("enum.inventory", inventoryState, humanize(inventoryState))}
               </span>
             }
           >
@@ -385,27 +393,28 @@ function InventoryInner() {
         <div className="mb-6 grid grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <Panel data-testid="inventory-rollups" className="h-full">
             <PanelHeader
-              title="What the last sweep found"
-              description="Health composition per resource class, as the agent reported it."
+              title={t("shared.sweepTitle")}
+              description={t("shared.sweepDescription")}
               level={2}
             />
             <ul className="space-y-5">
               {(
                 [
-                  ["Nodes", Server, summary.data.nodes],
-                  ["Namespaces", FolderTree, summary.data.namespaces],
-                  ["Workloads", Workflow, summary.data.workloads],
-                  ["Pods", Container, summary.data.pods],
+                  ["nodes", t("detail.sweep.nodes"), Server, summary.data.nodes],
+                  ["namespaces", t("detail.sweep.namespaces"), FolderTree, summary.data.namespaces],
+                  ["workloads", t("detail.sweep.workloads"), Workflow, summary.data.workloads],
+                  ["pods", t("detail.sweep.pods"), Container, summary.data.pods],
                   [
-                    "Volume claims",
+                    "volumeClaims",
+                    t("detail.sweep.volumeClaims"),
                     Database,
                     summary.data.persistent_volume_claims,
                   ],
                 ] as const
               )
-                .filter(([, , rollup]) => rollup.total > 0)
-                .map(([label, icon, rollup]) => (
-                  <li key={label} className="flex items-center gap-4">
+                .filter(([, , , rollup]) => rollup.total > 0)
+                .map(([key, label, icon, rollup]) => (
+                  <li key={key} className="flex items-center gap-4">
                     <IconBubble icon={icon} size="small" />
                     <div className="min-w-0 flex-1">
                       <p className="mb-2 flex items-baseline justify-between gap-2 text-caption">
@@ -415,9 +424,9 @@ function InventoryInner() {
                         </span>
                       </p>
                       <SegmentBar
-                        label={`${label} by health`}
+                        label={t("detail.sweep.byHealth", { title: label })}
                         height="h-2"
-                        segments={rollupSegments(rollup)}
+                        segments={rollupSegments(t, rollup)}
                       />
                     </div>
                   </li>
@@ -428,24 +437,24 @@ function InventoryInner() {
             summary.data.pods.restarts > 0 ? (
               <div className="mt-auto rounded-[1rem] bg-surface-2 px-5 py-4">
                 <p className="mb-3 text-micro tracking-[0.08em] text-ink-muted uppercase">
-                  Pod instability
+                  {t("shared.podInstability")}
                 </p>
                 {/* Counts of specific failure modes, not a composition — they
                     do not add up to the pod total, so counters, not wedges. */}
                 <ToneCounters
                   items={[
                     {
-                      label: "crash-looping",
+                      label: t("inventory.sweep.crashLooping"),
                       count: summary.data.pods.crashloop,
                       tone: "critical",
                     },
                     {
-                      label: "OOM-killed",
+                      label: t("inventory.sweep.oomKilled"),
                       count: summary.data.pods.oom_killed,
                       tone: "critical",
                     },
                     {
-                      label: "restarts in window",
+                      label: t("inventory.sweep.restartsInWindow"),
                       count: summary.data.pods.restarts,
                       tone: "warning",
                     },
@@ -457,8 +466,8 @@ function InventoryInner() {
 
           <div className="h-full min-w-0 [&>*]:h-full">
             <SortedBarChart
-              title="Resources by kind"
-              question="Which kinds make up this cluster's inventory?"
+              title={t("shared.resourcesByKind")}
+              question={t("inventory.kinds.question")}
               unit="count"
               status={kindCategories.length === 0 ? "empty" : "ready"}
               asOf={summary.data.as_of}
@@ -466,7 +475,7 @@ function InventoryInner() {
                 summary.data.inventory.state === "stale" ? "stale" : "fresh"
               }
               categories={kindCategories}
-              emptyDescription="The last sweep recorded no resources of any allowlisted kind."
+              emptyDescription={t("inventory.kinds.emptyDescription")}
             />
           </div>
         </div>
@@ -474,8 +483,8 @@ function InventoryInner() {
 
       <div className="mt-10">
         <SectionHeader
-          title="Resources"
-          description="Secrets and ConfigMaps are outside the collected set and never appear here."
+          title={t("inventory.resources.title")}
+          description={t("inventory.resources.description")}
         />
       </div>
 
@@ -486,9 +495,9 @@ function InventoryInner() {
       >
         <PillSelect
           data-testid="filter-kind"
-          label="Kind"
+          label={tc("field.kind")}
           value={kind}
-          placeholder="All kinds"
+          placeholder={t("inventory.filter.allKinds")}
           active={Boolean(kind)}
           options={INVENTORY_KINDS.map((option) => ({
             value: option,
@@ -507,37 +516,40 @@ function InventoryInner() {
         />
         <PillSelect
           data-testid="filter-health"
-          label="Health"
+          label={tc("field.health")}
           value={health}
-          placeholder="Any health"
+          placeholder={t("inventory.filter.anyHealth")}
           active={Boolean(health)}
-          options={HEALTH_OPTIONS}
+          options={HEALTH_VALUES.map((value) => ({
+            value,
+            label: t(`enum.health.${value}`),
+          }))}
           onChange={(value) => setParam({ health: value })}
         />
         {kind === "Event" ? (
           <PillSelect
             data-testid="filter-event-type"
-            label="Event type"
+            label={t("inventory.filter.eventType")}
             value={eventType}
             active={Boolean(eventType)}
-            options={EVENT_TYPE_OPTIONS}
+            options={eventTypeOptions(t)}
             onChange={(value) => setParam({ event_type: value })}
           />
         ) : null}
         <PillSelect
           data-testid="filter-lifecycle"
-          label="Lifecycle"
+          label={t("shared.lifecycle")}
           value={lifecycle}
           active={lifecycle !== "active"}
-          options={LIFECYCLE_OPTIONS}
+          options={lifecycleOptions(t, tc)}
           onChange={(value) => setParam({ lifecycle: value })}
         />
         <PillSearch
           data-testid="filter-search"
-          label="Name"
+          label={tc("field.name")}
           value={draft}
           onChange={setDraft}
-          placeholder="Name (min 2 characters)"
+          placeholder={t("inventory.filter.namePlaceholder")}
         />
         {filtered ? (
           <button
@@ -551,15 +563,14 @@ function InventoryInner() {
             className="inline-flex h-10 items-center gap-1.5 rounded-full px-3.5 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
           >
             <X aria-hidden className="h-4 w-4" />
-            Clear filters
+            {t("inventory.filter.clear")}
           </button>
         ) : null}
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {lifecycle === "active" && missingCount > 0 ? (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-stale-soft px-3 py-1.5 text-micro text-stale">
               <EyeOff aria-hidden className="h-3.5 w-3.5" />
-              {missingCount} missing resource(s) are hidden by the active-only
-              filter.
+              {t("inventory.filter.missingHidden", { count: missingCount })}
             </span>
           ) : null}
           {page.data ? (
@@ -567,7 +578,9 @@ function InventoryInner() {
               data-tabular
               className="rounded-full bg-surface px-3 py-1.5 text-micro font-medium text-ink-secondary"
             >
-              {`${rows.length} shown${nextCursor ? " (more available)" : ""}`}
+              {nextCursor
+                ? t("inventory.filter.shownMore", { count: rows.length })
+                : t("inventory.filter.shown", { count: rows.length })}
             </span>
           ) : null}
         </span>
@@ -579,7 +592,7 @@ function InventoryInner() {
             <LoadingSkeleton
               variant="table"
               rows={6}
-              label="Loading inventory"
+              label={t("inventory.table.loading")}
             />
           </div>
         ) : page.notFound ? (
@@ -587,8 +600,8 @@ function InventoryInner() {
             testId="state-not-found"
             icon={Server}
             tone="not-applicable"
-            title="Not found"
-            description="This cluster's inventory does not exist in your authorized scope."
+            title={t("shared.notFoundTitle")}
+            description={t("inventory.table.notFoundDescription")}
           />
         ) : page.denied ? (
           <div className="px-7 py-4">
@@ -609,8 +622,8 @@ function InventoryInner() {
                 <StateCard
                   testId="state-empty"
                   icon={SearchX}
-                  title="No resources match"
-                  description="Nothing in the authorized inventory matches these filters."
+                  title={t("inventory.table.emptyTitle")}
+                  description={t("inventory.table.emptyDescription")}
                   action={
                     filtered ? (
                       <Button
@@ -622,7 +635,7 @@ function InventoryInner() {
                           });
                         }}
                       >
-                        Clear filters
+                        {t("inventory.filter.clear")}
                       </Button>
                     ) : undefined
                   }
@@ -634,30 +647,30 @@ function InventoryInner() {
                     data-tabular
                   >
                     <caption className="sr-only">
-                      Inventory resources matching the current filters
+                      {t("inventory.table.caption")}
                     </caption>
                     <thead className="sticky top-0 z-10 bg-surface-2">
                       <tr className="border-b border-border">
                         <th scope="col" className={HEADER_CELL}>
-                          Name
+                          {tc("field.name")}
                         </th>
                         <th scope="col" className={HEADER_CELL}>
-                          Kind
+                          {tc("field.kind")}
                         </th>
                         <th scope="col" className={HEADER_CELL}>
-                          Namespace
+                          {tc("field.namespace")}
                         </th>
                         <th scope="col" className={HEADER_CELL}>
-                          Health
+                          {tc("field.health")}
                         </th>
                         <th scope="col" className={HEADER_CELL}>
-                          Lifecycle
+                          {t("shared.lifecycle")}
                         </th>
                         <th
                           scope="col"
                           className={`${HEADER_CELL} hidden text-right lg:table-cell`}
                         >
-                          Observed
+                          {t("inventory.table.observed")}
                         </th>
                       </tr>
                     </thead>
@@ -690,7 +703,7 @@ function InventoryInner() {
                           <td className={BODY_CELL}>
                             <StatusBadge
                               status={toneForHealth(row.health)}
-                              label={humanize(row.health)}
+                              label={t.dyn("enum.health", row.health, humanize(row.health))}
                               size="compact"
                             />
                           </td>
@@ -698,12 +711,12 @@ function InventoryInner() {
                             {row.lifecycle === "missing" ? (
                               <StatusBadge
                                 status="stale"
-                                label="Missing"
+                                label={t("enum.resourceLifecycle.missing")}
                                 size="compact"
                               />
                             ) : (
                               <span className="text-caption text-ink-secondary">
-                                Active
+                                {t("enum.resourceLifecycle.active")}
                               </span>
                             )}
                           </td>
@@ -739,7 +752,7 @@ function InventoryInner() {
                   size="compact"
                   data-testid="load-more"
                 >
-                  {loadingMore ? "Loading…" : "Load more"}
+                  {loadingMore ? t("shared.loadingEllipsis") : tc("action.loadMore")}
                 </Button>
               </div>
             ) : null}
@@ -749,17 +762,22 @@ function InventoryInner() {
 
       {page.data ? (
         <p className="mt-4 text-micro text-ink-muted">
-          Cluster{" "}
+          {tc("field.cluster")}{" "}
           <CopyableIdentifier
             value={clusterId}
-            label="cluster id"
+            label={t("inventory.footer.clusterId")}
             truncate={16}
           />{" "}
-          · inventory as of <Timestamp value={page.data.as_of} />
+          · {t("inventory.footer.asOf", { when: fmt.utc(page.data.as_of) })}
         </p>
       ) : null}
     </PageFrame>
   );
+}
+
+function InventoryFallback() {
+  const t = useT("clusters");
+  return <LoadingSkeleton variant="table" rows={6} label={t("inventory.table.loading")} />;
 }
 
 export default function ClusterInventoryPage() {
@@ -767,7 +785,7 @@ export default function ClusterInventoryPage() {
     <Suspense
       fallback={
         <PageFrame width="wide">
-          <LoadingSkeleton variant="table" rows={6} label="Loading inventory" />
+          <InventoryFallback />
         </PageFrame>
       }
     >

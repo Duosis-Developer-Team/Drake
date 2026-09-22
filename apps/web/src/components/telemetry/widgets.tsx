@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/states";
 import { formatUnit } from "@/lib/design/format";
 import { thresholdLabel, toneForThreshold, toneSpec } from "@/lib/design/status";
+import { useLocale, useT, type Translator } from "@/lib/i18n";
 import type { DashboardWidget, TelemetryEnvelope, TelemetrySeries } from "@/lib/telemetry";
 import { formatValue, reduceEnvelope } from "@/lib/telemetry";
 
@@ -51,9 +52,9 @@ export type WidgetState =
   | { kind: "error"; correlationId?: string }
   | { kind: "ready"; envelope: TelemetryEnvelope };
 
-function seriesName(series: TelemetrySeries, index: number): string {
+function seriesName(series: TelemetrySeries, index: number, t: Translator<"ui">): string {
   const parts = Object.entries(series.labels).map(([key, value]) => `${key}=${value}`);
-  return parts.length > 0 ? parts.join(" ") : `series ${index + 1}`;
+  return parts.length > 0 ? parts.join(" ") : t("widget.seriesN", { n: index + 1 });
 }
 
 /** Envelope data state → the chart frame's status vocabulary. */
@@ -94,14 +95,14 @@ export function hasDrawableSeries(state: WidgetState): boolean {
  * Separate from `chartStatus` because the chart frame only has one error
  * state, and these three reasons send an operator to three different places.
  */
-function failureDescription(state: WidgetState): string | undefined {
+function failureDescription(state: WidgetState, t: Translator<"ui">): string | undefined {
   switch (state.kind) {
     case "throttled":
-      return "The query budget for this scope is exhausted. This is a rate limit, not an outage — it clears within seconds.";
+      return t("widget.throttled");
     case "unavailable":
-      return "The telemetry source could not be reached. Nothing is known about this window.";
+      return t("widget.unavailable");
     case "error":
-      return "The query did not complete. This is not the same as an empty result.";
+      return t("widget.error");
     default:
       return undefined;
   }
@@ -128,6 +129,7 @@ function WidgetShell({
   meta?: React.ReactNode;
   children: (envelope: TelemetryEnvelope) => React.ReactNode;
 }) {
+  const t = useT("ui");
   const correlationId = "correlationId" in state ? state.correlationId : undefined;
   return (
     <section
@@ -140,6 +142,7 @@ function WidgetShell({
           {widget.title}
         </h3>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
+          {/* The unit id from the dashboard definition, as data: it is not copy. */}
           <span>{widget.unit.replace(/_/g, " ")}</span>
           {state.kind === "ready" ? (
             <FreshnessIndicator
@@ -156,8 +159,8 @@ function WidgetShell({
         {state.kind === "throttled" || state.kind === "unavailable" || state.kind === "error" ? (
           <ErrorState
             compact
-            title={state.kind === "throttled" ? "Query limit reached" : undefined}
-            description={failureDescription(state)}
+            title={state.kind === "throttled" ? t("widget.throttledTitle") : undefined}
+            description={failureDescription(state, t)}
             correlationId={correlationId}
             onRetry={onRetry}
           />
@@ -170,7 +173,10 @@ function WidgetShell({
                   asOf={state.envelope.as_of}
                   description={
                     state.envelope.data_range
-                      ? `These values cover ${state.envelope.data_range.from} to ${state.envelope.data_range.to}, not the window you asked for.`
+                      ? t("widget.staleRange", {
+                          from: state.envelope.data_range.from,
+                          to: state.envelope.data_range.to,
+                        })
                       : undefined
                   }
                   source={state.envelope.source_type}
@@ -186,15 +192,15 @@ function WidgetShell({
               <TileState
                 icon={CircleSlash}
                 testId="state-not-configured"
-                title="Not configured"
-                description="No telemetry source for this scope."
+                title={t("widget.notConfiguredTitle")}
+                description={t("widget.notConfigured")}
               />
             ) : state.envelope.data_state === "empty" || state.envelope.series.length === 0 ? (
               <TileState
                 icon={MinusCircle}
                 testId="state-no-data"
-                title="No data in this window"
-                description="No samples returned — not a zero."
+                title={t("widget.noDataTitle")}
+                description={t("widget.noData")}
               />
             ) : (
               children(state.envelope)
@@ -215,6 +221,8 @@ export function KpiWidget({
   state: WidgetState;
   onRetry: () => void;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   return (
     <WidgetShell
       widget={widget}
@@ -225,10 +233,10 @@ export function KpiWidget({
         const value = reduceEnvelope(envelope, widget.reducer);
         const thresholds = widget.thresholds ?? null;
         const tone = toneForThreshold(value, thresholds);
-        const spec = toneSpec(tone);
+        const spec = toneSpec(tone, locale);
         const ToneIcon = spec.icon;
         const missing = value === null || Number.isNaN(value);
-        const { number, unit } = splitMeasure(formatUnit(value, widget.unit));
+        const { number, unit } = splitMeasure(formatUnit(value, widget.unit, {}, locale));
         // The series is already here — the shape of the window costs nothing
         // and answers "is this rising" before the reader opens the chart.
         const shape = envelope.series[0]?.points.map(([, sample]) => sample) ?? [];
@@ -245,38 +253,40 @@ export function KpiWidget({
               </span>
               {unit ? <span className="text-body font-medium text-ink-muted">{unit}</span> : null}
             </p>
-            <p className="-mt-1 text-micro text-ink-muted">{widget.reducer} over the window</p>
+            <p className="-mt-1 text-micro text-ink-muted">
+              {t("widget.reducerOverWindow", {
+                reducer: t.dyn("widget.reducer", widget.reducer, widget.reducer),
+              })}
+            </p>
             {shape.length > 1 ? (
               <div className="min-w-0 [&_svg]:h-9 [&_svg]:w-full">
                 <Sparkline
                   points={shape}
                   width={240}
                   height={36}
-                  label={`${widget.title} over the window`}
+                  label={t("widget.overWindow", { title: widget.title })}
                   tone={tone}
                 />
               </div>
             ) : null}
             {missing ? (
-              <p className="text-micro text-ink-muted">
-                The source returned no usable sample in this window.
-              </p>
+              <p className="text-micro text-ink-muted">{t("widget.noUsableSample")}</p>
             ) : thresholds ? (
               <span
                 className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-micro font-medium ${spec.chip}`}
               >
                 <ToneIcon aria-hidden className="h-3 w-3" />
-                {thresholdLabel(tone, true)}
+                {thresholdLabel(tone, true, locale)}
               </span>
             ) : (
               <span className="self-start rounded-full bg-surface-2 px-2.5 py-1 text-micro text-ink-muted">
-                {thresholdLabel(tone, false)}
+                {thresholdLabel(tone, false, locale)}
               </span>
             )}
             <p className="sr-only">
-              {widget.accessibleSummary ?? widget.title}: {formatValue(value, widget.unit)}
+              {widget.accessibleSummary ?? widget.title}: {formatValue(value, widget.unit, locale)}
               {widget.thresholds
-                ? `, ${toneForThreshold(value, widget.thresholds)} against its threshold`
+                ? `, ${t("widget.thresholdVerdict", { tone: toneForThreshold(value, widget.thresholds) })}`
                 : ""}
             </p>
           </div>
@@ -303,6 +313,8 @@ export function StatusWidget({
   state: WidgetState;
   onRetry: () => void;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   return (
     <WidgetShell widget={widget} state={state} onRetry={onRetry}>
       {(envelope) => {
@@ -315,12 +327,10 @@ export function StatusWidget({
             <IconBubble icon={up ? Activity : GaugeIcon} tone={tone} size="large" />
             <span className="min-w-0">
               <span className={`block text-[1.125rem] leading-6 font-semibold ${toneSpec(tone).text}`}>
-                {unknown ? "Unknown" : up ? "Being scraped" : "Not being scraped"}
+                {unknown ? common("state.unknown") : up ? t("widget.scraped") : t("widget.notScraped")}
               </span>
               <span className="block text-caption text-ink-muted">
-                {unknown
-                  ? "No sample arrived, so Drake cannot say whether this target is scraped."
-                  : "Latest scrape sample in this window"}
+                {unknown ? t("widget.unknownDetail") : t("widget.scrapedDetail")}
               </span>
             </span>
           </div>
@@ -339,10 +349,11 @@ export function TimeseriesWidget({
   state: WidgetState;
   onRetry: () => void;
 }) {
+  const t = useT("ui");
   const envelope = state.kind === "ready" ? state.envelope : null;
 
   const series: TimeSeries[] = (envelope?.series ?? []).map((entry, index) => ({
-    name: seriesName(entry, index),
+    name: seriesName(entry, index, t),
     // The API speaks epoch seconds; the chart's time axis is milliseconds.
     points: entry.points.map(([ts, value]) => [ts * 1000, value] as [number, number | null]),
   }));
@@ -375,10 +386,10 @@ export function TimeseriesWidget({
         onRetry={onRetry}
         emptyDescription={
           state.kind === "ready" && state.envelope.data_state === "not_configured"
-            ? "No telemetry source is configured for this scope."
+            ? t("widget.notConfiguredScope")
             : undefined
         }
-        errorDescription={failureDescription(state)}
+        errorDescription={failureDescription(state, t)}
         window={
           envelope
             ? {

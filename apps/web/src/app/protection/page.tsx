@@ -39,12 +39,11 @@ import {
 } from "@/components/protection/primitives";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   BACKUP_LABELS,
   RECOVERABILITY_LABELS,
   REASON_LABELS,
-  formatAge,
-  formatWindow,
   protectionListPath,
   type BackupState,
   type ProtectionPage,
@@ -52,6 +51,7 @@ import {
   type ProtectionSummary,
   type RecoverabilityState,
 } from "@/lib/protection";
+import { formatWindowWith } from "@/components/protection/format";
 
 const BACKUP_STATES: BackupState[] = [
   "protected",
@@ -68,6 +68,7 @@ const RECOVERABILITY_STATES: RecoverabilityState[] = [
 ];
 
 function SummaryStats({ summary }: { summary: ProtectionSummary }) {
+  const t = useT("protection");
   const total = summary.total_policies;
   const protectedCount = summary.backup.protected ?? 0;
   const needsAttention =
@@ -80,39 +81,39 @@ function SummaryStats({ summary }: { summary: ProtectionSummary }) {
     <div className="page-grid" data-testid="protection-stats">
       <KpiTile
         icon={Shield}
-        label="Policies"
+        label={t("stats.policies")}
         value={total}
-        caption={`${verified} with a verified restore`}
+        caption={t("stats.verifiedRestore", { count: verified })}
         part={verified}
         whole={total}
         tone="info"
       />
       <KpiTile
         icon={ShieldCheck}
-        label="Protected"
+        label={t("stats.protected")}
         value={protectedCount}
         tone="success"
         part={protectedCount}
         whole={total}
-        caption={`of ${total} ${total === 1 ? "policy" : "policies"}`}
+        caption={t("stats.ofPolicies", { count: total })}
       />
       <KpiTile
         icon={AlertTriangle}
-        label="Needs attention"
+        label={t("stats.needsAttention")}
         value={needsAttention}
         tone={(summary.backup.failed ?? 0) > 0 ? "critical" : "warning"}
         part={needsAttention}
         whole={total}
-        caption="At risk, overdue or failed"
+        caption={t("stats.needsAttentionCaption")}
       />
       <KpiTile
         icon={History}
-        label="Never restore-tested"
+        label={t("stats.neverTested")}
         value={unverified}
         tone="unknown"
         part={unverified}
         whole={total}
-        caption="A backup nobody restored is unproven"
+        caption={t("stats.neverTestedCaption")}
       />
     </div>
   );
@@ -141,51 +142,52 @@ function EmptyBreakdown({ message }: { message: string }) {
 }
 
 function Breakdowns({ summary }: { summary: ProtectionSummary }) {
+  const t = useT("protection");
   const backup = [
     {
-      name: "Protected",
+      name: t("backup.protected"),
       value: summary.backup.protected ?? 0,
       tone: "success" as const,
     },
     {
-      name: "At risk",
+      name: t("backup.at_risk"),
       value: summary.backup.at_risk ?? 0,
       tone: "warning" as const,
     },
     {
-      name: "Overdue",
+      name: t("backup.overdue"),
       value: summary.backup.overdue ?? 0,
       tone: "warning" as const,
     },
     {
-      name: "Failed",
+      name: t("backup.failed"),
       value: summary.backup.failed ?? 0,
       tone: "critical" as const,
     },
     {
-      name: "Unknown",
+      name: t("backup.unknown"),
       value: summary.backup.unknown ?? 0,
       tone: "unknown" as const,
     },
   ];
   const restore = [
     {
-      name: "Verified",
+      name: t("recoverability.verified"),
       value: summary.recoverability.verified ?? 0,
       tone: "success" as const,
     },
     {
-      name: "Never verified",
+      name: t("recoverability.unverified"),
       value: summary.recoverability.unverified ?? 0,
       tone: "unknown" as const,
     },
     {
-      name: "Failed",
+      name: t("recoverability.failed"),
       value: summary.recoverability.failed ?? 0,
       tone: "critical" as const,
     },
     {
-      name: "Unknown",
+      name: t("recoverability.unknown"),
       value: summary.recoverability.unknown ?? 0,
       tone: "unknown" as const,
     },
@@ -199,32 +201,32 @@ function Breakdowns({ summary }: { summary: ProtectionSummary }) {
           be the first without ever having been the second. */}
       <Panel>
         <PanelHeader
-          title="Backup state"
-          description="By freshest backup outcome."
+          title={t("breakdown.backupTitle")}
+          description={t("breakdown.backupDescription")}
         />
         {sum(backup) === 0 ? (
-          <EmptyBreakdown message="No policy reports a backup state yet." />
+          <EmptyBreakdown message={t("breakdown.backupEmpty")} />
         ) : (
           <Donut
             size={120}
             thickness={14}
-            label="Policies by backup state"
+            label={t("breakdown.backupChart")}
             slices={backup}
           />
         )}
       </Panel>
       <Panel>
         <PanelHeader
-          title="Restore evidence"
-          description="Whether a restore was ever proven."
+          title={t("breakdown.restoreTitle")}
+          description={t("breakdown.restoreDescription")}
         />
         {sum(restore) === 0 ? (
-          <EmptyBreakdown message="No restore drill has been recorded." />
+          <EmptyBreakdown message={t("breakdown.restoreEmpty")} />
         ) : (
           <Donut
             size={120}
             thickness={14}
-            label="Policies by restore evidence"
+            label={t("breakdown.restoreChart")}
             slices={restore}
           />
         )}
@@ -234,10 +236,16 @@ function Breakdowns({ summary }: { summary: ProtectionSummary }) {
 }
 
 function PolicyRow({ policy }: { policy: ProtectionPolicy }) {
+  const t = useT("protection");
+  const fmt = useFormat();
   const evaluation = policy.evaluation;
   const reason =
     evaluation && evaluation.reasons.length > 0
-      ? (REASON_LABELS[evaluation.reasons[0]] ?? evaluation.reasons[0])
+      ? t.dyn(
+          "reason",
+          evaluation.reasons[0],
+          REASON_LABELS[evaluation.reasons[0]] ?? evaluation.reasons[0],
+        )
       : null;
   return (
     <li
@@ -261,42 +269,42 @@ function PolicyRow({ policy }: { policy: ProtectionPolicy }) {
           {policy.store_key}
         </span>
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <FactChip label="Last success">
-            {formatAge(evaluation?.last_success_at ?? null)}
+          <FactChip label={t("row.lastSuccess")}>
+            {fmt.relative(evaluation?.last_success_at)}
           </FactChip>
-          <FactChip label="RPO">
-            <span>{formatWindow(policy.rpo_seconds)}</span>
+          <FactChip label={t("row.rpo")}>
+            <span>{formatWindowWith(fmt, policy.rpo_seconds)}</span>
           </FactChip>
-          <FactChip label="Offsite">
-            {policy.requires_offsite ? "required" : "not required"}
+          <FactChip label={t("row.offsite")}>
+            {policy.requires_offsite ? t("row.required") : t("row.notRequired")}
           </FactChip>
-          <FactChip label="Last restore">
-            {formatAge(evaluation?.last_restore_at ?? null)}
+          <FactChip label={t("row.lastRestore")}>
+            {fmt.relative(evaluation?.last_restore_at)}
           </FactChip>
-          <FactChip label="Reporter">
-            {formatAge(evaluation?.reporter_seen_at ?? null)}
+          <FactChip label={t("row.reporter")}>
+            {fmt.relative(evaluation?.reporter_seen_at)}
           </FactChip>
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="flex items-center gap-1.5">
-            <span className="text-micro text-ink-muted">Backup</span>
+            <span className="text-micro text-ink-muted">{t("row.backup")}</span>
             {evaluation ? (
               <BackupBadge state={evaluation.backup_state} />
             ) : (
               <span className="rounded-full bg-surface-3 px-2.5 py-0.5 text-caption text-ink-muted italic">
-                not evaluated
+                {t("row.notEvaluated")}
               </span>
             )}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="text-micro text-ink-muted">Restore</span>
+            <span className="text-micro text-ink-muted">{t("row.restore")}</span>
             {evaluation ? (
               <RecoverabilityBadge state={evaluation.recoverability_state} />
             ) : (
               <span className="rounded-full bg-surface-3 px-2.5 py-0.5 text-caption text-ink-muted italic">
-                not evaluated
+                {t("row.notEvaluated")}
               </span>
             )}
           </span>
@@ -308,7 +316,7 @@ function PolicyRow({ policy }: { policy: ProtectionPolicy }) {
               <span>{reason}</span>
             </>
           ) : (
-            <span className="text-ink-muted">No open reason</span>
+            <span className="text-ink-muted">{t("row.noOpenReason")}</span>
           )}
         </span>
       </div>
@@ -321,6 +329,8 @@ function PolicyRow({ policy }: { policy: ProtectionPolicy }) {
 }
 
 function ProtectionTable() {
+  const t = useT("protection");
+  const common = useT("common");
   const [backupState, setBackupState] = useState<BackupState | "">("");
   const [recoverabilityState, setRecoverabilityState] = useState<
     RecoverabilityState | ""
@@ -344,36 +354,36 @@ function ProtectionTable() {
       <div
         className="flex flex-wrap items-center gap-2"
         role="group"
-        aria-label="Filters"
+        aria-label={t("filters.label")}
       >
         <PillSelect
-          label="Backup"
+          label={t("filters.backup")}
           value={backupState}
-          placeholder="Any"
+          placeholder={t("filters.any")}
           onChange={(value) => setBackupState(value)}
           options={BACKUP_STATES.map((value) => ({
             value,
-            label: BACKUP_LABELS[value],
+            label: t.dyn("backup", value, BACKUP_LABELS[value]),
           }))}
         />
         <PillSelect
-          label="Recoverability"
+          label={t("filters.recoverability")}
           value={recoverabilityState}
-          placeholder="Any"
+          placeholder={t("filters.any")}
           onChange={(value) => setRecoverabilityState(value)}
           options={RECOVERABILITY_STATES.map((value) => ({
             value,
-            label: RECOVERABILITY_LABELS[value],
+            label: t.dyn("recoverability", value, RECOVERABILITY_LABELS[value]),
           }))}
         />
         <PillSelect
-          label="Offsite"
+          label={t("filters.offsite")}
           value={offsiteState}
-          placeholder="Any"
+          placeholder={t("filters.any")}
           onChange={(value) => setOffsiteState(value)}
           options={[
-            { value: "present", label: "Present" },
-            { value: "missing", label: "Missing" },
+            { value: "present", label: t("filters.present") },
+            { value: "missing", label: t("filters.missing") },
           ]}
         />
         {filtered ? (
@@ -386,12 +396,15 @@ function ProtectionTable() {
             }}
             className="h-10 rounded-full px-4 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
           >
-            Clear filters
+            {t("filters.clear")}
           </button>
         ) : null}
         {page.state === "ready" ? (
           <span data-tabular className="ml-auto text-caption text-ink-muted">
-            Showing {page.data.items.length} of {page.data.total}
+            {common("count.showing", {
+              shown: page.data.items.length,
+              total: page.data.total,
+            })}
           </span>
         ) : null}
       </div>
@@ -406,7 +419,7 @@ function ProtectionTable() {
           {page.notFound ? (
             <StateCard
               kind="permission-denied"
-              description="Viewing protection posture needs protection.view in this scope."
+              description={t("list.denied")}
             />
           ) : (
             <StateCard
@@ -419,7 +432,7 @@ function ProtectionTable() {
                   className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
                 >
                   <RefreshCw aria-hidden className="h-3.5 w-3.5" />
-                  Retry
+                  {common("action.retry")}
                 </button>
               }
             />
@@ -431,8 +444,8 @@ function ProtectionTable() {
           <StateCard
             kind="empty"
             icon={ShieldOff}
-            title="No protection policies"
-            description="Nothing matches in your authorized scope. A policy appears once a registered connector reports one."
+            title={t("list.emptyTitle")}
+            description={t("list.emptyDescription")}
           />
         </Panel>
       ) : null}
@@ -441,8 +454,8 @@ function ProtectionTable() {
         <Panel flush>
           <PanelHeader
             flush
-            title="Policies"
-            description="Backup and restore evidence per store, in your authorized scope."
+            title={t("list.title")}
+            description={t("list.description")}
           />
           <ul className="divide-y divide-border" data-testid="protection-table">
             {page.data.items.map((policy) => (
@@ -472,11 +485,12 @@ function ProtectionTable() {
 }
 
 export default function ProtectionPage() {
+  const t = useT("protection");
   return (
     <PageFrame>
       <PageHeader
-        title="Protection"
-        description="Backed up and proven restorable are two different answers — Drake keeps them apart."
+        title={t("page.title")}
+        description={t("page.description")}
       />
       <Suspense fallback={<DataState kind="loading" />}>
         <ProtectionTable />

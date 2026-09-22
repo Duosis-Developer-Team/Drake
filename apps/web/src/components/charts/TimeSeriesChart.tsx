@@ -40,6 +40,7 @@ import { EChart } from "@/components/charts/LazyChart";
 import { formatTimeAxis, formatUnit, formatUtc } from "@/lib/design/format";
 import type { Thresholds } from "@/lib/design/status";
 import { SERIES_DASH, SERIES_LIMIT, SERIES_TOKENS, type Tokens } from "@/lib/design/tokens";
+import { useLocale, useT } from "@/lib/i18n";
 
 export interface TimeSeries {
   name: string;
@@ -93,6 +94,8 @@ export function TimeSeriesChart({
   actions?: React.ReactNode;
   deterministic?: boolean;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
 
   const shown = useMemo(() => series.slice(0, SERIES_LIMIT), [series]);
@@ -164,7 +167,7 @@ export function TimeSeriesChart({
                     tokens,
                     point.color ?? tokens["series-1"],
                     point.seriesName ?? "",
-                    formatUnit(value ?? null, unit),
+                    formatUnit(value ?? null, unit, {}, locale),
                   );
                 })
                 .join("");
@@ -188,7 +191,7 @@ export function TimeSeriesChart({
             splitNumber: 4,
             axisLabel: {
               ...axis.axisLabel,
-              formatter: (value: number) => formatUnit(value, unit, { compact: true }),
+              formatter: (value: number) => formatUnit(value, unit, { compact: true }, locale),
             },
           },
           series: [
@@ -256,7 +259,9 @@ export function TimeSeriesChart({
                                   label: {
                                     ...pill(tokens["status-warning"]),
                                     position: "insideEndTop" as const,
-                                    formatter: `warn ${formatUnit(thresholds.warn, unit)}`,
+                                    formatter: t("chart.warnLine", {
+                                      value: formatUnit(thresholds.warn, unit, {}, locale),
+                                    }),
                                   },
                                 },
                                 {
@@ -270,7 +275,9 @@ export function TimeSeriesChart({
                                   label: {
                                     ...pill(tokens["status-critical"]),
                                     position: "insideEndTop" as const,
-                                    formatter: `critical ${formatUnit(thresholds.critical, unit)}`,
+                                    formatter: t("chart.criticalLine", {
+                                      value: formatUnit(thresholds.critical, unit, {}, locale),
+                                    }),
                                   },
                                 },
                               ]
@@ -296,7 +303,7 @@ export function TimeSeriesChart({
           ],
         };
       },
-    [visible, shown, unit, area, thresholds, markers, windowSeconds],
+    [visible, shown, unit, area, thresholds, markers, windowSeconds, locale, t],
   );
 
   const categories = useMemo(
@@ -306,14 +313,16 @@ export function TimeSeriesChart({
 
   const summaryText = useMemo(() => {
     if (shown.length === 0) return null;
-    const parts = summaries.map(
-      (entry) => `${entry.name} latest ${formatUnit(entry.latest, unit)}`,
+    const parts = summaries.map((entry) =>
+      t("chart.summary.latest", { name: entry.name, value: formatUnit(entry.latest, unit, {}, locale) }),
     );
-    const gapNote = gaps > 0 ? `; ${gaps} missing sample${gaps === 1 ? "" : "s"} shown as gaps` : "";
+    const gapNote = gaps > 0 ? `; ${t("chart.summary.gaps", { count: gaps })}` : "";
     const extra =
-      series.length > shown.length ? `; ${series.length - shown.length} further series not drawn` : "";
-    return `${shown.length} series. ${parts.join(", ")}${gapNote}${extra}.`;
-  }, [summaries, shown, series.length, unit, gaps]);
+      series.length > shown.length
+        ? `; ${t("chart.summary.notDrawn", { count: series.length - shown.length })}`
+        : "";
+    return `${t("chart.summary.seriesCount", { count: shown.length })}. ${parts.join(", ")}${gapNote}${extra}.`;
+  }, [summaries, shown, series.length, unit, gaps, locale, t]);
 
   return (
     <ChartFrame
@@ -365,7 +374,7 @@ export function TimeSeriesChart({
         deps={[build]}
         height={height}
         deterministic={deterministic}
-        ariaLabel={`${typeof title === "string" ? title : "Time series"}. ${summaryText ?? ""}`}
+        ariaLabel={`${typeof title === "string" ? title : t("chart.timeSeries")}. ${summaryText ?? ""}`}
       />
     </ChartFrame>
   );

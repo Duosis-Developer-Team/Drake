@@ -17,6 +17,7 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { SegmentedControl } from "@/components/ui/controls";
+import { useT } from "@/lib/i18n";
 import {
   readPreference,
   resolveTheme,
@@ -26,13 +27,14 @@ import {
 } from "@/lib/theme";
 
 const OPTIONS = [
-  { value: "system" as const, label: "System", icon: Monitor },
-  { value: "light" as const, label: "Light", icon: Sun },
-  { value: "dark" as const, label: "Dark", icon: Moon },
+  { value: "system" as const, icon: Monitor },
+  { value: "light" as const, icon: Sun },
+  { value: "dark" as const, icon: Moon },
 ];
 
 export function ThemeControl({ compact = false }: { compact?: boolean }) {
   const [preference, setPreference] = useState<ThemePreference>("system");
+  const t = useT("shell");
 
   useEffect(() => {
     setPreference(readPreference());
@@ -48,12 +50,12 @@ export function ThemeControl({ compact = false }: { compact?: boolean }) {
 
   return (
     <SegmentedControl
-      label="Theme"
+      label={t("theme.label")}
       value={preference}
       // Icons only in the top bar; each radio still carries its word as its
       // accessible name and its tooltip.
       iconOnly={compact}
-      options={OPTIONS}
+      options={OPTIONS.map((option) => ({ ...option, label: t(`theme.${option.value}`) }))}
       onChange={(next) => {
         setPreference(next);
         writePreference(next);

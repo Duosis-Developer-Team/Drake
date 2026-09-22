@@ -20,8 +20,8 @@ import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
   InstallationBadge,
   OnboardingBadge,
+  RichMessage,
   VerdictBadge,
-  formatUtc,
 } from "@/components/github/primitives";
 import {
   IconBubble,
@@ -35,11 +35,8 @@ import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet, apiMutate } from "@/lib/api";
 import type { StatusTone } from "@/lib/design/status";
-import {
-  CANDIDATE_BLOCKERS,
-  fetchRepositoryCandidate,
-  type RepositoryCandidate,
-} from "@/lib/onboarding";
+import { useFormat, useT } from "@/lib/i18n";
+import { fetchRepositoryCandidate, type RepositoryCandidate } from "@/lib/onboarding";
 import { useSession } from "@/lib/session";
 import {
   isStale,
@@ -48,13 +45,6 @@ import {
   type GitHubStatus,
   type PolicySnapshot,
 } from "@/lib/github";
-
-const MISSING_INPUT_LABELS: Record<string, string> = {
-  feature_disabled: "The GitHub App integration is switched off",
-  app_identity: "App client id (or app id)",
-  private_key_reference: "Private key secret reference",
-  webhook_secret_reference: "Webhook secret reference",
-};
 
 const REPO_TONE: Record<string, StatusTone> = {
   ready: "success",
@@ -66,6 +56,7 @@ const REPO_TONE: Record<string, StatusTone> = {
 };
 
 export default function GitHubIntegrationPage() {
+  const t = useT("integrations");
   const { hasPermission } = useSession();
   const canManage = hasPermission("integration.manage");
   // Separate on purpose: managing the GitHub integration is not permission
@@ -86,14 +77,13 @@ export default function GitHubIntegrationPage() {
   return (
     <PageFrame>
       <PageHeader
-        title="GitHub App integration"
+        title={t("github.title")}
         description={
           <>
             <Link href="/integrations" className="hover:text-ink">
-              Integrations
+              {t("github.crumb")}
             </Link>{" "}
-            / GitHub — read-only repository governance; Drake never changes a
-            repository setting.
+            {t("github.descriptionTail")}
           </>
         }
       />
@@ -116,11 +106,13 @@ export default function GitHubIntegrationPage() {
                 id="repositories-heading"
                 className="text-[1.0625rem] font-semibold text-ink"
               >
-                Repositories
+                {t("github.repositories.heading")}
               </h2>
               {repositories.state === "ready" ? (
                 <span className="text-micro text-ink-muted">
-                  {repositories.data.repositories.length} visible to you
+                  {t("github.repositories.visible", {
+                    count: repositories.data.repositories.length,
+                  })}
                 </span>
               ) : null}
             </div>
@@ -137,8 +129,8 @@ export default function GitHubIntegrationPage() {
                   <StateCard
                     kind="empty"
                     icon={FolderGit2}
-                    title="No repositories in your scope"
-                    description="Repositories the installation can see, and you are authorized to view, appear here."
+                    title={t("github.repositories.empty.title")}
+                    description={t("github.repositories.empty.description")}
                   />
                 </Panel>
               ) : (
@@ -160,9 +152,9 @@ export default function GitHubIntegrationPage() {
             <Panel flush aria-labelledby="installations-heading">
               <PanelHeader
                 flush
-                title="Installations"
+                title={t("github.installations.title")}
                 id="installations-heading"
-                description="Organizations the App is installed on"
+                description={t("github.installations.description")}
               />
               <LoadGate value={installations} retry={retryInstallations}>
                 {(data) =>
@@ -171,8 +163,8 @@ export default function GitHubIntegrationPage() {
                       <StateCard
                         kind="not-configured"
                         icon={Building2}
-                        title="No installation yet"
-                        description="Once the GitHub App is installed for the organization, its installation appears here."
+                        title={t("github.installations.empty.title")}
+                        description={t("github.installations.empty.description")}
                       />
                     </div>
                   ) : (
@@ -192,11 +184,13 @@ export default function GitHubIntegrationPage() {
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-body font-semibold text-ink">
                                 {installation.account_login ||
-                                  "unknown account"}
+                                  t("github.installations.unknownAccount")}
                               </p>
                               <p className="truncate text-micro text-ink-muted">
-                                {installation.repository_selection} repositories
-                                · {installation.subscribed_events.length} events
+                                {t("github.installations.summary", {
+                                  selection: installation.repository_selection,
+                                  count: installation.subscribed_events.length,
+                                })}
                               </p>
                             </div>
                             <InstallationBadge state={installation.state} />
@@ -268,6 +262,7 @@ function StatTile({
 }
 
 function ConfigurationCard({ status }: { status: GitHubStatus }) {
+  const t = useT("integrations");
   const configured = status.configuration_state === "configured";
   return (
     <Panel data-testid="github-status-card">
@@ -282,10 +277,10 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
             </span>
             <div className="min-w-0">
               <h2 className="text-[1.25rem] leading-7 font-semibold tracking-[-0.01em] text-ink">
-                Connection readiness
+                {t("github.readiness.title")}
               </h2>
               <p className="text-caption text-ink-muted">
-                GitHub App · read-only
+                {t("github.readiness.subtitle")}
               </p>
             </div>
           </div>
@@ -293,14 +288,14 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
             <>
               <div className="flex items-center gap-2">
                 <span className="text-caption text-ink-muted">
-                  Configuration
+                  {t("github.readiness.configurationLabel")}
                 </span>
-                <StatusBadge status="healthy" label="configured" />
+                <StatusBadge status="healthy" label={t("github.readiness.configured")} />
               </div>
               <div className="mt-auto">
                 <p className="mb-2 flex items-center gap-1.5 text-micro text-ink-muted">
                   <Webhook aria-hidden className="h-3.5 w-3.5" />
-                  Subscribed events
+                  {t("github.readiness.subscribedEvents")}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {status.supported_events.map((event) => (
@@ -321,29 +316,29 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
           <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-3">
             <StatTile
               icon={Building2}
-              label="Installations"
+              label={t("github.readiness.installations")}
               value={status.installations}
             />
             <StatTile
               icon={FolderGit2}
               tone="info"
-              label="Repositories"
+              label={t("github.readiness.repositories")}
               value={status.repositories}
             />
             <StatTile
               icon={ShieldAlert}
               tone={status.blocked_repositories > 0 ? "critical" : undefined}
-              label="Blocked by a security gate"
+              label={t("github.readiness.blocked")}
               value={status.blocked_repositories}
               detail={
                 status.blocked_repositories > 0 ? (
                   <StatusBadge
                     status="critical"
-                    label="operator action required"
+                    label={t("github.readiness.operatorAction")}
                   />
                 ) : (
                   <span className="text-micro text-ink-muted">
-                    No gate is open
+                    {t("github.readiness.noGate")}
                   </span>
                 )
               }
@@ -357,8 +352,8 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
             <StateCard
               inline
               kind="not-configured"
-              title="GitHub App is not connected yet"
-              description="Drake shows nothing here until an operator supplies the app identity and its secret references."
+              title={t("github.readiness.notConnected.title")}
+              description={t("github.readiness.notConnected.description")}
             >
               <ul className="mt-4 space-y-2">
                 {status.missing_operator_inputs.map((item) => (
@@ -370,14 +365,13 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
                       aria-hidden
                       className="h-4 w-4 shrink-0 text-warning"
                     />
-                    {MISSING_INPUT_LABELS[item] ?? item}
+                    {t.dyn("missingInput", item, item)}
                   </li>
                 ))}
               </ul>
               <p className="mt-3 flex items-center gap-1.5 text-micro text-ink-muted">
                 <Lock aria-hidden className="h-3.5 w-3.5" />
-                Secrets are supplied out of band and referenced by name; never
-                shown here.
+                {t("github.readiness.secretsNote")}
               </p>
             </StateCard>
           </div>
@@ -396,6 +390,8 @@ function RepositoryCard({
   canManage: boolean;
   canOnboard: boolean;
 }) {
+  const t = useT("integrations");
+  const fmt = useFormat();
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
   const [snapshot, setSnapshot] = useState<PolicySnapshot | null>(null);
@@ -414,10 +410,10 @@ function RepositoryCard({
       );
     } catch (error) {
       setActionError(
-        error instanceof ApiError ? error.message : "request failed",
+        error instanceof ApiError ? error.message : t("github.repository.requestFailed"),
       );
     }
-  }, [repository.id]);
+  }, [repository.id, t]);
 
   const reconcile = useCallback(async () => {
     setBusy(true);
@@ -433,12 +429,12 @@ function RepositoryCard({
       await loadPolicy();
     } catch (error) {
       setActionError(
-        error instanceof ApiError ? error.message : "request failed",
+        error instanceof ApiError ? error.message : t("github.repository.requestFailed"),
       );
     } finally {
       setBusy(false);
     }
-  }, [csrf, loadPolicy, repository.id]);
+  }, [csrf, loadPolicy, repository.id, t]);
 
   const tone = blocked
     ? "critical"
@@ -463,19 +459,23 @@ function RepositoryCard({
               <span className="inline-flex items-center gap-1">
                 <GitBranch aria-hidden className="h-3.5 w-3.5" />
                 <span className="font-mono">
-                  default branch: {repository.default_branch || "unknown"}
+                  {t("github.repository.defaultBranch", {
+                    branch: repository.default_branch || t("github.repository.unknownBranch"),
+                  })}
                 </span>
               </span>
               <span className="inline-flex items-center gap-1">
                 <Lock aria-hidden className="h-3.5 w-3.5" />
-                {repository.private ? "private" : "public"}
+                {repository.private
+                  ? t("github.repository.private")
+                  : t("github.repository.public")}
               </span>
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {stale && !blocked ? (
-            <StatusBadge status="stale" label="stale" />
+            <StatusBadge status="stale" label={t("github.repository.stale")} />
           ) : null}
           <OnboardingBadge state={repository.onboarding_state} />
         </div>
@@ -490,8 +490,8 @@ function RepositoryCard({
             inline
             kind="no-data"
             tone="warning"
-            title="Reconciliation required"
-            description="A recent change could not be recorded in full, so this installation is being re-read. What is shown may be incomplete until that finishes."
+            title={t("github.repository.reconciliation.title")}
+            description={t("github.repository.reconciliation.description")}
           />
         </div>
       ) : null}
@@ -506,10 +506,9 @@ function RepositoryCard({
             kind="permission-denied"
             icon={ShieldAlert}
             tone="critical"
-            title="Blocked by a manual security gate"
+            title={t("github.repository.gate.title")}
             description={
-              repository.security_gate_reason ||
-              "An operator must review and close this security gate before Drake may onboard this repository."
+              repository.security_gate_reason || t("github.repository.gate.description")
             }
           />
         </div>
@@ -519,25 +518,25 @@ function RepositoryCard({
         columns={repository.last_error_code ? 3 : 2}
         items={[
           {
-            label: "Last reconciliation",
+            label: t("github.repository.lastReconciliation"),
             value: (
               <span className="font-mono">
-                {formatUtc(repository.last_reconciled_at)}
+                {fmt.utc(repository.last_reconciled_at)}
               </span>
             ),
           },
           {
-            label: "Last policy evaluation",
+            label: t("github.repository.lastPolicyEvaluation"),
             value: (
               <span className="font-mono">
-                {formatUtc(repository.last_policy_evaluated_at)}
+                {fmt.utc(repository.last_policy_evaluated_at)}
               </span>
             ),
           },
           ...(repository.last_error_code
             ? [
                 {
-                  label: "Last error",
+                  label: t("github.repository.lastError"),
                   value: (
                     <span className="font-mono text-critical">
                       {repository.last_error_code}
@@ -576,7 +575,7 @@ function RepositoryCard({
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={loadPolicy} className={PILL_BUTTON}>
             <ShieldCheck aria-hidden className="h-3.5 w-3.5" />
-            Show last policy result
+            {t("github.repository.showPolicy")}
           </button>
           {canManage ? (
             <button
@@ -584,14 +583,12 @@ function RepositoryCard({
               onClick={reconcile}
               disabled={busy || blocked}
               title={
-                blocked
-                  ? "Reconciliation stays disabled while the gate is open."
-                  : undefined
+                blocked ? t("github.repository.reconcileDisabled") : undefined
               }
               className={PILL_BUTTON}
               data-testid="reconcile-button"
             >
-              {busy ? "Evaluating…" : "Reconcile (dry run)"}
+              {busy ? t("github.repository.evaluating") : t("github.repository.reconcile")}
             </button>
           ) : null}
         </div>
@@ -617,6 +614,8 @@ function OnboardingLink({
   repositoryId: string;
   canOnboard: boolean;
 }) {
+  const t = useT("integrations");
+  const to = useT("onboarding");
   const [candidate, setCandidate] = useState<RepositoryCandidate | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied">(
     canOnboard ? "loading" : "denied",
@@ -644,7 +643,7 @@ function OnboardingLink({
   if (state === "loading") {
     return (
       <p className={note} data-testid="onboarding-link-loading">
-        Checking whether this repository can be onboarded…
+        {t("github.onboardingLink.checking")}
       </p>
     );
   }
@@ -655,8 +654,7 @@ function OnboardingLink({
     // in", which is the distinction the scoping is there to keep.
     return (
       <p className={note} data-testid="onboarding-link-denied">
-        Onboarding needs the onboarding manage permission on this
-        repository&apos;s scope.
+        {t("github.onboardingLink.denied")}
       </p>
     );
   }
@@ -668,7 +666,7 @@ function OnboardingLink({
         data-testid="onboarding-link-existing"
         className={PILL_BUTTON}
       >
-        Open the open onboarding session
+        {t("github.onboardingLink.openExisting")}
         <ArrowRight aria-hidden className="h-3.5 w-3.5" />
       </Link>
     );
@@ -680,8 +678,7 @@ function OnboardingLink({
         className="max-w-sm text-right text-micro text-warning"
         data-testid="onboarding-link-blocked"
       >
-        {CANDIDATE_BLOCKERS[candidate?.reason_code ?? ""] ??
-          "This repository cannot be onboarded right now."}
+        {to.dyn("candidateBlocker", candidate?.reason_code, t("github.onboardingLink.cannot"))}
       </p>
     );
   }
@@ -692,13 +689,15 @@ function OnboardingLink({
       data-testid="onboarding-link"
       className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-caption font-medium text-ink-inverse hover:opacity-90"
     >
-      Onboard this repository
+      {t("github.onboardingLink.onboard")}
       <ArrowRight aria-hidden className="h-3.5 w-3.5" />
     </Link>
   );
 }
 
 function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
+  const t = useT("integrations");
+  const fmt = useFormat();
   if (snapshot.state === "never_evaluated") {
     return (
       <div
@@ -709,8 +708,8 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
           inline
           kind="no-data"
           icon={ShieldCheck}
-          title="No policy evaluation yet"
-          description="Run a dry-run reconciliation to produce the first snapshot."
+          title={t("github.policy.neverEvaluated.title")}
+          description={t("github.policy.neverEvaluated.description")}
         />
       </div>
     );
@@ -734,33 +733,35 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-body font-semibold text-ink">
-            Policy result
+            {t("github.policy.heading")}
           </span>
           <VerdictBadge verdict={snapshot.overall} />
           {snapshot.dry_run ? (
-            <StatusBadge status="maintenance" label="dry run" />
+            <StatusBadge status="maintenance" label={t("github.policy.dryRun")} />
           ) : null}
         </div>
         <span className="text-micro text-ink-muted">
-          evaluated{" "}
-          <time className="font-mono">{formatUtc(snapshot.evaluated_at)}</time>
+          <RichMessage
+            template={t("github.policy.evaluated")}
+            parts={{ time: <time className="font-mono">{fmt.utc(snapshot.evaluated_at)}</time> }}
+          />
         </span>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         {[
           {
-            label: "Blocking",
+            label: t("github.policy.blocking"),
             value: snapshot.blocking_count ?? 0,
             tone: "critical" as StatusTone,
           },
           {
-            label: "Not determinable",
+            label: t("github.policy.notDeterminable"),
             value: snapshot.unknown_count ?? 0,
             tone: "unknown" as StatusTone,
           },
           {
-            label: "Rules passed",
+            label: t("github.policy.passed"),
             value: passed,
             tone: "success" as StatusTone,
           },
@@ -786,7 +787,7 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
       {blocking.length > 0 ? (
         <div data-testid="blocking-violations" className="space-y-2">
           <p className="text-micro font-medium tracking-[0.08em] text-critical uppercase">
-            Blocking violations
+            {t("github.policy.blockingViolations")}
           </p>
           <ul className="space-y-2">
             {blocking.map((result) => (

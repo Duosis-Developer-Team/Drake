@@ -10,9 +10,12 @@
 import { Clock } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { RANGE_PRESETS, parseRangePreset } from "@/lib/telemetry";
+import { useLocale, useT } from "@/lib/i18n";
+import { RANGE_PRESETS, parseRangePreset, rangePresetLabel } from "@/lib/telemetry";
 
 export function TimeRangeControl() {
+  const common = useT("common");
+  const { locale } = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -27,7 +30,7 @@ export function TimeRangeControl() {
   return (
     <div
       role="group"
-      aria-label="Time range"
+      aria-label={common("time.timeRange")}
       className="hidden h-9 items-center gap-0.5 rounded-lg border border-border p-0.5 sm:inline-flex"
     >
       <Clock className="mx-1 h-4 w-4 text-ink-muted" aria-hidden />
@@ -43,7 +46,7 @@ export function TimeRangeControl() {
               : "text-ink-secondary hover:bg-surface-sunken"
           }`}
         >
-          {preset.label}
+          {rangePresetLabel(preset.key, locale)}
         </button>
       ))}
     </div>

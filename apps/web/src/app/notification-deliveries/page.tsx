@@ -37,8 +37,8 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
-import { formatRelative, formatUtc } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   DELIVERY_ERROR_LABELS,
   DELIVERY_STATE_LABELS,
@@ -93,6 +93,9 @@ const OUTCOME_TONE: Record<DeliveryAttempt["outcome"], StatusTone> = {
 };
 
 function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
+  const t = useT("notifications");
+  const c = useT("common");
+  const fmt = useFormat();
   const [attempts, setAttempts] = useState<DeliveryAttempt[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,22 +108,20 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
       .catch((problem: unknown) => {
         if (!cancelled) {
           setError(
-            problem instanceof ApiError ? problem.message : "request failed",
+            problem instanceof ApiError ? problem.message : c("state.error"),
           );
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [deliveryId]);
+  }, [deliveryId, c]);
 
   if (error) return <DataState kind="error" description={error} />;
   if (attempts === null) return <DataState kind="loading" />;
   if (attempts.length === 0) {
     return (
-      <p className="text-caption text-ink-secondary">
-        Not attempted yet — this delivery is still queued.
-      </p>
+      <p className="text-caption text-ink-secondary">{t("deliveries.attempt.notAttempted")}</p>
     );
   }
   return (
@@ -150,31 +151,33 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
             <div className="min-w-0 pt-1 text-micro text-ink-secondary">
               <p>
                 <span className="text-caption font-semibold text-ink">
-                  Attempt {attempt.attempt_number}
+                  {t("deliveries.attempt.number", { number: attempt.attempt_number })}
                 </span>{" "}
-                — {attempt.outcome}
+                — {t.dyn("outcome", attempt.outcome, attempt.outcome)}
               </p>
               <p className="mt-1 flex flex-wrap gap-1.5">
                 {attempt.http_status ? (
                   <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono">
-                    HTTP {attempt.http_status}
+                    {t("deliveries.attempt.http", { status: attempt.http_status })}
                   </span>
                 ) : null}
                 {attempt.error_code ? (
                   <span className="rounded-full bg-surface-3 px-2 py-0.5">
-                    {DELIVERY_ERROR_LABELS[attempt.error_code] ??
-                      attempt.error_code}
+                    {t.dyn(
+                      "deliveryError",
+                      attempt.error_code,
+                      DELIVERY_ERROR_LABELS[attempt.error_code] ?? attempt.error_code,
+                    )}
                   </span>
                 ) : null}
                 {attempt.duration_ms !== null ? (
                   <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono">
-                    {attempt.duration_ms} ms
+                    {c("time.millisecondsShort", { count: attempt.duration_ms })}
                   </span>
                 ) : null}
                 {attempt.retry_at ? (
                   <span className="rounded-full bg-surface-3 px-2 py-0.5">
-                    retry at{" "}
-                    <time className="font-mono">{attempt.retry_at}</time>
+                    {t("deliveries.attempt.retryAt", { when: fmt.utc(attempt.retry_at) })}
                   </span>
                 ) : null}
               </p>
@@ -187,11 +190,12 @@ function AttemptTimeline({ deliveryId }: { deliveryId: string }) {
 }
 
 function LifecycleCard() {
+  const t = useT("notifications");
   return (
     <Panel>
       <PanelHeader
-        title="Delivery lifecycle"
-        description="At-least-once, with a stable idempotency key"
+        title={t("deliveries.lifecycle.title")}
+        description={t("deliveries.lifecycle.description")}
       />
       <ol className="space-y-3">
         {(
@@ -210,19 +214,10 @@ function LifecycleCard() {
               size="sm"
             />
             <span className="min-w-0 flex-1 text-caption font-medium text-ink">
-              {DELIVERY_STATE_LABELS[state]}
+              {t.dyn("deliveryState", state, DELIVERY_STATE_LABELS[state])}
             </span>
             <span className="text-right text-micro text-ink-muted">
-              {
-                {
-                  pending: "queued",
-                  processing: "in flight",
-                  retrying: "backing off",
-                  delivered: "accepted",
-                  dead_letter: "gave up",
-                  suppressed: "not sent",
-                }[state]
-              }
+              {t.dyn("deliveryStateHint", state, state)}
             </span>
           </li>
         ))}
@@ -232,6 +227,9 @@ function LifecycleCard() {
 }
 
 export default function NotificationDeliveriesPage() {
+  const t = useT("notifications");
+  const c = useT("common");
+  const fmt = useFormat();
   const [state, setState] = useState<DeliveryState | "">("");
   const [rows, setRows] = useState<DeliveryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -250,14 +248,14 @@ export default function NotificationDeliveriesPage() {
       .catch((problem: unknown) => {
         if (!cancelled) {
           setError(
-            problem instanceof ApiError ? problem.message : "request failed",
+            problem instanceof ApiError ? problem.message : c("state.error"),
           );
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [state]);
+  }, [state, c]);
 
   useEffect(() => load(), [load]);
 
@@ -276,16 +274,18 @@ export default function NotificationDeliveriesPage() {
 
   const shown = rows?.length ?? 0;
   const inFlight = byState.pending + byState.processing + byState.retrying;
+  const stateLabel = (value: DeliveryState) =>
+    t.dyn("deliveryState", value, DELIVERY_STATE_LABELS[value]);
 
   return (
     <PageFrame>
       <PageHeader
-        title="Notification deliveries"
-        description="Outbound webhook deliveries, their attempts and safe error codes."
+        title={t("deliveries.title")}
+        description={t("deliveries.description")}
         actions={
           <Link href="/notification-policies" className={PILL_BUTTON}>
             <Webhook aria-hidden className="h-3.5 w-3.5" />
-            Routing policies
+            {t("deliveries.routingPolicies")}
           </Link>
         }
       />
@@ -293,69 +293,69 @@ export default function NotificationDeliveriesPage() {
       <div className="space-y-6">
         {rows !== null ? (
           <div className="page-grid">
-            <KpiTile icon={Send} label="Deliveries shown" value={shown}>
+            <KpiTile icon={Send} label={t("deliveries.kpi.shown")} value={shown}>
               <p className="text-micro text-ink-muted">
                 {state
-                  ? `Filtered to ${DELIVERY_STATE_LABELS[state]}`
-                  : "Every state, newest first"}
+                  ? t("deliveries.kpi.filteredTo", { state: stateLabel(state) })
+                  : t("deliveries.kpi.everyState")}
               </p>
             </KpiTile>
             <KpiTile
               icon={CircleCheck}
               tone="success"
-              label="Delivered"
+              label={t("deliveries.kpi.delivered")}
               value={byState.delivered}
-              suffix={`of ${shown}`}
+              suffix={t("deliveries.kpi.of", { total: shown })}
             >
               <ShareBar
                 value={byState.delivered}
                 total={shown}
                 tone="success"
-                label="accepted by the target"
+                label={t("deliveries.kpi.accepted")}
               />
             </KpiTile>
             <KpiTile
               icon={RotateCcw}
               tone={inFlight > 0 ? "warning" : undefined}
-              label="In flight"
+              label={t("deliveries.kpi.inFlight")}
               value={inFlight}
             >
               <p className="text-micro text-ink-muted">
                 <span data-tabular className="font-medium text-ink-secondary">
                   {byState.retrying}
                 </span>{" "}
-                retrying ·{" "}
+                {t("deliveries.kpi.retrying")} ·{" "}
                 <span data-tabular className="font-medium text-ink-secondary">
                   {byState.pending + byState.processing}
                 </span>{" "}
-                queued
+                {t("deliveries.kpi.queued")}
               </p>
             </KpiTile>
             <KpiTile
               icon={MailX}
               tone={byState.dead_letter > 0 ? "critical" : undefined}
-              label="Dead letter"
+              label={t("deliveries.kpi.deadLetter")}
               value={byState.dead_letter}
             >
               <p className="text-micro text-ink-muted">
                 <span data-tabular className="font-medium text-ink-secondary">
                   {byState.suppressed}
                 </span>{" "}
-                suppressed
+                {t("deliveries.kpi.suppressed")}
               </p>
             </KpiTile>
           </div>
         ) : null}
 
         <FilterChips
-          label="State"
+          label={t("deliveries.filter.label")}
           value={state}
           onChange={(value) => setState(value)}
           options={[
-            { value: "" as DeliveryState | "", label: "Any state" },
+            { value: "" as DeliveryState | "", label: t("deliveries.filter.any") },
             ...STATES.map((value) => ({
               value,
-              label: DELIVERY_STATE_LABELS[value],
+              label: stateLabel(value),
             })),
           ]}
         />
@@ -366,7 +366,7 @@ export default function NotificationDeliveriesPage() {
               <Panel>
                 <StateCard
                   kind="error"
-                  title="Could not load deliveries"
+                  title={t("deliveries.errorTitle")}
                   description={error}
                   onRetry={load}
                 />
@@ -382,8 +382,8 @@ export default function NotificationDeliveriesPage() {
                 <StateCard
                   kind="empty"
                   icon={Send}
-                  title="No deliveries"
-                  description="No webhook deliveries match this filter in your authorized scope."
+                  title={t("deliveries.emptyTitle")}
+                  description={t("deliveries.emptyDescription")}
                   action={
                     state ? (
                       <button
@@ -391,7 +391,7 @@ export default function NotificationDeliveriesPage() {
                         onClick={() => setState("")}
                         className={PILL_BUTTON}
                       >
-                        Show every state
+                        {t("deliveries.showEveryState")}
                       </button>
                     ) : null
                   }
@@ -403,8 +403,8 @@ export default function NotificationDeliveriesPage() {
               <Panel flush>
                 <PanelHeader
                   flush
-                  title="Deliveries"
-                  meta={<span>{rows.length} shown</span>}
+                  title={t("deliveries.list.title")}
+                  meta={<span>{t("deliveries.list.shown", { count: rows.length })}</span>}
                 />
                 <ul
                   className="divide-y divide-border"
@@ -430,8 +430,11 @@ export default function NotificationDeliveriesPage() {
                           </Link>
                           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-ink-muted">
                             <span className="text-ink-secondary">
-                              {EVENT_TYPE_LABELS[row.event_type] ??
-                                row.event_type}
+                              {t.dyn(
+                                "eventType",
+                                row.event_type,
+                                EVENT_TYPE_LABELS[row.event_type] ?? row.event_type,
+                              )}
                             </span>
                             <span>→ {row.destination_display_name}</span>
                             <span className="font-mono">{row.project_key}</span>
@@ -440,11 +443,10 @@ export default function NotificationDeliveriesPage() {
                         <div className="flex shrink-0 flex-wrap items-center gap-2">
                           <StatusBadge
                             status={STATE_BADGE[row.state]}
-                            label={DELIVERY_STATE_LABELS[row.state]}
+                            label={stateLabel(row.state)}
                           />
                           <span className="rounded-full bg-surface-2 px-2.5 py-1 text-micro font-medium text-ink-secondary">
-                            {row.attempt_count} attempt
-                            {row.attempt_count === 1 ? "" : "s"}
+                            {t("deliveries.row.attempts", { count: row.attempt_count })}
                           </span>
                           <button
                             type="button"
@@ -454,7 +456,9 @@ export default function NotificationDeliveriesPage() {
                             }
                             className={PILL_BUTTON}
                           >
-                            {expanded === row.id ? "Hide attempts" : "Attempts"}
+                            {expanded === row.id
+                              ? t("deliveries.row.hideAttempts")
+                              : t("deliveries.row.showAttempts")}
                             <ChevronDown
                               aria-hidden
                               className={`h-3.5 w-3.5 transition-transform ${expanded === row.id ? "rotate-180" : ""}`}
@@ -468,29 +472,27 @@ export default function NotificationDeliveriesPage() {
                         <p className="mt-2 flex flex-wrap items-center gap-2 pl-14 text-micro text-ink-muted">
                           {row.last_error_code ? (
                             <span className="rounded-full bg-critical-soft px-2 py-0.5 text-critical">
-                              {DELIVERY_ERROR_LABELS[row.last_error_code] ??
-                                row.last_error_code}
+                              {t.dyn(
+                                "deliveryError",
+                                row.last_error_code,
+                                DELIVERY_ERROR_LABELS[row.last_error_code] ?? row.last_error_code,
+                              )}
                               {row.last_http_status
-                                ? ` (HTTP ${row.last_http_status})`
+                                ? ` ${t("deliveries.row.httpStatus", { status: row.last_http_status })}`
                                 : ""}
                             </span>
                           ) : null}
                           {row.delivered_at ? (
-                            <span>
-                              delivered{" "}
-                              <time
-                                dateTime={row.delivered_at}
-                                title={formatUtc(row.delivered_at)}
-                              >
-                                {formatRelative(row.delivered_at)}
-                              </time>
+                            <span title={fmt.utc(row.delivered_at)}>
+                              {t("deliveries.row.deliveredAt", {
+                                when: fmt.relative(row.delivered_at),
+                              })}
                             </span>
                           ) : row.next_attempt_at ? (
                             <span>
-                              next attempt{" "}
-                              <time className="font-mono">
-                                {row.next_attempt_at}
-                              </time>
+                              {t("deliveries.row.nextAttempt", {
+                                when: fmt.utc(row.next_attempt_at),
+                              })}
                             </span>
                           ) : null}
                         </p>
@@ -511,11 +513,11 @@ export default function NotificationDeliveriesPage() {
             {rows !== null && rows.length > 0 ? (
               <Panel>
                 <PanelHeader
-                  title="Outcome breakdown"
-                  description="Deliveries shown, by state"
+                  title={t("deliveries.breakdown.title")}
+                  description={t("deliveries.breakdown.description")}
                 />
                 <Donut
-                  label="Delivery outcomes"
+                  label={t("deliveries.breakdown.chart")}
                   size={148}
                   thickness={16}
                   slices={(
@@ -528,7 +530,7 @@ export default function NotificationDeliveriesPage() {
                       "suppressed",
                     ] as DeliveryState[]
                   ).map((value) => ({
-                    name: DELIVERY_STATE_LABELS[value],
+                    name: stateLabel(value),
                     value: byState[value],
                     tone: STATE_TONE[value],
                   }))}

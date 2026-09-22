@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 
 import { AppShell } from "@/components/shell/AppShell";
+import { LOCALE_INIT_SCRIPT } from "@/lib/i18n/locale";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
@@ -65,6 +66,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             synchronous on purpose: anything deferred paints the wrong theme
             first, and on a dark-mode NOC screen that flash is a strobe. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Same rule for the language: `<html lang>` must be right before
+            anything renders, for screen readers and the browser's own UI. */}
+        <script dangerouslySetInnerHTML={{ __html: LOCALE_INIT_SCRIPT }} />
       </head>
       <body>
         <AppShell>{children}</AppShell>

@@ -13,12 +13,14 @@ import { Bell } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { useT } from "@/lib/i18n";
 import { fetchUnreadCount } from "@/lib/notifications";
 
 const POLL_INTERVAL_MS = 60_000;
 
 export function NotificationBell() {
   const [unread, setUnread] = useState<number | null>(null);
+  const t = useT("shell");
 
   const load = useCallback(async () => {
     try {
@@ -34,8 +36,7 @@ export function NotificationBell() {
     return () => clearInterval(timer);
   }, [load]);
 
-  const label =
-    unread && unread > 0 ? `Notifications, ${unread} unread` : "Notifications";
+  const label = unread && unread > 0 ? t("bell.unread", { count: unread }) : t("bell.label");
 
   return (
     <Link

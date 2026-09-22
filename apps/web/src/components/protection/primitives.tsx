@@ -13,6 +13,7 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import type { StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import {
   BACKUP_LABELS,
   OVERALL_LABELS,
@@ -63,29 +64,46 @@ export function overallTone(state: OverallState): StatusTone {
   return OVERALL_TONE[state];
 }
 
+// The English label records in lib/protection stay the source of truth for
+// non-React code; here they are only the fallback `t.dyn` shows for a token
+// the catalogue does not know.
 export function BackupBadge({ state }: { state: BackupState }) {
-  return <StatusBadge status={BACKUP_BADGE[state]} label={BACKUP_LABELS[state]} />;
+  const t = useT("protection");
+  return (
+    <StatusBadge
+      status={BACKUP_BADGE[state]}
+      label={t.dyn("backup", state, BACKUP_LABELS[state])}
+    />
+  );
 }
 
 export function RecoverabilityBadge({ state }: { state: RecoverabilityState }) {
+  const t = useT("protection");
   return (
     <StatusBadge
       status={RECOVERABILITY_BADGE[state]}
-      label={RECOVERABILITY_LABELS[state]}
+      label={t.dyn("recoverability", state, RECOVERABILITY_LABELS[state])}
     />
   );
 }
 
 export function OverallBadge({ state }: { state: OverallState }) {
-  return <StatusBadge status={OVERALL_BADGE[state]} label={OVERALL_LABELS[state]} />;
+  const t = useT("protection");
+  return (
+    <StatusBadge
+      status={OVERALL_BADGE[state]}
+      label={t.dyn("overall", state, OVERALL_LABELS[state])}
+    />
+  );
 }
 
 export function ReasonList({ reasons }: { reasons: string[] }) {
+  const t = useT("protection");
   if (reasons.length === 0) {
     return (
       <p className="flex items-center gap-2.5 rounded-2xl bg-healthy-soft px-4 py-3 text-caption text-healthy">
         <CheckCircle2 aria-hidden className="h-4 w-4 shrink-0" />
-        Every requirement this policy states is currently met.
+        {t("reasons.allMet")}
       </p>
     );
   }
@@ -102,7 +120,9 @@ export function ReasonList({ reasons }: { reasons: string[] }) {
           >
             <AlertTriangle className="h-4 w-4" />
           </span>
-          <span className="font-medium">{REASON_LABELS[reason] ?? reason}</span>
+          <span className="font-medium">
+            {t.dyn("reason", reason, REASON_LABELS[reason] ?? reason)}
+          </span>
         </li>
       ))}
     </ul>

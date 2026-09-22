@@ -206,12 +206,21 @@ export function formatSignal(value: number | null): string {
   return value.toFixed(4);
 }
 
-/** "12m" — how long a rollout took, or has been running. */
-export function formatDuration(fromIso: string, toIso: string | null): string {
+/** Seconds a rollout took, or has been running; `null` when a timestamp
+ * does not parse. Components hand this to `useFormat().duration` so the
+ * text follows the locale; `formatDuration` below stays for callers that
+ * want the English short form outside React. */
+export function rolloutDurationSeconds(fromIso: string, toIso: string | null): number | null {
   const from = Date.parse(fromIso);
   const to = toIso ? Date.parse(toIso) : Date.now();
-  if (Number.isNaN(from) || Number.isNaN(to)) return "—";
-  const seconds = Math.max(0, Math.round((to - from) / 1000));
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.max(0, Math.round((to - from) / 1000));
+}
+
+/** "12m" — how long a rollout took, or has been running. */
+export function formatDuration(fromIso: string, toIso: string | null): string {
+  const seconds = rolloutDurationSeconds(fromIso, toIso);
+  if (seconds === null) return "—";
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;

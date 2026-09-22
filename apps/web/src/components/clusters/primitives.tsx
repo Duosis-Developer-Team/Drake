@@ -15,6 +15,7 @@ import { LoadGate, type Loadable } from "@/components/catalog/primitives";
 import { Panel } from "@/components/ui/Panel";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 
 /** A round icon holder. Tinted by tone when the icon carries a state. */
 export function IconBubble({
@@ -101,12 +102,13 @@ export function ShareBar({
   tone: StatusTone;
   label: string;
 }) {
+  const t = useT("clusters");
   const share = total > 0 ? value / total : 0;
   return (
     <div className="flex items-center gap-3">
       <span
         role="img"
-        aria-label={`${label}: ${value} of ${total}`}
+        aria-label={t("bar.share", { label, value, total })}
         className="block h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-3"
       >
         <span
@@ -143,15 +145,21 @@ export function SegmentBar({
   height?: string;
   legend?: boolean;
 }) {
+  const t = useT("clusters");
+  const fmt = useFormat();
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
   const drawn = segments.filter((segment) => segment.value > 0);
+  // A punctuation join of one label and one list, not a sentence: word
+  // order is the same in both languages, only the items are translated.
+  const detail =
+    drawn.length > 0
+      ? drawn.map((s) => t("bar.segment", { label: s.label, value: s.value })).join(", ")
+      : t("bar.nothingRecorded");
   return (
     <div className="min-w-0">
       <span
         role="img"
-        aria-label={`${label}: ${
-          drawn.length > 0 ? drawn.map((s) => `${s.label} ${s.value}`).join(", ") : "nothing recorded"
-        }`}
+        aria-label={`${label}: ${detail}`}
         className={`flex w-full gap-1 overflow-hidden rounded-full bg-surface-3 ${height}`}
       >
         {drawn.map((segment) => (
@@ -178,8 +186,9 @@ export function SegmentBar({
                 }`}
               />
               {/* One text node on purpose: "1 stale", never a bare "Stale"
-                  that reads like a status badge of its own. */}
-              <span data-tabular>{`${segment.value} ${segment.label.toLowerCase()}`}</span>
+                  that reads like a status badge of its own. Lowercased by
+                  locale so a Turkish "I" becomes "ı", not "i". */}
+              <span data-tabular>{`${segment.value} ${segment.label.toLocaleLowerCase(fmt.tag)}`}</span>
             </li>
           ))}
         </ul>

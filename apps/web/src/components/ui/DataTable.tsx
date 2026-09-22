@@ -24,6 +24,8 @@
 
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
+
 export type ColumnAlign = "left" | "right";
 
 export interface Column<Row> {
@@ -212,6 +214,8 @@ export function Pagination({
   total?: number | null;
   onOffsetChange: (offset: number) => void;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   const first = count === 0 ? 0 : offset + 1;
   const last = offset + count;
   const hasMore = total === null || total === undefined ? count === limit : last < total;
@@ -219,8 +223,8 @@ export function Pagination({
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2">
       <p className="text-caption text-ink-muted" data-tabular>
         {total === null || total === undefined
-          ? `Showing ${first}–${last}`
-          : `Showing ${first}–${last} of ${total}`}
+          ? t("table.showingRange", { first, last })
+          : t("table.showingRangeOf", { first, last, total })}
       </p>
       <div className="flex items-center gap-2">
         <button
@@ -229,7 +233,7 @@ export function Pagination({
           onClick={() => onOffsetChange(Math.max(0, offset - limit))}
           className="rounded-control border border-border px-2.5 py-1 text-caption font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-40"
         >
-          Previous
+          {common("action.previous")}
         </button>
         <button
           type="button"
@@ -237,7 +241,7 @@ export function Pagination({
           onClick={() => onOffsetChange(offset + limit)}
           className="rounded-control border border-border px-2.5 py-1 text-caption font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-40"
         >
-          Next
+          {common("action.next")}
         </button>
       </div>
     </div>

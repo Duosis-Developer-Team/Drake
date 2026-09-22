@@ -13,6 +13,7 @@ import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import { BindingForm } from "@/components/service-health/BindingForm";
 import { DataState } from "@/components/state/DataState";
+import { useT } from "@/lib/i18n";
 import type { BindingSummary } from "@/lib/serviceHealth";
 
 /** The binding endpoint's payload, reshaped into the summary the form takes. */
@@ -56,6 +57,7 @@ function toSummary(detail: BindingDetail): BindingSummary {
 }
 
 function BindScreen() {
+  const t = useT("serviceHealth");
   const params = useSearchParams();
   const router = useRouter();
   const environmentServiceId = params.get("environment_service_id") ?? "";
@@ -68,8 +70,8 @@ function BindScreen() {
     return (
       <DataState
         kind="not-configured"
-        title="No service selected"
-        description="Open this screen from a service in the health list."
+        title={t("bind.noService.title")}
+        description={t("bind.noService.description")}
       />
     );
   }
@@ -97,19 +99,17 @@ function BindScreen() {
 }
 
 export default function BindPage() {
+  const t = useT("serviceHealth");
   return (
     <PageFrame width="narrow">
       <p className="mb-2 text-micro text-ink-muted">
         <Link href="/service-health" className="hover:text-ink">
-          Service health
+          {t("bind.crumbRoot")}
         </Link>
         <span className="mx-1.5">/</span>
-        <span className="text-ink-secondary">Binding</span>
+        <span className="text-ink-secondary">{t("bind.crumbCurrent")}</span>
       </p>
-      <PageHeader
-        title="Service ↔ workload binding"
-        description="Choose the workload this service runs as. Which metrics are read comes from a reviewed preset — there is no query to write here."
-      />
+      <PageHeader title={t("bind.title")} description={t("bind.description")} />
       <Suspense fallback={<DataState kind="loading" />}>
         <BindScreen />
       </Suspense>

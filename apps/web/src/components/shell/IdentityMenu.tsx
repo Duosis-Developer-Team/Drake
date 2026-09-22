@@ -3,11 +3,13 @@
 import { LogOut } from "lucide-react";
 import { useState } from "react";
 
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 export function IdentityMenu() {
   const { state, signOut } = useSession();
   const [open, setOpen] = useState(false);
+  const t = useT("shell");
 
   if (state.status !== "authenticated") return null;
   const { identity } = state.me;
@@ -20,8 +22,8 @@ export function IdentityMenu() {
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
-        className="flex h-11 items-center gap-2 rounded-full border border-border bg-surface pr-1.5 pl-1.5 transition-colors hover:bg-surface-hover lg:pr-4"
+        aria-label={t("identity.accountMenu")}
+        className="flex h-11 items-center gap-2 rounded-full border border-border bg-surface pr-1.5 pl-1.5 transition-colors hover:bg-surface-hover xl:pr-4"
       >
         <span
           aria-hidden
@@ -29,7 +31,11 @@ export function IdentityMenu() {
         >
           {initial}
         </span>
-        <span className="hidden max-w-32 truncate text-sm text-ink lg:block">
+        {/* The name shows from xl: at 1024px the bar already holds search,
+            breadcrumb, time range, theme, language, bell and this button,
+            and the name was the 35px that pushed the page sideways. The
+            avatar stays, and the menu itself always carries the name. */}
+        <span className="hidden max-w-32 truncate text-sm text-ink xl:block">
           {identity.display_name}
         </span>
       </button>
@@ -44,8 +50,7 @@ export function IdentityMenu() {
           </div>
           {state.me.groups_overage ? (
             <p className="px-3 py-2 text-xs text-warning">
-              Group memberships could not be evaluated; group-based access is
-              disabled for this session.
+              {t("identity.groupsOverage")}
             </p>
           ) : null}
           <button
@@ -55,7 +60,7 @@ export function IdentityMenu() {
             className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-surface-sunken hover:text-ink"
           >
             <LogOut className="h-4 w-4" aria-hidden />
-            Sign out
+            {t("identity.signOut")}
           </button>
         </div>
       ) : null}

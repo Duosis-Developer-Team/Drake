@@ -25,6 +25,7 @@
 import { formatUnit, MISSING } from "@/lib/design/format";
 import type { StatusTone, Thresholds } from "@/lib/design/status";
 import { toneForThreshold, toneSpec } from "@/lib/design/status";
+import { useLocale, useT } from "@/lib/i18n";
 
 /** A point on a circle, in SVG coordinates, from an angle in degrees. */
 function polar(cx: number, cy: number, radius: number, degrees: number) {
@@ -71,6 +72,8 @@ export function Gauge({
   missingReason?: string;
   size?: "compact" | "default";
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const width = size === "compact" ? 132 : 168;
   const height = size === "compact" ? 78 : 96;
   const cx = width / 2;
@@ -115,7 +118,7 @@ export function Gauge({
         width={width}
         height={height}
         role="img"
-        aria-label={`${label}: ${missing ? "not measured" : formatUnit(value, unit)}`}
+        aria-label={`${label}: ${missing ? t("visual.notMeasured") : formatUnit(value, unit, {}, locale)}`}
         className="overflow-visible"
       >
         {/* The empty track. Always drawn, so a missing value has a shape. */}
@@ -133,7 +136,7 @@ export function Gauge({
             key={band.token + band.from}
             d={arc(cx, cy, radius + track / 2 + 3, angle(band.from), angle(band.to))}
             fill="none"
-            stroke={`var(${band.token})`}
+            stroke={`var(${band.token})`} // i18n-ignore: CSS
             strokeWidth={2.5}
             opacity={0.55}
           />
@@ -144,7 +147,7 @@ export function Gauge({
           <path
             d={arc(cx, cy, radius, 180, angle(fraction))}
             fill="none"
-            stroke={`var(${spec.token})`}
+            stroke={`var(${spec.token})`} // i18n-ignore: CSS
             strokeWidth={track}
             strokeLinecap="round"
             className="transition-[d] duration-[var(--duration-surface)]"
@@ -158,7 +161,7 @@ export function Gauge({
           className={`fill-ink font-semibold ${size === "compact" ? "text-[15px]" : "text-[19px]"}`}
           style={{ fontVariantNumeric: "tabular-nums" }}
         >
-          {missing ? MISSING : formatUnit(value, unit)}
+          {missing ? MISSING : formatUnit(value, unit, {}, locale)}
         </text>
       </svg>
       <figcaption className="mt-0.5 text-center">
@@ -199,7 +202,7 @@ export function Donut({
   size = 132,
   thickness = 14,
   legend = true,
-  emptyMessage = "Nothing to break down — every bucket is zero.",
+  emptyMessage,
 }: {
   slices: Slice[];
   label: string;
@@ -209,6 +212,7 @@ export function Donut({
   legend?: boolean;
   emptyMessage?: string;
 }) {
+  const t = useT("ui");
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   const radius = (size - thickness) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -216,7 +220,7 @@ export function Donut({
   if (total === 0) {
     return (
       <p className="text-caption text-ink-muted" data-testid="donut-empty">
-        {emptyMessage}
+        {emptyMessage ?? t("visual.nothingToBreakDown")}
       </p>
     );
   }
@@ -281,7 +285,7 @@ export function Donut({
           >
             {centerLabel ?? total}
           </span>
-          <span className="mt-1 block text-micro text-ink-muted">total</span>
+          <span className="mt-1 block text-micro text-ink-muted">{t("visual.total")}</span>
         </span>
       </div>
 
@@ -343,6 +347,8 @@ export function RingProgress({
   tone?: StatusTone;
   size?: number;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const thickness = Math.max(4, size / 10);
   const radius = (size - thickness) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -357,7 +363,7 @@ export function RingProgress({
         width={size}
         height={size}
         role="img"
-        aria-label={`${label}: ${missing ? "not measured" : formatUnit(value, unit)}`}
+        aria-label={`${label}: ${missing ? t("visual.notMeasured") : formatUnit(value, unit, {}, locale)}`}
         className="shrink-0 -rotate-90"
       >
         <circle
@@ -374,7 +380,7 @@ export function RingProgress({
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke={`var(${toneSpec(tone).token})`}
+            stroke={`var(${toneSpec(tone).token})`} // i18n-ignore: CSS
             strokeWidth={thickness}
             strokeLinecap="round"
             strokeDasharray={`${fraction * circumference} ${circumference}`}
@@ -416,6 +422,7 @@ export function ValueChip({
   tone?: StatusTone;
   missingLabel?: string;
 }) {
+  const { locale } = useLocale();
   const missing = value === null || value === undefined || Number.isNaN(value);
   if (missing) {
     return <span className="text-caption text-ink-muted">{missingLabel}</span>;
@@ -431,7 +438,7 @@ export function ValueChip({
         plain ? "text-ink" : spec.chip
       }`}
     >
-      {formatUnit(value, unit)}
+      {formatUnit(value, unit, {}, locale)}
     </span>
   );
 }
@@ -455,6 +462,8 @@ export function SplitBar({
   label: string;
   thresholds?: Thresholds | null;
 }) {
+  const t = useT("ui");
+  const { locale } = useLocale();
   const known = used !== null && total !== null && total > 0;
   const ratio = known ? Math.min(1, used / total) : 0;
   const percent = ratio * 100;
@@ -471,11 +480,14 @@ export function SplitBar({
       </div>
       <div
         role="img"
-        aria-label={
+        aria-label={`${label}: ${
           known
-            ? `${label}: ${formatUnit(used, unit)} used of ${formatUnit(total, unit)}`
-            : `${label}: not measured`
-        }
+            ? t("visual.usedOf", {
+                used: formatUnit(used, unit, {}, locale),
+                total: formatUnit(total, unit, {}, locale),
+              })
+            : t("visual.notMeasured")
+        }`}
         className="mt-1.5 flex h-6 w-full overflow-hidden rounded-full bg-surface-3"
       >
         {known ? (
@@ -484,15 +496,17 @@ export function SplitBar({
               className={`flex items-center justify-end px-2 text-micro font-medium ${spec.chip}`}
               style={{ width: `${Math.max(percent, 0)}%` }}
             >
-              {percent > 22 ? formatUnit(used, unit) : ""}
+              {percent > 22 ? formatUnit(used, unit, {}, locale) : ""}
             </span>
             <span className="flex flex-1 items-center px-2 text-micro text-ink-muted">
-              {100 - percent > 22 ? `${formatUnit(total - used, unit)} free` : ""}
+              {100 - percent > 22
+                ? t("visual.free", { value: formatUnit(total - used, unit, {}, locale) })
+                : ""}
             </span>
           </>
         ) : (
           <span className="flex flex-1 items-center px-1.5 text-micro text-ink-muted">
-            not reported
+            {t("visual.notReported")}
           </span>
         )}
       </div>
@@ -522,11 +536,12 @@ export function Sparkline({
   height?: number;
   label: string;
 }) {
+  const t = useT("ui");
   const values = points.filter((point): point is number => point !== null);
   if (values.length < 2) {
     return (
       <span className="text-micro text-ink-muted" data-testid="sparkline-empty">
-        no series
+        {t("visual.noSeries")}
       </span>
     );
   }
@@ -558,7 +573,7 @@ export function Sparkline({
       width={width}
       height={height}
       role="img"
-      aria-label={`${label}: ${values.length} samples, latest ${last}`}
+      aria-label={t("visual.sparkline", { label, count: values.length, latest: last })}
       className="shrink-0 overflow-visible"
       data-testid="sparkline"
     >
@@ -642,11 +657,12 @@ export function StackedBar({
   height?: number;
   legend?: boolean;
 }) {
+  const t = useT("ui");
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
   if (total === 0) {
     return (
       <p className="text-caption text-ink-muted" data-testid="stacked-empty">
-        Nothing recorded in this window.
+        {t("visual.nothingRecorded")}
       </p>
     );
   }
@@ -740,6 +756,7 @@ export function StatusMatrix({
   label: string;
   rowLabel?: string;
 }) {
+  const t = useT("ui");
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-auto [contain:paint]">
       <table className="w-full border-collapse text-caption" data-testid="status-matrix">
@@ -747,7 +764,7 @@ export function StatusMatrix({
         <thead>
           <tr>
             <th scope="col" className="px-2 py-1.5 text-left font-medium text-ink-secondary">
-              {rowLabel ?? "Item"}
+              {rowLabel ?? t("visual.item")}
             </th>
             {columns.map((column) => (
               <th
@@ -776,9 +793,9 @@ export function StatusMatrix({
                     <td key={column.key} className="px-2 py-1.5 text-center">
                       <span
                         className="inline-block h-6 w-full max-w-16 rounded bg-surface-3"
-                        title="not applicable"
+                        title={t("visual.notApplicable")}
                       >
-                        <span className="sr-only">not applicable</span>
+                        <span className="sr-only">{t("visual.notApplicable")}</span>
                       </span>
                     </td>
                   );
@@ -828,11 +845,12 @@ export function Countdown({
   criticalDays?: number;
   now?: Date;
 }) {
+  const t = useT("ui");
   if (!deadline) {
     return (
       <div data-testid="countdown">
         <span className="text-caption text-ink-secondary">{label}</span>
-        <p className="text-caption text-ink-muted">no expiry reported</p>
+        <p className="text-caption text-ink-muted">{t("visual.noExpiry")}</p>
       </div>
     );
   }
@@ -847,12 +865,14 @@ export function Countdown({
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-caption text-ink-secondary">{label}</span>
         <span data-tabular className={`shrink-0 text-caption font-medium ${spec.text}`}>
-          {days <= 0 ? "expired" : `${Math.floor(days)}d left`}
+          {days <= 0 ? t("visual.expired") : t("visual.daysLeft", { count: Math.floor(days) })}
         </span>
       </div>
       <div
         role="img"
-        aria-label={`${label}: ${days <= 0 ? "expired" : `${Math.floor(days)} days remaining`}`}
+        aria-label={`${label}: ${
+          days <= 0 ? t("visual.expired") : t("visual.daysRemaining", { count: Math.floor(days) })
+        }`}
         className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
       >
         <span

@@ -34,6 +34,7 @@ import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import { Countdown } from "@/components/charts/visuals";
+import { formatWindowWith } from "@/components/protection/format";
 import {
   DefGrid,
   IconBubble,
@@ -49,10 +50,8 @@ import {
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
-  formatAge,
-  formatDuration,
-  formatWindow,
   type BackupRun,
   type ProtectionEvaluation,
   type ProtectionIncident,
@@ -60,6 +59,7 @@ import {
   type RestoreDrill,
 } from "@/lib/protection";
 
+/** English short forms of the drill validation keys; `t.dyn` prefers the catalogue. */
 const VALIDATION_LABELS: Record<string, string> = {
   schema_present: "Schema present",
   row_counts_sane: "Row counts sane",
@@ -67,12 +67,41 @@ const VALIDATION_LABELS: Record<string, string> = {
   application_smoke: "Application smoke test",
 };
 
+type ChainLink = "backupRun" | "artifact" | "integrity" | "offsite" | "restoreDrill";
+type ChainWord =
+  | "notEvaluated"
+  | "lastRunFailed"
+  | "overdue"
+  | "noGap"
+  | "noSuccess"
+  | "notObserved"
+  | "notRequired"
+  | "checkFailed"
+  | "checkMissing"
+  | "missing"
+  | "proven"
+  | "drillFailed"
+  | "notYetProven"
+  | "unknown";
+
 type Link_ = {
-  label: string;
+  key: ChainLink;
   icon: LucideIcon;
   tone: StatusTone;
-  word: string;
+  word: ChainWord;
 };
+
+const CHAIN_ICON: Record<ChainLink, LucideIcon> = {
+  backupRun: PlayCircle,
+  artifact: Package,
+  integrity: FileCheck2,
+  offsite: CloudUpload,
+  restoreDrill: ArchiveRestore,
+};
+
+function link(key: ChainLink, tone: StatusTone, word: ChainWord): Link_ {
+  return { key, icon: CHAIN_ICON[key], tone, word };
+}
 
 /**
  * The chain, link by link, read straight off the evaluation's own reason
@@ -86,169 +115,60 @@ function evidenceChain(
 ): Link_[] {
   if (!evaluation) {
     return [
-      {
-        label: "Backup run",
-        icon: PlayCircle,
-        tone: "unknown",
-        word: "Not evaluated",
-      },
-      {
-        label: "Artifact",
-        icon: Package,
-        tone: "unknown",
-        word: "Not evaluated",
-      },
-      {
-        label: "Integrity",
-        icon: FileCheck2,
-        tone: "unknown",
-        word: "Not evaluated",
-      },
-      {
-        label: "Offsite copy",
-        icon: CloudUpload,
-        tone: "unknown",
-        word: "Not evaluated",
-      },
-      {
-        label: "Restore drill",
-        icon: ArchiveRestore,
-        tone: "unknown",
-        word: "Not evaluated",
-      },
+      link("backupRun", "unknown", "notEvaluated"),
+      link("artifact", "unknown", "notEvaluated"),
+      link("integrity", "unknown", "notEvaluated"),
+      link("offsite", "unknown", "notEvaluated"),
+      link("restoreDrill", "unknown", "notEvaluated"),
     ];
   }
   const has = (code: string) => evaluation.reasons.includes(code);
   const run: Link_ = has("latest_run_failed")
-    ? {
-        label: "Backup run",
-        icon: PlayCircle,
-        tone: "critical",
-        word: "Last run failed",
-      }
+    ? link("backupRun", "critical", "lastRunFailed")
     : has("backup_overdue")
-      ? {
-          label: "Backup run",
-          icon: PlayCircle,
-          tone: "warning",
-          word: "Overdue",
-        }
+      ? link("backupRun", "warning", "overdue")
       : evaluation.last_success_at
-        ? {
-            label: "Backup run",
-            icon: PlayCircle,
-            tone: "success",
-            word: "No gap reported",
-          }
-        : {
-            label: "Backup run",
-            icon: PlayCircle,
-            tone: "unknown",
-            word: "No success seen",
-          };
+        ? link("backupRun", "success", "noGap")
+        : link("backupRun", "unknown", "noSuccess");
   const artifact: Link_ = has("artifact_missing")
-    ? {
-        label: "Artifact",
-        icon: Package,
-        tone: "warning",
-        word: "Not observed",
-      }
-    : {
-        label: "Artifact",
-        icon: Package,
-        tone: "success",
-        word: "No gap reported",
-      };
+    ? link("artifact", "warning", "notObserved")
+    : link("artifact", "success", "noGap");
   const integrity: Link_ = !policy.requires_integrity_check
-    ? {
-        label: "Integrity",
-        icon: FileCheck2,
-        tone: "not-applicable",
-        word: "Not required",
-      }
+    ? link("integrity", "not-applicable", "notRequired")
     : has("integrity_failed")
-      ? {
-          label: "Integrity",
-          icon: FileCheck2,
-          tone: "critical",
-          word: "Check failed",
-        }
+      ? link("integrity", "critical", "checkFailed")
       : has("integrity_missing")
-        ? {
-            label: "Integrity",
-            icon: FileCheck2,
-            tone: "warning",
-            word: "Check missing",
-          }
-        : {
-            label: "Integrity",
-            icon: FileCheck2,
-            tone: "success",
-            word: "No gap reported",
-          };
+        ? link("integrity", "warning", "checkMissing")
+        : link("integrity", "success", "noGap");
   const offsite: Link_ = !policy.requires_offsite
-    ? {
-        label: "Offsite copy",
-        icon: CloudUpload,
-        tone: "not-applicable",
-        word: "Not required",
-      }
+    ? link("offsite", "not-applicable", "notRequired")
     : has("offsite_missing")
-      ? {
-          label: "Offsite copy",
-          icon: CloudUpload,
-          tone: "warning",
-          word: "Missing",
-        }
-      : {
-          label: "Offsite copy",
-          icon: CloudUpload,
-          tone: "success",
-          word: "No gap reported",
-        };
+      ? link("offsite", "warning", "missing")
+      : link("offsite", "success", "noGap");
   const restore: Link_ =
     evaluation.recoverability_state === "verified"
-      ? {
-          label: "Restore drill",
-          icon: ArchiveRestore,
-          tone: "success",
-          word: "Proven",
-        }
+      ? link("restoreDrill", "success", "proven")
       : evaluation.recoverability_state === "failed"
-        ? {
-            label: "Restore drill",
-            icon: ArchiveRestore,
-            tone: "critical",
-            word: "Drill failed",
-          }
+        ? link("restoreDrill", "critical", "drillFailed")
         : evaluation.recoverability_state === "unverified"
-          ? {
-              label: "Restore drill",
-              icon: ArchiveRestore,
-              tone: "info",
-              word: "Not yet proven",
-            }
-          : {
-              label: "Restore drill",
-              icon: ArchiveRestore,
-              tone: "unknown",
-              word: "Unknown",
-            };
+          ? link("restoreDrill", "info", "notYetProven")
+          : link("restoreDrill", "unknown", "unknown");
   return [run, artifact, integrity, offsite, restore];
 }
 
 function EvidenceChain({ links }: { links: Link_[] }) {
+  const t = useT("protection");
   return (
     <ol
       className="grid grid-cols-1 gap-3 sm:grid-cols-5"
-      aria-label="Evidence chain"
+      aria-label={t("detail.chain.label")}
     >
-      {links.map((link, index) => {
-        const spec = toneSpec(link.tone);
-        const Icon = link.icon;
+      {links.map((item, index) => {
+        const spec = toneSpec(item.tone);
+        const Icon = item.icon;
         return (
           <li
-            key={link.label}
+            key={item.key}
             className="relative flex min-w-0 flex-col items-center text-center"
           >
             {index < links.length - 1 ? (
@@ -264,10 +184,10 @@ function EvidenceChain({ links }: { links: Link_[] }) {
               <Icon className="h-6 w-6" />
             </span>
             <span className="mt-3 text-caption font-semibold text-ink">
-              {link.label}
+              {t(`detail.chain.${item.key}`)}
             </span>
             <span className={`mt-0.5 text-micro ${spec.text}`}>
-              {link.word}
+              {t(`detail.chain.word.${item.word}`)}
             </span>
           </li>
         );
@@ -300,6 +220,10 @@ const TONE_ICON: Partial<Record<StatusTone, LucideIcon>> = {
 };
 
 export default function ProtectionDetailPage() {
+  const t = useT("protection");
+  const common = useT("common");
+  const incidentsT = useT("incidents");
+  const fmt = useFormat();
   const { policyId } = useParams<{ policyId: string }>();
   const [policy, retry] = useApi<ProtectionPolicy>(
     `/v1/protection/policies/${policyId}`,
@@ -313,6 +237,7 @@ export default function ProtectionDetailPage() {
   const [incidents] = useApi<{ incidents: ProtectionIncident[] }>(
     `/v1/protection/policies/${policyId}/incidents`,
   );
+  const windowOf = (seconds: number | null) => formatWindowWith(fmt, seconds);
 
   return (
     <PageFrame>
@@ -338,7 +263,7 @@ export default function ProtectionDetailPage() {
                 description={
                   <>
                     <Link href="/protection" className="hover:text-ink">
-                      Protection
+                      {t("detail.crumb")}
                     </Link>{" "}
                     / <span className="font-mono">{data.project_key}</span>
                     {data.environment_key ? (
@@ -370,31 +295,37 @@ export default function ProtectionDetailPage() {
                 <div className="page-grid">
                   <KpiTile
                     icon={HardDriveDownload}
-                    label="Last successful backup"
-                    value={formatAge(evaluation?.last_success_at ?? null)}
+                    label={t("detail.kpi.lastSuccess")}
+                    value={fmt.relative(evaluation?.last_success_at)}
                     tone={evaluation?.last_success_at ? "success" : "unknown"}
-                    caption={`Last attempt ${formatAge(evaluation?.last_attempt_at ?? null)}`}
+                    caption={t("detail.kpi.lastAttempt", {
+                      when: fmt.relative(evaluation?.last_attempt_at),
+                    })}
                   />
                   <KpiTile
                     icon={CalendarClock}
-                    label="Recovery point objective"
-                    value={formatWindow(data.rpo_seconds)}
+                    label={t("detail.kpi.rpo")}
+                    value={windowOf(data.rpo_seconds)}
                     tone="info"
-                    caption={`RTO ${formatWindow(data.rto_seconds)}`}
+                    caption={t("detail.kpi.rto", { value: windowOf(data.rto_seconds) })}
                   />
                   <KpiTile
                     icon={History}
-                    label="Last restore drill"
-                    value={formatAge(evaluation?.last_restore_at ?? null)}
+                    label={t("detail.kpi.lastDrill")}
+                    value={fmt.relative(evaluation?.last_restore_at)}
                     tone={evaluation?.last_restore_at ? "success" : "unknown"}
-                    caption={`Proof valid for ${formatWindow(data.restore_verification_ttl_seconds)}`}
+                    caption={t("detail.kpi.proofValid", {
+                      value: windowOf(data.restore_verification_ttl_seconds),
+                    })}
                   />
                   <KpiTile
                     icon={AlertOctagon}
-                    label="Failures since last success"
-                    value={failures === null ? "—" : failures}
+                    label={t("detail.kpi.failures")}
+                    value={failures === null ? "—" : fmt.number(failures)}
                     tone={failures ? "critical" : "neutral"}
-                    caption={`Reporter seen ${formatAge(evaluation?.reporter_seen_at ?? null)}`}
+                    caption={t("detail.kpi.reporterSeen", {
+                      when: fmt.relative(evaluation?.reporter_seen_at),
+                    })}
                   />
                 </div>
 
@@ -408,11 +339,13 @@ export default function ProtectionDetailPage() {
                       }
                     >
                       <PanelHeader
-                        title="Why"
+                        title={t("detail.why.title")}
                         description={
                           evaluation
-                            ? `Evaluated ${formatAge(evaluation.computed_at)} · each link of the chain, as observed`
-                            : "Each link of the chain, as observed"
+                            ? t("detail.why.evaluated", {
+                                when: fmt.relative(evaluation.computed_at),
+                              })
+                            : t("detail.why.notEvaluated")
                         }
                       />
                       <EvidenceChain links={evidenceChain(data, evaluation)} />
@@ -420,8 +353,8 @@ export default function ProtectionDetailPage() {
                         <StateCard
                           kind="unknown"
                           align="start"
-                          title="Not evaluated yet"
-                          description="No assessment has been recorded for this policy. Drake shows nothing rather than assuming a state."
+                          title={t("detail.why.notEvaluatedTitle")}
+                          description={t("detail.why.notEvaluatedDescription")}
                         />
                       ) : (
                         <ReasonList reasons={evaluation.reasons} />
@@ -432,12 +365,12 @@ export default function ProtectionDetailPage() {
                   <div className="page-aside">
                     <Panel>
                       <PanelHeader
-                        title="RPO buffer"
-                        description="Last success plus the stated window."
+                        title={t("detail.rpo.title")}
+                        description={t("detail.rpo.description")}
                       />
                       {data.rpo_seconds ? (
                         <Countdown
-                          label="RPO buffer remaining"
+                          label={t("detail.rpo.countdown")}
                           deadline={rpoDeadline}
                           windowDays={Math.max(1, data.rpo_seconds / 86_400)}
                           warnDays={Math.max(
@@ -448,16 +381,16 @@ export default function ProtectionDetailPage() {
                         />
                       ) : (
                         <p className="text-caption text-ink-muted">
-                          This policy states no RPO window.
+                          {t("detail.rpo.none")}
                         </p>
                       )}
                       <div className="mt-auto flex flex-wrap gap-2">
                         <RequirementPill
-                          label="Offsite"
+                          label={t("detail.rpo.offsite")}
                           required={data.requires_offsite}
                         />
                         <RequirementPill
-                          label="Integrity check"
+                          label={t("detail.rpo.integrity")}
                           required={data.requires_integrity_check}
                         />
                       </div>
@@ -469,8 +402,8 @@ export default function ProtectionDetailPage() {
                   <Panel flush>
                     <PanelHeader
                       flush
-                      title="Backup attempts"
-                      description="Every run the connector reported, newest first."
+                      title={t("detail.runs.title")}
+                      description={t("detail.runs.description")}
                     />
                     <LoadGate value={runs} retry={() => undefined}>
                       {(payload) =>
@@ -478,8 +411,8 @@ export default function ProtectionDetailPage() {
                           <StateCard
                             kind="empty"
                             icon={PlayCircle}
-                            title="No runs observed"
-                            description="No backup run has been reported for this policy."
+                            title={t("detail.runs.emptyTitle")}
+                            description={t("detail.runs.emptyDescription")}
                           />
                         ) : (
                           <ul
@@ -507,11 +440,10 @@ export default function ProtectionDetailPage() {
                                           aria-hidden
                                           className="h-3 w-3"
                                         />
-                                        {formatDuration(run.duration_seconds)}
+                                        {fmt.duration(run.duration_seconds, { compact: true })}
                                       </span>
                                       <span>
-                                        {run.artifact_count} artifact
-                                        {run.artifact_count === 1 ? "" : "s"}
+                                        {t("detail.runs.artifacts", { count: run.artifact_count })}
                                       </span>
                                       {run.error_code ? (
                                         <span className="font-mono text-critical">
@@ -523,10 +455,10 @@ export default function ProtectionDetailPage() {
                                   <div className="flex shrink-0 flex-col items-end gap-1">
                                     <StatusBadge
                                       status={tone}
-                                      label={run.status}
+                                      label={t.dyn("detail.runStatus", run.status, run.status)}
                                     />
                                     <time className="font-mono text-micro text-ink-muted">
-                                      {run.started_at}
+                                      {fmt.utc(run.started_at)}
                                     </time>
                                   </div>
                                 </li>
@@ -541,8 +473,8 @@ export default function ProtectionDetailPage() {
                   <Panel flush>
                     <PanelHeader
                       flush
-                      title="Restore drills"
-                      description="Proof that a copy actually comes back."
+                      title={t("detail.drills.title")}
+                      description={t("detail.drills.description")}
                     />
                     <LoadGate value={drills} retry={() => undefined}>
                       {(payload) =>
@@ -550,8 +482,8 @@ export default function ProtectionDetailPage() {
                           <StateCard
                             kind="unknown"
                             icon={ArchiveRestore}
-                            title="Never restore-tested"
-                            description="No restore drill has been recorded. A backup nobody has restored is not proven recoverable."
+                            title={t("detail.drills.emptyTitle")}
+                            description={t("detail.drills.emptyDescription")}
                           />
                         ) : (
                           <ul
@@ -575,15 +507,15 @@ export default function ProtectionDetailPage() {
                                       {drill.target_profile}
                                     </p>
                                     <p className="mt-0.5 text-micro text-ink-muted">
-                                      {formatDuration(drill.duration_seconds)}
+                                      {fmt.duration(drill.duration_seconds, { compact: true })}
                                       {drill.rto_met === false
-                                        ? " · slower than RTO"
+                                        ? ` · ${t("detail.drills.slowerThanRto")}`
                                         : ""}
                                     </p>
                                     <ul className="mt-2 flex flex-wrap gap-1.5">
                                       {checks.length === 0 ? (
                                         <li className="rounded-full bg-surface-2 px-3 py-1 text-micro text-ink-muted">
-                                          no checks recorded
+                                          {t("detail.drills.noChecks")}
                                         </li>
                                       ) : (
                                         checks.map(([key, passed]) => (
@@ -595,7 +527,14 @@ export default function ProtectionDetailPage() {
                                               ).chip
                                             }`}
                                           >
-                                            {`${VALIDATION_LABELS[key] ?? key}: ${passed ? "pass" : "fail"}`}
+                                            {t("detail.drills.check", {
+                                              label: t.dyn(
+                                                "detail.validation",
+                                                key,
+                                                VALIDATION_LABELS[key] ?? key,
+                                              ),
+                                              result: passed ? "pass" : "fail",
+                                            })}
                                           </li>
                                         ))
                                       )}
@@ -604,10 +543,10 @@ export default function ProtectionDetailPage() {
                                   <div className="flex shrink-0 flex-col items-end gap-1">
                                     <StatusBadge
                                       status={tone}
-                                      label={drill.result}
+                                      label={t.dyn("detail.drillResult", drill.result, drill.result)}
                                     />
                                     <time className="font-mono text-micro text-ink-muted">
-                                      {drill.completed_at ?? drill.started_at}
+                                      {fmt.utc(drill.completed_at ?? drill.started_at)}
                                     </time>
                                   </div>
                                 </li>
@@ -621,15 +560,15 @@ export default function ProtectionDetailPage() {
                 </div>
 
                 <Panel flush>
-                  <PanelHeader flush title="Related incidents" />
+                  <PanelHeader flush title={t("detail.incidents.title")} />
                   <LoadGate value={incidents} retry={() => undefined}>
                     {(payload) =>
                       payload.incidents.length === 0 ? (
                         <StateCard
                           kind="empty"
                           icon={Siren}
-                          title="No protection incidents"
-                          description="No incident has been opened for this project's protection posture."
+                          title={t("detail.incidents.emptyTitle")}
+                          description={t("detail.incidents.emptyDescription")}
                         />
                       ) : (
                         <ul
@@ -657,14 +596,16 @@ export default function ProtectionDetailPage() {
                                   {incident.title}
                                 </Link>
                                 <p className="mt-0.5 text-micro text-ink-muted">
-                                  opened{" "}
                                   <time className="font-mono">
-                                    {incident.opened_at}
+                                    {t("detail.incidents.opened", {
+                                      when: fmt.utc(incident.opened_at),
+                                    })}
                                   </time>
                                 </p>
                               </div>
                               <span className="rounded-full bg-surface-2 px-3 py-1 text-micro font-medium text-ink-secondary">
-                                {incident.state}
+                                {/* The incident area owns its state labels. */}
+                                {incidentsT.dyn("state", incident.state, incident.state)}
                               </span>
                             </li>
                           ))}
@@ -676,48 +617,50 @@ export default function ProtectionDetailPage() {
 
                 <Panel>
                   <PanelHeader
-                    title="Policy"
-                    description="What this store promises."
+                    title={t("detail.policy.title")}
+                    description={t("detail.policy.description")}
                   />
                   <DefGrid
                     items={[
                       {
-                        label: "Store",
+                        label: t("detail.policy.store"),
                         value: `${data.store_key} (${data.store_kind})`,
                         mono: true,
                       },
                       {
-                        label: "Schedule",
+                        label: t("detail.policy.schedule"),
                         value: data.schedule_description ?? "—",
                       },
                       {
-                        label: "RPO",
-                        value: formatWindow(data.rpo_seconds),
+                        label: t("detail.policy.rpo"),
+                        value: windowOf(data.rpo_seconds),
                         mono: true,
                       },
                       {
-                        label: "RTO",
-                        value: formatWindow(data.rto_seconds),
+                        label: t("detail.policy.rto"),
+                        value: windowOf(data.rto_seconds),
                         mono: true,
                       },
                       {
-                        label: "Offsite required",
-                        value: data.requires_offsite ? "Yes" : "No",
+                        label: t("detail.policy.offsiteRequired"),
+                        value: data.requires_offsite
+                          ? common("state.yes")
+                          : common("state.no"),
                       },
                       {
-                        label: "Integrity required",
-                        value: data.requires_integrity_check ? "Yes" : "No",
+                        label: t("detail.policy.integrityRequired"),
+                        value: data.requires_integrity_check
+                          ? common("state.yes")
+                          : common("state.no"),
                       },
                       {
-                        label: "Restore verification valid for",
-                        value: formatWindow(
-                          data.restore_verification_ttl_seconds,
-                        ),
+                        label: t("detail.policy.verificationValid"),
+                        value: windowOf(data.restore_verification_ttl_seconds),
                         mono: true,
                       },
                       {
-                        label: "Evaluated at",
-                        value: evaluation?.computed_at ?? "—",
+                        label: t("detail.policy.evaluatedAt"),
+                        value: fmt.utc(evaluation?.computed_at),
                         mono: true,
                       },
                     ]}
@@ -739,6 +682,7 @@ function RequirementPill({
   label: string;
   required: boolean;
 }) {
+  const t = useT("protection");
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-micro font-medium ${
@@ -750,7 +694,9 @@ function RequirementPill({
       ) : (
         <CircleSlash aria-hidden className="h-3.5 w-3.5" />
       )}
-      {label} {required ? "required" : "not required"}
+      {required
+        ? t("detail.rpo.required", { label })
+        : t("detail.rpo.notRequired", { label })}
     </span>
   );
 }

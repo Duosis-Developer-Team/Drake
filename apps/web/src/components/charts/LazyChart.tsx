@@ -17,11 +17,17 @@
 import dynamic from "next/dynamic";
 
 import { LoadingSkeleton } from "@/components/ui/states";
+import { useT } from "@/lib/i18n";
+
+function ChartLoading() {
+  const t = useT("ui");
+  return <LoadingSkeleton variant="chart" label={t("chart.loading")} />;
+}
 
 export const EChart = dynamic(
   () => import("@/components/charts/echarts").then((module) => module.EChart),
   {
     ssr: false,
-    loading: () => <LoadingSkeleton variant="chart" label="Loading chart" />,
+    loading: () => <ChartLoading />,
   },
 );

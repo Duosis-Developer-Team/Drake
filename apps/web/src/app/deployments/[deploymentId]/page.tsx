@@ -25,29 +25,18 @@ import {
 import { RingProgress } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   EVIDENCE_DESCRIPTIONS,
-  formatDuration,
-  formatSignal,
+  rolloutDurationSeconds,
   type DeploymentRow,
   type RelatedIncident,
   type RevisionEntry,
 } from "@/lib/deployments";
 
-const SIGNAL_LABELS: Record<string, string> = {
-  request_rate: "Request rate",
-  error_ratio: "Error ratio",
-  latency_p95: "Latency (p95)",
-  restarts: "Restarts",
-  availability: "Scrape availability",
-};
-
-const CHAIN_LABELS: Record<string, string> = {
-  commit: "Commit SHA",
-  workflow: "Workflow run",
-  declared_digest: "Digest in the workload spec",
-  running_digest: "Digest the node pulled",
-};
+/** The links of the evidence chain, in the order they are shown. Each is a
+ *  key of `evidence_detail` and of the `chain.*` catalogue entries. */
+const CHAIN_KEYS = ["commit", "workflow", "declared_digest", "running_digest"] as const;
 
 /** A small stat tile for a value that is already a formatted string (a
  *  duration, a verdict) rather than a raw number `Stat` could format
@@ -84,6 +73,8 @@ function FigureTile({
 
 /** One prior revision, as a scannable row rather than a bullet of text. */
 function RevisionRow({ entry }: { entry: RevisionEntry }) {
+  const t = useT("deployments");
+  const fmt = useFormat();
   return (
     <li className="flex flex-wrap items-center gap-3 px-7 py-4">
       <span className="font-mono text-caption text-ink" data-tabular>
@@ -92,14 +83,16 @@ function RevisionRow({ entry }: { entry: RevisionEntry }) {
       <RolloutBadge state={entry.rollout_state} />
       <EvidenceBadge state={entry.evidence_state} />
       <span className="font-mono text-micro text-ink-muted">
-        {entry.short_digest ?? "no digest"}
+        {entry.short_digest ?? t("ref.missing", { label: t("ref.digest") })}
       </span>
       <span className="ml-auto flex flex-col items-end text-right">
-        <time className="font-mono text-micro text-ink-muted">
-          {entry.rollout_started_at}
+        <time dateTime={entry.rollout_started_at} className="font-mono text-micro text-ink-muted">
+          {fmt.utc(entry.rollout_started_at)}
         </time>
         <span className="text-micro text-ink-muted">
-          {formatDuration(entry.rollout_started_at, entry.rollout_completed_at)}
+          {fmt.duration(
+            rolloutDurationSeconds(entry.rollout_started_at, entry.rollout_completed_at),
+          )}
         </span>
       </span>
     </li>
@@ -108,6 +101,7 @@ function RevisionRow({ entry }: { entry: RevisionEntry }) {
 
 /** One incident opened in the window after this rollout. */
 function RelatedIncidentRow({ incident }: { incident: RelatedIncident }) {
+  const fmt = useFormat();
   return (
     <li className="flex flex-wrap items-center gap-3 px-7 py-4">
       <span
@@ -122,8 +116,8 @@ function RelatedIncidentRow({ incident }: { incident: RelatedIncident }) {
       >
         {incident.title}
       </Link>
-      <time className="ml-auto font-mono text-micro text-ink-muted">
-        {incident.opened_at}
+      <time dateTime={incident.opened_at} className="ml-auto font-mono text-micro text-ink-muted">
+        {fmt.utc(incident.opened_at)}
       </time>
     </li>
   );
@@ -131,6 +125,9 @@ function RelatedIncidentRow({ incident }: { incident: RelatedIncident }) {
 
 export default function DeploymentDetailPage() {
   const { deploymentId } = useParams<{ deploymentId: string }>();
+  const t = useT("deployments");
+  const c = useT("common");
+  const fmt = useFormat();
   const [deployment, retry] = useApi<DeploymentRow>(
     `/v1/deployments/${deploymentId}`,
   );
@@ -141,18 +138,28 @@ export default function DeploymentDetailPage() {
     `/v1/deployments/${deploymentId}/incidents`,
   );
 
+  /** A signal value in this locale's digits. `null` renders as a dash,
+   *  never as zero; precision follows the magnitude, as `formatSignal`. */
+  const signalText = (value: number | null): string => {
+    if (value === null || Number.isNaN(value)) return "—";
+    const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 1 ? 2 : 4;
+    return fmt.number(value, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  };
+
   return (
     <PageFrame>
       <LoadGate value={deployment} retry={retry}>
         {(data) => {
-          const chainKeys = Object.keys(CHAIN_LABELS);
-          const observedCount = chainKeys.filter(
+          const observedCount = CHAIN_KEYS.filter(
             (key) => data.evidence_detail[key],
           ).length;
           const readyRatio =
             data.replicas.desired && data.replicas.desired > 0
               ? Math.min(1, (data.replicas.ready ?? 0) / data.replicas.desired)
               : null;
+          const durationText = fmt.duration(
+            rolloutDurationSeconds(data.rollout_started_at, data.rollout_completed_at),
+          );
           return (
             <div className="space-y-6">
               <PageHeader
@@ -173,7 +180,7 @@ export default function DeploymentDetailPage() {
                 meta={
                   <>
                     <Link href="/deployments" className="hover:text-ink">
-                      Deployments
+                      {t("detail.back")}
                     </Link>
                     <span className="font-mono">
                       {data.cluster.cluster_ref}/{data.namespace}
@@ -184,7 +191,7 @@ export default function DeploymentDetailPage() {
                         {data.service_key}
                       </span>
                     ) : (
-                      <span className="italic">not bound to a service</span>
+                      <span className="italic">{t("detail.unbound")}</span>
                     )}
                   </>
                 }
@@ -198,7 +205,7 @@ export default function DeploymentDetailPage() {
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <p className="text-caption text-ink-muted">
-                        Replicas ready
+                        {t("detail.replicasReady")}
                       </p>
                       <p
                         data-tabular
@@ -211,68 +218,65 @@ export default function DeploymentDetailPage() {
                     <RingProgress
                       value={readyRatio}
                       unit="ratio"
-                      label="Replicas ready"
+                      label={t("detail.replicasReady")}
                       tone={ROLLOUT_TONE[data.rollout_state]}
                       size={48}
                     />
                   </div>
                 </Panel>
                 <FigureTile
-                  label="Rollout duration"
-                  value={formatDuration(
-                    data.rollout_started_at,
-                    data.rollout_completed_at,
-                  )}
+                  label={t("detail.rolloutDuration")}
+                  value={durationText}
                   caption={
                     data.rollout_completed_at
-                      ? "completed"
-                      : "still rolling out"
+                      ? t("detail.completed")
+                      : t("detail.stillRollingOut")
                   }
                 />
                 <Panel>
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <p className="text-caption text-ink-muted">
-                        Evidence chain
+                        {t("detail.evidenceChain")}
                       </p>
                       <p
                         data-tabular
                         className="mt-1 text-[2rem] leading-none font-semibold tracking-[-0.03em] text-ink"
                       >
-                        {observedCount}/{chainKeys.length}
+                        {observedCount}/{CHAIN_KEYS.length}
                       </p>
                     </div>
                     <RingProgress
                       value={
-                        chainKeys.length > 0
-                          ? observedCount / chainKeys.length
+                        CHAIN_KEYS.length > 0
+                          ? observedCount / CHAIN_KEYS.length
                           : null
                       }
                       unit="ratio"
-                      label="Evidence chain observed"
+                      label={t("detail.evidenceChainObserved")}
                       tone={EVIDENCE_TONE[data.evidence_state]}
                       size={48}
                     />
                   </div>
                 </Panel>
                 <FigureTile
-                  label="Health verdict"
+                  label={t("detail.healthVerdict")}
                   size="badge"
                   value={
                     data.health_comparison ? (
                       <VerdictBadge verdict={data.health_comparison.verdict} />
                     ) : (
                       <span className="text-body italic text-ink-muted">
-                        not compared
+                        {t("detail.notCompared")}
                       </span>
                     )
                   }
                   caption={
                     data.health_comparison
-                      ? `${data.health_comparison.incident_count} incident${
-                          data.health_comparison.incident_count === 1 ? "" : "s"
-                        } after rollout`
-                      : "waiting for the window after this rollout to close"
+                      ? t("detail.incidentsAfter", {
+                          count: data.health_comparison.incident_count,
+                        })
+                      : t("detail.waitingForWindow")
                   }
                 />
               </div>
@@ -282,16 +286,20 @@ export default function DeploymentDetailPage() {
                   flush
                   className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]"
                 >
-                  <PanelHeader flush title="Provenance" />
+                  <PanelHeader flush title={t("detail.provenance.title")} />
                   <PanelBody>
                     <p className="mb-3 text-caption text-ink-secondary">
-                      {EVIDENCE_DESCRIPTIONS[data.evidence_state]}
+                      {t.dyn(
+                        "evidenceDescription",
+                        data.evidence_state,
+                        EVIDENCE_DESCRIPTIONS[data.evidence_state],
+                      )}
                     </p>
                     <ul
                       className="grid grid-cols-1 gap-1.5 sm:grid-cols-2"
                       data-testid="evidence-chain"
                     >
-                      {Object.entries(CHAIN_LABELS).map(([key, label]) => {
+                      {CHAIN_KEYS.map((key) => {
                         const observed = Boolean(data.evidence_detail[key]);
                         return (
                           <li
@@ -307,32 +315,34 @@ export default function DeploymentDetailPage() {
                               }`}
                             />
                             <span className="min-w-0 flex-1 truncate text-ink-secondary">
-                              {label}
+                              {t(`chain.${key}`)}
                             </span>
                             <span className="shrink-0 text-micro text-ink-muted">
-                              {observed ? "observed" : "not observed"}
+                              {observed
+                                ? t("detail.provenance.observed")
+                                : t("detail.provenance.notObserved")}
                             </span>
                           </li>
                         );
                       })}
                     </ul>
                     <dl className="mt-3 divide-y divide-border border-t border-border pt-2">
-                      <MetaRow label="Image">
+                      <MetaRow label={c("field.image")}>
                         <span className="font-mono text-[11px]">
                           {data.primary_image ?? "—"}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Digest">
+                      <MetaRow label={t("detail.provenance.digest")}>
                         <span className="font-mono text-[11px]">
                           {data.short_digest ?? "—"}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Commit">
+                      <MetaRow label={t("detail.provenance.commit")}>
                         <span className="font-mono text-[11px]">
                           {data.short_commit ?? "—"}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Workflow run">
+                      <MetaRow label={t("detail.provenance.workflowRun")}>
                         {data.workflow.run_url ? (
                           <a
                             href={data.workflow.run_url}
@@ -344,7 +354,7 @@ export default function DeploymentDetailPage() {
                           </a>
                         ) : (
                           <span className="text-xs italic text-ink-muted">
-                            not observed
+                            {t("detail.provenance.notObserved")}
                           </span>
                         )}
                       </MetaRow>
@@ -356,46 +366,43 @@ export default function DeploymentDetailPage() {
                   flush
                   className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]"
                 >
-                  <PanelHeader flush title="Rollout" />
+                  <PanelHeader flush title={t("detail.rollout.title")} />
                   <PanelBody>
                     <dl className="divide-y divide-border">
-                      <MetaRow label="Ready / desired">
+                      <MetaRow label={t("detail.rollout.readyDesired")}>
                         <span className="font-mono text-xs">
                           {data.replicas.ready ?? "—"} /{" "}
                           {data.replicas.desired ?? "—"}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Updated">
+                      <MetaRow label={t("detail.rollout.updated")}>
                         <span className="font-mono text-xs">
                           {data.replicas.updated ?? "—"}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Available">
+                      <MetaRow label={t("detail.rollout.available")}>
                         <span className="font-mono text-xs">
                           {data.replicas.available ?? "—"}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Generation">
+                      <MetaRow label={t("detail.rollout.generation")}>
                         <span className="font-mono text-xs">
-                          {data.revision} observed{" "}
-                          {data.observed_generation ?? "—"}
+                          {t("detail.rollout.generationValue", {
+                            revision: data.revision,
+                            observed: data.observed_generation ?? "—",
+                          })}
                         </span>
                       </MetaRow>
-                      <MetaRow label="Started">
-                        <time className="font-mono text-xs">
-                          {data.rollout_started_at}
+                      <MetaRow label={t("detail.rollout.started")}>
+                        <time dateTime={data.rollout_started_at} className="font-mono text-xs">
+                          {fmt.utc(data.rollout_started_at)}
                         </time>
                       </MetaRow>
-                      <MetaRow label="Duration">
-                        <span className="font-mono text-xs">
-                          {formatDuration(
-                            data.rollout_started_at,
-                            data.rollout_completed_at,
-                          )}
-                        </span>
+                      <MetaRow label={t("detail.rollout.duration")}>
+                        <span className="font-mono text-xs">{durationText}</span>
                       </MetaRow>
                       {data.rollout_reason ? (
-                        <MetaRow label="Reason">
+                        <MetaRow label={c("field.reason")}>
                           <span className="text-xs">{data.rollout_reason}</span>
                         </MetaRow>
                       ) : null}
@@ -406,19 +413,17 @@ export default function DeploymentDetailPage() {
 
               <Panel className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
                 <PanelHeader
-                  title="Health before and after"
-                  description="A comparison of two time windows, not a causal claim. Drake does not assert that this deployment caused any change it shows here."
+                  title={t("detail.comparison.title")}
+                  description={t("detail.comparison.description")}
                 />
                 {data.health_comparison ? (
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <VerdictBadge verdict={data.health_comparison.verdict} />
                       <span className="text-micro text-ink-muted">
-                        {data.health_comparison.incident_count} incident
-                        {data.health_comparison.incident_count === 1
-                          ? ""
-                          : "s"}{" "}
-                        opened in the window after this rollout
+                        {t("detail.comparison.incidentsInWindow", {
+                          count: data.health_comparison.incident_count,
+                        })}
                       </span>
                     </div>
                     {data.health_comparison.signals ? (
@@ -429,10 +434,18 @@ export default function DeploymentDetailPage() {
                         >
                           <thead>
                             <tr className="text-caption text-ink-secondary">
-                              <th className="pb-1 pr-3 font-medium">Signal</th>
-                              <th className="pb-1 pr-3 font-medium">Before</th>
-                              <th className="pb-1 pr-3 font-medium">After</th>
-                              <th className="pb-1 font-medium">Direction</th>
+                              <th className="pb-1 pr-3 font-medium">
+                                {t("detail.comparison.signal")}
+                              </th>
+                              <th className="pb-1 pr-3 font-medium">
+                                {t("detail.comparison.before")}
+                              </th>
+                              <th className="pb-1 pr-3 font-medium">
+                                {t("detail.comparison.after")}
+                              </th>
+                              <th className="pb-1 font-medium">
+                                {t("detail.comparison.direction")}
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -443,13 +456,13 @@ export default function DeploymentDetailPage() {
                                   className="border-t border-border"
                                 >
                                   <td className="py-1.5 pr-3 text-xs text-ink">
-                                    {SIGNAL_LABELS[name] ?? name}
+                                    {t.dyn("signal", name, name)}
                                   </td>
                                   <td className="py-1.5 pr-3 font-mono text-xs">
-                                    {formatSignal(signal.before)}
+                                    {signalText(signal.before)}
                                   </td>
                                   <td className="py-1.5 pr-3 font-mono text-xs">
-                                    {formatSignal(signal.after)}
+                                    {signalText(signal.after)}
                                   </td>
                                   <td className="py-1.5 text-xs text-ink-secondary">
                                     <SignalDirectionBadge
@@ -467,8 +480,8 @@ export default function DeploymentDetailPage() {
                 ) : (
                   <DataState
                     kind="unknown"
-                    title="Not compared yet"
-                    description="A comparison is computed once the rollout has finished and the window after it has closed."
+                    title={t("detail.comparison.notYetTitle")}
+                    description={t("detail.comparison.notYetDescription")}
                   />
                 )}
               </Panel>
@@ -478,14 +491,14 @@ export default function DeploymentDetailPage() {
                   flush
                   className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
                 >
-                  <PanelHeader flush title="Revision history" />
+                  <PanelHeader flush title={t("detail.revisions.title")} />
                   <LoadGate value={revisions} retry={() => undefined}>
                     {(payload) =>
                       payload.revisions.length === 0 ? (
                         <div className="px-7 py-8">
                           <DataState
                             kind="empty"
-                            title="No prior revisions recorded"
+                            title={t("detail.revisions.empty")}
                           />
                         </div>
                       ) : (
@@ -506,15 +519,15 @@ export default function DeploymentDetailPage() {
                   flush
                   className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
                 >
-                  <PanelHeader flush title="Incidents in the window" />
+                  <PanelHeader flush title={t("detail.incidents.title")} />
                   <LoadGate value={incidents} retry={() => undefined}>
                     {(payload) =>
                       payload.incidents.length === 0 ? (
                         <div className="px-7 py-8">
                           <DataState
                             kind="empty"
-                            title="No incidents"
-                            description="No incident opened for this service in the two hours after this rollout."
+                            title={t("detail.incidents.emptyTitle")}
+                            description={t("detail.incidents.emptyDescription")}
                           />
                         </div>
                       ) : (

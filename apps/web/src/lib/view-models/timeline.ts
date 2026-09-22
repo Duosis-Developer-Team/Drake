@@ -31,12 +31,21 @@ export interface TimelineEvent {
   kind: TimelineEventKind;
   tone: StatusTone;
   at: string;
+  /** English rendering of `kind` + `subject`; a component prefers the parts. */
   label: string;
   href: string;
+  /** What the event is about — an incident's service, an alert's name, a
+   *  deployment's workload. `OperationalTimeline` renders
+   *  `commandCenter.timeline.event.<kind>` from it when present. */
+  subject?: string;
+  /** A deployment's short commit or digest; `null` when neither was reported. */
+  revision?: string | null;
 }
 
 export interface TimelineLane {
+  /** Also the catalogue key: `commandCenter.timeline.lane.<key>`. */
   key: string;
+  /** English rendering of `key`, the fallback when the catalogue has no entry. */
   label: string;
   events: TimelineEvent[];
   historyAvailable: boolean;
@@ -86,6 +95,7 @@ export function incidentEvents(incidents: IncidentSummary[]): TimelineEvent[] {
       at: incident.opened_at,
       label: `Incident opened: ${subject}`,
       href: `/incidents/${incident.id}`,
+      subject,
     });
     if (incident.resolved_at) {
       events.push({
@@ -95,6 +105,7 @@ export function incidentEvents(incidents: IncidentSummary[]): TimelineEvent[] {
         at: incident.resolved_at,
         label: `Incident resolved: ${subject}`,
         href: `/incidents/${incident.id}`,
+        subject,
       });
     }
   }
@@ -111,6 +122,7 @@ export function alertEvents(alerts: AlertInstance[]): TimelineEvent[] {
       at: alert.starts_at,
       label: `Alert firing: ${alert.alert_name}`,
       href: `/alerts/${alert.id}`,
+      subject: alert.alert_name,
     });
     if (alert.resolved_at) {
       events.push({
@@ -120,6 +132,7 @@ export function alertEvents(alerts: AlertInstance[]): TimelineEvent[] {
         at: alert.resolved_at,
         label: `Alert resolved: ${alert.alert_name}`,
         href: `/alerts/${alert.id}`,
+        subject: alert.alert_name,
       });
     }
   }
@@ -127,16 +140,19 @@ export function alertEvents(alerts: AlertInstance[]): TimelineEvent[] {
 }
 
 export function deploymentEvents(deployments: DeploymentRow[]): TimelineEvent[] {
-  return deployments.map((deployment) => ({
-    id: `deployment:${deployment.id}`,
-    kind: "deployment" as const,
-    tone: byRolloutState(deployment.rollout_state),
-    at: deployment.rollout_started_at,
-    label: `Deployment: ${deployment.workload_name} (${
-      deployment.short_commit ?? deployment.short_digest ?? "unknown revision"
-    })`,
-    href: `/deployments/${deployment.id}`,
-  }));
+  return deployments.map((deployment) => {
+    const revision = deployment.short_commit ?? deployment.short_digest ?? null;
+    return {
+      id: `deployment:${deployment.id}`,
+      kind: "deployment" as const,
+      tone: byRolloutState(deployment.rollout_state),
+      at: deployment.rollout_started_at,
+      label: `Deployment: ${deployment.workload_name} (${revision ?? "unknown revision"})`,
+      href: `/deployments/${deployment.id}`,
+      subject: deployment.workload_name,
+      revision,
+    };
+  });
 }
 
 function ascending(events: TimelineEvent[]): TimelineEvent[] {

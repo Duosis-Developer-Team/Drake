@@ -56,6 +56,9 @@ import {
   TileState,
   ToneBar,
   capabilityTone,
+  useCapabilityLabel,
+  useToneLabel,
+  useWhen,
 } from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { ProjectMetricsSection } from "@/components/telemetry/ProjectMetricsSection";
@@ -77,6 +80,7 @@ import {
   toneSpec,
   type StatusTone,
 } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 import {
   serviceHealthListPath,
   type ServiceHealthPage,
@@ -84,12 +88,9 @@ import {
 import { useResource } from "@/lib/useResource";
 import { buildProjectTopology } from "@/lib/view-models/scope-health";
 
-const CAPABILITY_LABELS: Record<string, string> = {
-  telemetry: "Telemetry",
-  inventory: "Cluster inventory",
-  deployment: "Deployments",
-  protection: "Backup & restore",
-};
+/** The project-level capabilities, in display order; their names are
+ *  `catalog.project.capability.*`. */
+const CAPABILITY_KEYS = ["telemetry", "inventory", "deployment", "protection"] as const;
 
 const CAPABILITY_ICONS: Record<string, typeof Activity> = {
   telemetry: Activity,
@@ -118,19 +119,6 @@ const CRITICALITY_TONE: Record<string, StatusTone> = {
   low: "neutral",
 };
 
-/**
- * How a dependency's evidence was obtained.
- *
- * Deliberately never a health tone: `provider_observed` is the strongest of
- * the three and still only means "the provider told us something", which is
- * not the same claim as "this is working".
- */
-const VERIFICATION_LABELS: Record<string, string> = {
-  repository_intent: "declared in repository",
-  owner_confirmed: "confirmed by owner",
-  provider_observed: "observed from provider",
-};
-
 function SectionTitle({
   title,
   description,
@@ -157,7 +145,16 @@ function SectionTitle({
   );
 }
 
+/**
+ * How a dependency's evidence was obtained is `project.dependency.verification.*`.
+ *
+ * Deliberately never a health tone: `provider_observed` is the strongest of
+ * the three and still only means "the provider told us something", which is
+ * not the same claim as "this is working".
+ */
 function DependencyCard({ dependency }: { dependency: ProjectDependency }) {
+  const t = useT("catalog");
+  const when = useWhen();
   const notApplicable = dependency.workload_applicability === "not_applicable";
   return (
     <li className="flex min-w-0 flex-col gap-3 px-7 py-5">
@@ -182,7 +179,7 @@ function DependencyCard({ dependency }: { dependency: ProjectDependency }) {
           {dependency.health ? (
             <StatusBadge
               status={toneForHealth(dependency.health.status)}
-              label={dependency.health.status}
+              label={t.dyn("project.dependency.status", dependency.health.status, dependency.health.status)}
               size="compact"
             />
           ) : null}
@@ -195,7 +192,7 @@ function DependencyCard({ dependency }: { dependency: ProjectDependency }) {
                     ? "stale"
                     : "unknown"
               }
-              label={dependency.health.freshness}
+              label={t.dyn("project.dependency.freshness", dependency.health.freshness, dependency.health.freshness)}
               size="compact"
             />
           ) : null}
@@ -204,15 +201,18 @@ function DependencyCard({ dependency }: { dependency: ProjectDependency }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-[3.25rem] text-micro text-ink-muted">
         <span>
           <InlineCode>{dependency.verification}</InlineCode>{" "}
-          {VERIFICATION_LABELS[dependency.verification] ?? ""}
+          {t.dyn("project.dependency.verification", dependency.verification, "")}
         </span>
         <span className={notApplicable ? "" : "text-ink-secondary"}>
-          Workload:{" "}
-          {notApplicable ? "Not applicable" : dependency.workload_applicability}
+          {t("project.dependency.workload", {
+            value: notApplicable
+              ? t("project.dependency.notApplicable")
+              : dependency.workload_applicability,
+          })}
         </span>
         {dependency.health?.last_observed_at ? (
-          <span>
-            observed <RelativeTime value={dependency.health.last_observed_at} />
+          <span title={dependency.health.last_observed_at}>
+            {t("project.dependency.observed", { when: when(dependency.health.last_observed_at) })}
           </span>
         ) : null}
       </div>
@@ -220,7 +220,16 @@ function DependencyCard({ dependency }: { dependency: ProjectDependency }) {
   );
 }
 
+function MetricsFallback() {
+  const t = useT("catalog");
+  return <LoadingSkeleton variant="chart" label={t("load.metrics")} />;
+}
+
 export default function ProjectOverviewPage() {
+  const t = useT("catalog");
+  const toneLabel = useToneLabel();
+  const capabilityLabel = useCapabilityLabel();
+  const when = useWhen();
   const { projectId } = useParams<{ projectId: string }>();
   const project = useResource<Project>(`/v1/projects/${projectId}`);
   const environments = useResource<{
@@ -235,14 +244,14 @@ export default function ProjectOverviewPage() {
   if (project.loading && !project.data) {
     return (
       <PageFrame width="wide">
-        <LoadingSkeleton rows={4} label="Loading project" />
+        <LoadingSkeleton rows={4} label={t("load.project")} />
       </PageFrame>
     );
   }
   if (project.notFound) {
     return (
       <PageFrame width="wide">
-        <NotFoundState description="This project does not exist in your authorized scope." />
+        <NotFoundState description={t("project.notFound")} />
       </PageFrame>
     );
   }
@@ -290,15 +299,13 @@ export default function ProjectOverviewPage() {
         )
       : "unknown";
   const laneServices = topology.flatMap((lane) => lane.services);
-  const serviceTones = toneCounts(laneServices, (service) => service.tone);
+  const serviceTones = toneCounts(laneServices, (service) => service.tone, toneLabel);
 
-  const capabilityEntries = Object.entries(CAPABILITY_LABELS).map(
-    ([key, label]) => ({
-      key,
-      label,
-      state: data.operational?.[key] ?? "unknown",
-    }),
-  );
+  const capabilityEntries = CAPABILITY_KEYS.map((key) => ({
+    key,
+    label: t(`project.capability.${key}`),
+    state: data.operational?.[key] ?? "unknown",
+  }));
   const reporting = capabilityEntries.filter(
     (entry) => entry.state === "ok",
   ).length;
@@ -312,15 +319,17 @@ export default function ProjectOverviewPage() {
         title={data.display_name}
         status={
           <>
-            <span className="text-caption text-ink-muted">Measured health</span>
-            <StatusBadge status={worstTone} label={toneSpec(worstTone).label} />
+            <span className="text-caption text-ink-muted">{t("measuredHealth")}</span>
+            <StatusBadge status={worstTone} label={toneLabel(worstTone)} />
             <StatusBadge
               status={CRITICALITY_TONE[data.criticality] ?? "neutral"}
-              label={`${humanize(data.criticality)} criticality`}
+              label={t("criticality.badge", {
+                level: t.dyn("criticality", data.criticality, humanize(data.criticality)),
+              })}
             />
             <StatusBadge
               status={data.lifecycle === "active" ? "success" : "neutral"}
-              label={humanize(data.lifecycle)}
+              label={t.dyn("lifecycle", data.lifecycle, humanize(data.lifecycle))}
             />
           </>
         }
@@ -338,9 +347,8 @@ export default function ProjectOverviewPage() {
                 }`}
               </InlineCode>
             </span>
-            <span>
-              catalog record accepted{" "}
-              <RelativeTime value={data.source.accepted_at} />
+            <span title={data.source.accepted_at}>
+              {t("record.accepted", { when: when(data.source.accepted_at) })}
             </span>
           </>
         }
@@ -355,45 +363,47 @@ export default function ProjectOverviewPage() {
           <StatTile
             icon={Radar}
             tone={worstTone}
-            label="Service health"
+            label={t("project.kpi.serviceHealth")}
             value={services.data ? laneServices.length : "—"}
             suffix={
               services.data
-                ? `service${laneServices.length === 1 ? "" : "s"} with evidence`
-                : "evidence unavailable"
+                ? t("project.kpi.withEvidence", { count: laneServices.length })
+                : t("project.kpi.evidenceUnavailable")
             }
           >
             <ToneBar
               counts={serviceTones}
-              label="Service health across environments"
+              label={t("project.kpi.acrossEnvironments")}
               emptyLabel={
                 services.data
-                  ? "No service in this project has reported yet"
-                  : "Service evidence could not be loaded"
+                  ? t("project.kpi.noneReported")
+                  : t("project.kpi.evidenceFailed")
               }
             />
           </StatTile>
 
           <StatTile
             icon={Layers}
-            label="Environments"
+            label={t("project.kpi.environments")}
             value={
               environments.data
                 ? environmentList.length
                 : data.counts.environments
             }
-            suffix={`${environmentList.filter((environment) => environment.lifecycle === "active").length} active`}
+            suffix={t("project.kpi.active", {
+              count: environmentList.filter((environment) => environment.lifecycle === "active").length,
+            })}
           >
             {topology.length > 0 ? (
               <ul
                 className="flex flex-wrap gap-2"
-                aria-label="Environments by measured health"
+                aria-label={t("project.kpi.byHealth")}
               >
                 {topology.map((lane) => (
                   <li
                     key={lane.id}
                     className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-medium ${toneSpec(lane.tone).chip}`}
-                    title={`${lane.key}: ${toneSpec(lane.tone).label}`}
+                    title={`${lane.key}: ${toneLabel(lane.tone)}`}
                   >
                     <span
                       aria-hidden
@@ -405,20 +415,20 @@ export default function ProjectOverviewPage() {
               </ul>
             ) : (
               <p className="text-micro text-ink-muted">
-                No environments in your scope
+                {t("project.kpi.noEnvironments")}
               </p>
             )}
           </StatTile>
 
           <StatTile
             icon={Boxes}
-            label="Services"
+            label={t("project.kpi.services")}
             value={data.counts.services}
-            suffix="in catalog"
+            suffix={t("project.kpi.inCatalog")}
           >
             {topology.length > 0 ? (
               <MiniBars
-                label="Services with evidence per environment"
+                label={t("project.kpi.perEnvironment")}
                 items={topology.map((lane) => ({
                   key: lane.id,
                   label: lane.key,
@@ -427,25 +437,25 @@ export default function ProjectOverviewPage() {
               />
             ) : (
               <p className="text-micro text-ink-muted">
-                No environment breakdown yet
+                {t("project.kpi.noBreakdown")}
               </p>
             )}
           </StatTile>
 
           <StatTile
             icon={ShieldCheck}
-            label="Capabilities"
+            label={t("capability.title")}
             value={reporting}
-            suffix={`of ${capabilityEntries.length} reporting`}
+            suffix={t("capability.reporting", { total: capabilityEntries.length })}
           >
             <ul
               className="grid grid-cols-4 gap-1.5"
-              aria-label="Capability states"
+              aria-label={t("capability.states")}
             >
               {capabilityEntries.map((entry) => (
                 <li
                   key={entry.key}
-                  title={`${entry.label}: ${entry.state === "ok" ? "Reporting" : humanize(entry.state)}`}
+                  title={`${entry.label}: ${capabilityLabel(entry.state)}`}
                   className={`h-2 rounded-full ${
                     entry.state === "ok"
                       ? toneSpec(capabilityTone(entry.state)).dot
@@ -459,25 +469,25 @@ export default function ProjectOverviewPage() {
 
         {/* Environments: the primary visual */}
         <section
-          aria-label="Environments"
+          aria-label={t("project.environments.title")}
           className="motion-safe:animate-[fade-in_380ms_var(--ease-entrance)_backwards]"
         >
           <SectionTitle
-            title="Environments"
-            description="Every service inside each environment, worst first. No evidence reads as unassessed, never healthy."
+            title={t("project.environments.title")}
+            description={t("project.environments.description")}
             aside={
               services.data && !servicesComplete ? (
                 <>
                   <StatusBadge
                     status="unknown"
-                    label="Evidence incomplete"
+                    label={t("evidence.incomplete")}
                     size="compact"
                   />
                   <Link
                     href={`/service-health?project_id=${projectId}`}
                     className="rounded-full border border-border px-3 py-1.5 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
                   >
-                    View full service health
+                    {t("project.environments.viewFull")}
                   </Link>
                 </>
               ) : null
@@ -503,8 +513,8 @@ export default function ProjectOverviewPage() {
                 <TileState
                   icon={Layers}
                   testId="state-empty"
-                  title="No environments in your scope"
-                  description="Environments you are authorized to see appear here as cards."
+                  title={t("project.environments.emptyTitle")}
+                  description={t("project.environments.emptyBody")}
                 />
               </Panel>
             ) : (
@@ -521,9 +531,7 @@ export default function ProjectOverviewPage() {
           </div>
         </section>
 
-        <Suspense
-          fallback={<LoadingSkeleton variant="chart" label="Loading metrics" />}
-        >
+        <Suspense fallback={<MetricsFallback />}>
           {/* The Telemetry capability card links here, so the target has to exist. */}
           <div id="signals" className="scroll-mt-4">
             <ProjectMetricsSection environments={environmentList} />
@@ -531,18 +539,18 @@ export default function ProjectOverviewPage() {
         </Suspense>
 
         {/* Standing record */}
-        <section aria-label="Standing state">
+        <section aria-label={t("project.standing.title")}>
           <SectionTitle
-            title="Standing state"
-            description="Capabilities, dependencies and the catalog record behind this project."
+            title={t("project.standing.title")}
+            description={t("project.standing.description")}
           />
           <div className="page-grid" data-cols="2">
             {/* The column's last card grows so both columns end on one line. */}
             <div className="flex min-w-0 flex-col gap-6 [&>*:last-child]:flex-1">
               <Panel data-testid="operational-grid">
                 <PanelHeader
-                  title="Capabilities"
-                  description="What Drake can observe here. Not configured is an absence, not a fault."
+                  title={t("capability.title")}
+                  description={t("project.capabilities.description")}
                   level={3}
                 />
                 <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -569,8 +577,8 @@ export default function ProjectOverviewPage() {
                 <Panel flush>
                   <PanelHeader
                     flush
-                    title="Managed dependencies"
-                    description="Run by a provider, not by Drake — no in-cluster workload behind them."
+                    title={t("project.managed.title")}
+                    description={t("project.managed.description")}
                     level={3}
                   />
                   <ul
@@ -591,8 +599,8 @@ export default function ProjectOverviewPage() {
                 <Panel flush>
                   <PanelHeader
                     flush
-                    title="In-cluster datastores"
-                    description="Drake runs these, so their health comes from the workload path."
+                    title={t("project.inCluster.title")}
+                    description={t("project.inCluster.description")}
                     level={3}
                   />
                   <ul
@@ -610,7 +618,8 @@ export default function ProjectOverviewPage() {
                             {dependency.display_name}
                           </span>
                           <span className="mt-0.5 block text-micro text-ink-muted">
-                            <InlineCode>{dependency.engine}</InlineCode> · scope{" "}
+                            <InlineCode>{dependency.engine}</InlineCode> ·{" "}
+                            {t("project.inCluster.scope")}{" "}
                             <InlineCode>{dependency.scope}</InlineCode>
                           </span>
                         </span>
@@ -622,7 +631,7 @@ export default function ProjectOverviewPage() {
             </div>
 
             <Panel>
-              <PanelHeader title="Catalog record" level={3} />
+              <PanelHeader title={t("record.title")} level={3} />
               <div className="flex items-center gap-4 rounded-[1.125rem] border border-border bg-surface-2/40 p-4">
                 <IconBubble icon={FolderGit2} size="large" />
                 <div className="min-w-0 flex-1">
@@ -630,8 +639,8 @@ export default function ProjectOverviewPage() {
                     {data.repository.owner}/{data.repository.name}
                   </span>
                   <span className="mt-0.5 block text-micro text-ink-muted">
-                    {humanize(data.repository.provider)} repository · default
-                    branch{" "}
+                    {t("record.repository", { provider: humanize(data.repository.provider) })} ·{" "}
+                    {t("record.defaultBranch")}{" "}
                     <InlineCode>
                       {data.repository.default_branch || "—"}
                     </InlineCode>
@@ -641,7 +650,7 @@ export default function ProjectOverviewPage() {
               <DefinitionGrid
                 items={[
                   {
-                    label: "Owners",
+                    label: t("project.record.owners"),
                     value:
                       data.owners && data.owners.length > 0 ? (
                         <span className="flex flex-wrap gap-2">
@@ -666,15 +675,15 @@ export default function ProjectOverviewPage() {
                     wide: true,
                   },
                   {
-                    label: "Tenant model",
+                    label: t("project.record.tenantModel"),
                     value: <InlineCode>{data.tenant_model}</InlineCode>,
                   },
                   {
-                    label: "Catalog version",
+                    label: t("record.version"),
                     value: <span data-tabular>v{data.version}</span>,
                   },
                   {
-                    label: "Source",
+                    label: t("record.source"),
                     value: (
                       <InlineCode>
                         {data.source.kind}:{data.source.ref}
@@ -682,7 +691,7 @@ export default function ProjectOverviewPage() {
                     ),
                   },
                   {
-                    label: "Revision",
+                    label: t("record.revision"),
                     value: (
                       <InlineCode className="break-all">
                         {data.source.revision}
@@ -690,7 +699,7 @@ export default function ProjectOverviewPage() {
                     ),
                   },
                   {
-                    label: "Accepted",
+                    label: t("record.acceptedLabel"),
                     value: <RelativeTime value={data.source.accepted_at} />,
                   },
                 ]}

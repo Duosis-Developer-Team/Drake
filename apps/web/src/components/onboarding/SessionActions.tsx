@@ -24,6 +24,7 @@ import { useCallback, useState, type MutableRefObject } from "react";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
+import { useT, type Translator } from "@/lib/i18n";
 import {
   ERROR_GUIDANCE,
   REFETCH_CODES,
@@ -86,17 +87,23 @@ const CANCEL_STATES = new Set([
 ]);
 const GITOPS_STATES = new Set(["needs_review", "ready", "approved"]);
 
-function message(error: unknown): { text: string; correlationId?: string; code: string } {
+function message(
+  error: unknown,
+  t: Translator<"onboarding">,
+): { text: string; correlationId?: string; code: string } {
   if (error instanceof ApiError) {
     return {
-      // Drake's own words for a code Drake defined; the server's message is
-      // also Drake's, so the fallback leaks nothing either.
-      text: ERROR_GUIDANCE[error.code] ?? error.message,
+      // Drake's own words for a code Drake defined, in the reader's language;
+      // the server's message is also Drake's, so the fallback leaks nothing
+      // either.
+      text: t.has(`errorGuidance.${error.code}`)
+        ? t.dyn("errorGuidance", error.code, ERROR_GUIDANCE[error.code])
+        : error.message,
       correlationId: error.correlationId,
       code: error.code,
     };
   }
-  return { text: "The request could not be sent. Nothing was changed.", code: "network" };
+  return { text: t("actions.networkError"), code: "network" };
 }
 
 export function SessionActions({
@@ -109,6 +116,7 @@ export function SessionActions({
   onResult,
   applyKey,
 }: SessionActionsProps) {
+  const t = useT("onboarding");
   const [pending, setPending] = useState<Pending>(null);
   const [confirming, setConfirming] = useState<Confirming>(null);
   const [failure, setFailure] = useState<ReturnType<typeof message> | null>(null);
@@ -139,7 +147,7 @@ export function SessionActions({
       await work();
       setConfirming(null);
     } catch (error) {
-      const described = message(error);
+      const described = message(error, t);
       setFailure(described);
       // A stale client is refetched rather than left showing buttons for a
       // session that has moved on. The confirmation closes with it: it was
@@ -168,16 +176,16 @@ export function SessionActions({
 
   return (
     <Panel>
-      <PanelHeader title="Actions" />
+      <PanelHeader title={t("actions.title")} />
       <div className="space-y-4" data-testid="session-actions">
         {failure ? (
           <div data-testid="action-error">
             <DataState
               kind={failure.code === "network" ? "error" : "stale"}
-              title="That did not happen"
+              title={t("actions.failedTitle")}
               description={
                 failure.correlationId
-                  ? `${failure.text} (reference ${failure.correlationId})`
+                  ? t("actions.reference", { text: failure.text, id: failure.correlationId })
                   : failure.text
               }
             />
@@ -199,10 +207,10 @@ export function SessionActions({
               className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending === "analyze"
-                ? "Analysing…"
+                ? t("actions.analysing")
                 : session.plan
-                  ? "Analyse again"
-                  : "Analyse repository"}
+                  ? t("actions.analyseAgain")
+                  : t("actions.analyse")}
             </button>
           ) : null}
 
@@ -214,7 +222,7 @@ export function SessionActions({
               onClick={() => setConfirming("approve")}
               className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Approve plan
+              {t("actions.approve")}
             </button>
           ) : null}
 
@@ -226,7 +234,7 @@ export function SessionActions({
               onClick={() => setConfirming("apply")}
               className="rounded-full border border-accent bg-accent-soft px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {pending === "apply" ? "Applying…" : "Apply approved plan"}
+              {pending === "apply" ? t("actions.applying") : t("actions.apply")}
             </button>
           ) : null}
 
@@ -238,7 +246,7 @@ export function SessionActions({
               onClick={() => setConfirming("cancel")}
               className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Cancel session
+              {t("actions.cancel")}
             </button>
           ) : null}
 
@@ -259,7 +267,7 @@ export function SessionActions({
               }
               className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Propose manifest pull request
+              {t("actions.proposePullRequest")}
             </button>
           ) : null}
 
@@ -270,31 +278,31 @@ export function SessionActions({
               download
               className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
             >
-              Download manifest draft
+              {t("actions.downloadDraft")}
             </a>
           ) : null}
         </div>
 
         {GITOPS_STATES.has(session.state) && session.can_gitops && !gitopsEnabled ? (
           <p className="text-xs text-ink-muted" data-testid="gitops-disabled">
-            Repository writes are disabled. No branch or pull request will be created.
+            {t("actions.writesDisabled")}
           </p>
         ) : null}
 
         {session.state === "ready" && session.can_manage && !approvable ? (
           <p className="text-xs text-warning" data-testid="approve-blocked">
             {plan && plan.blocking_items > 0
-              ? `Approval is blocked: ${plan.blocking_items} item(s) need a decision.`
-              : "There is no applicable plan to approve yet."}
+              ? t("actions.approvalBlocked", { count: plan.blocking_items })
+              : t("actions.noApplicablePlan")}
           </p>
         ) : null}
 
         {confirming === "approve" && plan && planVersion !== null ? (
           <Confirm
             testId="confirm-approve"
-            title="Approve this plan?"
+            title={t("actions.confirmApprove.title")}
             busy={busy}
-            confirmLabel="Approve"
+            confirmLabel={t("actions.confirmApprove.confirm")}
             onCancel={() => setConfirming(null)}
             onConfirm={() =>
               run("approve", async () => {
@@ -304,24 +312,21 @@ export function SessionActions({
             }
           >
             <dl className="space-y-1">
-              <Fact label="Plan version">v{planVersion}</Fact>
-              <Fact label="Commit">{shortSha(plan.commit_sha)}</Fact>
-              <Fact label="Digest">{shortSha(plan.plan_digest)}</Fact>
-              <Fact label="Items">{String(plan.total_items)}</Fact>
+              <Fact label={t("actions.confirmApprove.planVersion")}>v{planVersion}</Fact>
+              <Fact label={t("actions.confirmApprove.commit")}>{shortSha(plan.commit_sha)}</Fact>
+              <Fact label={t("actions.confirmApprove.digest")}>{shortSha(plan.plan_digest)}</Fact>
+              <Fact label={t("actions.confirmApprove.items")}>{String(plan.total_items)}</Fact>
             </dl>
-            <p className="mt-2 text-xs text-ink-secondary">
-              Approving records that you accept these exact values. It changes nothing on its
-              own.
-            </p>
+            <p className="mt-2 text-xs text-ink-secondary">{t("actions.confirmApprove.note")}</p>
           </Confirm>
         ) : null}
 
         {confirming === "apply" && session.approved_plan_version !== null ? (
           <Confirm
             testId="confirm-apply"
-            title="Apply the approved plan?"
+            title={t("actions.confirmApply.title")}
             busy={busy}
-            confirmLabel="Apply"
+            confirmLabel={t("actions.confirmApply.confirm")}
             onCancel={() => setConfirming(null)}
             onConfirm={() =>
               run("apply", async () => {
@@ -338,21 +343,20 @@ export function SessionActions({
             }
           >
             <dl className="space-y-1">
-              <Fact label="Approved version">v{session.approved_plan_version}</Fact>
+              <Fact label={t("actions.confirmApply.approvedVersion")}>
+                v{session.approved_plan_version}
+              </Fact>
             </dl>
-            <p className="mt-2 text-xs text-ink-secondary">
-              This writes the approved plan to Drake&apos;s catalog. It does not write to the
-              repository.
-            </p>
+            <p className="mt-2 text-xs text-ink-secondary">{t("actions.confirmApply.note")}</p>
           </Confirm>
         ) : null}
 
         {confirming === "cancel" ? (
           <Confirm
             testId="confirm-cancel"
-            title="Cancel this session?"
+            title={t("actions.confirmCancel.title")}
             busy={busy}
-            confirmLabel="Cancel session"
+            confirmLabel={t("actions.confirmCancel.confirm")}
             onCancel={() => setConfirming(null)}
             onConfirm={() =>
               run("cancel", async () => {
@@ -361,10 +365,7 @@ export function SessionActions({
               })
             }
           >
-            <p className="text-xs text-ink-secondary">
-              The session closes and its plan is no longer applicable. Nothing is removed from
-              the catalog — cancelling a session does not undo anything already applied.
-            </p>
+            <p className="text-xs text-ink-secondary">{t("actions.confirmCancel.note")}</p>
           </Confirm>
         ) : null}
 
@@ -402,6 +403,7 @@ function Confirm({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT("onboarding");
   return (
     <div
       role="group"
@@ -419,7 +421,7 @@ function Confirm({
           onClick={onConfirm}
           className="rounded-full border border-accent px-3 py-1.5 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? "Working…" : confirmLabel}
+          {busy ? t("actions.working") : confirmLabel}
         </button>
         <button
           type="button"
@@ -428,22 +430,23 @@ function Confirm({
           onClick={onCancel}
           className="rounded-full border border-border px-3 py-1.5 text-xs text-ink-secondary disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Back
+          {t("actions.back")}
         </button>
       </div>
     </div>
   );
 }
 
-const COUNTERS: { key: keyof ApplyResult; label: string }[] = [
-  { key: "created_entities", label: "Created" },
-  { key: "linked_entities", label: "Linked" },
-  { key: "unchanged_entities", label: "Unchanged" },
-  { key: "metadata_updated", label: "Metadata updated" },
-  { key: "slo_definitions_created", label: "SLOs created" },
-  { key: "slo_definitions_updated", label: "SLOs updated" },
-  { key: "bindings_created", label: "Bindings created" },
-];
+/** The counters shown, in order; each is labelled by `actions.result.<key>`. */
+const COUNTERS = [
+  "created_entities",
+  "linked_entities",
+  "unchanged_entities",
+  "metadata_updated",
+  "slo_definitions_created",
+  "slo_definitions_updated",
+  "bindings_created",
+] as const satisfies readonly (keyof ApplyResult)[];
 
 export function ApplyResultCard({
   result,
@@ -452,19 +455,23 @@ export function ApplyResultCard({
   result: ApplyResult;
   projectId: string | null;
 }) {
+  const t = useT("onboarding");
   return (
     <div
       className="rounded-2xl border border-border bg-surface-subtle p-3"
       data-testid="apply-result"
     >
-      <p className="text-xs font-medium text-ink">Applied to the catalog</p>
+      <p className="text-xs font-medium text-ink">{t("actions.result.title")}</p>
       <dl className="mt-2 grid gap-1 sm:grid-cols-2">
-        {COUNTERS.map(({ key, label }) => (
-          <Fact key={key} label={label}>
-            {/* `null` is "the receipt never recorded this", not zero. */}
-            {counterLabel(result[key] as number | null)}
-          </Fact>
-        ))}
+        {COUNTERS.map((key) => {
+          const value = result[key] as number | null;
+          return (
+            <Fact key={key} label={t(`actions.result.${key}`)}>
+              {/* `null` is "the receipt never recorded this", not zero. */}
+              {value === null ? t("actions.result.notRecorded") : counterLabel(value)}
+            </Fact>
+          );
+        })}
       </dl>
       {result.project_id ?? projectId ? (
         <a
@@ -472,7 +479,7 @@ export function ApplyResultCard({
           data-testid="apply-result-project"
           className="mt-3 inline-block text-xs text-ink hover:underline"
         >
-          Open the catalog project →
+          {t("actions.result.openProject")}
         </a>
       ) : null}
     </div>

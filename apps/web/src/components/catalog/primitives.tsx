@@ -4,7 +4,7 @@
  * operational-state cards. `unknown`/`not_configured`/`stale` are rendered
  * as their own states — never as healthy, zero, or blank. */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DataState, type DataStateKind } from "@/components/state/DataState";
 import { NotFoundState } from "@/components/ui/states";
@@ -12,6 +12,7 @@ import { StatusBadge, type HealthStatus } from "@/components/state/StatusBadge";
 import { Card } from "@/components/ui/Card";
 import { ApiError, apiGet } from "@/lib/api";
 import type { OperationalState, Provenance } from "@/lib/catalog";
+import { useT } from "@/lib/i18n";
 
 export type Loadable<T> =
   | { state: "loading" }
@@ -20,6 +21,13 @@ export type Loadable<T> =
 
 export function useApi<T>(path: string | null): [Loadable<T>, () => void] {
   const [value, setValue] = useState<Loadable<T>>({ state: "loading" });
+  // Read through a ref so a language switch re-words the next failure
+  // without re-issuing every request on the page.
+  const t = useT("catalog");
+  const translate = useRef(t);
+  useEffect(() => {
+    translate.current = t;
+  }, [t]);
   const load = useCallback(() => {
     if (!path) return;
     setValue({ state: "loading" });
@@ -34,7 +42,7 @@ export function useApi<T>(path: string | null): [Loadable<T>, () => void] {
             notFound: error.status === 404,
           });
         } else {
-          setValue({ state: "error", message: "request failed" });
+          setValue({ state: "error", message: translate.current("load.requestFailed") });
         }
       });
   }, [path]);
@@ -53,6 +61,7 @@ export function LoadGate<T>({
   retry: () => void;
   children: (data: T) => React.ReactNode;
 }) {
+  const t = useT("catalog");
   if (value.state === "loading") return <DataState kind="loading" />;
   if (value.state === "error") {
     if (value.notFound) {
@@ -68,7 +77,7 @@ export function LoadGate<T>({
         <DataState kind="error" description={value.message} onRetry={retry} />
         {value.correlationId ? (
           <p className="mt-1 text-xs text-ink-muted">
-            Correlation ID: <span className="font-mono">{value.correlationId}</span>
+            {t("load.correlationId")} <span className="font-mono">{value.correlationId}</span>
           </p>
         ) : null}
       </div>
@@ -97,12 +106,12 @@ const OPERATIONAL_KIND: Record<
   stale: "stale",
 };
 
-const OPERATIONAL_BADGE: Record<"ok" | "degraded", { status: HealthStatus; label: string }> = {
-  // "Reporting" rather than "Healthy": this says the capability is wired and
-  // answering. Whether what it reports is healthy is the signal's verdict,
-  // and belongs to the charts, not to this card.
-  ok: { status: "healthy", label: "Reporting" },
-  degraded: { status: "warning", label: "Degraded" },
+// "Reporting" (`capability.state.ok`) rather than "Healthy": this says the
+// capability is wired and answering. Whether what it reports is healthy is
+// the signal's verdict, and belongs to the charts, not to this card.
+const OPERATIONAL_BADGE: Record<"ok" | "degraded", HealthStatus> = {
+  ok: "healthy",
+  degraded: "warning",
 };
 
 export function OperationalGrid({
@@ -112,6 +121,7 @@ export function OperationalGrid({
   states: Record<string, OperationalState>;
   labels: Record<string, string>;
 }) {
+  const t = useT("catalog");
   return (
     <div
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
@@ -123,8 +133,8 @@ export function OperationalGrid({
           <Card key={key} title={label}>
             {state === "ok" || state === "degraded" ? (
               <StatusBadge
-                status={OPERATIONAL_BADGE[state].status}
-                label={OPERATIONAL_BADGE[state].label}
+                status={OPERATIONAL_BADGE[state]}
+                label={t(`capability.state.${state}`)}
               />
             ) : (
               <DataState kind={OPERATIONAL_KIND[state]} />
@@ -144,19 +154,21 @@ const CRITICALITY_STATUS: Record<string, HealthStatus> = {
 };
 
 export function CriticalityBadge({ criticality }: { criticality: string }) {
+  const t = useT("catalog");
   return (
     <StatusBadge
       status={CRITICALITY_STATUS[criticality] ?? "unknown"}
-      label={criticality}
+      label={t.dyn("criticality", criticality, criticality)}
     />
   );
 }
 
 export function LifecycleBadge({ lifecycle }: { lifecycle: string }) {
+  const t = useT("catalog");
   return (
     <StatusBadge
       status={lifecycle === "active" ? "healthy" : "unknown"}
-      label={lifecycle}
+      label={t.dyn("lifecycle", lifecycle, lifecycle)}
     />
   );
 }

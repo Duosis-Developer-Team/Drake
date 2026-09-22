@@ -16,6 +16,7 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 interface AuditEvent {
   id: string;
@@ -38,6 +39,8 @@ const RESULT_STATUS = {
 } as const;
 
 export function AuditPanel() {
+  const t = useT("admin");
+  const common = useT("common");
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "loading-more">("loading");
@@ -54,10 +57,10 @@ export function AuditPanel() {
       setCursor(body.next_cursor);
       setPhase("ready");
     } catch (error) {
-      setMessage(error instanceof ApiError ? error.message : "request failed");
+      setMessage(error instanceof ApiError ? error.message : t("error.request"));
       setPhase("error");
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadPage(null);
@@ -74,26 +77,26 @@ export function AuditPanel() {
     <div className="space-y-6">
       {events.length > 0 ? (
         <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)]">
-          <KpiTile icon={ScrollText} label="Events loaded" value={events.length}>
+          <KpiTile icon={ScrollText} label={t("audit.kpi.loaded")} value={events.length}>
             <p className="text-micro text-ink-muted">
-              {cursor ? "More pages are available" : "Every event in your scope"}
+              {cursor ? t("audit.kpi.morePages") : t("audit.kpi.allInScope")}
             </p>
           </KpiTile>
-          <KpiTile icon={Fingerprint} tone="info" label="Distinct actors" value={actors}>
-            <p className="text-micro text-ink-muted">Across the loaded events</p>
+          <KpiTile icon={Fingerprint} tone="info" label={t("audit.kpi.actors")} value={actors}>
+            <p className="text-micro text-ink-muted">{t("audit.kpi.actorsCaption")}</p>
           </KpiTile>
           <Panel className="h-full !gap-5">
             <div className="flex items-center gap-3">
               <IconBubble icon={ShieldAlert} tone={tally.failure + tally.denied > 0 ? "warning" : undefined} />
-              <span className="text-caption font-medium text-ink-secondary">Outcome of loaded events</span>
+              <span className="text-caption font-medium text-ink-secondary">{t("audit.kpi.outcome")}</span>
             </div>
             <StackedBar
-              label="Audit outcomes"
+              label={t("audit.kpi.chart")}
               height={20}
               segments={[
-                { name: "Success", value: tally.success, tone: "success" },
-                { name: "Denied", value: tally.denied, tone: "warning" },
-                { name: "Failure", value: tally.failure, tone: "critical" },
+                { name: t("audit.result.success"), value: tally.success, tone: "success" },
+                { name: t("audit.result.denied"), value: tally.denied, tone: "warning" },
+                { name: t("audit.result.failure"), value: tally.failure, tone: "critical" },
               ]}
             />
           </Panel>
@@ -101,7 +104,7 @@ export function AuditPanel() {
       ) : null}
 
       <Panel flush>
-        <PanelHeader flush title="Audit trail" description="Append-only; newest first" />
+        <PanelHeader flush title={t("audit.list.title")} description={t("audit.list.description")} />
         {phase === "loading" ? (
           <div className="px-7 py-5">
             <DataState kind="loading" />
@@ -113,18 +116,18 @@ export function AuditPanel() {
           </div>
         ) : null}
         {phase !== "loading" && phase !== "error" && events.length === 0 ? (
-          <StateCard kind="empty" icon={ScrollText} title="No audit events in your scope" />
+          <StateCard kind="empty" icon={ScrollText} title={t("audit.list.empty")} />
         ) : null}
         {events.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left" data-testid="audit-table">
               <thead>
                 <tr className={`border-b border-border ${TABLE_HEAD}`}>
-                  <th className="h-11 px-7 font-medium">Time (UTC)</th>
-                  <th className="h-11 px-3 font-medium">Actor</th>
-                  <th className="h-11 px-3 font-medium">Action</th>
-                  <th className="h-11 px-3 font-medium">Scope</th>
-                  <th className="h-11 px-7 font-medium">Result</th>
+                  <th className="h-11 px-7 font-medium">{t("audit.list.time")}</th>
+                  <th className="h-11 px-3 font-medium">{t("audit.list.actor")}</th>
+                  <th className="h-11 px-3 font-medium">{t("audit.list.action")}</th>
+                  <th className="h-11 px-3 font-medium">{t("audit.list.scope")}</th>
+                  <th className="h-11 px-7 font-medium">{t("audit.list.result")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -146,7 +149,11 @@ export function AuditPanel() {
                       {event.scope_ref ?? "—"}
                     </td>
                     <td className="px-7">
-                      <StatusBadge status={RESULT_STATUS[event.result]} label={event.result} size="compact" />
+                      <StatusBadge
+                        status={RESULT_STATUS[event.result]}
+                        label={t.dyn("audit.resultBadge", event.result, event.result)}
+                        size="compact"
+                      />
                     </td>
                   </tr>
                 ))}
@@ -162,7 +169,7 @@ export function AuditPanel() {
               disabled={phase === "loading-more"}
               className={PILL_BUTTON}
             >
-              {phase === "loading-more" ? "Loading…" : "Load more"}
+              {phase === "loading-more" ? t("audit.list.loadingMore") : common("action.loadMore")}
             </button>
           </div>
         ) : null}

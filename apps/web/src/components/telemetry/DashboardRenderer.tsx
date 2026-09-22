@@ -27,6 +27,7 @@ import {
   type WidgetState,
 } from "@/components/telemetry/widgets";
 import { ApiError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import type { DashboardDefinition, RangePreset } from "@/lib/telemetry";
 import { fetchDashboard, queryTelemetry } from "@/lib/telemetry";
@@ -69,10 +70,11 @@ export function DashboardRenderer({
    *  title and the page heading are otherwise the same words twice. */
   showSectionHeadings?: boolean;
 }) {
+  const t = useT("ui");
   const { state: sessionState } = useSession();
   const me = sessionState.status === "authenticated" ? sessionState.me : null;
   const [dashboard, setDashboard] = useState<DashboardDefinition | null>(null);
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [dashboardFailed, setDashboardFailed] = useState(false);
   const [states, setStates] = useState<Record<string, WidgetState>>({});
   const [nonce, setNonce] = useState(0);
   const generationRef = useRef(0);
@@ -84,8 +86,7 @@ export function DashboardRenderer({
         if (!cancelled) setDashboard(definition);
       })
       .catch(() => {
-        if (!cancelled)
-          setDashboardError("Could not load the dashboard definition.");
+        if (!cancelled) setDashboardFailed(true);
       });
     return () => {
       cancelled = true;
@@ -193,19 +194,17 @@ export function DashboardRenderer({
 
   const retry = useCallback(() => setNonce((value) => value + 1), []);
 
-  if (dashboardError) {
+  if (dashboardFailed) {
     return (
       <ErrorState
-        title="Dashboard unavailable"
-        description={dashboardError}
+        title={t("dashboard.unavailable")}
+        description={t("dashboard.loadFailed")}
         onRetry={retry}
       />
     );
   }
   if (!dashboard) {
-    return (
-      <LoadingSkeleton variant="chart" label="Loading dashboard definition" />
-    );
+    return <LoadingSkeleton variant="chart" label={t("dashboard.loading")} />;
   }
 
   return (

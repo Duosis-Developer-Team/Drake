@@ -43,7 +43,6 @@ import {
   AgentBadge,
   HealthBadge,
   InventoryStateBadge,
-  formatUtc,
 } from "@/components/inventory/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
@@ -54,16 +53,17 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { RelativeTime } from "@/components/ui/identifiers";
 import type { Cluster } from "@/lib/catalog";
 import { humanize, toneForHealth } from "@/lib/design/status";
+import { useFormat, useT, type Translator } from "@/lib/i18n";
 import type { HealthRollup, InventorySummary } from "@/lib/inventory";
 import { parseRangePreset } from "@/lib/telemetry";
 
 /** One rollup, as donut slices. The unknown bucket is always present. */
-function healthSlices(rollup: HealthRollup) {
+function healthSlices(t: Translator<"clusters">, rollup: HealthRollup) {
   return [
-    { name: "Healthy", value: rollup.healthy, tone: "success" as const },
-    { name: "Degraded", value: rollup.degraded, tone: "warning" as const },
-    { name: "Unhealthy", value: rollup.unhealthy, tone: "critical" as const },
-    { name: "Unknown", value: rollup.unknown, tone: "unknown" as const },
+    { name: t("enum.health.healthy"), value: rollup.healthy, tone: "success" as const },
+    { name: t("enum.health.degraded"), value: rollup.degraded, tone: "warning" as const },
+    { name: t("enum.health.unhealthy"), value: rollup.unhealthy, tone: "critical" as const },
+    { name: t("enum.health.unknown"), value: rollup.unknown, tone: "unknown" as const },
   ];
 }
 
@@ -88,10 +88,12 @@ function StatWord({
 
 /** A mono UTC instant, or an honest dash. */
 function Instant({ value }: { value: string | null | undefined }) {
+  const t = useT("clusters");
+  const fmt = useFormat();
   return value ? (
-    <span className="font-mono text-caption text-ink">{formatUtc(value)}</span>
+    <span className="font-mono text-caption text-ink">{fmt.utc(value)}</span>
   ) : (
-    <span className="text-ink-muted">Not reported</span>
+    <span className="text-ink-muted">{t("detail.agent.notReported")}</span>
   );
 }
 
@@ -115,6 +117,7 @@ function RollupCard({
   "data-testid"?: string;
   children?: React.ReactNode;
 }) {
+  const t = useT("clusters");
   return (
     <Panel data-testid={testId} className={`h-full ${className}`}>
       <div className="flex items-center gap-3">
@@ -123,12 +126,12 @@ function RollupCard({
           {title}
         </h3>
         <span data-tabular className="text-caption text-ink-muted">
-          <span className="font-semibold text-ink">{rollup.total}</span> total
+          <span className="font-semibold text-ink">{rollup.total}</span> {t("detail.sweep.total")}
         </span>
       </div>
       <div
         className={
-          children ? "flex flex-wrap items-center gap-x-10 gap-y-6" : ""
+          children ? "flex flex-wrap items-center gap-x-10 gap-y-6" : "" // i18n-ignore
         }
       >
         <div className="min-w-0 flex-1">
@@ -136,9 +139,9 @@ function RollupCard({
             <Donut
               size={120}
               thickness={13}
-              label={`${title} by health`}
+              label={t("detail.sweep.byHealth", { title })}
               centerLabel={`${rollup.total}`}
-              slices={healthSlices(rollup)}
+              slices={healthSlices(t, rollup)}
             />
           ) : (
             <div className="flex items-center gap-4 rounded-[1rem] bg-surface-2 px-5 py-4">
@@ -147,9 +150,9 @@ function RollupCard({
                 className="h-10 w-10 shrink-0 rounded-full border-[5px] border-surface-3"
               />
               <div className="min-w-0">
-                <p className="text-body font-medium text-ink">None recorded</p>
+                <p className="text-body font-medium text-ink">{t("detail.sweep.noneRecorded")}</p>
                 <p className="text-caption text-ink-muted">
-                  All health buckets are zero
+                  {t("detail.sweep.allBucketsZero")}
                 </p>
               </div>
             </div>
@@ -162,6 +165,8 @@ function RollupCard({
 }
 
 export default function ClusterDetailPage() {
+  const t = useT("clusters");
+  const tc = useT("common");
   const { clusterId } = useParams<{ clusterId: string }>();
   // The same range control the service boards use, read from the URL,
   // so a link to a cluster at 7d opens at 7d.
@@ -172,7 +177,7 @@ export default function ClusterDetailPage() {
   );
   const ready = summary.state === "ready" ? summary.data : null;
   const summaryFallback =
-    summary.state === "error" ? "Unavailable" : "Loading…";
+    summary.state === "error" ? tc("state.unavailable") : t("shared.loadingEllipsis");
 
   return (
     <PageFrame>
@@ -184,11 +189,11 @@ export default function ClusterDetailPage() {
             testId="state-not-found"
             icon={Server}
             tone="not-applicable"
-            title="Not found"
-            description="This resource does not exist in your authorized scope."
+            title={t("shared.notFoundTitle")}
+            description={t("shared.notFoundDescription")}
             action={
               <PillLink LinkComponent={Link} href="/clusters">
-                Back to clusters
+                {t("detail.backToClusters")}
               </PillLink>
             }
           />
@@ -199,11 +204,11 @@ export default function ClusterDetailPage() {
           return (
             <>
               <nav
-                aria-label="Breadcrumb"
+                aria-label={t("breadcrumb.label")}
                 className="mb-3 flex items-center gap-1.5 text-micro text-ink-muted"
               >
                 <Link href="/clusters" className="rounded hover:text-ink">
-                  Clusters
+                  {t("breadcrumb.clusters")}
                 </Link>
                 <ChevronRight aria-hidden className="h-3 w-3" />
                 <span className="font-mono text-ink-secondary">
@@ -215,13 +220,13 @@ export default function ClusterDetailPage() {
                 title={data.display_name || data.cluster_ref}
                 description={
                   data.site
-                    ? `Site ${data.site} · catalog v${data.version}`
-                    : `Catalog v${data.version}`
+                    ? t("detail.subtitleWithSite", { site: data.site, version: data.version })
+                    : t("detail.subtitle", { version: data.version })
                 }
                 status={
                   <StatusBadge
                     status={data.lifecycle === "active" ? "success" : "unknown"}
-                    label={humanize(data.lifecycle)}
+                    label={t.dyn("enum.lifecycle", data.lifecycle, humanize(data.lifecycle))}
                   />
                 }
                 actions={
@@ -231,7 +236,7 @@ export default function ClusterDetailPage() {
                     icon={Boxes}
                     variant="primary"
                   >
-                    Browse inventory
+                    {t("detail.browseInventory")}
                   </PillLink>
                 }
               />
@@ -240,20 +245,22 @@ export default function ClusterDetailPage() {
                 <StatTile
                   icon={Plug}
                   tone={ready ? toneForHealth(ready.agent.status) : null}
-                  label="Agent connection"
+                  label={t("detail.tile.agentConnection")}
                   value={
                     <StatWord muted={!ready}>
-                      {ready ? humanize(ready.agent.status) : summaryFallback}
+                      {ready
+                        ? t.dyn("enum.agent", ready.agent.status, humanize(ready.agent.status))
+                        : summaryFallback}
                     </StatWord>
                   }
                 >
                   <p className="text-micro text-ink-muted">
-                    Heartbeat{" "}
+                    {t("detail.tile.heartbeat")}{" "}
                     <span className="text-ink-secondary">
                       {ready?.agent.last_heartbeat_at ? (
                         <RelativeTime value={ready.agent.last_heartbeat_at} />
                       ) : (
-                        "not reported"
+                        t("detail.tile.notReported")
                       )}
                     </span>
                   </p>
@@ -261,47 +268,51 @@ export default function ClusterDetailPage() {
                 <StatTile
                   icon={RefreshCw}
                   tone={ready ? toneForHealth(ready.inventory.state) : null}
-                  label="Inventory"
+                  label={t("detail.tile.inventory")}
                   value={
                     <StatWord muted={!ready}>
                       {ready
-                        ? humanize(ready.inventory.state)
+                        ? t.dyn(
+                            "enum.inventory",
+                            ready.inventory.state,
+                            humanize(ready.inventory.state),
+                          )
                         : summaryFallback}
                     </StatWord>
                   }
                 >
                   <p className="text-micro text-ink-muted">
-                    Reconciled{" "}
+                    {t("detail.tile.reconciled")}{" "}
                     <span className="text-ink-secondary">
                       {ready?.inventory.last_reconcile_at ? (
                         <RelativeTime
                           value={ready.inventory.last_reconcile_at}
                         />
                       ) : (
-                        "not reported"
+                        t("detail.tile.notReported")
                       )}
                     </span>
                   </p>
                 </StatTile>
                 <StatTile
                   icon={Boxes}
-                  label="Resources"
+                  label={t("detail.tile.resources")}
                   value={ready ? (ready.inventory.active_resources ?? 0) : "—"}
-                  suffix="active"
+                  suffix={t("detail.tile.resourcesSuffix")}
                 >
                   {ready ? (
                     <SegmentBar
-                      label="Resources by lifecycle"
+                      label={t("shared.resourcesByLifecycle")}
                       segments={[
                         {
                           key: "active",
-                          label: "Active",
+                          label: t("enum.resourceLifecycle.active"),
                           value: ready.inventory.active_resources ?? 0,
                           tone: "info",
                         },
                         {
                           key: "missing",
-                          label: "Missing",
+                          label: t("enum.resourceLifecycle.missing"),
                           value: ready.inventory.missing_resources ?? 0,
                           tone: "stale",
                         },
@@ -311,9 +322,9 @@ export default function ClusterDetailPage() {
                 </StatTile>
                 <StatTile
                   icon={Layers}
-                  label="Environments"
+                  label={t("detail.tile.environments")}
                   value={environments.length}
-                  suffix="authorized"
+                  suffix={t("detail.tile.environmentsSuffix")}
                 >
                   {environments.length > 0 ? (
                     <ul className="flex flex-wrap gap-1.5">
@@ -334,14 +345,14 @@ export default function ClusterDetailPage() {
                     </ul>
                   ) : (
                     <p className="text-micro text-ink-muted">
-                      None you can see run here
+                      {t("detail.tile.noEnvironments")}
                     </p>
                   )}
                 </StatTile>
               </div>
 
               <section
-                aria-label="Cluster agent and inventory"
+                aria-label={t("detail.section")}
                 className="space-y-6"
               >
                 <LoadGate value={summary} retry={retrySummary}>
@@ -354,12 +365,13 @@ export default function ClusterDetailPage() {
                       1,
                     );
                     const classes = [
-                      ["Nodes", Server, inventory.nodes],
-                      ["Namespaces", FolderTree, inventory.namespaces],
-                      ["Workloads", Workflow, inventory.workloads],
-                      ["Pods", Container, inventory.pods],
+                      ["nodes", t("detail.sweep.nodes"), Server, inventory.nodes],
+                      ["namespaces", t("detail.sweep.namespaces"), FolderTree, inventory.namespaces],
+                      ["workloads", t("detail.sweep.workloads"), Workflow, inventory.workloads],
+                      ["pods", t("detail.sweep.pods"), Container, inventory.pods],
                       [
-                        "Volume claims",
+                        "volumeClaims",
+                        t("detail.sweep.volumeClaims"),
                         Database,
                         inventory.persistent_volume_claims,
                       ],
@@ -369,8 +381,8 @@ export default function ClusterDetailPage() {
                         <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
                           <Panel data-testid="agent-card" className="h-full">
                             <PanelHeader
-                              title="Cluster agent"
-                              description="What the agent last reported about itself"
+                              title={t("detail.agent.title")}
+                              description={t("detail.agent.description")}
                               actions={
                                 <AgentBadge status={inventory.agent.status} />
                               }
@@ -378,19 +390,19 @@ export default function ClusterDetailPage() {
                             <DefinitionGrid
                               items={[
                                 {
-                                  label: "Agent version",
+                                  label: t("detail.agent.version"),
                                   value: inventory.agent.agent_version ? (
                                     <span className="font-mono text-caption">
                                       {inventory.agent.agent_version}
                                     </span>
                                   ) : (
                                     <span className="text-ink-muted">
-                                      Not reported
+                                      {t("detail.agent.notReported")}
                                     </span>
                                   ),
                                 },
                                 {
-                                  label: "Last heartbeat",
+                                  label: t("detail.agent.lastHeartbeat"),
                                   value: (
                                     <Instant
                                       value={inventory.agent.last_heartbeat_at}
@@ -398,7 +410,7 @@ export default function ClusterDetailPage() {
                                   ),
                                 },
                                 {
-                                  label: "Certificate expires",
+                                  label: t("detail.agent.certificateExpires"),
                                   value: (
                                     <span className="flex flex-wrap items-center gap-2">
                                       <Instant
@@ -410,7 +422,7 @@ export default function ClusterDetailPage() {
                                         .certificate_expiry_warning ? (
                                         <StatusBadge
                                           status="warning"
-                                          label="expires soon"
+                                          label={t("detail.agent.expiresSoon")}
                                         />
                                       ) : null}
                                     </span>
@@ -426,7 +438,7 @@ export default function ClusterDetailPage() {
                               <IconBubble icon={ShieldCheck} size="small" />
                               <div className="min-w-0 flex-1">
                                 <Countdown
-                                  label="Certificate runway"
+                                  label={t("detail.agent.certificateRunway")}
                                   deadline={
                                     inventory.agent.certificate_not_after
                                   }
@@ -440,8 +452,8 @@ export default function ClusterDetailPage() {
                             className="h-full"
                           >
                             <PanelHeader
-                              title="Inventory freshness"
-                              description="How current the last sweep is"
+                              title={t("detail.freshness.title")}
+                              description={t("detail.freshness.description")}
                               actions={
                                 <InventoryStateBadge
                                   state={inventory.inventory.state}
@@ -451,7 +463,7 @@ export default function ClusterDetailPage() {
                             <DefinitionGrid
                               items={[
                                 {
-                                  label: "Last full reconcile",
+                                  label: t("detail.freshness.lastReconcile"),
                                   value: (
                                     <Instant
                                       value={
@@ -461,7 +473,7 @@ export default function ClusterDetailPage() {
                                   ),
                                 },
                                 {
-                                  label: "Last change applied",
+                                  label: t("detail.freshness.lastEvent"),
                                   value: (
                                     <Instant
                                       value={inventory.inventory.last_event_at}
@@ -473,7 +485,7 @@ export default function ClusterDetailPage() {
                             <div className="mt-auto grid grid-cols-2 gap-3">
                               <div className="rounded-[1rem] bg-surface-2 px-5 py-4">
                                 <span className="text-micro tracking-[0.08em] text-ink-muted uppercase">
-                                  Active resources
+                                  {t("detail.freshness.activeResources")}
                                 </span>
                                 <span
                                   data-tabular
@@ -484,7 +496,7 @@ export default function ClusterDetailPage() {
                               </div>
                               <div className="rounded-[1rem] bg-surface-2 px-5 py-4">
                                 <span className="text-micro tracking-[0.08em] text-ink-muted uppercase">
-                                  Missing resources
+                                  {t("detail.freshness.missingResources")}
                                 </span>
                                 <span
                                   data-tabular
@@ -503,19 +515,19 @@ export default function ClusterDetailPage() {
                         </div>
 
                         <SectionHeader
-                          title="What the last sweep found"
-                          description="Health composition per resource class, as the agent reported it."
+                          title={t("shared.sweepTitle")}
+                          description={t("shared.sweepDescription")}
                         />
-                        {classes.every(([, , rollup]) => rollup.total === 0) ? (
+                        {classes.every(([, , , rollup]) => rollup.total === 0) ? (
                           // Nothing recorded in any class: one card of five
                           // zero tiles, not five cards repeating one sentence.
                           <Panel>
                             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-                              {classes.map(([title, icon, rollup]) => (
+                              {classes.map(([key, title, icon, rollup]) => (
                                 <div
-                                  key={title}
+                                  key={key}
                                   data-testid={
-                                    title === "Pods" ? "pods-card" : undefined
+                                    key === "pods" ? "pods-card" : undefined
                                   }
                                   className="flex min-w-0 flex-col gap-3 rounded-[1rem] bg-surface-2 px-5 py-4"
                                 >
@@ -533,7 +545,7 @@ export default function ClusterDetailPage() {
                                       {rollup.total}
                                     </span>
                                     <span className="text-micro text-ink-muted">
-                                      recorded
+                                      {t("detail.sweep.recorded")}
                                     </span>
                                   </span>
                                 </div>
@@ -541,23 +553,23 @@ export default function ClusterDetailPage() {
                             </div>
                             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
                               <p className="text-caption text-ink-muted">
-                                Every health bucket is zero in the last summary.
+                                {t("detail.sweep.allZero")}
                               </p>
                               <ToneCounters
                                 size="compact"
                                 items={[
                                   {
-                                    label: "restarts",
+                                    label: t("shared.restarts"),
                                     count: inventory.pods.restarts,
                                     tone: "warning",
                                   },
                                   {
-                                    label: "CrashLoop",
+                                    label: t("shared.crashLoop"),
                                     count: inventory.pods.crashloop,
                                     tone: "critical",
                                   },
                                   {
-                                    label: "OOM killed",
+                                    label: t("shared.oomKilled"),
                                     count: inventory.pods.oom_killed,
                                     tone: "critical",
                                   },
@@ -568,23 +580,23 @@ export default function ClusterDetailPage() {
                         ) : (
                           <div className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-2 xl:grid-cols-3">
                             <RollupCard
-                              title="Nodes"
+                              title={t("detail.sweep.nodes")}
                               icon={Server}
                               rollup={inventory.nodes}
                             />
                             <RollupCard
-                              title="Namespaces"
+                              title={t("detail.sweep.namespaces")}
                               icon={FolderTree}
                               rollup={inventory.namespaces}
                             />
                             <RollupCard
-                              title="Workloads"
+                              title={t("detail.sweep.workloads")}
                               icon={Workflow}
                               rollup={inventory.workloads}
                             />
                             <RollupCard
                               data-testid="pods-card"
-                              title="Pods"
+                              title={t("detail.sweep.pods")}
                               icon={Container}
                               rollup={inventory.pods}
                               className="xl:col-span-2"
@@ -594,22 +606,22 @@ export default function ClusterDetailPage() {
                                   rather than wedges. */}
                               <div className="min-w-[12rem] rounded-[1rem] bg-surface-2 px-5 py-4">
                                 <p className="mb-3 text-micro tracking-[0.08em] text-ink-muted uppercase">
-                                  Pod instability
+                                  {t("shared.podInstability")}
                                 </p>
                                 <ToneCounters
                                   items={[
                                     {
-                                      label: "restarts",
+                                      label: t("shared.restarts"),
                                       count: inventory.pods.restarts,
                                       tone: "warning",
                                     },
                                     {
-                                      label: "CrashLoop",
+                                      label: t("shared.crashLoop"),
                                       count: inventory.pods.crashloop,
                                       tone: "critical",
                                     },
                                     {
-                                      label: "OOM killed",
+                                      label: t("shared.oomKilled"),
                                       count: inventory.pods.oom_killed,
                                       tone: "critical",
                                     },
@@ -618,7 +630,7 @@ export default function ClusterDetailPage() {
                               </div>
                             </RollupCard>
                             <RollupCard
-                              title="Persistent volume claims"
+                              title={t("detail.sweep.persistentVolumeClaims")}
                               icon={Database}
                               rollup={inventory.persistent_volume_claims}
                             />
@@ -628,11 +640,11 @@ export default function ClusterDetailPage() {
                         <Panel flush>
                           <PanelHeader
                             flush
-                            title="Resources by kind"
-                            description="Sorted by count — the shape of the cluster before any digit"
+                            title={t("shared.resourcesByKind")}
+                            description={t("detail.kinds.description")}
                             meta={
                               kinds.length > 0 ? (
-                                <span data-tabular>{kinds.length} kinds</span>
+                                <span data-tabular>{t("detail.kinds.count", { count: kinds.length })}</span>
                               ) : undefined
                             }
                           />
@@ -641,8 +653,8 @@ export default function ClusterDetailPage() {
                               compact
                               testId="kinds-empty"
                               icon={PackageOpen}
-                              title="No snapshot yet"
-                              description="No completed snapshot has been received from this cluster."
+                              title={t("detail.kinds.emptyTitle")}
+                              description={t("detail.kinds.emptyDescription")}
                             />
                           ) : (
                             <ul className="divide-y divide-border">
@@ -663,7 +675,7 @@ export default function ClusterDetailPage() {
                                     <IconBubble icon={Boxes} size="small" />
                                     <Link
                                       href={`/clusters/${clusterId}/inventory?kind=${kind}`}
-                                      aria-label={`Browse ${kind}`}
+                                      aria-label={t("detail.kinds.browse", { kind })}
                                       className="w-44 shrink-0 rounded font-mono text-caption font-semibold text-ink after:absolute after:inset-0 after:content-[''] hover:text-brand"
                                     >
                                       {kind}
@@ -707,12 +719,12 @@ export default function ClusterDetailPage() {
                   metrics backend rather than from inventory — an agent can be
                   perfectly healthy on a node that is full. */}
               <section
-                aria-label="Cluster capacity"
+                aria-label={t("detail.capacity.label")}
                 className="mt-10 space-y-4"
               >
                 <SectionHeader
-                  title="Capacity"
-                  description="What the hosts can still give, from the metrics backend."
+                  title={t("detail.capacity.title")}
+                  description={t("detail.capacity.description")}
                 />
                 <div>
                   <DashboardRenderer
@@ -728,13 +740,13 @@ export default function ClusterDetailPage() {
               <div className="mt-10 grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
                 <Panel data-testid="cluster-metadata" className="h-full">
                   <PanelHeader
-                    title="Cluster metadata"
-                    description="The catalog record"
+                    title={t("detail.metadata.title")}
+                    description={t("detail.metadata.description")}
                   />
                   <DefinitionGrid
                     items={[
                       {
-                        label: "Reference",
+                        label: t("detail.metadata.reference"),
                         value: (
                           <span className="font-mono text-caption">
                             {data.cluster_ref}
@@ -742,20 +754,23 @@ export default function ClusterDetailPage() {
                         ),
                       },
                       {
-                        label: "Site",
+                        label: t("detail.metadata.site"),
                         value: data.site || (
-                          <span className="text-ink-muted">Not set</span>
+                          <span className="text-ink-muted">{t("detail.metadata.notSet")}</span>
                         ),
                       },
                       {
-                        label: "Catalog version",
+                        label: t("detail.metadata.catalogVersion"),
                         value: (
                           <span className="font-mono text-caption">
                             v{data.version}
                           </span>
                         ),
                       },
-                      { label: "Lifecycle", value: humanize(data.lifecycle) },
+                      {
+                        label: t("shared.lifecycle"),
+                        value: t.dyn("enum.lifecycle", data.lifecycle, humanize(data.lifecycle)),
+                      },
                     ]}
                   />
                   <div className="mt-auto rounded-[1rem] bg-surface-2 px-5 py-4">
@@ -766,11 +781,11 @@ export default function ClusterDetailPage() {
                 <Panel flush className="h-full">
                   <PanelHeader
                     flush
-                    title="Referenced environments"
-                    description="Authorized only"
+                    title={t("detail.environments.title")}
+                    description={t("detail.environments.description")}
                     meta={
                       <span data-tabular>
-                        {environments.length} environments
+                        {t("detail.environments.count", { count: environments.length })}
                       </span>
                     }
                   />
@@ -799,8 +814,8 @@ export default function ClusterDetailPage() {
                       compact
                       testId="environments-empty"
                       icon={Layers}
-                      title="No environments"
-                      description="Environments you can see that run on this cluster will appear here."
+                      title={t("detail.environments.emptyTitle")}
+                      description={t("detail.environments.emptyDescription")}
                     />
                   )}
                 </Panel>

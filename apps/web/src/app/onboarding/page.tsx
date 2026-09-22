@@ -42,10 +42,10 @@ import {
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   MISSING_INPUT_LABELS,
   WIZARD_STEPS,
-  formatAge,
   shortSha,
   type GitHubStatus,
   type OnboardingSession,
@@ -53,32 +53,41 @@ import {
 } from "@/lib/onboarding";
 import { useSession } from "@/lib/session";
 
-const STEP_HINTS: Record<(typeof WIZARD_STEPS)[number], string> = {
-  "Integration status": "GitHub App ready",
-  Repository: "Pick one to onboard",
-  "Safe discovery": "Metadata files only",
-  "Detected structure": "What Drake found",
-  Review: "Item by item",
-  Approval: "This exact plan",
-  Result: "Written to the catalog",
+/** `WIZARD_STEPS` (the English source the tests name) → catalogue keys. */
+const STEP_KEYS: Record<
+  (typeof WIZARD_STEPS)[number],
+  | "integrationStatus"
+  | "repository"
+  | "safeDiscovery"
+  | "detectedStructure"
+  | "review"
+  | "approval"
+  | "result"
+> = {
+  "Integration status": "integrationStatus",
+  Repository: "repository",
+  "Safe discovery": "safeDiscovery",
+  "Detected structure": "detectedStructure",
+  Review: "review",
+  Approval: "approval",
+  Result: "result",
 };
 
 function HowItWorks({ status }: { status: GitHubStatus | null }) {
+  const t = useT("onboarding");
   const configured = status?.configuration_state === "configured";
   const notConfigured = status?.configuration_state === "not_configured";
-  const steps = WIZARD_STEPS.map((label, index) => {
+  const steps = WIZARD_STEPS.map((step, index) => {
     let state: StepStatus = "upcoming";
     if (index === 0)
       state = configured ? "done" : notConfigured ? "blocked" : "current";
     if (index === 1 && configured) state = "current";
-    return { label, status: state, hint: STEP_HINTS[label] };
+    const key = STEP_KEYS[step];
+    return { label: t(`step.${key}`), status: state, hint: t(`stepHint.${key}`) };
   });
   return (
     <Panel>
-      <PanelHeader
-        title="How this works"
-        description="Seven steps from a repository to a catalog project. Nothing changes before approval."
-      />
+      <PanelHeader title={t("how.title")} description={t("how.description")} />
       <div className="overflow-x-auto">
         <div className="min-w-[44rem]">
           <Stepper steps={steps} data-testid="wizard-steps" />
@@ -86,25 +95,22 @@ function HowItWorks({ status }: { status: GitHubStatus | null }) {
       </div>
       <p className="flex items-center gap-3 rounded-full bg-surface-2 px-5 py-3 text-caption text-ink-secondary">
         <ShieldCheck aria-hidden className="h-4 w-4 shrink-0 text-healthy" />
-        <span>
-          Nothing in a repository is executed: no build, no install, no script,
-          no hook, no workflow. Drake reads an allowlist of metadata files at
-          one immutable commit.
-        </span>
+        <span>{t("how.nothingExecuted")}</span>
       </p>
     </Panel>
   );
 }
 
 function NotConfigured({ status }: { status: GitHubStatus }) {
+  const t = useT("onboarding");
   return (
     <Panel>
       <div data-testid="github-not-configured" className="flex flex-col gap-5">
         <StateCard
           kind="not-configured"
           icon={PlugZap}
-          title="GitHub is not configured"
-          description="Drake cannot read repositories. Nothing has been contacted, no token has been issued, and no repository list is being shown."
+          title={t("notConfigured.title")}
+          description={t("notConfigured.description")}
         >
           <ul className="flex flex-wrap justify-center gap-2">
             {status.missing_operator_inputs.map((key) => (
@@ -112,21 +118,20 @@ function NotConfigured({ status }: { status: GitHubStatus }) {
                 key={key}
                 className={`rounded-full px-3.5 py-1.5 text-caption ${toneSpec("warning").chip}`}
               >
-                {MISSING_INPUT_LABELS[key] ?? key}
+                {t.dyn("missingInput", key, MISSING_INPUT_LABELS[key] ?? key)}
               </li>
             ))}
           </ul>
         </StateCard>
-        <p className="text-center text-micro text-ink-muted">
-          An operator configures the App identity and its credential references
-          outside Drake. Drake never accepts a credential through this screen.
-        </p>
+        <p className="text-center text-micro text-ink-muted">{t("notConfigured.operatorNote")}</p>
       </div>
     </Panel>
   );
 }
 
 function IntegrationHealth({ status }: { status: GitHubStatus }) {
+  const t = useT("onboarding");
+  const fmt = useFormat();
   const pullRequests =
     status.gitops_pending + status.gitops_active + status.gitops_failed;
   return (
@@ -134,39 +139,42 @@ function IntegrationHealth({ status }: { status: GitHubStatus }) {
       <div className="page-grid" data-testid="integration-health">
         <KpiTile
           icon={FileWarning}
-          label="Need review"
+          label={t("health.needReview")}
           value={status.needs_review}
           tone="warning"
           part={status.needs_review}
           whole={status.sessions}
-          caption={`of ${status.sessions} session${status.sessions === 1 ? "" : "s"}`}
+          caption={t("health.ofSessions", { count: status.sessions })}
         />
         <KpiTile
           icon={PackageCheck}
-          label="Imported"
+          label={t("health.imported")}
           value={status.imported}
           tone="success"
           part={status.imported}
           whole={status.sessions}
-          caption={`of ${status.sessions} session${status.sessions === 1 ? "" : "s"}`}
+          caption={t("health.ofSessions", { count: status.sessions })}
         />
         <KpiTile
           icon={ScanSearch}
-          label="Partial analyses"
+          label={t("health.partialAnalyses")}
           value={status.analyses_truncated}
           tone="info"
           part={status.analyses_truncated}
           whole={status.analyses}
-          caption={`of ${status.analyses} analys${status.analyses === 1 ? "is" : "es"} · last ${formatAge(status.last_analyzed_at)}`}
+          caption={t("health.ofAnalyses", {
+            count: status.analyses,
+            when: fmt.relative(status.last_analyzed_at),
+          })}
         />
         <KpiTile
           icon={GitPullRequest}
-          label="Failed pull requests"
+          label={t("health.failedPullRequests")}
           value={status.gitops_failed}
           tone={status.gitops_failed > 0 ? "critical" : "neutral"}
           part={status.gitops_failed}
           whole={pullRequests}
-          caption={`of ${pullRequests} manifest pull request${pullRequests === 1 ? "" : "s"}`}
+          caption={t("health.ofPullRequests", { count: pullRequests })}
         />
       </div>
       {status.gitops_pr_enabled ? null : (
@@ -178,8 +186,7 @@ function IntegrationHealth({ status }: { status: GitHubStatus }) {
             aria-hidden
             className="h-4 w-4 shrink-0 text-ink-muted"
           />
-          GitOps pull requests are switched off. Drake will not write to any
-          repository.
+          {t("health.gitopsOff")}
         </p>
       )}
     </div>
@@ -188,23 +195,22 @@ function IntegrationHealth({ status }: { status: GitHubStatus }) {
 
 /** Where the sessions are, as bars against the session total. */
 function Pipeline({ status }: { status: GitHubStatus }) {
+  const t = useT("onboarding");
+  // Each row is a session state, so it wears the state's own label.
   const rows: { label: string; count: number; tone: StatusTone }[] = [
-    { label: "Needs review", count: status.needs_review, tone: "warning" },
-    { label: "Ready to approve", count: status.ready, tone: "info" },
-    { label: "Imported", count: status.imported, tone: "success" },
-    { label: "Stale", count: status.stale, tone: "stale" },
+    { label: t("session.needs_review"), count: status.needs_review, tone: "warning" },
+    { label: t("session.ready"), count: status.ready, tone: "info" },
+    { label: t("session.imported"), count: status.imported, tone: "success" },
+    { label: t("session.stale"), count: status.stale, tone: "stale" },
     {
-      label: "GitHub unavailable",
+      label: t("session.provider_unavailable"),
       count: status.provider_unavailable,
       tone: "unknown",
     },
   ];
   return (
     <Panel className="h-full">
-      <PanelHeader
-        title="Session pipeline"
-        description="Where the sessions in your scope stand."
-      />
+      <PanelHeader title={t("pipeline.title")} description={t("pipeline.description")} />
       <p className="flex items-baseline gap-2">
         <span
           data-tabular
@@ -212,7 +218,7 @@ function Pipeline({ status }: { status: GitHubStatus }) {
         >
           {status.sessions}
         </span>
-        <span className="text-caption text-ink-muted">sessions</span>
+        <span className="text-caption text-ink-muted">{t("pipeline.sessions")}</span>
       </p>
       <ul className="flex flex-col gap-4">
         {rows.map((row) => {
@@ -248,13 +254,13 @@ function Pipeline({ status }: { status: GitHubStatus }) {
       </ul>
       <div className="mt-auto grid grid-cols-2 gap-3">
         <div className="rounded-2xl bg-surface-2 px-4 py-3">
-          <p className="text-micro text-ink-muted">Analyses</p>
+          <p className="text-micro text-ink-muted">{t("pipeline.analyses")}</p>
           <p data-tabular className="mt-1 text-title font-semibold text-ink">
             {status.analyses}
           </p>
         </div>
         <div className="rounded-2xl bg-surface-2 px-4 py-3">
-          <p className="text-micro text-ink-muted">Analyses failed</p>
+          <p className="text-micro text-ink-muted">{t("pipeline.analysesFailed")}</p>
           <p data-tabular className="mt-1 text-title font-semibold text-ink">
             {status.analyses_failed}
           </p>
@@ -265,6 +271,8 @@ function Pipeline({ status }: { status: GitHubStatus }) {
 }
 
 function SessionRow({ session }: { session: OnboardingSession }) {
+  const t = useT("onboarding");
+  const fmt = useFormat();
   return (
     <li
       className="group relative flex flex-wrap items-center gap-x-5 gap-y-3 px-7 py-5 transition-colors hover:bg-surface-hover"
@@ -291,18 +299,21 @@ function SessionRow({ session }: { session: OnboardingSession }) {
       <div className="flex flex-wrap items-center gap-2">
         {session.plan ? (
           <>
-            <FactChip label="Plan">
-              v{session.plan.plan_version} · {session.plan.total_items} items
+            <FactChip label={t("row.plan")}>
+              {t("row.planSummary", {
+                version: session.plan.plan_version,
+                count: session.plan.total_items,
+              })}
             </FactChip>
             {session.plan.blocking_items > 0 ? (
-              <FactChip label="Decisions" tone="warning">
-                {session.plan.blocking_items} need review
+              <FactChip label={t("row.decisions")} tone="warning">
+                {t("row.needReview", { count: session.plan.blocking_items })}
               </FactChip>
             ) : null}
           </>
         ) : (
           <span className="rounded-full bg-surface-2 px-3 py-1 text-micro text-ink-muted italic">
-            not analysed
+            {t("row.notAnalysed")}
           </span>
         )}
         {session.imported_project_key ? (
@@ -317,7 +328,7 @@ function SessionRow({ session }: { session: OnboardingSession }) {
       <div className="flex shrink-0 flex-col items-end gap-1.5">
         <SessionBadge state={session.state} />
         <span className="text-micro text-ink-muted">
-          opened {formatAge(session.created_at)}
+          {t("row.opened", { when: fmt.relative(session.created_at) })}
         </span>
       </div>
       <ChevronRight
@@ -329,6 +340,7 @@ function SessionRow({ session }: { session: OnboardingSession }) {
 }
 
 function OnboardingInner() {
+  const t = useT("onboarding");
   const { state: auth } = useSession();
   const csrfToken = auth.status === "authenticated" ? auth.me.csrf_token : "";
   const [status, retryStatus] = useApi<GitHubStatus>(
@@ -343,11 +355,11 @@ function OnboardingInner() {
     <Panel flush>
       <PanelHeader
         flush
-        title="Sessions"
-        description="Every onboarding in your scope, newest first."
+        title={t("sessions.title")}
+        description={t("sessions.description")}
         meta={
           page.state === "ready" && page.data.items.length > 0 ? (
-            <span>{page.data.total} total</span>
+            <span>{t("sessions.total", { count: page.data.total })}</span>
           ) : null
         }
       />
@@ -369,8 +381,8 @@ function OnboardingInner() {
         <StateCard
           kind="empty"
           icon={Inbox}
-          title="No onboarding sessions"
-          description="Nothing in your scope is being onboarded. This is not a statement about which repositories exist."
+          title={t("sessions.empty.title")}
+          description={t("sessions.empty.description")}
         />
       ) : (
         <ul className="divide-y divide-border">
@@ -384,10 +396,7 @@ function OnboardingInner() {
 
   return (
     <PageFrame>
-      <PageHeader
-        title="Onboard a project"
-        description="Drake reads a repository statically, proposes a catalog change, and applies nothing until someone approves it."
-      />
+      <PageHeader title={t("page.title")} description={t("page.description")} />
       <div className="flex flex-col gap-6">
         <HowItWorks status={status.state === "ready" ? status.data : null} />
 
@@ -430,6 +439,7 @@ function OnboardingInner() {
 }
 
 function RetryButton({ onClick }: { onClick: () => void }) {
+  const t = useT("common");
   return (
     <button
       type="button"
@@ -437,7 +447,7 @@ function RetryButton({ onClick }: { onClick: () => void }) {
       className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
     >
       <RefreshCw aria-hidden className="h-3.5 w-3.5" />
-      Retry
+      {t("action.retry")}
     </button>
   );
 }

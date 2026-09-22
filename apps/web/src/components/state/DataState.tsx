@@ -24,6 +24,7 @@ import {
   StaleBanner,
   UnknownState,
 } from "@/components/ui/states";
+import { useT } from "@/lib/i18n";
 
 export type DataStateKind =
   | "loading"
@@ -67,6 +68,7 @@ export function DataState({
   lastSuccessAt?: string;
   onRetry?: () => void;
 }) {
+  const t = useT("ui");
   switch (kind) {
     case "loading":
       return <LoadingSkeleton rows={3} />;
@@ -87,7 +89,7 @@ export function DataState({
             0
           </span>{" "}
           <span className="text-caption text-ink-secondary">
-            {description ?? "The source reported an actual value of 0."}
+            {description ?? t("state.zero.description")}
           </span>
         </p>
       );
@@ -108,9 +110,8 @@ export function DataState({
             <Sigma className="h-4 w-4" />
           </span>
           <span className="min-w-0 pt-1">
-            <span className="font-semibold">Estimated.</span>{" "}
-            {description ??
-              "Derived from a documented estimation method, not an exact measurement."}
+            <span className="font-semibold">{t("state.estimated.lead")}</span>{" "}
+            {description ?? t("state.estimated.description")}
           </span>
         </p>
       );

@@ -36,13 +36,12 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
 import type { StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   SLO_EXPLANATIONS,
   SLO_LABELS,
-  formatAge,
   formatBudget,
   formatRatio,
-  formatWindow,
   sloListPath,
   type Page,
   type Slo,
@@ -78,6 +77,8 @@ const SLO_TONE: Record<SloStatus, StatusTone> = {
  * each with its own bar. The whole row opens the objective.
  */
 function SloRow({ slo }: { slo: Slo }) {
+  const t = useT("alerting");
+  const fmt = useFormat();
   const evaluation = slo.evaluation;
   const activeBurn = evaluation?.burn_rates.find((rate) => rate.active) ?? null;
   const tone: StatusTone = evaluation ? SLO_TONE[evaluation.status] : "unknown";
@@ -102,7 +103,7 @@ function SloRow({ slo }: { slo: Slo }) {
             /* Never "healthy" for something nobody has measured. */
             <StatusBadge
               status="unknown"
-              label="not evaluated"
+              label={t("sloList.row.notEvaluated")}
               size="compact"
             />
           )}
@@ -121,32 +122,34 @@ function SloRow({ slo }: { slo: Slo }) {
             {[slo.project_key, slo.environment_key, slo.service_key]
               .filter(Boolean)
               .join("/")}{" "}
-            · {slo.indicator}
+            · {t.dyn("indicator", slo.indicator, slo.indicator)}
           </span>
           <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
           <span className="text-caption text-ink-secondary">
-            Target {formatRatio(slo.objective_ratio)} over{" "}
-            {formatWindow(slo.window_seconds)}
+            {t("sloList.row.target", {
+              ratio: formatRatio(slo.objective_ratio),
+              window: fmt.duration(slo.window_seconds, { compact: true }),
+            })}
           </span>
-          {!activeBurn ? <span>not burning</span> : null}
-          <span>{evaluation ? formatAge(evaluation.evaluated_for) : "—"}</span>
+          {!activeBurn ? <span>{t("sloList.row.notBurning")}</span> : null}
+          <span>{evaluation ? fmt.relative(evaluation.evaluated_for) : "—"}</span>
         </div>
       </div>
       <div className="col-span-2 grid grid-cols-2 gap-6 lg:col-span-1 lg:w-80">
         <div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-micro text-ink-muted">compliance</span>
+            <span className="text-micro text-ink-muted">{t("sloList.row.compliance")}</span>
             <span data-tabular className="text-body font-semibold text-ink">
               {formatRatio(evaluation?.compliance_ratio ?? null)}
             </span>
           </div>
           <p className="mt-2 truncate text-micro text-ink-muted">
-            of {formatRatio(slo.objective_ratio)} target
+            {t("sloList.row.ofTarget", { ratio: formatRatio(slo.objective_ratio) })}
           </p>
         </div>
         <div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-micro text-ink-muted">budget left</span>
+            <span className="text-micro text-ink-muted">{t("sloList.row.budgetLeft")}</span>
             <span
               data-tabular
               className={`text-body font-semibold ${
@@ -168,6 +171,7 @@ function SloRow({ slo }: { slo: Slo }) {
 }
 
 function SloInner() {
+  const t = useT("alerting");
   const [status, setStatus] = useState<string>("");
   const [page, retry] = useApi<Page<Slo>>(sloListPath({ status }));
 
@@ -197,47 +201,47 @@ function SloInner() {
   return (
     <PageFrame>
       <PageHeader
-        title="Service objectives"
-        description="What was promised, what was measured, and how much room is left before the promise is broken."
+        title={t("sloList.title")}
+        description={t("sloList.description")}
       />
       <div className="flex flex-col gap-6">
         {page.state === "ready" ? (
           <div className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
             <KpiTile
               data-testid="alerting-kpi-meeting"
-              label="Meeting"
+              label={t("sloList.kpi.meeting")}
               value={meeting}
               icon={CircleCheck}
               tone="success"
               share={share(meeting)}
-              caption="within objective, not burning"
+              caption={t("sloList.kpi.meetingCaption")}
             />
             <KpiTile
               data-testid="alerting-kpi-burning-fast"
-              label="Burning fast"
+              label={t("sloList.kpi.burning")}
               value={burning}
               icon={Flame}
               tone="warning"
               share={share(burning)}
-              caption="budget going faster than allowed"
+              caption={t("sloList.kpi.burningCaption")}
             />
             <KpiTile
               data-testid="alerting-kpi-breached"
-              label="Breached"
+              label={t("sloList.kpi.breached")}
               value={breached}
               icon={XCircle}
               tone="critical"
               share={share(breached)}
-              caption="critical, exhausted or unreadable"
+              caption={t("sloList.kpi.breachedCaption")}
             />
             <KpiTile
               data-testid="alerting-kpi-never-measured"
-              label="Never measured"
+              label={t("sloList.kpi.neverMeasured")}
               value={neverMeasured}
               icon={HelpCircle}
               tone="unknown"
               share={share(neverMeasured)}
-              caption="not the same as meeting it"
+              caption={t("sloList.kpi.neverMeasuredCaption")}
             />
           </div>
         ) : null}
@@ -246,17 +250,17 @@ function SloInner() {
           data-testid="slo-filters"
           summary={
             page.state === "ready"
-              ? `${total} of ${page.data.total} shown`
+              ? t("sloList.shown", { shown: total, total: page.data.total })
               : undefined
           }
         >
           <PillSelect
-            label="State"
+            label={t("sloList.filter.state")}
             value={status}
-            placeholder="Any state"
+            placeholder={t("sloList.filter.anyState")}
             options={STATES.map((value) => ({
               value,
-              label: SLO_LABELS[value],
+              label: t.dyn("slo", value, SLO_LABELS[value]),
             }))}
             onChange={setStatus}
           />
@@ -271,8 +275,8 @@ function SloInner() {
               <CardTitle
                 flush
                 icon={Target}
-                title="Objectives"
-                description="Compliance and remaining budget, side by side"
+                title={t("sloList.heading.title")}
+                description={t("sloList.heading.description")}
               />
               {page.state === "loading" ? (
                 <StatePad>
@@ -293,11 +297,15 @@ function SloInner() {
               ) : total === 0 ? (
                 <EmptyHero
                   icon={Target}
-                  title="No objectives in scope"
-                  description="No service level objective is configured for anything you can see."
+                  title={t("sloList.empty.title")}
+                  description={t("sloList.empty.description")}
                 >
                   <FactPill>
-                    State · {status ? SLO_LABELS[status as SloStatus] : "any"}
+                    {t("sloList.empty.state", {
+                      value: status
+                        ? t.dyn("slo", status, SLO_LABELS[status as SloStatus])
+                        : t("sloList.empty.any"),
+                    })}
                   </FactPill>
                 </EmptyHero>
               ) : (
@@ -342,16 +350,18 @@ function SloInner() {
                           >
                             <span className="font-semibold text-ink">
                               {slo.display_name}
-                            </span>{" "}
-                            — {SLO_EXPLANATIONS[slo.evaluation!.status]}
+                            </span>
+                            {" — "}
+                            {t.dyn(
+                              "sloExplanation",
+                              slo.evaluation!.status,
+                              SLO_EXPLANATIONS[slo.evaluation!.status],
+                            )}
                           </p>
                         ))}
                       {items.some((slo) => slo.evaluation === null) ? (
                         <p className="text-caption text-ink-secondary">
-                          Objectives marked{" "}
-                          <span className="italic">not evaluated</span> have
-                          never been measured. That is not the same as meeting
-                          the target.
+                          {t("sloList.caveat.notEvaluated")}
                         </p>
                       ) : null}
                     </div>
@@ -372,19 +382,19 @@ function SloInner() {
               >
                 <CardTitle
                   icon={Target}
-                  title="By verdict"
-                  description="Objectives on this page"
+                  title={t("sloList.byVerdict.title")}
+                  description={t("sloList.byVerdict.description")}
                 />
                 <BreakdownRing
-                  label="Objectives on this page by verdict"
-                  centerCaption="objectives"
+                  label={t("sloList.byVerdict.ringLabel")}
+                  centerCaption={t("sloList.byVerdict.center")}
                   slices={[
-                    { name: "Meeting", value: meeting, tone: "success" },
-                    { name: "Burning fast", value: burning, tone: "warning" },
-                    { name: "Breached", value: breached, tone: "critical" },
-                    { name: "Stale", value: stale, tone: "stale" },
+                    { name: t("sloList.byVerdict.meeting"), value: meeting, tone: "success" },
+                    { name: t("sloList.byVerdict.burning"), value: burning, tone: "warning" },
+                    { name: t("sloList.byVerdict.breached"), value: breached, tone: "critical" },
+                    { name: t("sloList.byVerdict.stale"), value: stale, tone: "stale" },
                     {
-                      name: "Never measured",
+                      name: t("sloList.byVerdict.neverMeasured"),
                       value: neverMeasured,
                       tone: "unknown",
                     },

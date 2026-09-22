@@ -13,6 +13,8 @@
 import { X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef } from "react";
 
+import { useT } from "@/lib/i18n";
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -127,6 +129,7 @@ export function Drawer({
   footer?: React.ReactNode;
   width?: "md" | "lg";
 }) {
+  const common = useT("common");
   const titleId = useId();
   const close = useCallback(() => onClose(), [onClose]);
   const ref = useDismissable<HTMLDivElement>({ open, onClose: close });
@@ -157,7 +160,7 @@ export function Drawer({
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={common("action.close")}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-border text-ink-secondary transition-colors hover:bg-surface-hover"
           >
             <X className="h-4 w-4" aria-hidden />

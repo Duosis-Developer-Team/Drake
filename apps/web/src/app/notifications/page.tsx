@@ -38,8 +38,8 @@ import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { SegmentedControl } from "@/components/ui/controls";
 import { ApiError } from "@/lib/api";
-import { formatRelative, formatUtc } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   EVENT_TYPES,
@@ -74,6 +74,8 @@ function NotificationRow({
   onRead: (id: string) => void;
   busy: boolean;
 }) {
+  const t = useT("notifications");
+  const fmt = useFormat();
   const visual = EVENT_VISUAL[item.event_type] ?? {
     icon: BellRing,
     tone: "unknown" as StatusTone,
@@ -101,12 +103,12 @@ function NotificationRow({
         <p className="mt-0.5 text-caption text-ink-secondary">{item.body}</p>
         <p className="mt-2 flex flex-wrap items-center gap-2 text-micro text-ink-muted">
           <span className="rounded-full bg-surface-3 px-2 py-0.5 font-medium text-ink-secondary">
-            {EVENT_TYPE_LABELS[item.event_type]}
+            {t.dyn("eventType", item.event_type, EVENT_TYPE_LABELS[item.event_type])}
           </span>
-          <time dateTime={item.created_at} title={formatUtc(item.created_at)}>
-            {formatRelative(item.created_at)}
+          <time dateTime={item.created_at} title={fmt.utc(item.created_at)}>
+            {fmt.relative(item.created_at)}
           </time>
-          {item.read_at ? <span>· read</span> : null}
+          {item.read_at ? <span>· {t("inbox.row.read")}</span> : null}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2 self-center">
@@ -118,7 +120,7 @@ function NotificationRow({
             className={PILL_BUTTON}
           >
             <CheckCheck aria-hidden className="h-3.5 w-3.5" />
-            Mark read
+            {t("inbox.row.markRead")}
           </button>
         )}
         {/* Every listed row is one the reader may still open: the API
@@ -128,7 +130,7 @@ function NotificationRow({
           href={item.target_path}
           className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-caption font-medium text-ink-inverse hover:opacity-90"
         >
-          Open incident
+          {t("inbox.row.openIncident")}
           <ArrowRight aria-hidden className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -137,6 +139,8 @@ function NotificationRow({
 }
 
 export default function NotificationsPage() {
+  const t = useT("notifications");
+  const c = useT("common");
   const { state: session } = useSession();
   const csrfToken =
     session.status === "authenticated" ? session.me.csrf_token : null;
@@ -156,14 +160,14 @@ export default function NotificationsPage() {
         const denied = error instanceof ApiError && error.status === 403;
         setState({
           kind: "error",
-          message: error instanceof ApiError ? error.message : "request failed",
+          message: error instanceof ApiError ? error.message : c("state.error"),
           denied,
         });
       });
     return () => {
       cancelled = true;
     };
-  }, [unreadOnly]);
+  }, [unreadOnly, c]);
 
   useEffect(() => load(), [load]);
 
@@ -192,12 +196,12 @@ export default function NotificationsPage() {
   return (
     <PageFrame>
       <PageHeader
-        title="Notifications"
-        description="Incidents a notification policy routed to you. Drake writes every one of these."
+        title={t("inbox.title")}
+        description={t("inbox.description")}
         actions={
           <Link href="/notification-policies" className={PILL_BUTTON}>
             <Route aria-hidden className="h-3.5 w-3.5" />
-            Routing policies
+            {t("inbox.routingPolicies")}
           </Link>
         }
       />
@@ -207,42 +211,40 @@ export default function NotificationsPage() {
           <div className="page-grid" data-cols="3">
             <KpiTile
               icon={Inbox}
-              label={unreadOnly ? "Shown (unread view)" : "Shown"}
+              label={unreadOnly ? t("inbox.kpi.shownUnread") : t("inbox.kpi.shown")}
               value={total}
             >
-              <p className="text-micro text-ink-muted">
-                Most recent page of your inbox
-              </p>
+              <p className="text-micro text-ink-muted">{t("inbox.kpi.shownCaption")}</p>
             </KpiTile>
             <KpiTile
               icon={BellRing}
               tone={unreadCount > 0 ? "info" : undefined}
-              label="Unread"
+              label={t("inbox.kpi.unread")}
               value={unreadCount}
-              suffix={`of ${total}`}
+              suffix={t("inbox.kpi.of", { total })}
             >
               <ShareBar
                 value={unreadCount}
                 total={total}
                 tone="info"
-                label="still unread"
+                label={t("inbox.kpi.stillUnread")}
               />
             </KpiTile>
             <KpiTile
               icon={Siren}
               tone={byEvent[0].count > 0 ? "critical" : undefined}
-              label="Incidents opened"
+              label={t("inbox.kpi.opened")}
               value={byEvent[0].count}
             >
               <p className="text-micro text-ink-muted">
                 <span data-tabular className="font-medium text-ink-secondary">
                   {byEvent[2].count}
                 </span>{" "}
-                resolved ·{" "}
+                {t("inbox.kpi.resolved")} ·{" "}
                 <span data-tabular className="font-medium text-ink-secondary">
                   {byEvent[1].count}
                 </span>{" "}
-                acknowledged
+                {t("inbox.kpi.acknowledged")}
               </p>
             </KpiTile>
           </div>
@@ -250,12 +252,12 @@ export default function NotificationsPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SegmentedControl
-            label="View"
+            label={t("inbox.view.label")}
             value={unreadOnly ? "unread" : "all"}
             onChange={(value) => setUnreadOnly(value === "unread")}
             options={[
-              { value: "all", label: "All" },
-              { value: "unread", label: "Unread" },
+              { value: "all", label: t("inbox.view.all") },
+              { value: "unread", label: t("inbox.view.unread") },
             ]}
           />
           {unreadIds.length > 0 ? (
@@ -266,7 +268,7 @@ export default function NotificationsPage() {
               className={PILL_BUTTON}
             >
               <MailOpen aria-hidden className="h-3.5 w-3.5" />
-              Mark visible read
+              {t("inbox.markVisibleRead")}
             </button>
           ) : null}
         </div>
@@ -281,13 +283,13 @@ export default function NotificationsPage() {
             {state.denied ? (
               <StateCard
                 kind="permission-denied"
-                title="Permission required"
-                description="Your session cannot read notifications."
+                title={t("inbox.forbiddenTitle")}
+                description={t("inbox.forbiddenDescription")}
               />
             ) : (
               <StateCard
                 kind="error"
-                title="Could not load notifications"
+                title={t("inbox.errorTitle")}
                 description={state.message}
                 onRetry={load}
               />
@@ -299,11 +301,11 @@ export default function NotificationsPage() {
             <StateCard
               kind="empty"
               icon={BellOff}
-              title={unreadOnly ? "Nothing unread" : "No notifications"}
-              description="Drake sends these when an incident matches a policy you are a destination for."
+              title={unreadOnly ? t("inbox.emptyUnread") : t("inbox.empty")}
+              description={t("inbox.emptyDescription")}
               action={
                 <Link href="/notification-policies" className={PILL_BUTTON}>
-                  Review routing policies
+                  {t("inbox.reviewPolicies")}
                 </Link>
               }
             />
@@ -315,12 +317,8 @@ export default function NotificationsPage() {
               <Panel flush>
                 <PanelHeader
                   flush
-                  title="Inbox"
-                  meta={
-                    <span>
-                      {total} shown · {unreadCount} unread
-                    </span>
-                  }
+                  title={t("inbox.list.title")}
+                  meta={<span>{t("inbox.list.meta", { total, unread: unreadCount })}</span>}
                 />
                 <ul className="divide-y divide-border" data-testid="inbox-list">
                   {items.map((item) => (
@@ -337,13 +335,13 @@ export default function NotificationsPage() {
             <div className="page-aside">
               <Panel>
                 <PanelHeader
-                  title="By event"
-                  description="What the shown notifications were about"
+                  title={t("inbox.byEvent.title")}
+                  description={t("inbox.byEvent.description")}
                 />
                 <StackedBar
-                  label="Notifications by event"
+                  label={t("inbox.byEvent.chart")}
                   segments={byEvent.map(({ event, count }) => ({
-                    name: EVENT_TYPE_LABELS[event],
+                    name: t.dyn("eventType", event, EVENT_TYPE_LABELS[event]),
                     value: count,
                     tone: EVENT_VISUAL[event].tone,
                   }))}

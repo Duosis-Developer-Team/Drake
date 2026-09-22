@@ -26,10 +26,11 @@ import { HealthBadge } from "@/components/service-health/primitives";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api";
+import { useFormat, useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   acknowledgeIncident,
-  formatDuration,
+  durationSeconds,
   type IncidentDetail,
   type IncidentEvent,
 } from "@/lib/incidents";
@@ -41,6 +42,8 @@ type Notice =
   | { kind: "error"; message: string };
 
 export default function IncidentDetailPage() {
+  const t = useT("incidents");
+  const fmt = useFormat();
   const { incidentId } = useParams<{ incidentId: string }>();
   const [incident, retryIncident] = useApi<IncidentDetail>(`/v1/incidents/${incidentId}`);
   const [events, retryEvents] = useApi<{ events: IncidentEvent[] }>(
@@ -65,21 +68,20 @@ export default function IncidentDetailPage() {
       setNotice({
         kind: "done",
         message: result.changed
-          ? "Acknowledged. Monitoring continues — this incident closes only on a real recovery."
-          : "Already acknowledged.",
+          ? t("detail.notice.acknowledged")
+          : t("detail.notice.alreadyAcknowledged"),
       });
       refresh();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         setNotice({
           kind: "conflict",
-          message:
-            "This incident changed while you were looking at it — someone else acted on it. Refresh to see the current state before trying again.",
+          message: t("detail.notice.conflict"),
         });
       } else {
         setNotice({
           kind: "error",
-          message: error instanceof ApiError ? error.message : "request failed",
+          message: error instanceof ApiError ? error.message : t("detail.notice.requestFailed"),
         });
       }
     } finally {
@@ -105,7 +107,7 @@ export default function IncidentDetailPage() {
                 meta={
                   <>
                     <Link href="/incidents" className="hover:text-ink">
-                      Incidents
+                      {t("detail.back")}
                     </Link>
                     <span className="font-mono">
                       {detail.project_key}/{detail.environment_key}/{detail.service_key}
@@ -124,7 +126,9 @@ export default function IncidentDetailPage() {
                       onClick={() => acknowledge(detail)}
                       className="rounded-full bg-accent px-5 py-2.5 text-body font-medium text-ink-inverse transition-opacity disabled:opacity-50"
                     >
-                      {detail.state === "acknowledged" ? "Acknowledged" : "Acknowledge"}
+                      {detail.state === "acknowledged"
+                        ? t("detail.acknowledged")
+                        : t("detail.acknowledge")}
                     </button>
                   ) : undefined
                 }
@@ -135,7 +139,7 @@ export default function IncidentDetailPage() {
                   <Panel tone="critical">
                     <DataState
                       kind="error"
-                      title="Version conflict"
+                      title={t("detail.notice.conflictTitle")}
                       description={notice.message}
                       onRetry={refresh}
                     />
@@ -163,7 +167,7 @@ export default function IncidentDetailPage() {
                 <Panel>
                   <DataState
                     kind="permission-denied"
-                    description="Acknowledging an incident needs incident.ack in this scope."
+                    description={t("detail.ackForbidden")}
                   />
                 </Panel>
               ) : null}
@@ -173,8 +177,8 @@ export default function IncidentDetailPage() {
                 data-testid="incident-lifecycle-panel"
               >
                 <PanelHeader
-                  title="Lifecycle"
-                  description="Opened, acknowledged, resolved — as Drake recorded it, one honest timestamp at a time."
+                  title={t("detail.lifecycle.title")}
+                  description={t("detail.lifecycle.description")}
                 />
                 <IncidentLifecycle
                   openedAt={detail.opened_at}
@@ -183,28 +187,28 @@ export default function IncidentDetailPage() {
                 />
                 <p className="text-micro text-ink-muted">
                   {active
-                    ? "Acknowledging does not close the incident. It resolves on its own after two consecutive healthy evaluations."
-                    : "Resolved — see below for how."}
+                    ? t("detail.lifecycle.activeNote")
+                    : t("detail.lifecycle.resolvedNote")}
                 </p>
               </Panel>
 
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
                   <PanelHeader
-                    title="Why it opened"
-                    description="Opened after two consecutive trustworthy critical evaluations. A partial, stale, or last-known reading is never one of them."
+                    title={t("detail.why.title")}
+                    description={t("detail.why.description")}
                   />
                   <ReasonList reasons={detail.opening_reasons} />
                 </Panel>
 
                 <Panel className="motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards] [animation-delay:40ms]">
-                  <PanelHeader title="Current health" />
+                  <PanelHeader title={t("detail.health.title")} />
                   {detail.current_health ? (
                     <div className="space-y-3">
                       <HealthBadge status={detail.current_health.status} />
                       <ReasonList reasons={detail.current_health.reasons} />
                       <p className="text-micro text-ink-muted">
-                        Last observed{" "}
+                        {t("detail.health.lastObserved")}{" "}
                         <time className="font-mono">
                           {detail.current_health.last_observed_at ?? "—"}
                         </time>
@@ -213,13 +217,13 @@ export default function IncidentDetailPage() {
                         href={`/service-health/${detail.binding.id}`}
                         className="inline-block text-caption font-medium text-ink-secondary underline hover:text-ink"
                       >
-                        Open service health
+                        {t("detail.health.open")}
                       </Link>
                     </div>
                   ) : (
                     <DataState
                       kind="unknown"
-                      description="No health state has been recorded for this binding yet."
+                      description={t("detail.health.none")}
                     />
                   )}
                 </Panel>
@@ -231,8 +235,8 @@ export default function IncidentDetailPage() {
               >
                 <PanelHeader
                   flush
-                  title="Lifecycle events"
-                  description="Append-only. Nothing on this screen edits or removes an entry."
+                  title={t("detail.events.title")}
+                  description={t("detail.events.description")}
                 />
                 <div className="px-7 py-5">
                   <LoadGate value={events} retry={retryEvents}>
@@ -245,26 +249,26 @@ export default function IncidentDetailPage() {
                 flush
                 className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
               >
-                <PanelHeader flush title="Workload & timing" />
+                <PanelHeader flush title={t("detail.timing.title")} />
                 <dl className="divide-y divide-border px-7 pb-2">
-                  <MetaRow label="Workload">
+                  <MetaRow label={t("detail.timing.workload")}>
                     <span className="font-mono text-xs">
                       {detail.binding.cluster_ref}/{detail.binding.namespace}/
                       {detail.binding.workload_kind}/{detail.binding.workload_name}
                     </span>
                   </MetaRow>
-                  <MetaRow label="Opened">
+                  <MetaRow label={t("detail.timing.opened")}>
                     <span className="font-mono text-xs">{detail.opened_at}</span>
                   </MetaRow>
-                  <MetaRow label="Duration">
+                  <MetaRow label={t("detail.timing.duration")}>
                     <span className="font-mono text-xs">
-                      {formatDuration(detail.opened_at, detail.resolved_at)}
+                      {fmt.duration(durationSeconds(detail.opened_at, detail.resolved_at))}
                     </span>
                   </MetaRow>
-                  <MetaRow label="Last critical">
+                  <MetaRow label={t("detail.timing.lastCritical")}>
                     <span className="font-mono text-xs">{detail.last_critical_at}</span>
                   </MetaRow>
-                  <MetaRow label="Acknowledged">
+                  <MetaRow label={t("detail.timing.acknowledged")}>
                     <span className="text-xs">
                       {detail.acknowledged_at ? (
                         <>
@@ -274,21 +278,23 @@ export default function IncidentDetailPage() {
                             : null}
                         </>
                       ) : (
-                        <span className="italic text-ink-muted">not yet</span>
+                        <span className="italic text-ink-muted">{t("detail.timing.notYet")}</span>
                       )}
                     </span>
                   </MetaRow>
-                  <MetaRow label="Resolved">
+                  <MetaRow label={t("detail.timing.resolved")}>
                     <span className="text-xs">
                       {detail.resolved_at ? (
                         <>
                           <time className="font-mono">{detail.resolved_at}</time>
                           {detail.resolution_source === "health_recovered"
-                            ? " · health recovered"
+                            ? ` · ${t("detail.timing.healthRecovered")}`
                             : null}
                         </>
                       ) : (
-                        <span className="italic text-ink-muted">still active</span>
+                        <span className="italic text-ink-muted">
+                          {t("detail.timing.stillActive")}
+                        </span>
                       )}
                     </span>
                   </MetaRow>

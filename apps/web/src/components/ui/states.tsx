@@ -24,9 +24,9 @@
 
 import { Clock, PieChart, RefreshCw } from "lucide-react";
 
-import { formatRelative, formatUtc } from "@/lib/design/format";
 import type { StatusTone } from "@/lib/design/status";
 import { toneSpec } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 
 export type StateLayout = "inline" | "centered";
 
@@ -128,8 +128,8 @@ function StateBlock({
 }
 
 export function EmptyState({
-  title = "Nothing here yet",
-  description = "This collection has no entries in your authorized scope.",
+  title,
+  description,
   action,
   compact,
   layout,
@@ -140,12 +140,14 @@ export function EmptyState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   return (
     <StateBlock
       tone="neutral"
       testId="state-empty"
-      title={title}
-      description={description}
+      title={title ?? common("state.empty")}
+      description={description ?? t("state.empty.description")}
       compact={compact}
       layout={layout}
     >
@@ -156,7 +158,7 @@ export function EmptyState({
 
 export function NoDataState({
   title,
-  description = "The source answered for this window and returned no samples. This is not a value of zero.",
+  description,
   compact,
   layout,
 }: {
@@ -165,12 +167,13 @@ export function NoDataState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
   return (
     <StateBlock
       tone="neutral"
       testId="state-no-data"
-      title={title ?? "No data in this window"}
-      description={description}
+      title={title ?? t("state.noData.title")}
+      description={description ?? t("state.noData.description")}
       compact={compact}
       layout={layout}
     />
@@ -192,12 +195,14 @@ export function ErrorState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   return (
     <StateBlock
       tone="critical"
       testId="state-error"
-      title={title ?? "Query failed"}
-      description={description ?? "The request did not complete. This is not the same as empty."}
+      title={title ?? t("state.error.title")}
+      description={description ?? t("state.error.description")}
       compact={compact}
       layout={layout}
     >
@@ -210,12 +215,12 @@ export function ErrorState({
               className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-              Retry
+              {common("action.retry")}
             </button>
           ) : null}
           {correlationId ? (
             <span className="inline-flex h-6 items-center rounded-full bg-surface-2 px-2.5 font-mono text-micro text-ink-muted">
-              ref: {correlationId}
+              {t("state.error.ref", { id: correlationId })}
             </span>
           ) : null}
         </div>
@@ -226,7 +231,7 @@ export function ErrorState({
 
 export function DeniedState({
   title,
-  description = "Your current scope does not include this. Whether anything exists here is not disclosed.",
+  description,
   compact,
   layout,
 }: {
@@ -235,12 +240,13 @@ export function DeniedState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
   return (
     <StateBlock
       tone="denied"
       testId="state-permission-denied"
-      title={title ?? "Permission required"}
-      description={description}
+      title={title ?? t("state.denied.title")}
+      description={description ?? t("state.denied.description")}
       compact={compact}
       layout={layout}
     />
@@ -256,8 +262,8 @@ export function DeniedState({
  * hand that distinction straight back.
  */
 export function NotFoundState({
-  title = "Not found",
-  description = "This resource does not exist in your authorized scope.",
+  title,
+  description,
   compact,
   layout,
 }: {
@@ -266,12 +272,14 @@ export function NotFoundState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   return (
     <StateBlock
       tone="not-applicable"
       testId="state-not-found"
-      title={title}
-      description={description}
+      title={title ?? common("state.notFound")}
+      description={description ?? t("state.notFound.description")}
       compact={compact}
       layout={layout}
     />
@@ -280,7 +288,7 @@ export function NotFoundState({
 
 export function NotConfiguredState({
   title,
-  description = "No source has been connected for this yet.",
+  description,
   action,
   compact,
   layout,
@@ -291,12 +299,13 @@ export function NotConfiguredState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
   return (
     <StateBlock
       tone="not-applicable"
       testId="state-not-configured"
-      title={title ?? "Not configured"}
-      description={description}
+      title={title ?? t("state.notConfigured.title")}
+      description={description ?? t("state.notConfigured.description")}
       compact={compact}
       layout={layout}
     >
@@ -316,14 +325,14 @@ export function NotApplicableState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   return (
     <StateBlock
       tone="not-applicable"
       testId="state-not-applicable"
-      title={title ?? "Not applicable"}
-      description={
-        description ?? "This does not apply to this resource, so there is nothing to report."
-      }
+      title={title ?? common("state.notApplicable")}
+      description={description ?? t("state.notApplicable.description")}
       compact={compact}
       layout={layout}
     />
@@ -332,7 +341,7 @@ export function NotApplicableState({
 
 export function UnknownState({
   title,
-  description = "The state cannot be determined. It is reported as unknown rather than assumed.",
+  description,
   compact,
   layout,
 }: {
@@ -341,12 +350,14 @@ export function UnknownState({
   compact?: boolean;
   layout?: StateLayout;
 }) {
+  const t = useT("ui");
+  const common = useT("common");
   return (
     <StateBlock
       tone="unknown"
       testId="state-unknown"
-      title={title ?? "Unknown"}
-      description={description}
+      title={title ?? common("state.unknown")}
+      description={description ?? t("state.unknown.description")}
       compact={compact}
       layout={layout}
     />
@@ -368,6 +379,8 @@ export function StaleBanner({
   description?: React.ReactNode;
   source?: React.ReactNode;
 }) {
+  const t = useT("ui");
+  const fmt = useFormat();
   return (
     <div
       role="status"
@@ -381,25 +394,31 @@ export function StaleBanner({
         <Clock className="h-4 w-4" />
       </span>
       <span className="min-w-0 pt-1">
-        <span className="font-semibold">Last known values.</span>{" "}
-        {description ?? "The source has not refreshed in time, so these are not current."}
+        <span className="font-semibold">{t("state.stale.lead")}</span>{" "}
+        {description ?? t("state.stale.description")}
         {asOf ? (
           <>
             {" "}
-            Last successful update{" "}
+            {t("state.stale.lastUpdate")}{" "}
             <time dateTime={asOf} className="font-mono">
-              {formatUtc(asOf)}
+              {fmt.utc(asOf)}
             </time>{" "}
-            ({formatRelative(asOf)}).
+            ({fmt.relative(asOf)}).
           </>
         ) : null}
-        {source ? <> Source: {source}.</> : null}
+        {source ? (
+          <>
+            {" "}
+            {t("state.stale.source")} {source}.
+          </>
+        ) : null}
       </span>
     </div>
   );
 }
 
 export function PartialBanner({ description }: { description?: React.ReactNode }) {
+  const t = useT("ui");
   return (
     <div
       role="status"
@@ -413,8 +432,8 @@ export function PartialBanner({ description }: { description?: React.ReactNode }
         <PieChart className="h-4 w-4" />
       </span>
       <span className="min-w-0 pt-1">
-        <span className="font-semibold">Partial result.</span>{" "}
-        {description ?? "Part of the requested scope could not be read, so this does not cover all of it."}
+        <span className="font-semibold">{t("state.partial.lead")}</span>{" "}
+        {description ?? t("state.partial.description")}
       </span>
     </div>
   );
@@ -434,7 +453,7 @@ const BAR_HEIGHTS = [38, 52, 44, 66, 58, 72, 48, 62, 80, 56, 68, 46, 60, 74, 54,
 export function LoadingSkeleton({
   variant = "text",
   rows = 3,
-  label = "Loading",
+  label,
   height,
 }: {
   variant?: "text" | "table" | "chart" | "tiles";
@@ -443,9 +462,10 @@ export function LoadingSkeleton({
   /** Chart variant only: the height of the plot it stands in for. */
   height?: number;
 }) {
+  const common = useT("common");
   return (
     <div data-testid="state-loading" aria-busy="true" className="min-w-0">
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">{label ?? common("state.loading")}</span>
       {variant === "chart" ? (
         <div
           aria-hidden

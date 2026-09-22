@@ -46,11 +46,12 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
 import type { StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   INCIDENT_STATES,
   OPENED_WINDOWS,
   STATE_LABELS,
-  formatDuration,
+  durationSeconds,
   incidentListPath,
   type IncidentPage,
   type IncidentState,
@@ -73,6 +74,8 @@ const STATE_VISUAL: Record<
  * opened time and duration sit on the right. The whole row opens it.
  */
 function IncidentRow({ incident }: { incident: IncidentSummary }) {
+  const t = useT("incidents");
+  const fmt = useFormat();
   const visual = STATE_VISUAL[incident.state];
   return (
     <li
@@ -90,7 +93,7 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
           </Link>
           <StatusBadge
             status="critical"
-            label={incident.severity}
+            label={t.dyn("severity", incident.severity, incident.severity)}
             size="compact"
           />
           <IncidentStateBadge state={incident.state} />
@@ -107,7 +110,7 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
           </span>
           {incident.acknowledged_at ? (
             <span className="text-micro text-ink-muted">
-              acknowledged{" "}
+              {t("row.acknowledged")}{" "}
               <time className="font-mono">{incident.acknowledged_at}</time>
             </span>
           ) : null}
@@ -117,14 +120,14 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
         {incident.current_health ? (
           <HealthBadge status={incident.current_health.status} />
         ) : (
-          <span className="text-caption text-ink-muted">health unknown</span>
+          <span className="text-caption text-ink-muted">{t("row.healthUnknown")}</span>
         )}
         <div className="text-right text-micro leading-4 text-ink-muted">
           <div className="font-semibold text-ink-secondary" data-tabular>
-            {formatDuration(incident.opened_at, incident.resolved_at)}
+            {fmt.duration(durationSeconds(incident.opened_at, incident.resolved_at))}
           </div>
           <div>
-            opened <time className="font-mono">{incident.opened_at}</time>
+            {t("row.opened")} <time className="font-mono">{incident.opened_at}</time>
           </div>
         </div>
       </div>
@@ -134,34 +137,39 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
 
 /** The lifecycle rule the header used to spell out, as three small steps. */
 function LifecycleRule() {
+  const t = useT("incidents");
   const steps: {
+    key: string;
     icon: LucideIcon;
     tone: StatusTone;
     title: string;
     detail: string;
   }[] = [
     {
+      key: "opens",
       icon: Siren,
       tone: "critical",
-      title: "Opens",
-      detail: "after two consecutive trustworthy critical evaluations",
+      title: t("list.lifecycle.opens"),
+      detail: t("list.lifecycle.opensDetail"),
     },
     {
+      key: "acknowledged",
       icon: Eye,
       tone: "warning",
-      title: "Acknowledged",
-      detail: "someone is on it — monitoring continues",
+      title: t("list.lifecycle.acknowledged"),
+      detail: t("list.lifecycle.acknowledgedDetail"),
     },
     {
+      key: "closes",
       icon: HeartPulse,
       tone: "success",
-      title: "Closes",
-      detail: "on its own when the service reports healthy twice",
+      title: t("list.lifecycle.closes"),
+      detail: t("list.lifecycle.closesDetail"),
     },
   ];
   return (
     <Panel>
-      <CardTitle icon={Layers} title="How incidents move" />
+      <CardTitle icon={Layers} title={t("list.lifecycle.title")} />
       <ol className="relative space-y-5">
         <span
           aria-hidden
@@ -170,7 +178,7 @@ function LifecycleRule() {
         {steps.map((step) => {
           const Icon = step.icon;
           return (
-            <li key={step.title} className="relative flex items-start gap-3.5">
+            <li key={step.key} className="relative flex items-start gap-3.5">
               <RowBubble icon={Icon} tone={step.tone} />
               <div className="min-w-0 pt-0.5">
                 <p className="text-caption font-semibold text-ink">
@@ -183,13 +191,14 @@ function LifecycleRule() {
         })}
       </ol>
       <p className="rounded-2xl bg-surface-2 px-4 py-3 text-micro text-ink-secondary">
-        A datasource outage never opens an incident.
+        {t("list.lifecycle.note")}
       </p>
     </Panel>
   );
 }
 
 function IncidentTable() {
+  const t = useT("incidents");
   const params = useSearchParams();
   const [state, setState] = useState<IncidentState | "">(
     (params.get("state") as IncidentState) ?? "",
@@ -218,32 +227,35 @@ function IncidentTable() {
     <Toolbar
       summary={
         page.state === "ready"
-          ? `${total} of ${page.data.total} shown`
+          ? t("list.shown", { shown: total, total: page.data.total })
           : undefined
       }
     >
       <PillSelect
-        label="State"
+        label={t("list.filter.state")}
         value={state}
-        placeholder="Any"
+        placeholder={t("list.filter.any")}
         options={INCIDENT_STATES.map((value) => ({
           value,
-          label: STATE_LABELS[value],
+          label: t.dyn("state", value, STATE_LABELS[value]),
         }))}
         onChange={(value) => setState(value as IncidentState | "")}
       />
       <PillSelect
-        label="Severity"
+        label={t("list.filter.severity")}
         value={severity}
-        placeholder="Any"
-        options={[{ value: "critical" as const, label: "critical" }]}
+        placeholder={t("list.filter.any")}
+        options={[{ value: "critical" as const, label: t("severity.critical") }]}
         onChange={(value) => setSeverity(value as "critical" | "")}
       />
       <PillSelect
-        label="Opened within"
+        label={t("list.filter.openedWithin")}
         value={openedWithin}
-        placeholder="Any time"
-        options={OPENED_WINDOWS.map((value) => ({ value, label: value }))}
+        placeholder={t("list.filter.anyTime")}
+        options={OPENED_WINDOWS.map((value) => ({
+          value,
+          label: t.dyn("window", value, value),
+        }))}
         onChange={(value) => setOpenedWithin(value as OpenedWindow | "")}
       />
     </Toolbar>
@@ -258,39 +270,39 @@ function IncidentTable() {
         >
           <KpiTile
             data-testid="incident-kpi-open"
-            label="Open"
+            label={t("list.kpi.open")}
             value={openCount}
             icon={Siren}
             tone="critical"
             share={total > 0 ? openCount / total : null}
-            caption="nobody has acknowledged yet"
+            caption={t("list.kpi.openCaption")}
           />
           <KpiTile
             data-testid="incident-kpi-acknowledged"
-            label="Acknowledged"
+            label={t("list.kpi.acknowledged")}
             value={ackCount}
             icon={Eye}
             tone="warning"
             share={total > 0 ? ackCount / total : null}
-            caption="someone is on it"
+            caption={t("list.kpi.acknowledgedCaption")}
           />
           <KpiTile
             data-testid="incident-kpi-resolved"
-            label="Resolved"
+            label={t("list.kpi.resolved")}
             value={resolvedCount}
             icon={CheckCircle2}
             tone="success"
             share={total > 0 ? resolvedCount / total : null}
-            caption="closed on a real recovery"
+            caption={t("list.kpi.resolvedCaption")}
           />
           <KpiTile
             data-testid="incident-kpi-shown"
-            label="Shown"
+            label={t("list.kpi.shown")}
             value={total}
             icon={Inbox}
             tone="info"
             share={page.data.total > 0 ? total / page.data.total : null}
-            caption={`of ${page.data.total} in your authorized scope`}
+            caption={t("list.kpi.shownCaption", { total: page.data.total })}
           />
         </div>
       ) : null}
@@ -306,8 +318,8 @@ function IncidentTable() {
             <CardTitle
               flush
               icon={Siren}
-              title="Incident queue"
-              description="Worst first, as the processor recorded them"
+              title={t("list.queue.title")}
+              description={t("list.queue.description")}
             />
             {page.state === "loading" ? (
               <StatePad>
@@ -321,7 +333,7 @@ function IncidentTable() {
                 {page.notFound ? (
                   <DataState
                     kind="permission-denied"
-                    description="Your current scope does not include incidents."
+                    description={t("list.forbidden")}
                   />
                 ) : (
                   <DataState
@@ -335,14 +347,26 @@ function IncidentTable() {
             {page.state === "ready" && total === 0 ? (
               <EmptyHero
                 icon={Inbox}
-                title="No incidents"
-                description="Nothing matches these filters in your authorized scope."
+                title={t("list.empty.title")}
+                description={t("list.empty.description")}
               >
                 <FactPill>
-                  State · {state ? STATE_LABELS[state] : "any"}
+                  {t("list.empty.state", {
+                    value: state ? t.dyn("state", state, STATE_LABELS[state]) : t("list.empty.any"),
+                  })}
                 </FactPill>
-                <FactPill>Severity · {severity || "any"}</FactPill>
-                <FactPill>Opened · {openedWithin || "any time"}</FactPill>
+                <FactPill>
+                  {t("list.empty.severity", {
+                    value: severity ? t("severity.critical") : t("list.empty.any"),
+                  })}
+                </FactPill>
+                <FactPill>
+                  {t("list.empty.opened", {
+                    value: openedWithin
+                      ? t.dyn("window", openedWithin, openedWithin)
+                      : t("list.empty.anyTime"),
+                  })}
+                </FactPill>
               </EmptyHero>
             ) : null}
             {page.state === "ready" && total > 0 ? (
@@ -356,8 +380,7 @@ function IncidentTable() {
                   ))}
                 </ul>
                 <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
-                  Showing {items.length} of {page.data.total} incidents in your
-                  authorized scope.
+                  {t("list.footer", { shown: items.length, total: page.data.total })}
                 </p>
               </>
             ) : null}
@@ -369,16 +392,16 @@ function IncidentTable() {
             <Panel className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
               <CardTitle
                 icon={Activity}
-                title="By state"
-                description="Incidents on this page"
+                title={t("list.byState.title")}
+                description={t("list.byState.description")}
               />
               <BreakdownRing
-                label="Incidents on this page by state"
-                centerCaption="on this page"
+                label={t("list.byState.ringLabel")}
+                centerCaption={t("list.byState.center")}
                 slices={[
-                  { name: "Open", value: openCount, tone: "critical" },
-                  { name: "Acknowledged", value: ackCount, tone: "warning" },
-                  { name: "Resolved", value: resolvedCount, tone: "success" },
+                  { name: t("state.open"), value: openCount, tone: "critical" },
+                  { name: t("state.acknowledged"), value: ackCount, tone: "warning" },
+                  { name: t("state.resolved"), value: resolvedCount, tone: "success" },
                 ]}
               />
             </Panel>
@@ -391,11 +414,12 @@ function IncidentTable() {
 }
 
 export default function IncidentsPage() {
+  const t = useT("incidents");
   return (
     <PageFrame>
       <PageHeader
-        title="Incidents"
-        description="Opened and closed by Drake from trustworthy health evaluations — never by a datasource outage."
+        title={t("list.title")}
+        description={t("list.description")}
       />
       <Suspense fallback={<DataState kind="loading" />}>
         <IncidentTable />

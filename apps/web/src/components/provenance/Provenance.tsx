@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Provenance footer for data cards.
  *
@@ -6,6 +8,8 @@
  * Missing values render as an explicit "not configured" — never hidden and
  * never silently defaulted.
  */
+import { useT } from "@/lib/i18n";
+
 export interface ProvenanceInfo {
   source?: string;
   asOf?: string;
@@ -15,16 +19,18 @@ export interface ProvenanceInfo {
   confidence?: "exact" | "estimated" | "partial" | "unknown";
 }
 
-const FIELDS: { key: keyof ProvenanceInfo; label: string }[] = [
-  { key: "source", label: "Source" },
-  { key: "asOf", label: "As of" },
-  { key: "freshness", label: "Freshness" },
-  { key: "scope", label: "Scope" },
-  { key: "measurementMethod", label: "Method" },
-  { key: "confidence", label: "Confidence" },
-];
+/** Field → its `ui.provenance.*` label key. */
+const FIELDS = [
+  { key: "source", label: "provenance.source" },
+  { key: "asOf", label: "provenance.asOf" }, // i18n-ignore: a catalogue key, not copy
+  { key: "freshness", label: "provenance.freshness" },
+  { key: "scope", label: "provenance.scope" },
+  { key: "measurementMethod", label: "provenance.method" },
+  { key: "confidence", label: "provenance.confidence" },
+] as const satisfies readonly { key: keyof ProvenanceInfo; label: string }[];
 
 export function Provenance(props: ProvenanceInfo) {
+  const t = useT("ui");
   return (
     <dl
       data-testid="provenance"
@@ -34,8 +40,10 @@ export function Provenance(props: ProvenanceInfo) {
         const value = props[key];
         return (
           <div key={key} className="flex items-baseline gap-1">
-            <dt className="font-medium">{label}:</dt>
-            <dd className={value ? "font-mono" : "italic"}>{value ?? "not configured"}</dd>
+            <dt className="font-medium">{t(label)}:</dt>
+            <dd className={value ? "font-mono" : "italic"}>
+              {value ?? t("provenance.notConfigured")}
+            </dd>
           </div>
         );
       })}

@@ -20,6 +20,7 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet, apiMutate } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 interface Grant {
@@ -54,6 +55,8 @@ type Loadable<T> =
   | { state: "ready"; data: T };
 
 export function GrantsPanel() {
+  const t = useT("admin");
+  const common = useT("common");
   const { state: session } = useSession();
   const csrf = session.status === "authenticated" ? session.me.csrf_token : "";
   const [grants, setGrants] = useState<Loadable<Grant[]>>({ state: "loading" });
@@ -80,11 +83,11 @@ export function GrantsPanel() {
       setOptions({ state: "ready", data: optionsBody });
     } catch (error) {
       const message =
-        error instanceof ApiError ? error.message : "request failed";
+        error instanceof ApiError ? error.message : t("error.request");
       setGrants({ state: "error", message });
       setOptions({ state: "error", message });
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -100,7 +103,7 @@ export function GrantsPanel() {
       await load();
     } catch (error) {
       setActionError(
-        error instanceof ApiError ? error.message : "revoke failed",
+        error instanceof ApiError ? error.message : t("error.revoke"),
       );
     }
   };
@@ -119,36 +122,33 @@ export function GrantsPanel() {
     <div className="space-y-6">
       {grants.state === "ready" ? (
         <div className="page-grid" data-cols="3">
-          <KpiTile icon={KeyRound} label="Grants" value={grantList.length}>
+          <KpiTile icon={KeyRound} label={t("grants.kpi.grants")} value={grantList.length}>
             <p className="text-micro text-ink-muted">
-              Every grant you may manage
+              {t("grants.kpi.grantsCaption")}
             </p>
           </KpiTile>
           <KpiTile
             icon={CircleCheck}
             tone="success"
-            label="Active"
+            label={t("grants.kpi.active")}
             value={activeGrants}
-            suffix={`of ${grantList.length}`}
+            suffix={t("grants.kpi.ofTotal", { total: grantList.length })}
           >
             <ShareBar
               value={activeGrants}
               total={grantList.length}
               tone="success"
-              label="currently in force"
+              label={t("grants.kpi.inForce")}
             />
           </KpiTile>
           <KpiTile
             icon={Users}
             tone="info"
-            label="Principals"
+            label={t("grants.kpi.principals")}
             value={principals}
           >
-            <p className="text-micro text-ink-muted">
-              <span data-tabular className="font-medium text-ink-secondary">
-                {grantList.length - activeGrants}
-              </span>{" "}
-              revoked grants kept for the record
+            <p data-tabular className="text-micro text-ink-muted">
+              {t("grants.kpi.revokedKept", { count: grantList.length - activeGrants })}
             </p>
           </KpiTile>
         </div>
@@ -159,8 +159,8 @@ export function GrantsPanel() {
           <Panel flush>
             <PanelHeader
               flush
-              title="Scoped grants"
-              description="Who holds which role, where"
+              title={t("grants.list.title")}
+              description={t("grants.list.description")}
             />
             {grants.state === "loading" ? (
               <div className="px-7 py-5">
@@ -180,8 +180,8 @@ export function GrantsPanel() {
               <StateCard
                 kind="empty"
                 icon={KeyRound}
-                title="No grants in your scope"
-                description="Grants you are allowed to manage will appear here."
+                title={t("grants.list.emptyTitle")}
+                description={t("grants.list.emptyDescription")}
               />
             ) : null}
             {actionError ? (
@@ -197,11 +197,11 @@ export function GrantsPanel() {
                 <table className="w-full text-left" data-testid="grant-table">
                   <thead>
                     <tr className={`border-b border-border ${TABLE_HEAD}`}>
-                      <th className="h-11 pr-3 pl-7 font-medium">Principal</th>
-                      <th className="h-11 px-3 font-medium">Role</th>
-                      <th className="h-11 px-3 font-medium">Scope</th>
-                      <th className="h-11 px-3 font-medium">Status</th>
-                      <th className="h-11 pr-7 pl-3" aria-label="Actions" />
+                      <th className="h-11 pr-3 pl-7 font-medium">{t("grants.list.principal")}</th>
+                      <th className="h-11 px-3 font-medium">{t("grants.list.role")}</th>
+                      <th className="h-11 px-3 font-medium">{t("grants.list.scope")}</th>
+                      <th className="h-11 px-3 font-medium">{t("grants.list.status")}</th>
+                      <th className="h-11 pr-7 pl-3" aria-label={common("field.actions")} />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -223,7 +223,7 @@ export function GrantsPanel() {
                                 </span>
                                 {grant.group_display ? (
                                   <span className="block text-micro text-ink-muted">
-                                    group
+                                    {t("grants.list.group")}
                                   </span>
                                 ) : null}
                               </span>
@@ -242,7 +242,7 @@ export function GrantsPanel() {
                           <td className="px-3">
                             <StatusBadge
                               status={active ? "healthy" : "unknown"}
-                              label={active ? "active" : "revoked"}
+                              label={active ? t("grants.list.active") : t("grants.list.revoked")}
                             />
                           </td>
                           <td className="pr-7 pl-3 text-right">
@@ -252,7 +252,7 @@ export function GrantsPanel() {
                                 onClick={() => void revoke(grant)}
                                 className={PILL_BUTTON}
                               >
-                                Revoke
+                                {t("grants.list.revoke")}
                               </button>
                             ) : null}
                           </td>
@@ -289,6 +289,7 @@ function CreateGrantForm({
   csrf: string;
   onCreated: () => Promise<void>;
 }) {
+  const t = useT("admin");
   const [principalType, setPrincipalType] = useState<"identity" | "group">(
     "identity",
   );
@@ -325,11 +326,11 @@ function CreateGrantForm({
     setSuccess(null);
 
     if (!principalId || !roleId || !scopeId) {
-      setFormError("Principal, role, and scope are required.");
+      setFormError(t("grants.form.requiredError"));
       return;
     }
     if (validFrom && validTo && new Date(validTo) <= new Date(validFrom)) {
-      setFormError("Valid-to must be after valid-from.");
+      setFormError(t("grants.form.intervalError"));
       return;
     }
 
@@ -346,14 +347,14 @@ function CreateGrantForm({
           valid_to: validTo ? new Date(validTo).toISOString() : null,
         },
       });
-      setSuccess("Grant created.");
+      setSuccess(t("grants.form.created"));
       setPrincipalId("");
       setRoleId("");
       setValidFrom("");
       setValidTo("");
       await onCreated();
     } catch (error) {
-      setFormError(error instanceof ApiError ? error.message : "create failed");
+      setFormError(error instanceof ApiError ? error.message : t("error.create"));
     } finally {
       setSubmitting(false);
     }
@@ -365,8 +366,8 @@ function CreateGrantForm({
   return (
     <Panel>
       <PanelHeader
-        title="Create grant"
-        description="Give a principal a role at one scope"
+        title={t("grants.form.title")}
+        description={t("grants.form.description")}
         actions={<IconBubble icon={Plus} size="sm" />}
       />
       <form
@@ -375,7 +376,7 @@ function CreateGrantForm({
         className="grid grid-cols-1 gap-4 @min-[36rem]/page:grid-cols-2 @min-[60rem]/page:grid-cols-1"
       >
         <fieldset>
-          <legend className={labelClass}>Principal type</legend>
+          <legend className={labelClass}>{t("grants.form.principalType")}</legend>
           <div className="grid grid-cols-2 gap-1 rounded-full border border-border bg-surface-2 p-1">
             {(["identity", "group"] as const).map((type) => (
               <label
@@ -396,7 +397,7 @@ function CreateGrantForm({
                   }}
                   className="sr-only"
                 />
-                {type === "identity" ? "Identity" : "Mapped group"}
+                {type === "identity" ? t("grants.form.identity") : t("grants.form.mappedGroup")}
               </label>
             ))}
           </div>
@@ -404,7 +405,7 @@ function CreateGrantForm({
 
         <div>
           <label htmlFor="grant-principal" className={labelClass}>
-            {principalType === "identity" ? "Identity" : "Group mapping"}
+            {principalType === "identity" ? t("grants.form.identity") : t("grants.form.groupMapping")}
           </label>
           <select
             id="grant-principal"
@@ -412,7 +413,7 @@ function CreateGrantForm({
             onChange={(event) => setPrincipalId(event.target.value)}
             className={selectClass}
           >
-            <option value="">Select…</option>
+            <option value="">{t("grants.form.select")}</option>
             {principals.map((principal) => (
               <option key={principal.id} value={principal.id}>
                 {principal.display_name}
@@ -423,7 +424,7 @@ function CreateGrantForm({
 
         <div>
           <label htmlFor="grant-scope" className={labelClass}>
-            Scope
+            {t("grants.form.scope")}
           </label>
           <select
             id="grant-scope"
@@ -444,7 +445,7 @@ function CreateGrantForm({
 
         <div>
           <label htmlFor="grant-role" className={labelClass}>
-            Role
+            {t("grants.form.role")}
           </label>
           <select
             id="grant-role"
@@ -452,7 +453,7 @@ function CreateGrantForm({
             onChange={(event) => setRoleId(event.target.value)}
             className={selectClass}
           >
-            <option value="">Select…</option>
+            <option value="">{t("grants.form.select")}</option>
             {delegableRoles.map((role) => (
               <option key={role.id} value={role.id}>
                 {role.name}
@@ -460,14 +461,14 @@ function CreateGrantForm({
             ))}
           </select>
           <p className="mt-1.5 px-4 text-micro text-ink-muted">
-            Only roles you can delegate at the selected scope are listed.
+            {t("grants.form.roleHelp")}
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-3 @min-[36rem]/page:col-span-2 @min-[36rem]/page:grid-cols-2 @min-[60rem]/page:col-span-1 @min-[60rem]/page:grid-cols-1">
           <div>
             <label htmlFor="grant-valid-from" className={labelClass}>
-              Valid from (optional)
+              {t("grants.form.validFrom")}
             </label>
             <input
               id="grant-valid-from"
@@ -480,7 +481,7 @@ function CreateGrantForm({
 
           <div>
             <label htmlFor="grant-valid-to" className={labelClass}>
-              Valid to (optional)
+              {t("grants.form.validTo")}
             </label>
             <input
               id="grant-valid-to"
@@ -494,8 +495,7 @@ function CreateGrantForm({
 
         {options.directory_scope === "subtree" ? (
           <p className="rounded-[1.25rem] bg-surface-2 px-4 py-3 text-micro text-ink-secondary @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1">
-            You can select principals already present in your scope. Adding
-            people beyond it arrives with the directory integration.
+            {t("grants.form.subtreeNote")}
           </p>
         ) : null}
 
@@ -521,7 +521,7 @@ function CreateGrantForm({
           disabled={submitting}
           className={`${PILL_PRIMARY} w-full @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1`}
         >
-          {submitting ? "Creating…" : "Create grant"}
+          {submitting ? t("grants.form.submitting") : t("grants.form.submit")}
         </button>
       </form>
     </Panel>

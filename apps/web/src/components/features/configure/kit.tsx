@@ -14,6 +14,7 @@ import { Ban, CircleSlash, Inbox, RefreshCw, XCircle } from "lucide-react";
 
 import { Panel } from "@/components/ui/Panel";
 import { toneSpec, type StatusTone } from "@/lib/design/status";
+import { useT } from "@/lib/i18n";
 
 export const PILL_BUTTON =
   "inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-caption font-medium text-ink transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50";
@@ -144,13 +145,14 @@ export function ShareBar({
   tone?: StatusTone;
   label: string;
 }) {
+  const t = useT("catalog");
   const share =
     total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
   return (
     <div className="min-w-0">
       <div
         role="img"
-        aria-label={`${label}: ${value} of ${total}`}
+        aria-label={t("configure.share", { label, value, total })}
         className="h-2 w-full overflow-hidden rounded-full bg-surface-3"
       >
         <span
@@ -171,40 +173,31 @@ export function ShareBar({
 type StateKind =
   "empty" | "not-configured" | "no-data" | "permission-denied" | "error";
 
+/** The default title of each kind lives in `catalog.configure.state.*`. */
 const STATE_DEFAULTS: Record<
   StateKind,
-  { testId: string; icon: LucideIcon; tone: StatusTone; title: string }
+  {
+    testId: string;
+    icon: LucideIcon;
+    tone: StatusTone;
+    title: "empty" | "notConfigured" | "noData" | "permissionDenied" | "error";
+  }
 > = {
-  empty: {
-    testId: "state-empty",
-    icon: Inbox,
-    tone: "neutral",
-    title: "Nothing here yet",
-  },
+  empty: { testId: "state-empty", icon: Inbox, tone: "neutral", title: "empty" },
   "not-configured": {
     testId: "state-not-configured",
     icon: CircleSlash,
     tone: "not-applicable",
-    title: "Not configured",
+    title: "notConfigured",
   },
-  "no-data": {
-    testId: "state-no-data",
-    icon: Inbox,
-    tone: "neutral",
-    title: "No data",
-  },
+  "no-data": { testId: "state-no-data", icon: Inbox, tone: "neutral", title: "noData" },
   "permission-denied": {
     testId: "state-permission-denied",
     icon: Ban,
     tone: "denied",
-    title: "Permission required",
+    title: "permissionDenied",
   },
-  error: {
-    testId: "state-error",
-    icon: XCircle,
-    tone: "critical",
-    title: "Query failed",
-  },
+  error: { testId: "state-error", icon: XCircle, tone: "critical", title: "error" },
 };
 
 /**
@@ -232,12 +225,15 @@ export function StateCard({
   inline?: boolean;
   children?: React.ReactNode;
 }) {
+  const t = useT("catalog");
+  const common = useT("common");
   const spec = STATE_DEFAULTS[kind];
   const Icon = icon ?? spec.icon;
+  const heading = title ?? t(`configure.state.${spec.title}`);
   const retry = onRetry ? (
     <button type="button" onClick={onRetry} className={PILL_BUTTON}>
       <RefreshCw aria-hidden className="h-3.5 w-3.5" />
-      Retry
+      {common("action.retry")}
     </button>
   ) : null;
   const tone =
@@ -254,7 +250,7 @@ export function StateCard({
         <IconBubble icon={Icon} tone={tone} size="lg" />
         <div className="min-w-0 flex-1">
           <p className="text-body font-semibold text-ink">
-            {title ?? spec.title}
+            {heading}
           </p>
           {description ? (
             <p className="mt-0.5 text-caption text-ink-muted">{description}</p>
@@ -284,7 +280,7 @@ export function StateCard({
         <IconBubble icon={Icon} tone={tone} size="lg" />
       </span>
       <p className="mt-5 text-[1.0625rem] font-semibold text-ink">
-        {title ?? spec.title}
+        {heading}
       </p>
       {description ? (
         <p className="mt-1 max-w-md text-caption text-ink-muted">
