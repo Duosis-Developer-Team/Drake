@@ -1,0 +1,82 @@
+# Drake OpenTelemetry stack — defaults are deliberately unusable.
+#
+# Every value that decides WHERE something runs, WHAT it reads or HOW MUCH it
+# may take has an empty or refusing default, so the chart fails to render
+# rather than installing something plausible. A production install supplies
+# a values file that states each decision (see values-drake-prod.yaml).
+
+# The cluster's name as Drake's catalog knows it (`clusters.cluster_ref`).
+# Written onto every record as `k8s.cluster.name`; Drake's log query matches
+# on it, so a wrong value means no service ever finds its logs.
+clusterName: ""
+
+# Datadog runs in the same cluster with admission-controller injection on
+# every pod. Drake's own pods opt out with this label, on Drake's pods only.
+# Nothing here changes Datadog's behaviour for any other workload.
+datadogOptOut: true
+
+images:
+  collector:
+    repository: otel/opentelemetry-collector-contrib
+    digest: ""
+  clickhouse:
+    repository: clickhouse/clickhouse-server
+    digest: ""
+
+# --- agent (DaemonSet) ----------------------------------------------------
+agent:
+  # Namespaces whose container logs are collected. An allowlist, not a
+  # denylist: a new namespace is not collected until someone decides it
+  # should be. Empty refuses to render.
+  namespaces: []
+  # Start at the end of each file. There is no checkpoint store, so nothing
+  # is ever written to the node; the cost is that lines written while an
+  # agent restarts are not collected. Datadog still has them.
+  startAt: end
+  # Lines longer than this are cut by the receiver before anything else.
+  maxLogSize: 64KiB
+  memoryLimitMiB: 160
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 300m, memory: 224Mi}
+  tolerations: []
+
+# --- gateway (Deployment) -------------------------------------------------
+gateway:
+  replicas: 1
+  memoryLimitMiB: 320
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {cpu: 500m, memory: 448Mi}
+  # Bounded export queue: when ClickHouse is down, data is dropped rather
+  # than growing memory without limit (ADR-0029 §3).
+  queueSize: 200
+
+# --- ClickHouse (StatefulSet) ---------------------------------------------
+clickhouse:
+  # REQUIRED. Where the store runs. Must select a node with headroom and
+  # never the saturated control-plane node. Empty refuses to render.
+  nodeSelector: {}
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {cpu: "1500m", memory: 2Gi}
+  # Below the container limit, so ClickHouse refuses queries before the
+  # kernel kills it.
+  maxServerMemoryBytes: 1610612736
+  # ClickHouse refuses writes while the node filesystem has less than this
+  # free. local-path does not enforce claim sizes, so this — together with
+  # the TTLs — is what keeps the store from filling a node's disk.
+  keepFreeSpaceBytes: 21474836480
+  storage:
+    size: 30Gi
+    # The chart creates its own StorageClass with reclaimPolicy Retain, so
+    # deleting a claim never deletes the data. No existing StorageClass is
+    # modified.
+    storageClassName: drake-otel-retain
+    provisioner: rancher.io/local-path
+  retention:
+    logs: 168h
+    traces: 72h
+  # Existing Secret, created out of band, with keys `ingest-password` and
+  # `reader-password`. The chart never templates credential material.
+  existingSecret: ""

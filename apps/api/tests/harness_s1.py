@@ -108,6 +108,7 @@ def build_harness(
     settings: Settings | None = None,
     telemetry_transport: httpx.AsyncBaseTransport | None = None,
     github_transport: httpx.AsyncBaseTransport | None = None,
+    observability_transport: httpx.AsyncBaseTransport | None = None,
 ) -> S1Harness:
     base = settings or require_it_settings()
     update = {"oidc_issuer": DEFAULT_ISSUER, "oidc_client_id": DEFAULT_CLIENT_ID}
@@ -132,6 +133,7 @@ def build_harness(
         oidc_client=oidc_client,
         telemetry_transport=telemetry_transport,
         github_transport=github_transport,
+        observability_transport=observability_transport,
     )
     return S1Harness(app=app, provider=provider, settings=wired)
 

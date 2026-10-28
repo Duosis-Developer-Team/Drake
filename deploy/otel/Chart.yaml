@@ -1,0 +1,11 @@
+apiVersion: v2
+name: drake-otel
+description: >-
+  Drake's OpenTelemetry collection and log/trace store (ADR-0029). A
+  per-node collector agent that reads container logs of allowlisted
+  namespaces, a gateway that redacts and batches, and a ClickHouse pinned to
+  an operator-chosen node with hard memory/disk bounds and table TTLs. Runs
+  alongside Datadog without touching it.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

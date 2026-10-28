@@ -1,0 +1,78 @@
+{{- include "drake-otel.require" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drake-otel-clickhouse
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+data:
+  config.xml: |
+    <clickhouse>
+        <max_server_memory_usage>{{ int64 .Values.clickhouse.maxServerMemoryBytes }}</max_server_memory_usage>
+        <!-- local-path does not enforce a volume's size: the claim's
+             "30Gi" is a label, not a quota. This is the real disk guard.
+             ClickHouse stops writing while less than this is free on the
+             node's filesystem, so the store can never fill the disk other
+             workloads live on. -->
+        <storage_configuration>
+            <disks>
+                <default>
+                    <keep_free_space_bytes>{{ int64 .Values.clickhouse.keepFreeSpaceBytes }}</keep_free_space_bytes>
+                </default>
+            </disks>
+        </storage_configuration>
+        <logger>
+            <level>warning</level>
+            <console>1</console>
+        </logger>
+        <query_log remove="1"/>
+        <query_thread_log remove="1"/>
+        <trace_log remove="1"/>
+        <metric_log remove="1"/>
+        <asynchronous_metric_log remove="1"/>
+        <part_log remove="1"/>
+        <processors_profile_log remove="1"/>
+        <text_log remove="1"/>
+        <error_log remove="1"/>
+        <latency_log remove="1"/>
+        <query_metric_log remove="1"/>
+        <opentelemetry_span_log remove="1"/>
+    </clickhouse>
+  users.xml: |
+    <clickhouse>
+        <profiles>
+            <drake_reader>
+                <readonly>2</readonly>
+                <max_execution_time>10</max_execution_time>
+                <max_result_rows>1000</max_result_rows>
+                <result_overflow_mode>throw</result_overflow_mode>
+                <max_memory_usage>536870912</max_memory_usage>
+                <constraints>
+                    <max_execution_time><max>10</max></max_execution_time>
+                    <max_result_rows><max>1000</max></max_result_rows>
+                    <max_memory_usage><max>536870912</max></max_memory_usage>
+                </constraints>
+            </drake_reader>
+        </profiles>
+        <users>
+            <default remove="1"/>
+            <drake_ingest>
+                <password from_env="DRAKE_CH_INGEST_PASSWORD"/>
+                <networks><ip>::/0</ip></networks>
+                <profile>default</profile>
+                <quota>default</quota>
+                <grants>
+                    <query>GRANT CREATE DATABASE, CREATE TABLE, INSERT, SELECT ON otel.*</query>
+                </grants>
+            </drake_ingest>
+            <drake_reader>
+                <password from_env="DRAKE_CH_READER_PASSWORD"/>
+                <networks><ip>::/0</ip></networks>
+                <profile>drake_reader</profile>
+                <quota>default</quota>
+                <grants>
+                    <query>GRANT SELECT ON otel.*</query>
+                </grants>
+            </drake_reader>
+        </users>
+    </clickhouse>

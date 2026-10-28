@@ -62,6 +62,20 @@ imagePullSecrets:
 {{- toJson $out -}}
 {{- end -}}
 
+{{/* The log store connector, as the settings model expects it. An address
+     and a username only; the password is a FILE path derived from the
+     mount, never a value. */}}
+{{- define "drake.observabilityStore" -}}
+{{- $store := .Values.observability.store -}}
+{{- toJson (dict
+      "url" (required "observability.store.url is required when observability.logsEnabled" $store.url)
+      "allow_private" (default false $store.allowPrivate)
+      "allow_plaintext" (default false $store.allowPlaintext)
+      "database" (default "otel" $store.database)
+      "username" (required "observability.store.username is required" $store.username)
+      "password_file" (printf "%s/reader-password" .Values.observability.secretMountPath)) -}}
+{{- end -}}
+
 {{/* Alertmanager integrations, as the settings model expects them.
 
      Same translation as the telemetry connectors: camelCase in values,

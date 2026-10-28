@@ -42,6 +42,8 @@ from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
 from drake_api.notifications.worker import NotificationWorker
+from drake_api.observability.router import router as observability_router
+from drake_api.observability.store import ClickHouseStore
 from drake_api.onboarding.github_provider import GitHubPullRequestProvider
 from drake_api.onboarding.gitops import GitOpsWorker, RecordingProvider
 from drake_api.onboarding.router import router as onboarding_router
@@ -120,6 +122,7 @@ def create_app(
     telemetry_transport: "httpx.AsyncBaseTransport | None" = None,
     github_transport: "httpx.AsyncBaseTransport | None" = None,
     webhook_transport: "httpx.AsyncBaseTransport | None" = None,
+    observability_transport: "httpx.AsyncBaseTransport | None" = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast on insecure identity configuration outside local/test —
@@ -191,6 +194,10 @@ def create_app(
         adapter=PrometheusAdapter(settings, transport=telemetry_transport),
         metrics=app.state.telemetry_metrics,
     )
+    # Logs and traces (ADR-0029). Constructing the adapter opens nothing and
+    # reads no credential; it does so per query, and only when the feature
+    # is on and a store is configured.
+    app.state.observability_store = ClickHouseStore(settings, transport=observability_transport)
     # The evaluator reuses the Sprint 5 read path exactly as the API does —
     # same orchestrator, same broker, same budgets — so a scheduled
     # evaluation and a screen refresh can never disagree about a service.
@@ -297,6 +304,7 @@ def create_app(
     app.include_router(protection_router)
     app.include_router(protection_ingest_router)
     app.include_router(service_health_router)
+    app.include_router(observability_router)
     app.include_router(incidents_router)
     app.include_router(alerting_router)
     app.include_router(alertmanager_webhook_router)

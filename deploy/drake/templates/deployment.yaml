@@ -110,13 +110,25 @@ spec:
               value: {{ .Values.deployments.ingestEnabled | quote }}
             - name: DRAKE_DEPLOYMENT_INGEST_INTERVAL_SECONDS
               value: {{ .Values.deployments.ingestIntervalSeconds | quote }}
+            # Stated in both states, like the deployment ingest flag.
+            - name: DRAKE_OBSERVABILITY_LOGS_ENABLED
+              value: {{ (.Values.observability).logsEnabled | default false | quote }}
+            {{- if (.Values.observability).logsEnabled }}
+            - name: DRAKE_OBSERVABILITY_STORE
+              value: {{ include "drake.observabilityStore" . | quote }}
+            {{- end }}
           envFrom:
             # Secret REFERENCES only; no value is ever rendered here.
             - secretRef:
                 name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
-          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) }}
+          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) }}
           {{- if $secretVolumes }}
           volumeMounts:
+            {{- if (.Values.observability).logsEnabled }}
+            - name: observability-store
+              mountPath: {{ .Values.observability.secretMountPath | quote }}
+              readOnly: true
+            {{- end }}
             {{- if .Values.github.enabled }}
             - name: github-app
               mountPath: {{ .Values.github.secretMountPath | quote }}
@@ -138,8 +150,17 @@ spec:
             httpGet: {path: /health/ready, port: http}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) }}
+      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) }}
       volumes:
+        {{- if (.Values.observability).logsEnabled }}
+        - name: observability-store
+          secret:
+            secretName: {{ required "observability.existingSecret is required when observability.logsEnabled" .Values.observability.existingSecret }}
+            items:
+              - {key: reader-password, path: reader-password}
+            # Same 0440 + fsGroup contract as the other credential mounts.
+            defaultMode: 0440
+        {{- end }}
         {{- if .Values.github.enabled }}
         - name: github-app
           secret:
