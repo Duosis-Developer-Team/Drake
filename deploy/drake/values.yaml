@@ -261,6 +261,27 @@ deployments:
   ingestEnabled: false
   ingestIntervalSeconds: 120
 
+observability:
+  # Logs from Drake's own ClickHouse store (ADR-0029, deploy/otel). Off by
+  # default: with it off the API answers `not_configured` and connects to
+  # nothing. The flag is rendered in both states.
+  logsEnabled: false
+  store:
+    # IP LITERAL in production, for the same reason as the telemetry
+    # connectors: hostname connectors are refused until the transport pins
+    # the address it validated. Use the store Service's pinned ClusterIP.
+    url: ""
+    allowPrivate: false
+    allowPlaintext: false
+    database: otel
+    # The READ-ONLY ClickHouse user. The API never holds the ingest
+    # credential.
+    username: drake_reader
+  # Existing Secret in THIS namespace with key `reader-password`, created
+  # out of band. Mounted as a file; never an environment value.
+  existingSecret: ""
+  secretMountPath: /etc/drake/observability
+
 github:
   # Drake must be deployable before the real App exists. Disabled means
   # no token mint, no webhook registration, no provider call.

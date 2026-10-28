@@ -1,0 +1,41 @@
+# Drake OpenTelemetry — production values, `drake-otel` namespace.
+#
+# Committed on purpose: it contains no secret value, only the NAME of the
+# Secret created out of band, and the decisions this release makes. Each of
+# them was taken against what the cluster actually looks like, read-only,
+# before this file was written.
+#
+# Phase 1 of ADR-0029: LOGS ONLY. No trace collection, no application
+# instrumentation, nothing that touches an application pod or Datadog.
+
+clusterName: duosis-prod-1
+
+images:
+  collector:
+    repository: otel/opentelemetry-collector-contrib
+    # 0.162.0 (contrib distribution: carries the ClickHouse exporter).
+    digest: "sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6"
+  clickhouse:
+    repository: clickhouse/clickhouse-server
+    # 26.8.36.3, the 26.8 LTS line.
+    digest: "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
+
+agent:
+  # The application namespaces Drake catalogues, plus Drake itself. Datadog,
+  # the monitoring stacks and kube-system are deliberately absent.
+  namespaces:
+    - hermes
+    - hermes-test
+    - hermes-dev
+    - logislot-prod
+    - logislot-dev
+    - fikirsepeti-prod
+    - drake-prod
+
+clickhouse:
+  # The worker node. The control-plane node is saturated (load far above
+  # its core count, little free memory, no swap); the store and the gateway
+  # must never land there.
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  existingSecret: drake-otel-clickhouse

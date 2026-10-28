@@ -461,9 +461,18 @@ async def update_binding(
 
 
 async def get_binding(
-    connection: AsyncConnection, principal: Principal, binding_id: uuid.UUID
+    connection: AsyncConnection,
+    principal: Principal,
+    binding_id: uuid.UUID,
+    permission: str = "environment.view",
 ) -> dict[str, Any] | None:
-    visible = await visible_scope_ids(connection, principal, "environment.view")
+    """The binding, if *permission* covers its service scope; else None.
+
+    `permission` exists so that a capability gated more narrowly than
+    seeing a service (reading its logs) is decided by the same query, at the
+    same scope, rather than by a second visibility rule.
+    """
+    visible = await visible_scope_ids(connection, principal, permission)
     row = (
         await connection.execute(
             text(

@@ -1,0 +1,86 @@
+# Drake LOCAL-ONLY OpenTelemetry Collector.
+#
+# One collector plays both roles locally: it receives OTLP (from the fixture
+# emitter or an application you are running) and writes logs and traces to
+# the local ClickHouse. In a cluster the same pipeline is split into a
+# per-node agent and a gateway (deploy/otel); the processors are identical
+# so that what is tested here is what runs there.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # First in every pipeline: refuse data before the process grows, rather
+  # than after.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Defence in depth, not a guarantee (ADR-0029 §5): credential-shaped
+  # values are masked before anything is stored, and an oversized body is
+  # cut down to a bounded size.
+  transform/redact:
+    error_mode: ignore
+    log_statements:
+      - replace_pattern(log.body, "(?i)((?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)\\s*[=:]\\s*)\\S+", "$$1[REDACTED]")
+      - replace_pattern(log.body, "(?i)(bearer\\s+)[a-z0-9._~+/=-]{8,}", "$$1[REDACTED]")
+      - replace_pattern(log.body, "(://[^/\\s@:]+:)[^@\\s]+(@)", "$$1[REDACTED]$$2")
+      - set(log.body, Substring(log.body, 0, 16384)) where Len(log.body) > 16384
+
+  batch:
+    send_batch_size: 2000
+    timeout: 2s
+
+exporters:
+  # Two exporter instances because retention differs by signal: the
+  # exporter's `ttl` applies to every table it creates.
+  clickhouse/logs:
+    endpoint: tcp://clickhouse:9000
+    database: otel
+    username: drake_ingest
+    password: drake_local_only_ingest
+    create_schema: true
+    ttl: 168h
+    logs_table_name: otel_logs
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      queue_size: 100
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 60s
+  clickhouse/traces:
+    endpoint: tcp://clickhouse:9000
+    database: otel
+    username: drake_ingest
+    password: drake_local_only_ingest
+    create_schema: true
+    ttl: 72h
+    traces_table_name: otel_traces
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      queue_size: 100
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 60s
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/redact, batch]
+      exporters: [clickhouse/logs]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [clickhouse/traces]

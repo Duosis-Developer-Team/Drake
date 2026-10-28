@@ -1,0 +1,107 @@
+{{- include "drake-otel.require" . -}}
+# The per-node agent. It READS container log files of allowlisted
+# namespaces, enriches them with Kubernetes metadata, and forwards them to
+# the gateway. It writes nothing to the node and listens on no port beyond
+# its own health check. Datadog reads the same files; neither affects the
+# other.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drake-otel-agent
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+---
+# Exactly what the k8sattributes processor reads to name a pod's owner:
+# get/list/watch on pods, namespaces and replicasets. No Secrets, no
+# ConfigMaps, no write verb, no wildcard.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-drake-otel-agent-read
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-drake-otel-agent-read
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-drake-otel-agent-read
+subjects:
+  - kind: ServiceAccount
+    name: drake-otel-agent
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: drake-otel-agent
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+    app.kubernetes.io/name: drake-otel-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: drake-otel-agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "drake-otel.podLabels" . | nindent 8 }}
+        app.kubernetes.io/name: drake-otel-agent
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/agent-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: drake-otel-agent
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        # Pod log files are root-owned and not world-readable. The agent
+        # runs as root to read them, with every capability dropped and a
+        # read-only root filesystem: it can read what root owns, and
+        # nothing else root could otherwise do.
+        runAsUser: 0
+        runAsGroup: 0
+      containers:
+        - name: collector
+          image: {{ include "drake-otel.image" (dict "root" . "name" "collector") }}
+          args: ["--config=/etc/otelcol/collector.yaml"]
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          securityContext:
+            {{- include "drake-otel.securityContext" . | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /, port: 13133}
+          livenessProbe:
+            httpGet: {path: /, port: 13133}
+            initialDelaySeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/otelcol}
+            - {name: pod-logs, mountPath: /var/log/pods, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: drake-otel-agent}
+        - name: pod-logs
+          hostPath:
+            path: /var/log/pods
+            type: Directory

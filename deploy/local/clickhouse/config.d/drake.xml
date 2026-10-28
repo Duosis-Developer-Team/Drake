@@ -1,0 +1,28 @@
+<!--
+  Drake LOCAL-ONLY ClickHouse server settings.
+
+  The memory ceiling is the point of this file. A store that can take all of
+  a machine's memory is a store that can take the machine down, so the
+  bound exists locally too, where it is cheap to notice that something
+  needs more than it.
+-->
+<clickhouse>
+    <max_server_memory_usage>1610612736</max_server_memory_usage>
+    <logger>
+        <level>warning</level>
+        <console>1</console>
+    </logger>
+    <!-- Drake's own query log would be telemetry about telemetry. -->
+    <query_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <trace_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <part_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <text_log remove="1"/>
+    <error_log remove="1"/>
+    <latency_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+</clickhouse>

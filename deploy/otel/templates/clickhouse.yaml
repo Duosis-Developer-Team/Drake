@@ -1,0 +1,119 @@
+{{- include "drake-otel.require" . -}}
+# A StorageClass of Drake's own, so the store's volume is Retain. Every other
+# claim in this cluster is local-path with reclaimPolicy Delete; this does
+# not change that class or any claim that uses it. `keep` means
+# `helm uninstall` leaves the class (and therefore the volume's policy) in
+# place.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.clickhouse.storage.storageClassName }}
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+provisioner: {{ .Values.clickhouse.storage.provisioner }}
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: drake-otel-clickhouse
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: drake-otel-clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: drake-otel-clickhouse
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+    app.kubernetes.io/name: drake-otel-clickhouse
+spec:
+  replicas: 1
+  serviceName: drake-otel-clickhouse
+  # A StatefulSet's claims are never deleted by `helm uninstall` or by
+  # scaling down; with the Retain class above, the data outlives both.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: drake-otel-clickhouse
+  template:
+    metadata:
+      labels:
+        {{- include "drake-otel.podLabels" . | nindent 8 }}
+        app.kubernetes.io/name: drake-otel-clickhouse
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/clickhouse-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      nodeSelector:
+        {{- toYaml .Values.clickhouse.nodeSelector | nindent 8 }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: clickhouse
+          image: {{ include "drake-otel.image" (dict "root" . "name" "clickhouse") }}
+          ports:
+            - {name: http, containerPort: 8123}
+            - {name: native, containerPort: 9000}
+          env:
+            - name: DRAKE_CH_INGEST_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.clickhouse.existingSecret }}, key: ingest-password}
+            - name: DRAKE_CH_READER_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.clickhouse.existingSecret }}, key: reader-password}
+          resources:
+            {{- toYaml .Values.clickhouse.resources | nindent 12 }}
+          securityContext:
+            {{- include "drake-otel.securityContext" . | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /ping, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 6
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/clickhouse}
+            - {name: logs, mountPath: /var/log/clickhouse-server}
+            - {name: tmp, mountPath: /tmp}
+            - {name: config, mountPath: /etc/clickhouse-server/config.d/drake.xml, subPath: config.xml}
+            - {name: config, mountPath: /etc/clickhouse-server/users.d/drake.xml, subPath: users.xml}
+      volumes:
+        - name: config
+          configMap: {name: drake-otel-clickhouse}
+        - name: logs
+          emptyDir: {sizeLimit: 512Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 1Gi}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.clickhouse.storage.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.clickhouse.storage.size }}

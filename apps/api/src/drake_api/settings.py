@@ -40,6 +40,25 @@ class TelemetryConnector(BaseModel):
     allow_plaintext: bool = False
 
 
+class ObservabilityStoreConnector(TelemetryConnector):
+    """Drake's own log and trace store (ClickHouse, ADR-0029).
+
+    Inherits the SSRF contract of `TelemetryConnector`: the URL lives only in
+    server-owned settings, a hostname is refused outside local/test, private
+    and plaintext targets each need their explicit opt-in.
+
+    `password_file` is a REFERENCE, following the same `*_file` convention as
+    every other credential here. It is read at query time and never becomes a
+    settings value, a column, a log line, or part of any response. The user it
+    names must be read-only on the ClickHouse side; Drake never writes there.
+    """
+
+    database: str = "otel"
+    username: str = ""
+    password_file: str = ""
+    timeout_seconds: float = 10.0
+
+
 class WebhookDestination(BaseModel):
     """Operator-owned webhook target, resolved from an opaque key.
 
@@ -347,6 +366,13 @@ class Settings(BaseSettings):
     slo_evaluator_batch_size: int = 25
     slo_evaluator_lease_seconds: int = 300
 
+    # --- Logs and traces (ADR-0029) ----------------------------------
+    # Off by default, like every other capability that reaches a datastore:
+    # with no store configured the endpoints answer `not_configured` and
+    # nothing is queried.
+    observability_logs_enabled: bool = False
+    observability_store: ObservabilityStoreConnector | None = None
+
     @property
     def effective_session_cookie_name(self) -> str:
         """`__Host-` wherever the cookie is actually Secure.
@@ -523,6 +549,22 @@ class Settings(BaseSettings):
                     f"alertmanager integration {key!r} allows a silence longer than a week; "
                     "that is an off switch, not a pause"
                 )
+        if self.observability_logs_enabled:
+            store = self.observability_store
+            if store is None:
+                raise RuntimeError(
+                    "observability logs are enabled but no observability store is configured"
+                )
+            if not (store.username and store.password_file):
+                # An anonymous connection would be whatever the server's
+                # default user is allowed to do, and that is not a decision
+                # Drake should inherit.
+                raise RuntimeError(
+                    "observability store requires a username and a password file reference "
+                    "outside local/test"
+                )
+            if store.timeout_seconds > 30:
+                raise RuntimeError("observability store timeout above 30s is not a bounded read")
         if self.slo_evaluator_enabled and self.slo_evaluator_interval_seconds < 60:
             raise RuntimeError("SLO evaluator interval below 60s is local/test only")
         if self.incident_runner_enabled and self.incident_runner_interval_seconds < 30:

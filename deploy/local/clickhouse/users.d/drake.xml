@@ -1,0 +1,48 @@
+<!--
+  Drake LOCAL-ONLY ClickHouse users. The passwords are deliberate
+  local-only development values, exactly like the Compose PostgreSQL one.
+  Real environments create these users from out-of-band secrets.
+
+  drake_ingest  the collector. Creates the otel database and tables on first
+                start and inserts into them. Nothing else.
+  drake_reader  the API. Read-only (readonly=2 lets the API set the bounded
+                query settings it sends; it can never write), with hard
+                ceilings the API cannot raise.
+-->
+<clickhouse>
+    <profiles>
+        <drake_reader>
+            <readonly>2</readonly>
+            <max_execution_time>10</max_execution_time>
+            <max_result_rows>1000</max_result_rows>
+            <result_overflow_mode>throw</result_overflow_mode>
+            <max_memory_usage>536870912</max_memory_usage>
+            <constraints>
+                <max_execution_time><max>10</max></max_execution_time>
+                <max_result_rows><max>1000</max></max_result_rows>
+                <max_memory_usage><max>536870912</max></max_memory_usage>
+            </constraints>
+        </drake_reader>
+    </profiles>
+    <users>
+        <default remove="1"/>
+        <drake_ingest>
+            <password>drake_local_only_ingest</password>
+            <networks><ip>::/0</ip></networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT CREATE DATABASE, CREATE TABLE, INSERT, SELECT ON otel.*</query>
+            </grants>
+        </drake_ingest>
+        <drake_reader>
+            <password>drake_local_only_reader</password>
+            <networks><ip>::/0</ip></networks>
+            <profile>drake_reader</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT SELECT ON otel.*</query>
+            </grants>
+        </drake_reader>
+    </users>
+</clickhouse>
