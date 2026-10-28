@@ -66,13 +66,19 @@ data:
           - /var/log/pods/{{ .Release.Namespace }}_*/*/*.log
         start_at: {{ .Values.agent.startAt }}
         max_log_size: {{ .Values.agent.maxLogSize }}
-        include_file_path: false
+        # The container parser reads namespace, pod, pod uid and container
+        # name FROM the file path, so the path has to be on the record. It
+        # is removed again right after, so it is never stored.
+        include_file_path: true
         include_file_name: false
         operators:
           # Parses the CRI/docker line format and sets namespace, pod, pod
           # uid and container name from the file path.
           - type: container
             id: container-parser
+          - type: remove
+            id: drop-file-path
+            field: attributes["log.file.path"]
     processors:
       memory_limiter:
         check_interval: 1s

@@ -125,6 +125,29 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+      # The ClickHouse exporter creates its schema at start-up and exits if
+      # the store is not answering yet, so on a fresh install the gateway
+      # crash-looped until ClickHouse was up. Waiting here instead turns
+      # that into one ordered start. Bounded: after five minutes it fails
+      # and Kubernetes retries, rather than waiting forever.
+      initContainers:
+        - name: wait-for-clickhouse
+          image: {{ include "drake-otel.image" (dict "root" . "name" "clickhouse") }}
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 150); do
+                wget -q -T 2 -O /dev/null http://drake-otel-clickhouse:8123/ping && exit 0
+                sleep 2
+              done
+              echo "clickhouse did not answer within 5 minutes" >&2
+              exit 1
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            {{- include "drake-otel.securityContext" . | nindent 12 }}
       containers:
         - name: collector
           image: {{ include "drake-otel.image" (dict "root" . "name" "collector") }}
