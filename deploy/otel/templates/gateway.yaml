@@ -4,85 +4,6 @@
 # §5). Same processors as deploy/local/otel/collector.yaml, which is where
 # they are exercised end to end.
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: drake-otel-gateway
-  labels:
-    {{- include "drake-otel.labels" . | nindent 4 }}
-data:
-  collector.yaml: |
-    extensions:
-      health_check:
-        endpoint: 0.0.0.0:13133
-    receivers:
-      otlp:
-        protocols:
-          grpc:
-            endpoint: 0.0.0.0:4317
-    processors:
-      memory_limiter:
-        check_interval: 1s
-        limit_mib: {{ .Values.gateway.memoryLimitMiB }}
-        spike_limit_mib: {{ div .Values.gateway.memoryLimitMiB 4 }}
-      transform/redact:
-        error_mode: ignore
-        log_statements:
-          - replace_pattern(log.body, "(?i)((?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)\\s*[=:]\\s*)\\S+", "$$1[REDACTED]")
-          - replace_pattern(log.body, "(?i)(bearer\\s+)[a-z0-9._~+/=-]{8,}", "$$1[REDACTED]")
-          - replace_pattern(log.body, "(://[^/\\s@:]+:)[^@\\s]+(@)", "$$1[REDACTED]$$2")
-          - set(log.body, Substring(log.body, 0, 16384)) where Len(log.body) > 16384
-      batch:
-        send_batch_size: 2000
-        timeout: 5s
-    exporters:
-      clickhouse/logs:
-        endpoint: tcp://drake-otel-clickhouse:9000
-        database: otel
-        username: drake_ingest
-        password: ${env:DRAKE_CH_INGEST_PASSWORD}
-        create_schema: true
-        ttl: {{ .Values.clickhouse.retention.logs }}
-        logs_table_name: otel_logs
-        timeout: 10s
-        sending_queue:
-          enabled: true
-          queue_size: {{ .Values.gateway.queueSize }}
-        retry_on_failure:
-          enabled: true
-          max_elapsed_time: 120s
-      clickhouse/traces:
-        endpoint: tcp://drake-otel-clickhouse:9000
-        database: otel
-        username: drake_ingest
-        password: ${env:DRAKE_CH_INGEST_PASSWORD}
-        create_schema: true
-        ttl: {{ .Values.clickhouse.retention.traces }}
-        traces_table_name: otel_traces
-        timeout: 10s
-        sending_queue:
-          enabled: true
-          queue_size: {{ .Values.gateway.queueSize }}
-        retry_on_failure:
-          enabled: true
-          max_elapsed_time: 120s
-    service:
-      extensions: [health_check]
-      telemetry:
-        logs:
-          level: warn
-        metrics:
-          level: none
-      pipelines:
-        logs:
-          receivers: [otlp]
-          processors: [memory_limiter, transform/redact, batch]
-          exporters: [clickhouse/logs]
-        traces:
-          receivers: [otlp]
-          processors: [memory_limiter, batch]
-          exporters: [clickhouse/traces]
----
-apiVersion: v1
 kind: Service
 metadata:
   name: drake-otel-gateway
@@ -115,7 +36,7 @@ spec:
         {{- include "drake-otel.podLabels" . | nindent 8 }}
         app.kubernetes.io/name: drake-otel-gateway
       annotations:
-        checksum/config: {{ .Values | toJson | sha256sum | trunc 16 }}
+        checksum/config: {{ include (print $.Template.BasePath "/gateway-config.yaml") . | sha256sum | trunc 16 }}
     spec:
       # Next to the store, not on the saturated node.
       nodeSelector:
