@@ -213,6 +213,12 @@ networkPolicy:
       podSelector:
         app.kubernetes.io/name: prometheus
       port: 9090
+    # The log store (deploy/otel, ADR-0029), by label like Prometheus above.
+    # HTTP interface only: the API never speaks ClickHouse's native port.
+    - namespace: drake-otel
+      podSelector:
+        app.kubernetes.io/name: drake-otel-clickhouse
+      port: 8123
 
 # The internal agent listener. ClusterIP-only; never published.
 #
@@ -289,6 +295,29 @@ telemetry:
       url: http://10.233.0.42
       allowPrivate: true
       allowPlaintext: true
+
+# Logs from Drake's own store, installed by deploy/otel in `drake-otel`
+# (ADR-0029). The address is that Service's ClusterIP, pinned for the same
+# reason as the Prometheus connector above: Drake refuses hostname
+# connectors in production. Plaintext to a private address, each half
+# stated rather than defaulted.
+#
+# The API holds only the READ-ONLY ClickHouse user. Its password is in
+# `drake-observability-reader` (key `reader-password`), copied out of band
+# from `drake-otel/drake-otel-clickhouse` and mounted as a file. The ingest
+# credential never leaves `drake-otel`.
+#
+# Reading a service's logs needs `logs.view` at its scope (migration 0023
+# gives it to the Platform Owner template and to nobody else).
+observability:
+  logsEnabled: true
+  store:
+    url: http://10.233.5.89:8123
+    allowPrivate: true
+    allowPlaintext: true
+    database: otel
+    username: drake_reader
+  existingSecret: drake-observability-reader
 
 # ON here because this deployment has an agent enrolled and reporting fresh
 # inventory, which is the only precondition. It grants no new access: the
