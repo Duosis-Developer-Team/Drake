@@ -4,20 +4,29 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@fdef05c by publish
-# run 35728719932. All three — API, web
-# and migration — were built from that one commit, so they cannot drift
-# apart. Both digests were read back from the registry by commit-SHA tag
-# rather than from the build log: the log also prints a tooling image's
-# digest, and pinning that would have deployed something else entirely.
+# Images are pinned to real digests published from main@887f127 by publish
+# run 40721869375. All three — API, web and migration — were built from that
+# one commit, so they cannot drift apart. The digests are the build step's
+# own `digest` output for each image (the run summary), cross-checked
+# against the `pushing manifest for …:887f127…@sha256:…` line of the same
+# job — not grepped from the build log at large, which also prints a
+# tooling image's digest.
 #
-# This is the release that carries Turkish language support (PR #85): the
-# EN/TR switch, every screen through the typed catalogue, ADR-0028.
+# This release carries two changes:
+#   - PR #88: every dependency advisory the scan reported is patched,
+#     including Next.js GHSA-2464-fhr4-w9xw (image optimizer RCE) and the
+#     PyJWT key-confusion advisories on the sign-in token path.
+#   - PR #87: the OpenTelemetry log read path (ADR-0029) and migration 0023
+#     (`logs.view`, additive). The feature stays OFF here: no
+#     `observability` block is set, so the API connects to no log store.
 #
-# The digests these replaced (API `ad8bc09a…682a`, web `19d5a4f1…407b`) named
-# main@be85372 and are what helm revision 31 served — the rollback target if
-# this one has to come back. Read from the live Deployments before this edit
-# rather than assumed from the previous file.
+# The digests these replaced (API `cd11da21…e608`, web `9deb9275…dfaf`)
+# named main@fdef05c and are what helm revision 32 served — the rollback
+# target if this one has to come back. Read from the live Deployments before
+# this edit rather than assumed from the previous file.
+#
+# Before that (API `ad8bc09a…682a`, web `19d5a4f1…407b`) named main@be85372,
+# served by revision 31.
 #
 # Before that (API `1dcc010a…0819`, web `937ee63d…0b2d`) named main@76b3be9,
 # served by revision 30.
@@ -120,11 +129,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit fdef05c67042c25318e9006e0bb78ebca571bb66
+    # Source commit 887f1272391c46818b984f8dcd9b015a6d1ca737
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:cd11da21c186168a163d867c4578fe6b4a7fe72d3f837cb45e629b635c84e608"
+    digest: "sha256:65b3e0482d0a8958fc46c47c8420914b7668ef0a946b27f82a6fb3ec8caa762f"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -136,8 +145,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit fdef05c67042c25318e9006e0bb78ebca571bb66
-    digest: "sha256:9deb9275263c6b1f428875b3f0733a0ae31287a4196103a62106a2f44fb7dfaf"
+    # Source commit 887f1272391c46818b984f8dcd9b015a6d1ca737
+    digest: "sha256:9092b7c4aa9acc1960382bfbc372f80d75958e69f3cd72a1eff3bfa8aff2afbe"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -148,7 +157,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:cd11da21c186168a163d867c4578fe6b4a7fe72d3f837cb45e629b635c84e608"
+    digest: "sha256:65b3e0482d0a8958fc46c47c8420914b7668ef0a946b27f82a6fb3ec8caa762f"
   backoffLimit: 0
 
 networkPolicy:
