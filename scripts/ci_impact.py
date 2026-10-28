@@ -117,6 +117,9 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
         "apps/api/tests/test_service_health_read_api_integration.py",
         "apps/api/tests/test_service_health_bindings_integration.py",
         "apps/api/tests/test_deployment_intelligence_integration.py",
+        # Logs are read through a service-health binding, so the suite sits
+        # with the binding read path it depends on.
+        "apps/api/tests/test_observability_logs_integration.py",
     ),
     "agents_enrollment": (
         "apps/api/tests/test_agent_enrollment_integration.py",
@@ -173,6 +176,7 @@ BACKEND_INTEGRATION_MAP: list[tuple[str, tuple[str, ...]]] = [
     ("apps/api/src/drake_api/protection/**", ("projects_catalog",)),
     ("apps/api/src/drake_api/deployments/**", ("clusters_inventory",)),
     ("apps/api/src/drake_api/service_health/**", ("clusters_inventory",)),
+    ("apps/api/src/drake_api/observability/**", ("clusters_inventory",)),
     (
         "apps/api/src/drake_api/agents/**",
         ("agents_enrollment", "agents_ingest", "clusters_inventory"),
