@@ -76,7 +76,7 @@ def load(path):
 
 
 OBI_NAME = "drake-otel-obi"
-OBI_CAPS = {"BPF", "PERFMON", "SYS_PTRACE", "NET_RAW", "CHECKPOINT_RESTORE", "DAC_READ_SEARCH"}
+OBI_CAPS = {"BPF", "PERFMON", "SYS_PTRACE", "NET_RAW", "CHECKPOINT_RESTORE", "DAC_READ_SEARCH", "IPC_LOCK"}
 OBI_HOST_PATHS = {"/sys/kernel/tracing", "/sys/fs/cgroup"}
 
 
