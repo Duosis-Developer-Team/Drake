@@ -17,11 +17,13 @@
 # requests/traces panel and its inline waterfall. It does bring a schema
 # change: migrations move to 0024 (`traces.view`, additive, granted only
 # to the Platform Owner template), and the migration job runs the exact
-# API code that follows. The feature stays OFF here: `tracesEnabled` is
-# not set, so the API answers not_configured and nothing new is queried.
-# Reading traces also needs OBI running in the cluster (drake-otel, off by
-# default); the hermes-dev pilot on node2 is a separate, deliberate act and
-# this pin authorises nothing about it.
+# API code that follows.
+#
+# Traces are ON here, opened deliberately after the OBI pilot proved
+# itself on hermes-dev (drake-otel #98/#99: spans flow, the five bound
+# services are seen, no workload disturbed). Collection itself remains
+# bounded by the drake-otel release — one namespace, node2 only — and
+# `tracesEnabled` is the switch that turns it back off.
 #
 # The digests these replaced (API `096a8556…22b1`, web `88ef5158…b6de`)
 # named main@5ccd005 and are what revision 35 serves — the rollback target
@@ -317,9 +319,15 @@ telemetry:
 # credential never leaves `drake-otel`.
 #
 # Reading a service's logs needs `logs.view` at its scope (migration 0023
-# gives it to the Platform Owner template and to nobody else).
+# gives it to the Platform Owner template and to nobody else); traces are
+# `traces.view` the same way (migration 0024).
 observability:
   logsEnabled: true
+  # ON after the OBI pilot proved the data on hermes-dev (drake-otel
+  # #98/#99). Reads the same store with the same read-only user. With it
+  # off the API answers not_configured and the panel shows the honest
+  # absence again.
+  tracesEnabled: true
   store:
     url: http://10.233.5.89:8123
     allowPrivate: true
