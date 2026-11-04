@@ -30,6 +30,7 @@ import {
   HealthTransitions,
   ServiceIncidents,
 } from "@/components/incidents/ServiceIncidents";
+import { LogExplorer } from "@/components/service-health/LogExplorer";
 import {
   RangeSelector,
   SignalChart,
@@ -733,6 +734,9 @@ export default function ServiceHealthDetailPage() {
                     </div>
                   </section>
                 ) : null}
+
+                {/* What the workload wrote: the evidence behind the numbers above. */}
+                <LogExplorer bindingId={binding.id} />
 
                 <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
                   <ServiceIncidents bindingId={binding.id} />

@@ -14,6 +14,7 @@ import { common } from "./common";
 import { deployments } from "./deployments";
 import { incidents } from "./incidents";
 import { integrations } from "./integrations";
+import { logs } from "./logs";
 import { notifications } from "./notifications";
 import { onboarding } from "./onboarding";
 import { protection } from "./protection";
@@ -31,6 +32,7 @@ export const MESSAGES = {
   alerting,
   deployments,
   serviceHealth,
+  logs,
   protection,
   notifications,
   integrations,
