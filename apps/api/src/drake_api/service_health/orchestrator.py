@@ -81,6 +81,7 @@ async def query_with_lease_retry(
         await asyncio.sleep(delay)
     return await broker.query(principal, request)
 
+
 # The signals a preset can name. The API speaks these names; the template
 # keys behind them stay server-side.
 SIGNAL_FIELDS: tuple[str, ...] = (
