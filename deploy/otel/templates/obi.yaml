@@ -1,0 +1,124 @@
+{{- if .Values.obi.enabled }}
+{{- if not .Values.obi.image.digest -}}
+{{- fail "obi.image.digest is required: production images are pinned by digest" -}}
+{{- end -}}
+# OpenTelemetry eBPF Instrumentation: spans from the kernel, no SDK, no
+# change to any application (see obi-config.yaml for the switches that keep
+# it that way).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drake-otel-obi
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+---
+# What OBI reads to name a process's pod, workload and service:
+# list/watch on pods, services, nodes and replicasets. No get on anything
+# else, no Secrets, no ConfigMaps, no write verb.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-drake-otel-obi-read
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-drake-otel-obi-read
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-drake-otel-obi-read
+subjects:
+  - kind: ServiceAccount
+    name: drake-otel-obi
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: drake-otel-obi
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+    app.kubernetes.io/name: drake-otel-obi
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: drake-otel-obi
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "drake-otel.podLabels" . | nindent 8 }}
+        app.kubernetes.io/name: drake-otel-obi
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/obi-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: drake-otel-obi
+      # Only the nodes chosen for it. Required when enabled.
+      nodeSelector:
+        {{- toYaml .Values.obi.nodeSelector | nindent 8 }}
+      # eBPF probes attach to processes in other pods, which OBI can only
+      # find in the host's PID namespace. This is the one host namespace it
+      # gets: no hostNetwork, no hostIPC.
+      hostPID: true
+      containers:
+        - name: obi
+          image: "{{ .Values.obi.image.repository }}@{{ .Values.obi.image.digest }}"
+          args: ["-config", "/etc/obi/obi.yaml"]
+          resources:
+            {{- toYaml .Values.obi.resources | nindent 12 }}
+          securityContext:
+            # Not privileged. Root (uid 0) with every capability dropped
+            # except the ones OBI needs to load probes and read /proc:
+            #   BPF, PERFMON          load eBPF programs, attach uprobes
+            #   SYS_PTRACE            read /proc/<pid>/exe of other processes
+            #   NET_RAW               socket-filter based HTTP tracking
+            #   CHECKPOINT_RESTORE    follow /proc symlinks
+            #   DAC_READ_SEARCH       read /proc/self/mem (kernel detection)
+            # Deliberately NOT granted: SYS_ADMIN (writes into process
+            # memory, Node.js inspector via setns) and NET_ADMIN (traffic
+            # control programs that alter packets).
+            runAsUser: 0
+            runAsNonRoot: false
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["BPF", "PERFMON", "SYS_PTRACE", "NET_RAW", "CHECKPOINT_RESTORE", "DAC_READ_SEARCH"]
+            # The runtime's default profile already allows bpf() and
+            # perf_event_open() to a process holding BPF/PERFMON; verified
+            # against the default profile before this was written.
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - {name: config, mountPath: /etc/obi, readOnly: true}
+            - {name: obi-run, mountPath: /var/run/obi}
+            # tracefs: OBI's fallback when perf events are restricted
+            # (kernel.perf_event_paranoid > 2, as on Ubuntu).
+            - {name: tracefs, mountPath: /sys/kernel/tracing, readOnly: true}
+            - {name: cgroup, mountPath: /sys/fs/cgroup, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: drake-otel-obi}
+        - name: obi-run
+          emptyDir: {sizeLimit: 64Mi}
+        - name: tracefs
+          hostPath: {path: /sys/kernel/tracing, type: Directory}
+        - name: cgroup
+          hostPath: {path: /sys/fs/cgroup, type: Directory}
+{{- end }}

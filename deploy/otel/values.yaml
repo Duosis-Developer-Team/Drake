@@ -52,6 +52,31 @@ gateway:
   # than growing memory without limit (ADR-0029 §3).
   queueSize: 200
 
+# --- OBI: eBPF traces (DaemonSet) ----------------------------------------
+# OpenTelemetry eBPF Instrumentation observes HTTP/gRPC/SQL at the kernel
+# and emits spans without touching the process (ADR-0029 §2). It is the one
+# privileged-ish component here, so everything about it is opt-in and
+# narrow:
+#   - off unless `obi.enabled`;
+#   - only on the nodes `obi.nodeSelector` names, only for the namespaces
+#     in `obi.namespaces` (an allowlist; both are required when enabled);
+#   - traces only: no metrics export, no Prometheus port;
+#   - never modifies an application: context propagation, the Node.js and
+#     Java injector agents and log enrichment are switched off in the
+#     template itself (not here), and the capabilities that would allow
+#     them (SYS_ADMIN, NET_ADMIN) are not granted. validate.sh enforces
+#     all of it.
+obi:
+  enabled: false
+  image:
+    repository: otel/ebpf-instrument
+    digest: ""
+  nodeSelector: {}
+  namespaces: []
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 384Mi}
+
 # --- ClickHouse (StatefulSet) ---------------------------------------------
 clickhouse:
   # REQUIRED. Where the store runs. Must select a node with headroom and
