@@ -49,7 +49,10 @@ done
 OUT="$(mktemp)"
 OUT_OBI="$(mktemp)"
 trap 'rm -f "$OUT" "$OUT_OBI"' EXIT
-render -f values-drake-prod.yaml >"$OUT"
+# Both directions are checked by forcing each state, so the invariant holds
+# no matter what the committed values happen to say today: OBI renders when
+# obi.enabled, and only then.
+render -f values-drake-prod.yaml --set obi.enabled=false >"$OUT"
 render -f values-drake-prod.yaml "${OBI_SETS[@]}" >"$OUT_OBI"
 
 python3 - "$OUT" "$OUT_OBI" <<'PYEOF'
@@ -190,8 +193,8 @@ def check(docs, by_kind, label, expect_obi):
 
 off_docs, off_kinds = load(sys.argv[1])
 on_docs, on_kinds = load(sys.argv[2])
-n_off = check(off_docs, off_kinds, "default", expect_obi=False)
-n_on = check(on_docs, on_kinds, "obi", expect_obi=True)
+n_off = check(off_docs, off_kinds, "obi off", expect_obi=False)
+n_on = check(on_docs, on_kinds, "obi on", expect_obi=True)
 
 if failures:
     for f in failures:

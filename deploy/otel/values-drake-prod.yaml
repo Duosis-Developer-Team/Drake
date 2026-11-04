@@ -5,8 +5,12 @@
 # them was taken against what the cluster actually looks like, read-only,
 # before this file was written.
 #
-# Phase 1 of ADR-0029: LOGS ONLY. No trace collection, no application
-# instrumentation, nothing that touches an application pod or Datadog.
+# Phase 1 of ADR-0029: logs. Phase 3, added 2026-11-04 as a deliberate
+# pilot: eBPF traces for ONE namespace (`hermes-dev`), collected on the
+# worker node only. Nothing that touches an application pod or Datadog —
+# OBI's application-mutating switches are fixed off in the chart template
+# and the capabilities they need are not granted (validated by
+# validate.sh). Turning the pilot off is one flag: `obi.enabled: false`.
 
 clusterName: duosis-prod-1
 
@@ -19,6 +23,21 @@ images:
     repository: clickhouse/clickhouse-server
     # 26.8.36.3, the 26.8 LTS line.
     digest: "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
+
+obi:
+  enabled: true
+  image:
+    repository: otel/ebpf-instrument
+    # v1.0.0, the release the chart was written against. The index digest,
+    # matching how the collector and ClickHouse are pinned above.
+    digest: "sha256:a68d70e934260f72540f157ccf4fb4adfa38f11de060d7d905696dad6a3fca02"
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  # The pilot allowlist, and the whole of it: one namespace, whose five
+  # bound services run on the node OBI observes. Nothing else on the
+  # cluster is instrumented. Widen only as a new decision.
+  namespaces:
+    - hermes-dev
 
 agent:
   # The application namespaces Drake catalogues, plus Drake itself. Datadog,
