@@ -4,15 +4,32 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@b81d7a1 by publish
-# run 41815964452. All three — API, web and migration — were built from that
+# Images are pinned to real digests published from main@f786da8 by publish
+# run 41840006890. All three — API, web and migration — were built from that
 # one commit, so they cannot drift apart. The digests are the build step's
 # own `digest` output for each image (the run summary), cross-checked
-# against the `pushing manifest for …:b81d7a1…@sha256:…` line of the same
+# against the `pushing manifest for …:f786da8…@sha256:…` line of the same
 # job — not grepped from the build log at large, which also prints a
 # tooling image's digest.
 #
-# This release carries the traces feature (PR #96, ADR-0029 phase 3): the
+# This release carries PR #101: the cross-service "where is the problem?"
+# board (GET /v1/service-health/signals — failed requests and error log
+# lines per bound service, read from the same store with the same scope
+# rules and the existing read-only user), the attention-queue entries it
+# feeds, and a fix for health reads reporting signals as "not measured"
+# when the caller's telemetry lease budget was momentarily full (seen live:
+# "—/1" ready replicas and "Datasource unreachable" on page load). The
+# budget is unchanged; a concurrency refusal is retried three times within
+# a second. No schema change (migrations stay at 0024), no new permission,
+# no new flag.
+#
+# The digests these replaced (API `f01da519…26ea`, web `1e33d0fa…f540`)
+# named main@b81d7a1 and are what revision 37 serves — the rollback target
+# if this one has to come back. Read from the live Deployments before this
+# edit rather than assumed from the previous file.
+#
+# Before that, revision 37 carried the traces feature (PR #96, ADR-0029
+# phase 3): the
 # trace read path behind every bound service's health screen, with the
 # requests/traces panel and its inline waterfall. It does bring a schema
 # change: migrations move to 0024 (`traces.view`, additive, granted only
@@ -140,11 +157,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit b81d7a1ed71d85685e0a17a87ea4f3193d437cb4
+    # Source commit f786da82a5a107855296e7e81a49b5ed64cd0c67
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:f01da519fe6dad24a878f9f13180eeab7d4161a10cd7f978f6ca097ac57826ea"
+    digest: "sha256:f515f6060bf0e675041d2a8166ea5df0cf96fb7600145c92613e4537060a1ee3"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -156,8 +173,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit b81d7a1ed71d85685e0a17a87ea4f3193d437cb4
-    digest: "sha256:1e33d0faac7837573f36650b287e389111c5d2c6b5af1d08445d24fd7ac8f540"
+    # Source commit f786da82a5a107855296e7e81a49b5ed64cd0c67
+    digest: "sha256:84400ab86a81c3564deebdc38cc946594021f4caacbf1045174e4241929f83d0"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -168,7 +185,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:f01da519fe6dad24a878f9f13180eeab7d4161a10cd7f978f6ca097ac57826ea"
+    digest: "sha256:f515f6060bf0e675041d2a8166ea5df0cf96fb7600145c92613e4537060a1ee3"
   backoffLimit: 0
 
 networkPolicy:
