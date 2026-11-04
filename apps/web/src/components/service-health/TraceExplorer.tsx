@@ -51,6 +51,11 @@ type Load =
   | { kind: "failed"; message: string; correlationId?: string }
   | { kind: "page"; page: TracePage };
 
+/** How many requests a page shows at first, and how many each "show more"
+ *  adds. The API returns up to 50; listing all of them at once turned the
+ *  panel into a scroll that never ended. */
+export const REQUESTS_STEP = 8;
+
 function percent(ratio: number | null): string {
   if (ratio === null) return "—";
   const value = ratio * 100;
@@ -65,6 +70,7 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [shown, setShown] = useState(REQUESTS_STEP);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchPage = useCallback(
@@ -73,7 +79,10 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
       const controller = new AbortController();
       abortRef.current = controller;
       if (quiet) setRefreshing(true);
-      else setLoad({ kind: "loading" });
+      else {
+        setLoad({ kind: "loading" });
+        setShown(REQUESTS_STEP);
+      }
       apiGet<TracePage>(tracesPath(bindingId, { range, errorsOnly, sort }), controller.signal)
         .then((page) => {
           if (controller.signal.aborted) return;
@@ -240,7 +249,7 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
                 data-testid="trace-requests"
                 aria-busy={refreshing}
               >
-                {page.requests.map((request) => (
+                {page.requests.slice(0, shown).map((request) => (
                   <li key={request.trace_id}>
                     <RequestRow
                       request={request}
@@ -255,6 +264,28 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
                 ))}
               </ol>
             )}
+
+            {page.requests.length > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-micro text-ink-muted">
+                <span data-testid="trace-requests-shown">
+                  {t("requests.showing", {
+                    shown: Math.min(shown, page.requests.length),
+                    total: page.requests.length,
+                  })}
+                </span>
+                {shown < page.requests.length ? (
+                  <Button
+                    size="compact"
+                    onClick={() => setShown((current) => current + REQUESTS_STEP)}
+                    data-testid="trace-requests-more"
+                  >
+                    {t("requests.more", {
+                      count: Math.min(REQUESTS_STEP, page.requests.length - shown),
+                    })}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
 
             <p className="text-micro text-ink-muted">{t("note")}</p>
           </>
