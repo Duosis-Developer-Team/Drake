@@ -31,6 +31,13 @@ spec:
       # are switched off rather than worked around. Not configurable: an
       # option here would only offer a way to reintroduce the crash.
       enableServiceLinks: false
+      {{- with .Values.api.affinity }}
+      # Where the scheduler should prefer to put this pod. Optional; a
+      # preference (not a requirement) so a full node never leaves it
+      # unscheduled.
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -216,6 +223,13 @@ spec:
       # are switched off rather than worked around. Not configurable: an
       # option here would only offer a way to reintroduce the crash.
       enableServiceLinks: false
+      {{- with .Values.web.affinity }}
+      # Where the scheduler should prefer to put this pod. Optional; a
+      # preference (not a requirement) so a full node never leaves it
+      # unscheduled.
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
