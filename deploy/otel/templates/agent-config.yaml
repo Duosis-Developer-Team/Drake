@@ -35,6 +35,51 @@ data:
           - type: remove
             id: drop-file-path
             field: attributes["log.file.path"]
+          # JSON lines carry their own level ("level", Python's "levelname",
+          # "severity", "lvl"), but a container log line arrives with no
+          # severity at all, so "errors only" could not select them. Parse
+          # the line into a scratch attribute, read the level from it, then
+          # drop the scratch copy: the body is stored exactly as written and
+          # nothing else grows. Lines that are not JSON, or not valid JSON,
+          # pass through untouched; nothing is ever dropped here.
+          - type: json_parser
+            id: json-scratch
+            if: 'body matches "^\\s*\\{"'
+            parse_from: body
+            parse_to: attributes["drake.json"]
+            on_error: send_quiet
+          - type: move
+            id: level-from-levelname
+            if: 'attributes["drake.json"] != nil and attributes["drake.json"]["level"] == nil and attributes["drake.json"]["levelname"] != nil'
+            from: attributes["drake.json"]["levelname"]
+            to: attributes["drake.json"]["level"]
+          - type: move
+            id: level-from-severity
+            if: 'attributes["drake.json"] != nil and attributes["drake.json"]["level"] == nil and attributes["drake.json"]["severity"] != nil'
+            from: attributes["drake.json"]["severity"]
+            to: attributes["drake.json"]["level"]
+          - type: move
+            id: level-from-lvl
+            if: 'attributes["drake.json"] != nil and attributes["drake.json"]["level"] == nil and attributes["drake.json"]["lvl"] != nil'
+            from: attributes["drake.json"]["lvl"]
+            to: attributes["drake.json"]["level"]
+          - type: severity_parser
+            id: json-level
+            if: 'attributes["drake.json"] != nil and attributes["drake.json"]["level"] != nil'
+            parse_from: attributes["drake.json"]["level"]
+            on_error: send_quiet
+            # On top of the default names: the spellings real services use,
+            # and pino's numeric levels (10 trace … 60 fatal).
+            mapping:
+              debug: [{min: 10, max: 29}]
+              info: [{min: 30, max: 39}, notice, NOTICE]
+              warn: [warning, WARNING, Warning, {min: 40, max: 49}]
+              error: [err, ERR, {min: 50, max: 59}]
+              fatal: [critical, CRITICAL, Critical, panic, PANIC, {min: 60, max: 69}]
+          - type: remove
+            id: drop-json-scratch
+            if: 'attributes["drake.json"] != nil'
+            field: attributes["drake.json"]
     processors:
       memory_limiter:
         check_interval: 1s
