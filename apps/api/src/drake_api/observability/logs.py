@@ -23,12 +23,20 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from drake_api.logging import redact
+from drake_api.observability.scope import (
+    DEFAULT_RANGE,
+    RANGES,
+    SCOPE_PREDICATE,
+    ScopeError,
+    clickhouse_time,
+    parse_store_time,
+    scope_parameters,
+)
 from drake_api.observability.store import safe_identifier
 
-# Fixed windows, exactly like the service-health series: no request can ask
-# for a month of logs.
-LOG_RANGES: dict[str, int] = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400}
-DEFAULT_LOG_RANGE = "1h"
+# Fixed windows, shared with traces (observability.scope).
+LOG_RANGES = RANGES
+DEFAULT_LOG_RANGE = DEFAULT_RANGE
 
 Severity = Literal["any", "debug", "info", "warn", "error", "fatal"]
 
@@ -55,35 +63,24 @@ MAX_BODY_CHARS = 4096
 # would only make a log line look like something it is not.
 _TERM = re.compile(r"^[^\x00-\x1f\x7f]*$")
 
-# The resource attribute that names a workload of each bound kind. These are
-# the OpenTelemetry semantic-convention keys the k8sattributes processor
-# writes, so a binding's kind decides the key server-side.
-_WORKLOAD_ATTRIBUTE: dict[str, str] = {
-    "Deployment": "k8s.deployment.name",
-    "StatefulSet": "k8s.statefulset.name",
-    "DaemonSet": "k8s.daemonset.name",
-}
-
 _STATEMENT = """
 SELECT
     toString(Timestamp) AS ts,
     SeverityText AS severity_text,
     SeverityNumber AS severity_number,
-    substring(Body, 1, {{max_body:UInt32}}) AS body,
+    substring(Body, 1, {max_body:UInt32}) AS body,
     TraceId AS trace_id,
     SpanId AS span_id,
     ResourceAttributes['k8s.pod.name'] AS pod,
     ResourceAttributes['k8s.container.name'] AS container
-FROM {database}.otel_logs
-WHERE Timestamp >= {{start:DateTime64(9, 'UTC')}}
-  AND Timestamp < {{end:DateTime64(9, 'UTC')}}
-  AND ResourceAttributes['k8s.cluster.name'] = {{cluster:String}}
-  AND ResourceAttributes['k8s.namespace.name'] = {{namespace:String}}
-  AND ResourceAttributes[{{workload_attribute:String}}] = {{workload:String}}
-  AND SeverityNumber >= {{min_severity:UInt8}}
-  AND ({{term:String}} = '' OR positionCaseInsensitive(Body, {{term:String}}) > 0)
+FROM __DATABASE__.otel_logs
+WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
+  AND Timestamp < {end:DateTime64(9, 'UTC')}
+  AND __SCOPE__
+  AND SeverityNumber >= {min_severity:UInt8}
+  AND ({term:String} = '' OR positionCaseInsensitive(Body, {term:String}) > 0)
 ORDER BY Timestamp DESC
-LIMIT {{limit:UInt16}}
+LIMIT {limit:UInt16}
 """
 
 
@@ -98,10 +95,6 @@ class LogQuery:
     limit: int
     start: datetime
     end: datetime
-
-
-def _clickhouse_time(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 def build_log_query(
@@ -128,9 +121,10 @@ def build_log_query(
         raise LogQueryError(f"limit must be between 1 and {MAX_LIMIT}")
     if len(term) > MAX_TERM_LENGTH or not _TERM.match(term):
         raise LogQueryError("unsupported search term")
-    attribute = _WORKLOAD_ATTRIBUTE.get(str(binding.get("workload_kind")))
-    if attribute is None:
-        raise LogQueryError("unsupported workload kind")
+    try:
+        scope = scope_parameters(binding)
+    except ScopeError as error:
+        raise LogQueryError(str(error)) from error
 
     end = now
     start = now - timedelta(seconds=LOG_RANGES[range_key])
@@ -145,15 +139,14 @@ def build_log_query(
         # that microsecond, so the boundary repeats rather than skips.
         end = min(end, before + timedelta(microseconds=1))
 
-    statement = _STATEMENT.format(database=safe_identifier(database))
+    statement = _STATEMENT.replace("__DATABASE__", safe_identifier(database)).replace(
+        "__SCOPE__", SCOPE_PREDICATE.strip()
+    )
     parameters = {
         "max_body": str(MAX_BODY_CHARS),
-        "start": _clickhouse_time(start),
-        "end": _clickhouse_time(end),
-        "cluster": str(binding["cluster"]["cluster_ref"]),
-        "namespace": str(binding["namespace"]),
-        "workload_attribute": attribute,
-        "workload": str(binding["workload_name"]),
+        "start": clickhouse_time(start),
+        "end": clickhouse_time(end),
+        **scope,
         "min_severity": str(_SEVERITY_FLOOR[severity]),
         "term": term.strip(),
         "limit": str(limit),
@@ -161,23 +154,11 @@ def build_log_query(
     return LogQuery(statement=statement, parameters=parameters, limit=limit, start=start, end=end)
 
 
-def _parse_store_time(value: Any) -> datetime:
-    if not isinstance(value, str):
-        raise ValueError("timestamp")
-    # ClickHouse renders DateTime64(9) as `YYYY-MM-DD HH:MM:SS.fffffffff`;
-    # Python keeps microseconds, which is all a page cursor needs.
-    head, _, fraction = value.partition(".")
-    parsed = datetime.strptime(head, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-    if fraction:
-        parsed = parsed.replace(microsecond=int(fraction[:6].ljust(6, "0")))
-    return parsed
-
-
 def normalize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Store rows → the API's log entry shape. Refuses anything unexpected."""
     entries: list[dict[str, Any]] = []
     for row in rows:
-        timestamp = _parse_store_time(row.get("ts"))
+        timestamp = parse_store_time(row.get("ts"))
         body = row.get("body")
         if not isinstance(body, str):
             raise ValueError("body")

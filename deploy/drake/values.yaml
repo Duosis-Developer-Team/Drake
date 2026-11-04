@@ -266,6 +266,9 @@ observability:
   # default: with it off the API answers `not_configured` and connects to
   # nothing. The flag is rendered in both states.
   logsEnabled: false
+  # Traces from the same store. Needs OBI running (deploy/otel `obi.*`),
+  # which logs do not, so it is its own switch.
+  tracesEnabled: false
   store:
     # IP LITERAL in production, for the same reason as the telemetry
     # connectors: hostname connectors are refused until the transport pins

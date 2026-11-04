@@ -31,6 +31,7 @@ import {
   ServiceIncidents,
 } from "@/components/incidents/ServiceIncidents";
 import { LogExplorer } from "@/components/service-health/LogExplorer";
+import { TraceExplorer } from "@/components/service-health/TraceExplorer";
 import {
   RangeSelector,
   SignalChart,
@@ -734,6 +735,9 @@ export default function ServiceHealthDetailPage() {
                     </div>
                   </section>
                 ) : null}
+
+                {/* What the workload served, request by request. */}
+                <TraceExplorer bindingId={binding.id} />
 
                 {/* What the workload wrote: the evidence behind the numbers above. */}
                 <LogExplorer bindingId={binding.id} />

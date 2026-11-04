@@ -20,6 +20,7 @@ import { onboarding } from "./onboarding";
 import { protection } from "./protection";
 import { serviceHealth } from "./serviceHealth";
 import { shell } from "./shell";
+import { traces } from "./traces";
 import { ui } from "./ui";
 
 export const MESSAGES = {
@@ -33,6 +34,7 @@ export const MESSAGES = {
   deployments,
   serviceHealth,
   logs,
+  traces,
   protection,
   notifications,
   integrations,

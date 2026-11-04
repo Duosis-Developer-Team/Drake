@@ -371,6 +371,9 @@ class Settings(BaseSettings):
     # with no store configured the endpoints answer `not_configured` and
     # nothing is queried.
     observability_logs_enabled: bool = False
+    # Traces are their own decision: they need OBI running in the cluster,
+    # which logs do not.
+    observability_traces_enabled: bool = False
     observability_store: ObservabilityStoreConnector | None = None
 
     @property
@@ -549,11 +552,12 @@ class Settings(BaseSettings):
                     f"alertmanager integration {key!r} allows a silence longer than a week; "
                     "that is an off switch, not a pause"
                 )
-        if self.observability_logs_enabled:
+        if self.observability_logs_enabled or self.observability_traces_enabled:
             store = self.observability_store
             if store is None:
                 raise RuntimeError(
-                    "observability logs are enabled but no observability store is configured"
+                    "observability logs or traces are enabled but no observability store "
+                    "is configured"
                 )
             if not (store.username and store.password_file):
                 # An anonymous connection would be whatever the server's

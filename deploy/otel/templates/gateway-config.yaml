@@ -30,6 +30,14 @@ data:
       batch:
         send_batch_size: 2000
         timeout: 5s
+      # Spans arrive from OBI, which knows the namespace and workload but
+      # not the name Drake's catalog gives this cluster. Logs get it from
+      # the agent; traces get it here, so both match a binding the same way.
+      resource/cluster:
+        attributes:
+          - key: k8s.cluster.name
+            value: {{ .Values.clusterName | quote }}
+            action: upsert
     exporters:
       clickhouse/logs:
         endpoint: tcp://drake-otel-clickhouse:9000
@@ -75,5 +83,5 @@ data:
           exporters: [clickhouse/logs]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, resource/cluster, batch]
           exporters: [clickhouse/traces]

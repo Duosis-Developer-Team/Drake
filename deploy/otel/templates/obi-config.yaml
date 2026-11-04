@@ -1,0 +1,55 @@
+{{- if .Values.obi.enabled }}
+{{- include "drake-otel.require" . -}}
+{{- if not .Values.obi.namespaces -}}
+{{- fail "obi.namespaces is required when obi.enabled: OBI instruments an allowlist of namespaces, never everything" -}}
+{{- end -}}
+{{- if not .Values.obi.nodeSelector -}}
+{{- fail "obi.nodeSelector is required when obi.enabled: OBI runs only on the nodes chosen for it" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drake-otel-obi
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+data:
+  obi.yaml: |
+    log_level: warn
+    # --- Never modify an application -------------------------------------
+    # Every key below changes what an instrumented process does or sends,
+    # and every one is fixed here rather than offered as a value. The
+    # capabilities that would make them possible are not granted either
+    # (see obi.yaml), so a mistake in one layer is caught by the other.
+    ebpf:
+      # Would add a `traceparent` header to outgoing HTTP requests and TCP
+      # options to TLS traffic.
+      context_propagation: disabled
+      track_request_headers: false
+      # Would write trace ids into the services' own log output.
+      log_enricher:
+        services: []
+    # Would signal Node.js processes with SIGUSR1 to open the inspector and
+    # evaluate an agent inside them (default ON in OBI 1.0).
+    nodejs:
+      enabled: false
+      manual_spans: false
+    # Would attach a Java agent to running JVMs (default ON in OBI 1.0).
+    javaagent:
+      enabled: false
+    # --- What to observe -------------------------------------------------
+    # An allowlist. A namespace not named here is never instrumented.
+    discovery:
+      instrument:
+        {{- range .Values.obi.namespaces }}
+        - k8s_namespace: {{ . | quote }}
+        {{- end }}
+    attributes:
+      kubernetes:
+        enable: "true"
+    # --- Where spans go --------------------------------------------------
+    # Traces only. No metrics endpoint and no Prometheus port are set, so
+    # OBI exports and listens for nothing else.
+    otel_traces_export:
+      endpoint: http://drake-otel-gateway.{{ .Release.Namespace }}.svc:4317
+      protocol: grpc
+{{- end }}
