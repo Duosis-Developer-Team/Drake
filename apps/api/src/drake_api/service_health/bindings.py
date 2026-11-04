@@ -501,6 +501,45 @@ async def get_binding(
     return _binding_payload(row)
 
 
+async def get_bindings(
+    connection: AsyncConnection,
+    principal: Principal,
+    binding_ids: list[uuid.UUID],
+    permission: str,
+) -> list[dict[str, Any]]:
+    """Every binding of *binding_ids* that *permission* covers, in one
+    query. Ids the caller may not read are simply absent, as for
+    get_binding: nothing distinguishes them from ids that do not exist."""
+    if not binding_ids:
+        return []
+    visible = await visible_scope_ids(connection, principal, permission)
+    rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT b.id, b.namespace, b.workload_kind, b.workload_name,
+                       b.resolved_resource_uid, b.resolved_at, b.preset_key,
+                       b.health_policy_key, b.lifecycle, b.revision,
+                       b.created_at, b.updated_at,
+                       c.cluster_ref, c.id,
+                       p.project_key, e.environment_key, sd.service_key,
+                       b.environment_service_id, b.integration_id
+                FROM service_workload_bindings b
+                JOIN environment_services es ON es.id = b.environment_service_id
+                JOIN clusters c ON c.id = b.cluster_id
+                JOIN projects p ON p.id = b.project_id
+                JOIN environments e ON e.id = b.environment_id
+                JOIN service_definitions sd ON sd.id = b.service_id
+                WHERE b.id = ANY(:ids) AND es.scope_id = ANY(:visible)
+                ORDER BY b.id
+                """
+            ),
+            {"ids": list(binding_ids), "visible": _sentinel(visible)},
+        )
+    ).all()
+    return [_binding_payload(row) for row in rows]
+
+
 def _binding_payload(row: Any) -> dict[str, Any]:
     return {
         "id": str(row[0]),

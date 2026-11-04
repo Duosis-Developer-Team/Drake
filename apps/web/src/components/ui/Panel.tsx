@@ -116,11 +116,14 @@ export function PanelHeader({
   const Heading = `h${level}` as const;
   return (
     <div
-      className={`flex items-start justify-between gap-x-4 gap-y-2 ${
+      /* Wraps instead of squeezing: below a readable title width (12rem)
+         the actions drop to their own line rather than crushing the title
+         into one word per line on a narrow screen. */
+      className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-3 ${
         flush ? "border-b border-border px-7 pt-6 pb-5" : ""
       }`}
     >
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-48">
         <Heading id={id} className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
           {title}
         </Heading>
@@ -133,7 +136,9 @@ export function PanelHeader({
           </div>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+      ) : null}
     </div>
   );
 }
@@ -183,7 +188,9 @@ export function SectionHeader({
           <p className="mt-0.5 text-caption text-ink-secondary">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+      ) : null}
     </div>
   );
 }
