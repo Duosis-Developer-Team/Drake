@@ -99,10 +99,16 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-              add: ["BPF", "PERFMON", "SYS_PTRACE", "NET_RAW", "CHECKPOINT_RESTORE", "DAC_READ_SEARCH"]
+              add: ["BPF", "PERFMON", "SYS_PTRACE", "NET_RAW", "CHECKPOINT_RESTORE", "DAC_READ_SEARCH", "IPC_LOCK"]
             # The runtime's default profile already allows bpf() and
             # perf_event_open() to a process holding BPF/PERFMON; verified
             # against the default profile before this was written.
+            #   IPC_LOCK          raise RLIMIT_MEMLOCK so eBPF maps can be
+            #                     allocated; without it map creation fails
+            #                     with ENOMEM and tracers stop (observed in
+            #                     the hermes-dev pilot). It only permits
+            #                     locking memory: no privilege escalation,
+            #                     no contact with an application.
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
