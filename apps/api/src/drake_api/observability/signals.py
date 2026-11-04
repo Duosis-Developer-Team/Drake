@@ -34,7 +34,10 @@ from drake_api.observability.store import safe_identifier
 MAX_BINDINGS = 100
 # One row per (cluster, namespace, workload) seen in the window. Bounded so
 # a namespace with thousands of short-lived workloads cannot blow the page.
-MAX_GROUPS = 2000
+# It must not exceed the reader profile's `max_result_rows` ceiling (1000 in
+# deploy/otel and deploy/local): ClickHouse refuses a request that asks for
+# more, so every read failed in production at 2000. A unit test pins it.
+MAX_GROUPS = 1000
 
 # OpenTelemetry severity bands (observability.logs uses the same floors).
 _WARN = 13
