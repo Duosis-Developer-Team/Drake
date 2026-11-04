@@ -113,7 +113,9 @@ spec:
             # Stated in both states, like the deployment ingest flag.
             - name: DRAKE_OBSERVABILITY_LOGS_ENABLED
               value: {{ (.Values.observability).logsEnabled | default false | quote }}
-            {{- if (.Values.observability).logsEnabled }}
+            - name: DRAKE_OBSERVABILITY_TRACES_ENABLED
+              value: {{ (.Values.observability).tracesEnabled | default false | quote }}
+            {{- if or (.Values.observability).logsEnabled (.Values.observability).tracesEnabled }}
             - name: DRAKE_OBSERVABILITY_STORE
               value: {{ include "drake.observabilityStore" . | quote }}
             {{- end }}
@@ -121,10 +123,11 @@ spec:
             # Secret REFERENCES only; no value is ever rendered here.
             - secretRef:
                 name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
-          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) }}
+          {{- $observability := or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
+          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability }}
           {{- if $secretVolumes }}
           volumeMounts:
-            {{- if (.Values.observability).logsEnabled }}
+            {{- if $observability }}
             - name: observability-store
               mountPath: {{ .Values.observability.secretMountPath | quote }}
               readOnly: true
@@ -150,12 +153,12 @@ spec:
             httpGet: {path: /health/ready, port: http}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) }}
+      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
       volumes:
-        {{- if (.Values.observability).logsEnabled }}
+        {{- if or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
         - name: observability-store
           secret:
-            secretName: {{ required "observability.existingSecret is required when observability.logsEnabled" .Values.observability.existingSecret }}
+            secretName: {{ required "observability.existingSecret is required when observability.logsEnabled or tracesEnabled" .Values.observability.existingSecret }}
             items:
               - {key: reader-password, path: reader-password}
             # Same 0440 + fsGroup contract as the other credential mounts.

@@ -7,7 +7,7 @@ never checks a role NAME — authority always flows through role_permissions.
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-CATALOG_VERSION = 5
+CATALOG_VERSION = 6
 
 # Atomic permissions (from the product authority). ``auth.session`` powers
 # nothing by itself — every authenticated user can read their own /v1/me.
@@ -20,6 +20,9 @@ PERMISSIONS: dict[str, str] = {
     # personal data or a credential a metric never could, so reading logs
     # is granted explicitly rather than inherited from seeing a chart.
     "logs.view": "Read application logs of services in scope",
+    # Separate for the same reason as logs.view: a span carries request
+    # paths and client addresses, which a chart never does.
+    "traces.view": "Read request traces of services in scope",
     "tenant.view": "View tenant directory and details",
     "tenant.usage.export": "Export tenant usage data",
     "protection.view": "View backup/restore posture",

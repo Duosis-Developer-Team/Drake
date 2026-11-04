@@ -68,7 +68,7 @@ imagePullSecrets:
 {{- define "drake.observabilityStore" -}}
 {{- $store := .Values.observability.store -}}
 {{- toJson (dict
-      "url" (required "observability.store.url is required when observability.logsEnabled" $store.url)
+      "url" (required "observability.store.url is required when observability.logsEnabled or tracesEnabled" $store.url)
       "allow_private" (default false $store.allowPrivate)
       "allow_plaintext" (default false $store.allowPlaintext)
       "database" (default "otel" $store.database)

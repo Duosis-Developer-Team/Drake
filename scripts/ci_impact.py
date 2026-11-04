@@ -120,6 +120,7 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
         # Logs are read through a service-health binding, so the suite sits
         # with the binding read path it depends on.
         "apps/api/tests/test_observability_logs_integration.py",
+        "apps/api/tests/test_observability_traces_integration.py",
     ),
     "agents_enrollment": (
         "apps/api/tests/test_agent_enrollment_integration.py",
