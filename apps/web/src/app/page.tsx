@@ -35,6 +35,7 @@ import { VerdictPanel } from "@/components/command-center/VerdictPanel";
 import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
 import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
 import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
+import { SignalBoard } from "@/components/service-health/SignalBoard";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
@@ -59,6 +60,7 @@ import {
   incidentItems,
   integrationItems,
   serviceItems,
+  signalItems,
   sortAttention,
   tallyByTone,
 } from "@/lib/overview";
@@ -70,6 +72,7 @@ import { useClusterInventorySummaries } from "@/lib/clusterSummaries";
 import type { InventorySummary } from "@/lib/inventory";
 import { useMediaQuery } from "@/lib/useMediaQuery";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
+import { boundIds, rankSignals, signalsPath, type SignalPage } from "@/lib/signals";
 import { resourceStatus, useResource, type Resource } from "@/lib/useResource";
 
 const REFRESH_MS = 60_000;
@@ -91,6 +94,13 @@ export default function CommandCenterPage() {
     "/v1/integrations/health",
     { refreshMs: REFRESH_MS },
   );
+  // What each bound service's own telemetry says (failed requests, error
+  // logs). Additive like the timeline reads: it adds rows to the queue but
+  // is not one of the verdict's sources, so a deployment without a
+  // telemetry store loses nothing from its sources-answered count.
+  const signals = useResource<SignalPage>(signalsPath(boundIds(services.data?.items ?? [])), {
+    refreshMs: REFRESH_MS,
+  });
   // Additive reads for the correlation timeline only — already-used
   // endpoints, not part of the verdict's own sources-answered accounting.
   const recentAlerts = useResource<Page<AlertInstance>>(alertListPath({ window: "24h" }), {
@@ -118,6 +128,9 @@ export default function CommandCenterPage() {
     ...(alerts.data ? alertItems(alerts.data) : []),
     ...(clusters.data ? clusterItems(clusters.data.clusters) : []),
     ...(services.data ? serviceItems(services.data.items) : []),
+    ...(services.data && signals.data
+      ? signalItems(rankSignals(services.data.items, signals.data))
+      : []),
     ...(integrations.data ? integrationItems(integrations.data.integrations) : []),
   ]);
 
@@ -149,6 +162,7 @@ export default function CommandCenterPage() {
     sources.forEach(({ resource }) => resource.reload());
     recentAlerts.reload();
     recentDeployments.reload();
+    signals.reload();
   };
 
   // Below 1024px the reading order becomes verdict → attention queue →
@@ -185,6 +199,11 @@ export default function CommandCenterPage() {
   );
 
   const attentionQueueSection = <AttentionQueue items={attention} loading={anyLoading} />;
+
+  const hasBound = boundIds(services.data?.items ?? []).length > 0;
+  const signalSection = hasBound ? (
+    <SignalBoard rows={services.data?.items ?? []} resource={signals} limit={5} />
+  ) : null;
 
   const evidenceCoverageSection = (
     <Panel data-testid="evidence-coverage-panel">
@@ -229,6 +248,7 @@ export default function CommandCenterPage() {
             {verdict}
           </div>
           <Reveal delay={80}>{attentionQueueSection}</Reveal>
+          {signalSection ? <Reveal delay={110}>{signalSection}</Reveal> : null}
           <Reveal delay={140}>{timelineSection}</Reveal>
           <Reveal delay={200}>{healthMatrixSection}</Reveal>
           <Reveal delay={260}>{capacityRiskSection}</Reveal>
@@ -258,6 +278,7 @@ export default function CommandCenterPage() {
             <Reveal delay={200} className="[&>*]:h-full">{attentionQueueSection}</Reveal>
             <Reveal delay={260} className="[&>*]:h-full">{timelineSection}</Reveal>
           </div>
+          {signalSection ? <Reveal delay={290}>{signalSection}</Reveal> : null}
           <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
             <Reveal delay={320} className="[&>*]:h-full">{healthMatrixSection}</Reveal>
             <Reveal delay={380} className="[&>*]:h-full">{capacityRiskSection}</Reveal>

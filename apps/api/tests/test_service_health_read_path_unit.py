@@ -121,6 +121,9 @@ class FakeBroker:
                 self.cancelled += 1
                 raise
         answer = self.answers.get(request.template_key, "empty")
+        if isinstance(answer, list):
+            # A scripted sequence: one answer per call, the last one sticks.
+            answer = answer.pop(0) if len(answer) > 1 else answer[0]
         if isinstance(answer, BaseException):
             raise answer
         if answer == "empty":
@@ -744,3 +747,64 @@ def test_every_preset_signal_maps_to_a_registry_template() -> None:
             template = find_template(registry, template_key)
             assert template is not None, f"{key} names missing template {template_key}"
             assert "workload" in template.scope_types
+
+
+# --- a momentarily full concurrency budget is not a missing signal ---------
+
+
+def _refused() -> HTTPException:
+    return HTTPException(429, "telemetry_concurrency_exhausted")
+
+
+@pytest.fixture
+def no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    from drake_api.service_health import orchestrator as module
+
+    monkeypatch.setattr(module, "LEASE_RETRY_DELAYS_SECONDS", (0.0, 0.0, 0.0))
+
+
+@pytest.mark.asyncio
+async def test_a_refused_lease_is_retried_and_the_signal_is_measured(no_retry_wait: None) -> None:
+    """A detail page opens a health read and its charts at once; the
+    caller's lease budget is full for a few milliseconds. That must not
+    turn a measured replica count into "not measured"."""
+    broker = FakeBroker(
+        {**HEALTHY_BASELINE, "workload.replicas-ready.v1": [_refused(), _refused(), 3]}
+    )
+    result, signals = await orchestrator(broker).compute(None, context(), now=NOW)
+
+    assert signals["ready_replicas"].value == 3
+    assert "availability.replicas" not in result.missing_signals
+    assert broker.calls.count("workload.replicas-ready.v1") == 3
+
+
+@pytest.mark.asyncio
+async def test_a_lease_that_never_frees_is_failed_after_a_bounded_number_of_tries(
+    no_retry_wait: None,
+) -> None:
+    broker = FakeBroker({**HEALTHY_BASELINE, "workload.replicas-ready.v1": [_refused()]})
+    result, signals = await orchestrator(broker).compute(None, context(), now=NOW)
+
+    assert signals["ready_replicas"].value is None
+    assert "availability.replicas" in result.missing_signals
+    # Three retries after the first attempt, then it is reported, not hidden.
+    assert broker.calls.count("workload.replicas-ready.v1") == 4
+    assert result.status is not HealthStatus.CRITICAL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        HTTPException(503, "telemetry_budget_unavailable"),
+        HTTPException(422, "range budget"),
+        HTTPException(429, "something else"),
+    ],
+)
+async def test_only_a_concurrency_refusal_is_retried(
+    no_retry_wait: None, refusal: HTTPException
+) -> None:
+    broker = FakeBroker({**HEALTHY_BASELINE, "workload.replicas-ready.v1": [refusal]})
+    await orchestrator(broker).compute(None, context(), now=NOW)
+
+    assert broker.calls.count("workload.replicas-ready.v1") == 1

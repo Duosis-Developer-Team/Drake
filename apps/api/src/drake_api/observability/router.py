@@ -19,9 +19,10 @@ read alike and mean opposite things (ADR-0011):
                     means "nothing matched in this window", nothing more
 """
 
+import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -36,6 +37,13 @@ from drake_api.observability.logs import (
     build_log_query,
     next_cursor,
     normalize_rows,
+)
+from drake_api.observability.scope import DEFAULT_RANGE, RANGES, WORKLOAD_ATTRIBUTE
+from drake_api.observability.signals import (
+    MAX_BINDINGS,
+    build_signal_query,
+    summarize_logs,
+    summarize_traces,
 )
 from drake_api.observability.store import ClickHouseStore, StoreContractError, StoreUnavailableError
 from drake_api.observability.traces import (
@@ -294,4 +302,127 @@ async def binding_trace(
         "trace_id": statement.parameters["trace_id"],
         "state": "ok",
         "spans": spans,
+    }
+
+
+async def _signal_section(
+    store: ClickHouseStore,
+    *,
+    enabled: bool,
+    kind: str,
+    bindings: list[dict[str, Any]],
+    range_key: str,
+    now: datetime,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """One signal (logs or traces) for every binding the caller may read it
+    for: the section's state, and the per-binding numbers when `ok`."""
+    connector = store.connector
+    if not enabled or connector is None:
+        return {"state": "not_configured"}, {}
+    if not bindings:
+        # Nothing this caller may read for this signal: not a store answer.
+        return {"state": "ok"}, {}
+    query = build_signal_query(
+        database=connector.database, bindings=bindings, range_key=range_key, now=now
+    )
+    statement = query.logs if kind == "logs" else query.traces
+    try:
+        result = await store.query(
+            statement,
+            query.parameters,
+            max_rows=query.max_rows,
+            timeout_seconds=connector.timeout_seconds,
+            correlation_id=correlation_id_var.get() or "",
+        )
+        summary = (
+            summarize_logs(result.rows, bindings)
+            if kind == "logs"
+            else summarize_traces(result.rows, bindings)
+        )
+    except StoreUnavailableError as error:
+        logger.warning("signal store unavailable", extra={"code": error.code, "signal": kind})
+        return {"state": "unavailable", "reason": error.code}, {}
+    except (StoreContractError, ValueError) as error:
+        code = error.code if isinstance(error, StoreContractError) else "store_malformed_row"
+        logger.warning("signal store contract failure", extra={"code": code, "signal": kind})
+        return {"state": "unavailable", "reason": code}, {}
+    return {"state": "ok"}, summary
+
+
+@router.get("/service-health/signals")
+async def service_signals(
+    request: Request,
+    binding_id: list[uuid.UUID] = Query(...),
+    range_key: str = Query(DEFAULT_RANGE, alias="range", max_length=8),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """Error and request counts for many bound services in one read.
+
+    For each requested binding: its log lines, error and warning lines
+    (when the caller has `logs.view` there) and its requests, failed
+    requests and p95 (when the caller has `traces.view` there). A binding
+    the caller may read neither for is absent, as a 404 would be. Each
+    signal carries its own state, because "no store" and "store down" must
+    not read as "no errors".
+    """
+    settings: Settings = request.app.state.settings
+    if range_key not in RANGES:
+        raise HTTPException(status_code=422, detail="unsupported range")
+    ids = list(dict.fromkeys(binding_id))
+    if len(ids) > MAX_BINDINGS:
+        raise HTTPException(status_code=422, detail="too many bindings")
+    async with get_engine(settings).connect() as connection:
+        log_bindings = await binding_repo.get_bindings(
+            connection, auth.principal, ids, permission=LOGS_PERMISSION
+        )
+        trace_bindings = await binding_repo.get_bindings(
+            connection, auth.principal, ids, permission=TRACES_PERMISSION
+        )
+
+    # Kinds the store cannot name are left out rather than matched on a
+    # guess (the schema allows only these today; this keeps it explicit).
+    log_bindings = [b for b in log_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE]
+    trace_bindings = [b for b in trace_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE]
+    now = datetime.now(UTC)
+
+    store = _store(request)
+    (logs_section, logs), (traces_section, traces) = await asyncio.gather(
+        _signal_section(
+            store,
+            enabled=settings.observability_logs_enabled,
+            kind="logs",
+            bindings=log_bindings,
+            range_key=range_key,
+            now=now,
+        ),
+        _signal_section(
+            store,
+            enabled=settings.observability_traces_enabled,
+            kind="traces",
+            bindings=trace_bindings,
+            range_key=range_key,
+            now=now,
+        ),
+    )
+
+    visible = {b["id"] for b in log_bindings} | {b["id"] for b in trace_bindings}
+    items = [
+        {
+            "binding_id": str(i),
+            "logs": logs.get(str(i)),
+            "traces": traces.get(str(i)),
+        }
+        for i in ids
+        if str(i) in visible
+    ]
+    return {
+        "range": range_key,
+        "as_of": now.isoformat(),
+        "window": {
+            "start": (now - timedelta(seconds=RANGES[range_key])).isoformat(),
+            "end": now.isoformat(),
+        },
+        "logs": logs_section,
+        "traces": traces_section,
+        "items": items,
     }

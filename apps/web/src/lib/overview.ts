@@ -19,6 +19,7 @@ import type { AlertSummary } from "@/lib/alerting";
 import type { Cluster, IntegrationHealth } from "@/lib/catalog";
 import type { IncidentSummary } from "@/lib/incidents";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
+import type { RankedSignal } from "@/lib/signals";
 
 /**
  * Why a row is in the list, as data rather than as a sentence.
@@ -33,6 +34,8 @@ export type AttentionReason =
   | { kind: "agent"; state: string }
   | { kind: "inventory"; state: string }
   | { kind: "service"; state: string }
+  | { kind: "signal"; cause: "requests"; ratio: number }
+  | { kind: "signal"; cause: "logs"; count: number }
   | { kind: "integration"; name: string; state: string }
   | { kind: "alerts"; priority: "p1" | "p2" | "unmapped"; count: number };
 
@@ -51,6 +54,8 @@ export interface AttentionItem {
   asOf?: string | null;
   /** Which surface it came from, so the list is traceable. */
   origin: "incident" | "alert" | "cluster" | "service" | "integration";
+  /* A service whose own telemetry is failing joins as origin "service":
+     it is that service needing attention, counted once per subject. */
   /** The structured form of `state` (and, for alerts and clusters, of
    *  `subject`/`context`) — what a component translates. */
   reason?: AttentionReason;
@@ -275,4 +280,42 @@ export function tallyByTone<T>(
   return [...counts.entries()]
     .map(([tone, count]) => ({ tone, count }))
     .sort((a, b) => compareTone(a.tone, b.tone));
+}
+
+/**
+ * Services whose own telemetry says they are failing right now — failed
+ * requests or error log lines over the thresholds in lib/signals. A
+ * service whose health verdict is fine can still be failing a quarter of
+ * its requests; this is what puts it in the queue.
+ */
+export function signalItems(ranked: RankedSignal[]): AttentionItem[] {
+  return ranked
+    .filter(({ verdict }) => verdict.cause !== null)
+    .map(({ row, item, verdict }) => {
+      const subject = row.display_name || row.service_key;
+      const base = {
+        key: `signal:${item.binding_id}`,
+        tone: verdict.tone,
+        subject,
+        context: `${row.project_key} / ${row.environment_key}`,
+        href: `/service-health/${item.binding_id}`,
+        origin: "service" as const,
+      };
+      if (verdict.cause === "requests") {
+        const ratio = item.traces?.error_ratio ?? 0;
+        return {
+          ...base,
+          state: `${Math.round(ratio * 100)}% of requests failing`,
+          asOf: item.traces?.newest_at ?? null,
+          reason: { kind: "signal" as const, cause: "requests" as const, ratio },
+        };
+      }
+      const count = item.logs?.errors ?? 0;
+      return {
+        ...base,
+        state: `${count} error log lines in the last hour`,
+        asOf: item.logs?.newest_at ?? null,
+        reason: { kind: "signal" as const, cause: "logs" as const, count },
+      };
+    });
 }

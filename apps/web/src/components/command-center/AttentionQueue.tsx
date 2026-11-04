@@ -26,6 +26,7 @@ import { LoadingSkeleton } from "@/components/ui/states";
 import { toneSpec } from "@/lib/design/status";
 import { useT, type Translator } from "@/lib/i18n";
 import { groupByRootCause, rootCauseKeyOf, type AttentionItem } from "@/lib/overview";
+import { percent } from "@/lib/signals";
 
 function testIdOf(key: string): string {
   return `attention-group-${key.replace(/[^a-zA-Z0-9]+/g, "-")}`;
@@ -35,6 +36,7 @@ function testIdOf(key: string): string {
 function describe(
   item: AttentionItem,
   t: Translator<"commandCenter">,
+  ts: Translator<"signals">,
 ): { state: string; subject: string; context: string } {
   const reason = item.reason;
   if (!reason) return { state: item.state, subject: item.subject, context: item.context };
@@ -75,6 +77,15 @@ function describe(
         context: item.context,
       };
     }
+    case "signal":
+      return {
+        state:
+          reason.cause === "requests"
+            ? ts("attention.requests", { ratio: percent(reason.ratio) })
+            : ts("attention.logs", { count: reason.count }),
+        subject: item.subject,
+        context: item.context,
+      };
     case "alerts":
       return {
         state: t(`attention.state.alerts.${reason.priority}`, { count: reason.count }),
@@ -86,9 +97,10 @@ function describe(
 
 function AttentionRow({ item }: { item: AttentionItem }) {
   const t = useT("commandCenter");
+  const ts = useT("signals");
   const spec = toneSpec(item.tone);
   const Icon = spec.icon;
-  const words = describe(item, t);
+  const words = describe(item, t, ts);
   return (
     <Link
       href={item.href}
@@ -122,6 +134,7 @@ export function AttentionQueue({
 }) {
   const t = useT("commandCenter");
   const common = useT("common");
+  const ts = useT("signals");
   const groups = groupByRootCause(items);
   const tally = (["critical", "warning"] as const).map((tone) => ({
     tone,
@@ -198,7 +211,7 @@ export function AttentionQueue({
               <li key={testId} data-testid={testId}>
                 <details open className="group">
                   <summary className="cursor-pointer list-none px-7 py-2.5 text-micro text-ink-muted hover:bg-surface-hover">
-                    {t("attention.group", { count: group.length, subject: describe(group[0], t).subject })}
+                    {t("attention.group", { count: group.length, subject: describe(group[0], t, ts).subject })}
                   </summary>
                   <ul className="divide-y divide-border border-t border-border">
                     {group.map((item) => (

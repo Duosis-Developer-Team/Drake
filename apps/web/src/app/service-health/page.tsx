@@ -38,6 +38,7 @@ import {
 } from "@/components/service-health/primitives";
 import { RingProgress, ValueChip } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
+import { SignalBoard } from "@/components/service-health/SignalBoard";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import {
   toneForThreshold,
@@ -51,6 +52,8 @@ import {
   type ServiceHealthRow,
   type ServiceHealthStatus,
 } from "@/lib/serviceHealth";
+import { boundIds, signalsPath, type SignalPage } from "@/lib/signals";
+import { useResource } from "@/lib/useResource";
 
 /** How many services sit in each verdict, from the rows the page already
  *  has — never a second query, and never a bucket invented beyond the ones
@@ -570,6 +573,9 @@ function ServiceHealthBody({ data }: { data: ServiceHealthPage }) {
   const t = useT("serviceHealth");
   const [filter, setFilter] = useState<ServiceHealthStatus | "all">("all");
   const buckets = useMemo(() => tally(data.items, t), [data.items, t]);
+  const signals = useResource<SignalPage>(signalsPath(boundIds(data.items)), {
+    refreshMs: 60_000,
+  });
   const visible = useMemo(
     () =>
       [...data.items]
@@ -590,6 +596,10 @@ function ServiceHealthBody({ data }: { data: ServiceHealthPage }) {
         <BreakdownCard items={data.items} />
         <CoverageCard items={data.items} />
       </div>
+
+      {boundIds(data.items).length > 0 ? (
+        <SignalBoard rows={data.items} resource={signals} />
+      ) : null}
 
       <div className="flex flex-col gap-6">
         <StatusFilter

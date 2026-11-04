@@ -57,6 +57,31 @@ from drake_api.telemetry.registry import TelemetryRegistry
 # all of it.
 MAX_CONCURRENT_QUERIES = 4
 
+# The broker refuses a query outright (429) when the caller's concurrency
+# budget is momentarily full — a detail page opening a health read and its
+# charts at once is enough. Those leases are held for milliseconds, so a
+# refusal is retried a few times after a short wait instead of turning a
+# measured signal into "not measured". The budget itself is never raised or
+# bypassed: every attempt still has to win a lease.
+LEASE_RETRY_DELAYS_SECONDS: tuple[float, ...] = (0.15, 0.4, 0.9)
+_CONCURRENCY_REFUSED = "telemetry_concurrency_exhausted"
+
+
+async def query_with_lease_retry(
+    broker: TelemetryBroker, principal: Principal, request: QueryInput
+) -> dict[str, Any]:
+    """`broker.query`, retrying only a concurrency refusal, a bounded number
+    of times. Every other refusal or failure is raised at once."""
+    for delay in LEASE_RETRY_DELAYS_SECONDS:
+        try:
+            return await broker.query(principal, request)
+        except HTTPException as error:
+            if error.status_code != 429 or error.detail != _CONCURRENCY_REFUSED:
+                raise
+        await asyncio.sleep(delay)
+    return await broker.query(principal, request)
+
+
 # The signals a preset can name. The API speaks these names; the template
 # keys behind them stay server-side.
 SIGNAL_FIELDS: tuple[str, ...] = (
@@ -278,7 +303,7 @@ class HealthOrchestrator:
         )
         async with semaphore:
             try:
-                envelope = await self._broker.query(principal, request)
+                envelope = await query_with_lease_retry(self._broker, principal, request)
             except asyncio.CancelledError:
                 # The caller went away. Propagate, so no query outlives the
                 # request that asked for it.
@@ -572,7 +597,8 @@ class HealthOrchestrator:
             raise HTTPException(status_code=404, detail="not found")
 
         now = datetime.now(UTC)
-        envelope = await self._broker.query(
+        envelope = await query_with_lease_retry(
+            self._broker,
             principal,
             QueryInput(
                 template_key=template_key,
