@@ -4,26 +4,28 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@887f127 by publish
-# run 40721869375. All three — API, web and migration — were built from that
+# Images are pinned to real digests published from main@5ccd005 by publish
+# run 41802456917. All three — API, web and migration — were built from that
 # one commit, so they cannot drift apart. The digests are the build step's
 # own `digest` output for each image (the run summary), cross-checked
-# against the `pushing manifest for …:887f127…@sha256:…` line of the same
+# against the `pushing manifest for …:5ccd005…@sha256:…` line of the same
 # job — not grepped from the build log at large, which also prints a
 # tooling image's digest.
 #
-# This release carries two changes:
-#   - PR #88: every dependency advisory the scan reported is patched,
-#     including Next.js GHSA-2464-fhr4-w9xw (image optimizer RCE) and the
-#     PyJWT key-confusion advisories on the sign-in token path.
-#   - PR #87: the OpenTelemetry log read path (ADR-0029) and migration 0023
-#     (`logs.view`, additive). The feature stays OFF here: no
-#     `observability` block is set, so the API connects to no log store.
+# This release carries the log explorer (PR #91): a Logs panel on every
+# bound service's health screen, reading the store #90 switched on. It
+# needs no schema change (migrations stay at 0023) and no new setting. The
+# API image is rebuilt from the same commit but its code is unchanged.
+# (#92, a dev-only lint dependency, and #93, the drake-otel agent's JSON
+# level parsing, ride along on main; #93 ships in the drake-otel release.)
 #
-# The digests these replaced (API `cd11da21…e608`, web `9deb9275…dfaf`)
-# named main@fdef05c and are what helm revision 32 served — the rollback
-# target if this one has to come back. Read from the live Deployments before
-# this edit rather than assumed from the previous file.
+# The digests these replaced (API `65b3e048…762f`, web `9092b7c4…afbe`)
+# named main@887f127 and are what helm revisions 33 and 34 served — 34 is
+# the rollback target if this one has to come back. Read from the live
+# Deployments before this edit rather than assumed from the previous file.
+#
+# Before that (API `cd11da21…e608`, web `9deb9275…dfaf`) named main@fdef05c,
+# served by revision 32.
 #
 # Before that (API `ad8bc09a…682a`, web `19d5a4f1…407b`) named main@be85372,
 # served by revision 31.
@@ -129,11 +131,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 887f1272391c46818b984f8dcd9b015a6d1ca737
+    # Source commit 5ccd005fd08361bb2c4884bced96dce4ea2afd83
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:65b3e0482d0a8958fc46c47c8420914b7668ef0a946b27f82a6fb3ec8caa762f"
+    digest: "sha256:096a8556551869ec8804bad2475717bef9d1146492aa358a4b13297f5a3b22b1"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -145,8 +147,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 887f1272391c46818b984f8dcd9b015a6d1ca737
-    digest: "sha256:9092b7c4aa9acc1960382bfbc372f80d75958e69f3cd72a1eff3bfa8aff2afbe"
+    # Source commit 5ccd005fd08361bb2c4884bced96dce4ea2afd83
+    digest: "sha256:88ef51585b3e59607a473382604e87390a9b4aa656c7b68087232683635db6de"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -157,7 +159,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:65b3e0482d0a8958fc46c47c8420914b7668ef0a946b27f82a6fb3ec8caa762f"
+    digest: "sha256:096a8556551869ec8804bad2475717bef9d1146492aa358a4b13297f5a3b22b1"
   backoffLimit: 0
 
 networkPolicy:
