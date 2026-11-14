@@ -74,9 +74,15 @@ emit_identity() {
       grep -m1 -oE '"id": *"sha256:[0-9a-f]{64}"' | grep -oE 'sha256:[0-9a-f]{64}' || true)"
   done
   {
-    echo "reference=$IMAGE"
-    echo "local_config_id=$LOCAL_ID"
-    echo "node_digests=$(echo "$digests" | tr -s ' ' | sed 's/^ //;s/ $//')"
+    # The caller sources this file, so every value is shell-quoted: a
+    # value holding more than one digest would otherwise run the second
+    # one as a command.
+    printf 'reference=%q
+' "$IMAGE"
+    printf 'local_config_id=%q
+' "$LOCAL_ID"
+    printf 'node_digests=%q
+' "$(echo "$digests" | tr -s ' ' | sed 's/^ //;s/ $//')"
   } > "$K3D_IMPORT_IDENTITY_FILE"
   echo "[import] identity recorded for the caller"
 }
