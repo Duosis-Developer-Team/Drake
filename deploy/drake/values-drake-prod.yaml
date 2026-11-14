@@ -4,15 +4,25 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@b3f2b7c by publish
-# run 41846337356. All three — API, web and migration — were built from that
+# Images are pinned to real digests published from main@155e0e5 by publish
+# run 43635612118. All three — API, web and migration — were built from that
 # one commit, so they cannot drift apart. The digests are the build step's
 # own `digest` output for each image (the run summary), cross-checked
-# against the `pushing manifest for …:b3f2b7c…@sha256:…` line of the same
+# against the `pushing manifest for …:155e0e5…@sha256:…` line of the same
 # job — not grepped from the build log at large, which also prints a
 # tooling image's digest.
 #
-# This release carries PR #103: the "where is the problem?" read asked
+# This release carries PR #104: the requests panel shows 8 requests at a
+# time and the log panel 30 lines in a bounded box, each with "show more",
+# instead of listing everything the API returned. Web only; the API image
+# is rebuilt from the same commit and carries no behaviour change (#106 is
+# chart-only, #107 touches the agent and CI). No schema change.
+#
+# The digests these replaced (API `eea90ece…9126`, web `07141c7b…17d2`)
+# named main@b3f2b7c and are what revision 40 serves — the rollback target
+# if this one has to come back. Read from the live Deployments.
+#
+# Revision 39 carried PR #103: the "where is the problem?" read asked
 # ClickHouse for 2000 rows against the read-only profile's hard ceiling of
 # 1000, so revision 38 answered every board read "unavailable". The bound is
 # now 1000 (verified against this store from inside the API pod) and a unit
@@ -178,11 +188,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit b3f2b7cce6ff28d13c92d4205c478118e81d1827
+    # Source commit 155e0e50463705cae7475dcfd051cef9fcab24d8
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:eea90ecea9da283f7dc76235fe61ddefcfd23178f208165573a7f522d1099126"
+    digest: "sha256:c1849b70ce038e4f7090077d71b57b6bb11590475e61b3fa27db91c8497e54a9"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -205,8 +215,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit b3f2b7cce6ff28d13c92d4205c478118e81d1827
-    digest: "sha256:07141c7bd5d70195215c5acc7d7ae4d772dc0666e034b550b95285b007a317d2"
+    # Source commit 155e0e50463705cae7475dcfd051cef9fcab24d8
+    digest: "sha256:6ad6396d3c906a93cc961a04a0a8e189f27466fd81362793fd06338f7cf89d11"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -228,7 +238,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:eea90ecea9da283f7dc76235fe61ddefcfd23178f208165573a7f522d1099126"
+    digest: "sha256:c1849b70ce038e4f7090077d71b57b6bb11590475e61b3fa27db91c8497e54a9"
   backoffLimit: 0
 
 networkPolicy:
