@@ -33,6 +33,8 @@ export const traces = defineMessages({
       open: "Open trace",
       close: "Close trace",
       none: "No requests matched",
+      showing: "Showing {shown} of {total}",
+      more: "Show {count} more",
     },
     trace: {
       title: "Trace",
@@ -100,6 +102,8 @@ export const traces = defineMessages({
       open: "Trace'i aç",
       close: "Trace'i kapat",
       none: "Eşleşen istek yok",
+      showing: "{total} istekten {shown} tanesi gösteriliyor",
+      more: "{count} tane daha göster",
     },
     trace: {
       title: "Trace ayrıntısı",

@@ -69,6 +69,9 @@ import {
 
 const LIVE_INTERVAL_MS = 10_000;
 const SEARCH_DEBOUNCE_MS = 400;
+/** Lines shown at first and per "show more". A page holds up to 100 and
+ *  older pages append; the list stays a bounded box either way. */
+export const LINES_STEP = 30;
 
 const BAND_TONE: Record<SeverityBand, StatusTone> = {
   fatal: "critical",
@@ -135,6 +138,7 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderFailed, setOlderFailed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [shown, setShown] = useState(LINES_STEP);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchNewest = useCallback(
@@ -149,7 +153,10 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
           if (controller.signal.aborted) return;
           setLoad({ kind: "page", page, entries: page.entries });
           setOlderFailed(false);
-          if (!quiet) setExpanded(new Set());
+          if (!quiet) {
+            setExpanded(new Set());
+            setShown(LINES_STEP);
+          }
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
@@ -200,6 +207,8 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
           page: { ...current.page, next_before: older.next_before },
           entries: [...current.entries, ...older.entries],
         });
+        // The reader asked for these lines: show them, not another button.
+        setShown((value) => value + older.entries.length);
       })
       .catch(() => setOlderFailed(true))
       .finally(() => setLoadingOlder(false));
@@ -224,6 +233,11 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
     if (bandFilter === "warn" && row.band !== "warn") return false;
     return true;
   });
+  // A local filter narrows what is on screen; start the count again so a
+  // narrower list is not hidden behind a "show more" it no longer needs.
+  useEffect(() => {
+    setShown(LINES_STEP);
+  }, [hideHealth, pod, bandFilter]);
   const counted = rows.filter((row) => !(hideHealth && row.healthCheck));
   const errors = counted.filter((row) => row.band === "error" || row.band === "fatal").length;
   const warnings = counted.filter((row) => row.band === "warn").length;
@@ -447,11 +461,11 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
             )
           ) : (
             <ol
-              className="-mx-2 divide-y divide-border overflow-hidden rounded-[1rem] border border-border"
+              className="-mx-2 max-h-[40rem] divide-y divide-border overflow-y-auto overscroll-contain rounded-[1rem] border border-border"
               data-testid="log-lines"
               aria-busy={refreshing}
             >
-              {visible.map((row, index) => {
+              {visible.slice(0, shown).map((row, index) => {
                 const day = utcDay(row.entry.timestamp);
                 const previousDay = index > 0 ? utcDay(visible[index - 1].entry.timestamp) : null;
                 return (
@@ -468,7 +482,20 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-micro text-ink-muted">
             <span>{t("redaction")}</span>
-            {load.page.next_before ? (
+            {visible.length > shown ? (
+              <span className="flex flex-wrap items-center gap-3">
+                <span data-testid="log-lines-shown">
+                  {t("summary.showing", { shown, total: visible.length })}
+                </span>
+                <Button
+                  size="compact"
+                  onClick={() => setShown((value) => value + LINES_STEP)}
+                  data-testid="log-lines-more"
+                >
+                  {t("action.showMore", { count: Math.min(LINES_STEP, visible.length - shown) })}
+                </Button>
+              </span>
+            ) : load.page.next_before ? (
               <Button
                 size="compact"
                 onClick={loadOlder}

@@ -53,6 +53,7 @@ export const logs = defineMessages({
       expand: "Show details",
       collapse: "Hide details",
       clearFilters: "Clear filters",
+      showMore: "Show {count} more",
     },
     summary: {
       lines: "{count, plural, one {# line} other {# lines}}",
@@ -63,6 +64,7 @@ export const logs = defineMessages({
       window: "{start} – {end} UTC",
       more: "More lines exist in this window",
       end: "Start of the window reached",
+      showing: "Showing {shown} of {total} lines",
     },
     detail: {
       time: "Time (UTC)",
@@ -149,6 +151,7 @@ export const logs = defineMessages({
       expand: "Ayrıntıları göster",
       collapse: "Ayrıntıları gizle",
       clearFilters: "Filtreleri temizle",
+      showMore: "{count} satır daha göster",
     },
     summary: {
       lines: "{count} satır",
@@ -159,6 +162,7 @@ export const logs = defineMessages({
       window: "UTC {start} – {end}",
       more: "Bu aralıkta daha fazla satır var",
       end: "Aralığın başına ulaşıldı",
+      showing: "{total} satırdan {shown} tanesi gösteriliyor",
     },
     detail: {
       time: "Zaman (UTC)",

@@ -229,4 +229,25 @@ describe("LogExplorer", () => {
     expect(await screen.findByText("Eşleşen satır yok")).toBeInTheDocument();
     expect(screen.getByText("Loglar")).toBeInTheDocument();
   });
+
+  it("bounds the list: the first lines, then more on request, before older pages", async () => {
+    const entries = Array.from({ length: 45 }, (_, index) =>
+      line({ body: `line ${index}`, timestamp: `2026-11-04T09:15:${String(59 - index).padStart(2, "0")}.000000+00:00` }),
+    );
+    fetchMock.mockResolvedValue(
+      respond(page({ entries, next_before: "2026-11-04T09:00:00+00:00" })),
+    );
+    render(<LogExplorer bindingId="b1" />);
+
+    const list = await screen.findByTestId("log-lines");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(30);
+    expect(screen.getByTestId("log-lines-shown")).toHaveTextContent("Showing 30 of 45 lines");
+    // Older pages are offered only once what is loaded has been shown.
+    expect(screen.queryByTestId("log-load-older")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("log-lines-more"));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(45);
+    expect(screen.queryByTestId("log-lines-more")).not.toBeInTheDocument();
+    expect(screen.getByTestId("log-load-older")).toBeInTheDocument();
+  });
 });

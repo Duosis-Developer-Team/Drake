@@ -176,4 +176,27 @@ describe("TraceExplorer", () => {
     expect(await screen.findByText("İstekler ve trace'ler")).toBeInTheDocument();
     expect(screen.getByText("Hata oranı")).toBeInTheDocument();
   });
+
+  it("shows the first requests and adds more on request, never the whole page at once", async () => {
+    const many = Array.from({ length: 20 }, (_, index) => ({
+      ...page().requests[0],
+      trace_id: index.toString(16).padStart(32, "0"),
+      path: `/orders/${index}`,
+      error: false,
+      http_status: "200",
+    }));
+    fetchMock.mockResolvedValue(respond(page({ requests: many })));
+    render(<TraceExplorer bindingId="b1" />);
+
+    const list = await screen.findByTestId("trace-requests");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(8);
+    expect(screen.getByTestId("trace-requests-shown")).toHaveTextContent("Showing 8 of 20");
+
+    fireEvent.click(screen.getByTestId("trace-requests-more"));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(16);
+
+    fireEvent.click(screen.getByTestId("trace-requests-more"));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(20);
+    expect(screen.queryByTestId("trace-requests-more")).not.toBeInTheDocument();
+  });
 });
