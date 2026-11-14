@@ -63,11 +63,26 @@ emit_identity() {
   for node in $(nodes); do
     digests="$digests $(docker exec "$node" ctr -n k8s.io images ls 2>/dev/null |
       awk -v ref="$IMAGE" '$1 ~ ref { print $3 }' | grep -oE 'sha256:[0-9a-f]{64}' | sort -u | tr '\n' ' ')"
+    # The image id the node's own CRI records for this reference: the
+    # platform image's CONFIG digest, which is what kubelet reports as
+    # `imageID`. When Docker uses the containerd image store (as the
+    # ubuntu-latest runners began to, 2026-11) `docker image inspect .Id` is
+    # the image INDEX digest instead, so without this the config digest is
+    # known to nobody and a genuine match is refused. Read from the node, for this exact
+    # reference: still an exact identity, never a looser comparison.
+    digests="$digests $(docker exec "$node" crictl inspecti -o json "docker.io/library/$IMAGE" 2>/dev/null |
+      grep -m1 -oE '"id": *"sha256:[0-9a-f]{64}"' | grep -oE 'sha256:[0-9a-f]{64}' || true)"
   done
   {
-    echo "reference=$IMAGE"
-    echo "local_config_id=$LOCAL_ID"
-    echo "node_digests=$(echo "$digests" | tr -s ' ' | sed 's/^ //;s/ $//')"
+    # The caller sources this file, so every value is shell-quoted: a
+    # value holding more than one digest would otherwise run the second
+    # one as a command.
+    printf 'reference=%q
+' "$IMAGE"
+    printf 'local_config_id=%q
+' "$LOCAL_ID"
+    printf 'node_digests=%q
+' "$(echo "$digests" | tr -s ' ' | sed 's/^ //;s/ $//')"
   } > "$K3D_IMPORT_IDENTITY_FILE"
   echo "[import] identity recorded for the caller"
 }
