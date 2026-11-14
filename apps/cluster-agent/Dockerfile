@@ -8,10 +8,10 @@
 #   - runs as the distroless nonroot user (uid 65532)
 #   - static build: works with readOnlyRootFilesystem and drop-ALL caps
 
-# golang:1.26.10. The official images set GOTOOLCHAIN=local, so this digest —
+# golang:1.26.11. The official images set GOTOOLCHAIN=local, so this digest —
 # not the `go` directive in go.mod — decides which toolchain compiles the
 # agent. Bump the two together or the build stops resolving.
-FROM golang@sha256:c141012f2b79382f9cb7438104ae0cd324cc548c1a605f393ef7402b87a1bd8b AS build
+FROM golang@sha256:957952ae74dc010608717144399a59a2c6e82ea03d63be1c7ff6577c5a135f93 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
