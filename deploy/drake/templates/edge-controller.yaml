@@ -205,6 +205,10 @@ spec:
       # Same reason as every other Drake pod: the injected DRAKE_* service
       # links are noise here, and Drake's own pods parse DRAKE_ variables.
       enableServiceLinks: false
+      {{- with $c.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ $name }}
       securityContext:
         runAsNonRoot: true

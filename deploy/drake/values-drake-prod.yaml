@@ -119,6 +119,17 @@ edge:
       repository: registry.k8s.io/ingress-nginx/controller
       # Same build the cluster's existing controllers run, pinned.
       digest: "sha256:f95a79b85fb93ac3de752c71a5c27d5ceae10a18b61904dec224c1c6a4581e47"
+    # Prefer the worker node (node2). The control-plane node is saturated
+    # (load far above its six cores, little free memory, no swap), and this
+    # pod is stateless, so it belongs where the headroom is. A preference,
+    # not a requirement: if node2 cannot take it, it still schedules.
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - {key: kubernetes.io/hostname, operator: In, values: [node2]}
 
 ingress:
   enabled: true
@@ -178,6 +189,17 @@ api:
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 512Mi}
+  # Prefer the worker node (node2). The control-plane node is saturated
+  # (load far above its six cores, little free memory, no swap), and this
+  # pod is stateless, so it belongs where the headroom is. A preference,
+  # not a requirement: if node2 cannot take it, it still schedules.
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - {key: kubernetes.io/hostname, operator: In, values: [node2]}
 
 web:
   replicas: 2
@@ -188,6 +210,17 @@ web:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
+  # Prefer the worker node (node2). The control-plane node is saturated
+  # (load far above its six cores, little free memory, no swap), and this
+  # pod is stateless, so it belongs where the headroom is. A preference,
+  # not a requirement: if node2 cannot take it, it still schedules.
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - {key: kubernetes.io/hostname, operator: In, values: [node2]}
 
 migration:
   enabled: true

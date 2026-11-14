@@ -58,6 +58,8 @@ edge:
     resources:
       requests: {cpu: 100m, memory: 128Mi}
       limits: {cpu: "1", memory: 512Mi}
+    # Pod affinity, rendered as given. Empty: the scheduler decides.
+    affinity: {}
 
 ingress:
   enabled: false
@@ -96,6 +98,8 @@ api:
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 512Mi}
+  # Pod affinity, rendered as given. Empty: the scheduler decides.
+  affinity: {}
 
 web:
   replicas: 2
@@ -107,6 +111,8 @@ web:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
+  # Pod affinity, rendered as given. Empty: the scheduler decides.
+  affinity: {}
 
 migration:
   # One owner, one path: a pre-install/pre-upgrade Job running

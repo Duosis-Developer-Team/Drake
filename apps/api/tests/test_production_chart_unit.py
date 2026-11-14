@@ -2225,3 +2225,42 @@ def test_both_listeners_mount_the_ca_because_both_of_them_sign() -> None:
     for container in pod["containers"]:
         mounts = {m["name"] for m in container["volumeMounts"]}
         assert "agent-ca" in mounts, container["name"]
+
+
+# --- placement --------------------------------------------------------------
+
+
+def _pod_affinity(docs: list[dict[str, Any]], component: str) -> dict[str, Any] | None:
+    [deployment] = [
+        d
+        for d in by_kind(docs, "Deployment")
+        if d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component")
+        == component
+    ]
+    affinity: dict[str, Any] | None = deployment["spec"]["template"]["spec"].get("affinity")
+    return affinity
+
+
+def test_no_affinity_unless_asked_for() -> None:
+    docs = render()
+    for component in ("api", "web"):
+        assert _pod_affinity(docs, component) is None
+
+
+def test_production_prefers_the_worker_node_and_never_requires_it() -> None:
+    """The control-plane node is saturated; Drake's stateless pods prefer
+    node2. A preference only: a requirement would leave a pod pending, and
+    Drake down, the day node2 has no room."""
+    docs = render_prod()
+    for component in ("api", "web", "edge"):
+        node = _pod_affinity(docs, component)
+        assert node is not None, component
+        node_affinity = node["nodeAffinity"]
+        assert "requiredDuringSchedulingIgnoredDuringExecution" not in node_affinity
+        [term] = node_affinity["preferredDuringSchedulingIgnoredDuringExecution"]
+        [expression] = term["preference"]["matchExpressions"]
+        assert expression == {
+            "key": "kubernetes.io/hostname",
+            "operator": "In",
+            "values": ["node2"],
+        }
