@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
-from drake_api.observability import logs, signals, traces
+from drake_api.observability import logs, signals, timeline, traces
 
 ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = [
@@ -34,6 +34,7 @@ def test_every_read_bound_fits_the_reader_ceiling(path: Path) -> None:
     ceiling = _ceiling(path)
     bounds = {
         "signals.MAX_GROUPS": signals.MAX_GROUPS,
+        "timeline.MAX_BUCKETS": timeline.MAX_BUCKETS,
         "logs.MAX_LIMIT": logs.MAX_LIMIT,
         "traces.MAX_LIMIT": traces.MAX_LIMIT,
         "traces.MAX_ROUTES": traces.MAX_ROUTES,

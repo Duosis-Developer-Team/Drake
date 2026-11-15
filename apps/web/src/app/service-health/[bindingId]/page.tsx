@@ -32,6 +32,7 @@ import {
 } from "@/components/incidents/ServiceIncidents";
 import { LogExplorer } from "@/components/service-health/LogExplorer";
 import { SectionNav, type SectionNavItem } from "@/components/service-health/SectionNav";
+import { TimelineStrip } from "@/components/service-health/TimelineStrip";
 import { TraceExplorer } from "@/components/service-health/TraceExplorer";
 import {
   RangeSelector,
@@ -65,6 +66,7 @@ import {
 import { useT, type Translator } from "@/lib/i18n";
 import { percent, signalsPath, type SignalPage } from "@/lib/signals";
 import { formatDuration } from "@/lib/traces";
+import type { TimelineWindow } from "@/lib/timeline";
 import { useResource } from "@/lib/useResource";
 import {
   SIGNAL_LABELS,
@@ -327,6 +329,7 @@ function sectionItems(
   const count = (n: number) => (n > 0 ? t("detail.nav.errors", { count: n }) : undefined);
   return [
     { id: "sh-overview", label: t("detail.nav.overview") },
+    { id: "sh-timeline", label: t("detail.nav.timeline") },
     { id: "sh-why", label: t("detail.nav.why") },
     ...(facts.history ? [{ id: "sh-history", label: t("detail.nav.history") }] : []),
     { id: "sh-requests", label: t("detail.nav.requests"), badge: count(facts.requestErrors) },
@@ -409,6 +412,8 @@ export default function ServiceHealthDetailPage() {
   // and the section counts say. Absent or unreadable, they say nothing.
   const signals = useResource<SignalPage>(signalsPath([bindingId]), { refreshMs: 60_000 });
   const signal = signals.data?.items[0] ?? null;
+  // A slice picked on the timeline narrows the request and log panels.
+  const [slice, setSlice] = useState<TimelineWindow | null>(null);
 
   return (
     <PageFrame>
@@ -672,6 +677,15 @@ export default function ServiceHealthDetailPage() {
                   </SectionCard>
                 </div>
 
+                <div id="sh-timeline" className="scroll-mt-24">
+                  <TimelineStrip
+                    bindingId={binding.id}
+                    environmentServiceId={binding.environment_service_id}
+                    selected={slice}
+                    onSelect={setSlice}
+                  />
+                </div>
+
                 {/* Why + resource pressure. */}
                 <div id="sh-why" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
                   <Panel className="h-full">
@@ -829,12 +843,20 @@ export default function ServiceHealthDetailPage() {
 
                 {/* What the workload served, request by request. */}
                 <div id="sh-requests" className="scroll-mt-24">
-                  <TraceExplorer bindingId={binding.id} />
+                  <TraceExplorer
+                    bindingId={binding.id}
+                    slice={slice}
+                    onClearSlice={() => setSlice(null)}
+                  />
                 </div>
 
                 {/* What the workload wrote: the evidence behind the numbers above. */}
                 <div id="sh-logs" className="scroll-mt-24">
-                  <LogExplorer bindingId={binding.id} />
+                  <LogExplorer
+                    bindingId={binding.id}
+                    slice={slice}
+                    onClearSlice={() => setSlice(null)}
+                  />
                 </div>
 
                 <div id="sh-incidents" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 lg:grid-cols-2">

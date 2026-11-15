@@ -51,6 +51,27 @@ def scope_parameters(binding: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def narrow_window(
+    start: datetime,
+    end: datetime,
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> tuple[datetime, datetime]:
+    """Narrow [start, end) to a caller's window, never widen it.
+
+    The range a caller chose bounds the read; a window (a slice the timeline
+    picked) can only move the edges inward. A window entirely outside the
+    range, or empty, is refused rather than silently read as "nothing".
+    """
+    if window_start is not None:
+        start = max(start, window_start.astimezone(UTC))
+    if window_end is not None:
+        end = min(end, window_end.astimezone(UTC))
+    if start >= end:
+        raise ValueError("window is outside the selected range")
+    return start, end
+
+
 def clickhouse_time(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
 

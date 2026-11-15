@@ -243,4 +243,17 @@ describe("TraceExplorer", () => {
     fireEvent.click(headers[1]);
     expect(within(groups).getByText("/orders/1")).toBeInTheDocument();
   });
+
+  it("reads a timeline slice instead of its own range, and offers a way back", async () => {
+    fetchMock.mockResolvedValue(respond(page()));
+    const onClear = vi.fn();
+    const slice = { start: "2026-11-04T09:25:00.000Z", end: "2026-11-04T09:27:30.000Z", range: "6h" as const };
+    render(<TraceExplorer bindingId="b1" slice={slice} onClearSlice={onClear} />);
+
+    await screen.findByTestId("trace-totals");
+    expect(params(0)).toMatchObject({ range: "6h", start: slice.start, end: slice.end });
+    expect(screen.queryByRole("radiogroup", { name: "Time range" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("window-chip"));
+    expect(onClear).toHaveBeenCalled();
+  });
 });

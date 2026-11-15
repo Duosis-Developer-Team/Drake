@@ -44,7 +44,14 @@ export const PAGE_SIZE = 100;
 
 export function logsPath(
   bindingId: string,
-  options: { range: LogRange; severity: LogSeverity; term: string; before?: string | null },
+  options: {
+    range: LogRange;
+    severity: LogSeverity;
+    term: string;
+    before?: string | null;
+    /** A slice picked on the timeline; the server keeps it inside `range`. */
+    window?: { start: string; end: string } | null;
+  },
 ): string {
   const params = new URLSearchParams({
     range: options.range,
@@ -54,6 +61,10 @@ export function logsPath(
   const term = options.term.trim();
   if (term) params.set("q", term);
   if (options.before) params.set("before", options.before);
+  if (options.window) {
+    params.set("start", options.window.start);
+    params.set("end", options.window.end);
+  }
   return `/v1/service-health/bindings/${encodeURIComponent(bindingId)}/logs?${params.toString()}`;
 }
 

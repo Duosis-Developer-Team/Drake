@@ -156,6 +156,7 @@ export const serviceHealth = defineMessages({
       nav: {
         label: "Sections",
         overview: "Overview",
+        timeline: "Timeline",
         why: "Why",
         history: "Signal history",
         requests: "Requests",
@@ -163,6 +164,28 @@ export const serviceHealth = defineMessages({
         incidents: "Incidents",
         setup: "Configuration",
         errors: "{count, plural, one {# error} other {# errors}}",
+      },
+      timeline: {
+        title: "When did it start?",
+        description: "Requests, failures, p95 and error log lines on one time axis, with deployments and incidents. Times are UTC.",
+        range: "Time range",
+        filling: "still filling",
+        hint: "Click a slice to narrow requests and logs to it",
+        selected: "{from}–{to} selected · Clear",
+        deployed: "Deployed {commit}",
+        slice: "{from}–{to}: {requests} requests, {errors} failed",
+        lanes: {
+          requests: "Requests",
+          failed: "Failed",
+          p95: "p95 latency",
+          errorLogs: "Error log lines",
+          events: "Events",
+        },
+        laneState: {
+          not_configured: "Not enabled on this Drake",
+          denied: "You can't read this signal for this service",
+          unavailable: "The store did not answer",
+        },
       },
       telemetry: {
         lastHour: "Last hour",
@@ -456,6 +479,7 @@ export const serviceHealth = defineMessages({
       nav: {
         label: "Bölümler",
         overview: "Özet",
+        timeline: "Zaman çizelgesi",
         why: "Neden",
         history: "Sinyal geçmişi",
         requests: "İstekler",
@@ -463,6 +487,28 @@ export const serviceHealth = defineMessages({
         incidents: "Olaylar",
         setup: "Yapılandırma",
         errors: "{count} hata",
+      },
+      timeline: {
+        title: "Ne zaman başladı?",
+        description: "İstekler, hatalar, p95 ve hata log satırları tek zaman ekseninde; dağıtımlar ve olaylarla birlikte. Saatler UTC.",
+        range: "Zaman aralığı",
+        filling: "hâlâ doluyor",
+        hint: "Bir dilime tıkla, istekler ve loglar o ana daralsın",
+        selected: "{from}–{to} seçili · Temizle",
+        deployed: "Dağıtım {commit}",
+        slice: "{from}–{to}: {requests} istek, {errors} başarısız",
+        lanes: {
+          requests: "İstekler",
+          failed: "Başarısız",
+          p95: "%95 gecikme",
+          errorLogs: "Hata log satırları",
+          events: "Olaylar",
+        },
+        laneState: {
+          not_configured: "Bu Drake'te açık değil",
+          denied: "Bu servis için bu sinyali okuma yetkin yok",
+          unavailable: "Depo yanıt vermedi",
+        },
       },
       telemetry: {
         lastHour: "Son 1 saat",
