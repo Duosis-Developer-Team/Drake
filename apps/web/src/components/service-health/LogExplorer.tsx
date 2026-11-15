@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { LogPatterns } from "@/components/service-health/LogPatterns";
 import { WindowChip } from "@/components/service-health/TimelineStrip";
 import { IconBubble, PILL_SECONDARY } from "@/components/service-health/primitives";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
@@ -150,6 +151,8 @@ export function LogExplorer({
   const [olderFailed, setOlderFailed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [shown, setShown] = useState(LINES_STEP);
+  // Lines, or the same window grouped by shape (counted in the store).
+  const [view, setView] = useState<"lines" | "patterns">("lines");
   const abortRef = useRef<AbortController | null>(null);
 
   const effectiveRange: LogRange = slice ? slice.range : range;
@@ -362,6 +365,16 @@ export function LogExplorer({
               data-testid="log-pod"
             />
           ) : null}
+          <SegmentedControl
+            label={t("view.label")}
+            value={view}
+            onChange={setView}
+            size="compact"
+            options={[
+              { value: "lines", label: t("view.lines") },
+              { value: "patterns", label: t("view.patterns") },
+            ]}
+          />
           <label className="inline-flex cursor-pointer items-center gap-2 text-caption text-ink-secondary">
             <input
               type="checkbox"
@@ -403,7 +416,19 @@ export function LogExplorer({
         />
       ) : null}
 
-      {isOk && load.kind === "page" ? (
+      {isOk && load.kind === "page" && view === "patterns" ? (
+        <LogPatterns
+          bindingId={bindingId}
+          range={effectiveRange}
+          severity={severity}
+          term={term}
+          slice={slice}
+          hideHealth={hideHealth}
+          onShowHealth={() => setHideHealth(false)}
+        />
+      ) : null}
+
+      {isOk && load.kind === "page" && view === "lines" ? (
         <>
           <div
             className="flex flex-wrap items-center gap-2 text-caption text-ink-secondary"
