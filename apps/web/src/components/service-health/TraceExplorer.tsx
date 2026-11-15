@@ -55,6 +55,42 @@ type Load =
  *  adds. The API returns up to 50; listing all of them at once turned the
  *  panel into a scroll that never ended. */
 export const REQUESTS_STEP = 8;
+/** Requests shown inside an opened endpoint group, worst first. */
+export const GROUP_TOP = 3;
+
+interface RouteGroup {
+  route: string;
+  items: RequestSummary[];
+  errors: number;
+  worst: number | null;
+}
+
+/** The loaded requests by endpoint, the ones with failures first, each
+ *  group's requests failed-then-slowest first. */
+export function groupByRoute(requests: RequestSummary[]): RouteGroup[] {
+  const byRoute = new Map<string, RequestSummary[]>();
+  for (const request of requests) {
+    const list = byRoute.get(request.route) ?? [];
+    list.push(request);
+    byRoute.set(request.route, list);
+  }
+  return [...byRoute.entries()]
+    .map(([route, items]) => {
+      const sorted = [...items].sort(
+        (a, b) => Number(b.error) - Number(a.error) || (b.duration_ms ?? 0) - (a.duration_ms ?? 0),
+      );
+      return {
+        route,
+        items: sorted,
+        errors: items.filter((item) => item.error).length,
+        worst: sorted.reduce<number | null>(
+          (max, item) => (item.duration_ms === null ? max : Math.max(max ?? 0, item.duration_ms)),
+          null,
+        ),
+      };
+    })
+    .sort((a, b) => b.errors - a.errors || (b.worst ?? 0) - (a.worst ?? 0));
+}
 
 function percent(ratio: number | null): string {
   if (ratio === null) return "—";
@@ -71,6 +107,11 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [shown, setShown] = useState(REQUESTS_STEP);
+  // Narrowing within the loaded page: an endpoint picked in the table,
+  // and a grouped view. Neither is sent to the server.
+  const [routeFilter, setRouteFilter] = useState<string | null>(null);
+  const [view, setView] = useState<"list" | "byRoute">("list");
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchPage = useCallback(
@@ -115,6 +156,22 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
     () => Math.max(1, ...(page?.requests ?? []).map((request) => request.duration_ms ?? 0)),
     [page],
   );
+  const visibleRequests = useMemo(
+    () => (page?.requests ?? []).filter((request) => !routeFilter || request.route === routeFilter),
+    [page, routeFilter],
+  );
+  const groups = useMemo(() => groupByRoute(visibleRequests), [visibleRequests]);
+  const pickRoute = (route: string) => {
+    setRouteFilter((current) => (current === route ? null : route));
+    setShown(REQUESTS_STEP);
+  };
+  const toggleGroup = (route: string) =>
+    setOpenGroups((previous) => {
+      const next = new Set(previous);
+      if (next.has(route)) next.delete(route);
+      else next.add(route);
+      return next;
+    });
 
   return (
     <Panel data-testid="trace-explorer">
@@ -198,9 +255,20 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {page.routes.map((route) => (
-                      <tr key={route.route}>
-                        <td className="max-w-[24rem] truncate px-4 py-2 font-mono text-ink" title={route.route}>
-                          {route.route}
+                      <tr
+                        key={route.route}
+                        className={routeFilter === route.route ? "bg-surface-selected" : undefined}
+                      >
+                        <td className="max-w-[24rem] px-4 py-2">
+                          <button
+                            type="button"
+                            onClick={() => pickRoute(route.route)}
+                            aria-pressed={routeFilter === route.route}
+                            title={t("routes.filterHint")}
+                            className="block max-w-full truncate text-left font-mono text-ink underline-offset-4 hover:text-brand hover:underline"
+                          >
+                            {route.route}
+                          </button>
                         </td>
                         <td data-tabular className="px-3 py-2 text-right text-ink">{route.requests}</td>
                         <td
@@ -220,6 +288,16 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
 
             <div className="flex flex-wrap items-center gap-3">
               <h3 className="mr-auto text-body font-semibold text-ink">{t("requests.title")}</h3>
+              <SegmentedControl
+                label={t("requests.view.label")}
+                value={view}
+                onChange={setView}
+                size="compact"
+                options={[
+                  { value: "list", label: t("requests.view.list") },
+                  { value: "byRoute", label: t("requests.view.byRoute") },
+                ]}
+              />
               <SegmentedControl
                 label={t("requests.sort.label")}
                 value={sort}
@@ -241,15 +319,96 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
               </label>
             </div>
 
-            {page.requests.length === 0 ? (
+            {routeFilter ? (
+              <p className="flex flex-wrap items-center gap-2 text-caption" data-testid="trace-route-filter">
+                <span className="rounded-full bg-surface-2 px-3 py-1 font-mono text-ink">
+                  {t("requests.filter.route", { route: routeFilter })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRouteFilter(null)}
+                  className="text-ink-secondary underline underline-offset-4 hover:text-ink"
+                >
+                  {t("requests.filter.clear")}
+                </button>
+              </p>
+            ) : null}
+
+            {visibleRequests.length === 0 ? (
               <EmptyState title={t("requests.none")} compact />
+            ) : view === "byRoute" ? (
+              <>
+                <ol
+                  className="-mx-2 divide-y divide-border overflow-hidden rounded-[1rem] border border-border"
+                  data-testid="trace-request-groups"
+                  aria-busy={refreshing}
+                >
+                  {groups.map((group) => {
+                    const expanded = openGroups.has(group.route);
+                    return (
+                      <li key={group.route}>
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(group.route)}
+                          aria-expanded={expanded}
+                          className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-hover"
+                        >
+                          {expanded ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-ink-muted" aria-hidden />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 text-ink-muted" aria-hidden />
+                          )}
+                          <span className="truncate font-mono text-caption text-ink" title={group.route}>
+                            {group.route}
+                          </span>
+                          <span className="flex flex-wrap items-center justify-end gap-2 text-micro">
+                            <span data-tabular className="rounded-full bg-surface-2 px-2 py-0.5 text-ink-secondary">
+                              {t("requests.group.requests", { count: group.items.length })}
+                            </span>
+                            {group.errors > 0 ? (
+                              <span data-tabular className={`rounded-full px-2 py-0.5 font-medium ${toneSpec("critical").chip}`}>
+                                {t("requests.group.errors", { count: group.errors })}
+                              </span>
+                            ) : null}
+                            <span data-tabular className="text-ink-muted">
+                              {t("requests.group.worst", { duration: formatDuration(group.worst) })}
+                            </span>
+                          </span>
+                        </button>
+                        {expanded ? (
+                          <ol className="divide-y divide-border border-t border-border bg-surface-2/50">
+                            {group.items.slice(0, GROUP_TOP).map((request) => (
+                              <li key={request.trace_id}>
+                                <RequestRow
+                                  request={request}
+                                  slowest={slowest}
+                                  open={open === request.trace_id}
+                                  onToggle={() =>
+                                    setOpen((current) => (current === request.trace_id ? null : request.trace_id))
+                                  }
+                                />
+                                {open === request.trace_id ? (
+                                  <TraceWaterfall bindingId={bindingId} traceId={request.trace_id} />
+                                ) : null}
+                              </li>
+                            ))}
+                          </ol>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+                <p className="text-micro text-ink-muted">
+                  {t("requests.group.scope", { count: visibleRequests.length, top: GROUP_TOP })}
+                </p>
+              </>
             ) : (
               <ol
                 className="-mx-2 divide-y divide-border overflow-hidden rounded-[1rem] border border-border"
                 data-testid="trace-requests"
                 aria-busy={refreshing}
               >
-                {page.requests.slice(0, shown).map((request) => (
+                {visibleRequests.slice(0, shown).map((request) => (
                   <li key={request.trace_id}>
                     <RequestRow
                       request={request}
@@ -265,22 +424,22 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
               </ol>
             )}
 
-            {page.requests.length > 0 ? (
+            {view === "list" && visibleRequests.length > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 text-micro text-ink-muted">
                 <span data-testid="trace-requests-shown">
                   {t("requests.showing", {
-                    shown: Math.min(shown, page.requests.length),
-                    total: page.requests.length,
+                    shown: Math.min(shown, visibleRequests.length),
+                    total: visibleRequests.length,
                   })}
                 </span>
-                {shown < page.requests.length ? (
+                {shown < visibleRequests.length ? (
                   <Button
                     size="compact"
                     onClick={() => setShown((current) => current + REQUESTS_STEP)}
                     data-testid="trace-requests-more"
                   >
                     {t("requests.more", {
-                      count: Math.min(REQUESTS_STEP, page.requests.length - shown),
+                      count: Math.min(REQUESTS_STEP, visibleRequests.length - shown),
                     })}
                   </Button>
                 ) : null}

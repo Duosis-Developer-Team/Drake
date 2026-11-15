@@ -283,8 +283,12 @@ describe("service health list", () => {
 
 // --- detail -------------------------------------------------------------
 
-function renderDetail(overrides: Record<string, unknown> = {}) {
+function renderDetail(
+  overrides: Record<string, unknown> = {},
+  extra: Record<string, { status: number; body: unknown }> = {},
+) {
   return installFetchMock({
+    ...extra,
     "/v1/service-health/bindings/b1/health": { status: 200, body: health(overrides) },
     "/v1/service-health/bindings/b1/metrics": { status: 200, body: METRICS },
     "/v1/service-health/bindings/b1/series": {
@@ -307,7 +311,78 @@ function renderDetail(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function signals(traces: unknown, logs: unknown, state = "ok") {
+  return {
+    "/v1/service-health/signals": {
+      status: 200,
+      body: {
+        range: "1h",
+        as_of: "2026-08-08T12:00:00Z",
+        logs: { state },
+        traces: { state },
+        items: [{ binding_id: "b1", traces, logs }],
+      },
+    },
+  };
+}
+
 describe("service health detail", () => {
+  it("has a section index, and counts failures only where there are some", async () => {
+    renderDetail(
+      {},
+      signals(
+        { requests: 200, errors: 5, error_ratio: 0.025, p95_ms: 410, newest_at: null },
+        { lines: 90, errors: 0, warnings: 2, newest_at: null },
+      ),
+    );
+    render(<ServiceHealthDetailPage />);
+
+    const nav = await screen.findByTestId("section-nav");
+    for (const label of ["Overview", "Why", "Requests", "Logs", "Incidents", "Configuration"]) {
+      expect(within(nav).getByRole("link", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
+    }
+    await waitFor(() =>
+      expect(within(nav).getByRole("link", { name: /^Requests/ })).toHaveTextContent("5 errors"),
+    );
+    // Zero error lines is not shown as a badge: a "0" would read as a verdict.
+    expect(within(nav).getByRole("link", { name: /^Logs/ })).toHaveTextContent(/^Logs$/);
+    for (const link of within(nav).getAllByRole("link")) {
+      const target = link.getAttribute("href")!.slice(1);
+      expect(document.getElementById(target)).not.toBeNull();
+    }
+  });
+
+  it("says what the service served in the last hour, and nothing when there is no store", async () => {
+    renderDetail(
+      {},
+      signals(
+        { requests: 200, errors: 5, error_ratio: 0.025, p95_ms: 410, newest_at: null },
+        { lines: 90, errors: 3, warnings: 2, newest_at: null },
+      ),
+    );
+    const { unmount } = render(<ServiceHealthDetailPage />);
+    const line = await screen.findByTestId("telemetry-line");
+    expect(line).toHaveTextContent("Last hour");
+    expect(line).toHaveTextContent("200 requests");
+    expect(line).toHaveTextContent("2.5% failed");
+    expect(line).toHaveTextContent("p95 410 ms");
+    expect(line).toHaveTextContent("3 error log lines");
+    unmount();
+
+    renderDetail({}, signals(null, null, "not_configured"));
+    render(<ServiceHealthDetailPage />);
+    await screen.findByTestId("section-nav");
+    expect(screen.queryByTestId("telemetry-line")).not.toBeInTheDocument();
+  });
+
+  it("says the store is unavailable rather than showing zeros", async () => {
+    renderDetail({}, signals(null, null, "unavailable"));
+    render(<ServiceHealthDetailPage />);
+    expect(await screen.findByTestId("telemetry-line")).toHaveTextContent(
+      "Telemetry is unavailable right now",
+    );
+  });
+
   it("shows all four sections with the API's own statuses", async () => {
     renderDetail();
     render(<ServiceHealthDetailPage />);

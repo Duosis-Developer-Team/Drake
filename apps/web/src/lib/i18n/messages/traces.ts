@@ -25,6 +25,7 @@ export const traces = defineMessages({
       errors: "Errors",
       p50: "p50",
       p95: "p95",
+      filterHint: "Show only this endpoint's requests",
     },
     requests: {
       title: "Requests",
@@ -35,6 +36,15 @@ export const traces = defineMessages({
       none: "No requests matched",
       showing: "Showing {shown} of {total}",
       more: "Show {count} more",
+      view: { label: "View", list: "List", byRoute: "By endpoint" },
+      filter: { route: "Endpoint: {route}", clear: "Clear filter" },
+      group: {
+        requests: "{count, plural, one {# request} other {# requests}}",
+        errors: "{count, plural, one {# error} other {# errors}}",
+        worst: "worst {duration}",
+        scope:
+          "Grouped within the {count} loaded requests, {top} worst per endpoint. Endpoint totals are in the table above.",
+      },
     },
     trace: {
       title: "Trace",
@@ -94,6 +104,7 @@ export const traces = defineMessages({
       errors: "Hata",
       p50: "%50",
       p95: "%95",
+      filterHint: "Yalnızca bu endpoint'in isteklerini göster",
     },
     requests: {
       title: "İstekler",
@@ -104,6 +115,15 @@ export const traces = defineMessages({
       none: "Eşleşen istek yok",
       showing: "{total} istekten {shown} tanesi gösteriliyor",
       more: "{count} tane daha göster",
+      view: { label: "Görünüm", list: "Liste", byRoute: "Endpoint'e göre" },
+      filter: { route: "Seçili endpoint: {route}", clear: "Süzgeci kaldır" },
+      group: {
+        requests: "{count} istek",
+        errors: "{count} hata",
+        worst: "en kötü {duration}",
+        scope:
+          "Yüklenen {count} istek içinde gruplandı; her endpoint'te en kötü {top} istek. Endpoint toplamları yukarıdaki tabloda.",
+      },
     },
     trace: {
       title: "Trace ayrıntısı",

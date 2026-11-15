@@ -31,6 +31,7 @@ import {
   ServiceIncidents,
 } from "@/components/incidents/ServiceIncidents";
 import { LogExplorer } from "@/components/service-health/LogExplorer";
+import { SectionNav, type SectionNavItem } from "@/components/service-health/SectionNav";
 import { TraceExplorer } from "@/components/service-health/TraceExplorer";
 import {
   RangeSelector,
@@ -62,6 +63,9 @@ import {
   type StatusTone,
 } from "@/lib/design/status";
 import { useT, type Translator } from "@/lib/i18n";
+import { percent, signalsPath, type SignalPage } from "@/lib/signals";
+import { formatDuration } from "@/lib/traces";
+import { useResource } from "@/lib/useResource";
 import {
   SIGNAL_LABELS,
   type MetricSummary,
@@ -314,6 +318,80 @@ function Gate<T>({
   return <>{children(value.data)}</>;
 }
 
+/** The table of contents. Request and log counts appear only when there is
+ *  something to count; "Signal history" only when the preset charts any. */
+function sectionItems(
+  t: Translator<"serviceHealth">,
+  facts: { history: boolean; requestErrors: number; errorLines: number },
+): SectionNavItem[] {
+  const count = (n: number) => (n > 0 ? t("detail.nav.errors", { count: n }) : undefined);
+  return [
+    { id: "sh-overview", label: t("detail.nav.overview") },
+    { id: "sh-why", label: t("detail.nav.why") },
+    ...(facts.history ? [{ id: "sh-history", label: t("detail.nav.history") }] : []),
+    { id: "sh-requests", label: t("detail.nav.requests"), badge: count(facts.requestErrors) },
+    {
+      id: "sh-logs",
+      label: t("detail.nav.logs"),
+      badge: count(facts.errorLines),
+      tone: "warning" as const,
+    },
+    { id: "sh-incidents", label: t("detail.nav.incidents") },
+    { id: "sh-setup", label: t("detail.nav.setup") },
+  ];
+}
+
+/**
+ * One line under the title: what this service served and wrote in the last
+ * hour, from Drake's own telemetry. Silent when no store is configured or
+ * the caller may read neither signal; says "unavailable" when the store did
+ * not answer, never a reassuring zero.
+ */
+function TelemetryLine({ page }: { page: SignalPage | null }) {
+  const t = useT("serviceHealth");
+  if (!page) return null;
+  if (page.logs.state === "not_configured" && page.traces.state === "not_configured") return null;
+  if (page.logs.state === "unavailable" && page.traces.state === "unavailable") {
+    return <span data-testid="telemetry-line">{t("detail.telemetry.unavailable")}</span>;
+  }
+  const item = page.items[0];
+  if (!item) return null;
+  const parts: React.ReactNode[] = [];
+  const traces = item.traces;
+  if (traces) {
+    if (traces.requests === 0) {
+      parts.push(t("detail.telemetry.noRequests"));
+    } else {
+      parts.push(t("detail.telemetry.requests", { count: traces.requests }));
+      parts.push(
+        <span key="failed" className={traces.errors > 0 ? "font-medium text-critical" : undefined}>
+          {t("detail.telemetry.failed", { ratio: percent(traces.error_ratio) })}
+        </span>,
+      );
+      parts.push(t("detail.telemetry.p95", { value: formatDuration(traces.p95_ms) }));
+    }
+  }
+  if (item.logs) {
+    parts.push(
+      <span key="logs" className={item.logs.errors > 0 ? "font-medium text-warning" : undefined}>
+        {t("detail.telemetry.errorLogs", { count: item.logs.errors })}
+      </span>,
+    );
+  }
+  if (parts.length === 0) return null;
+  return (
+    <span data-testid="telemetry-line" className="inline-flex flex-wrap items-center gap-x-1.5">
+      <span>{t("detail.telemetry.lastHour")}</span>
+      {parts.map((part, index) => (
+        <span key={index} className="inline-flex items-center gap-x-1.5">
+          <span aria-hidden>·</span>
+          {part}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export default function ServiceHealthDetailPage() {
   const t = useT("serviceHealth");
   const tc = useT("common");
@@ -327,6 +405,10 @@ export default function ServiceHealthDetailPage() {
     `/v1/service-health/bindings/${bindingId}/metrics`,
   );
   const [range, setRange] = useState<SeriesRange>("1h");
+  // This service's own telemetry over the last hour: what the header line
+  // and the section counts say. Absent or unreadable, they say nothing.
+  const signals = useResource<SignalPage>(signalsPath([bindingId]), { refreshMs: 60_000 });
+  const signal = signals.data?.items[0] ?? null;
 
   return (
     <PageFrame>
@@ -391,6 +473,7 @@ export default function ServiceHealthDetailPage() {
                     <span>
                       {t("detail.newestSample", { age: age(data.freshness_age_seconds) })}
                     </span>
+                    <TelemetryLine page={signals.data} />
                   </>
                 }
                 actions={
@@ -405,6 +488,14 @@ export default function ServiceHealthDetailPage() {
               />
 
               <div className="space-y-6">
+                <SectionNav
+                  label={t("detail.nav.label")}
+                  items={sectionItems(t, {
+                    history: chartable.length > 0,
+                    requestErrors: signal?.traces?.errors ?? 0,
+                    errorLines: signal?.logs?.errors ?? 0,
+                  })}
+                />
                 <FreshnessNotice
                   partial={data.partial}
                   servedFromLastGood={data.served_from_last_good}
@@ -414,7 +505,7 @@ export default function ServiceHealthDetailPage() {
                 />
 
                 {/* Hero row: the four sections behind the verdict. */}
-                <div className="page-grid">
+                <div id="sh-overview" className="page-grid scroll-mt-24">
                   <SectionCard
                     id="availability"
                     title={t("detail.section.availability")}
@@ -582,7 +673,7 @@ export default function ServiceHealthDetailPage() {
                 </div>
 
                 {/* Why + resource pressure. */}
-                <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+                <div id="sh-why" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
                   <Panel className="h-full">
                     <div className="flex items-center gap-4">
                       <span
@@ -702,7 +793,7 @@ export default function ServiceHealthDetailPage() {
                 </div>
 
                 {chartable.length > 0 ? (
-                  <section aria-label={t("detail.history.title")} className="space-y-4">
+                  <section id="sh-history" aria-label={t("detail.history.title")} className="scroll-mt-24 space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <IconBubble icon={GaugeIcon} />
@@ -737,18 +828,22 @@ export default function ServiceHealthDetailPage() {
                 ) : null}
 
                 {/* What the workload served, request by request. */}
-                <TraceExplorer bindingId={binding.id} />
+                <div id="sh-requests" className="scroll-mt-24">
+                  <TraceExplorer bindingId={binding.id} />
+                </div>
 
                 {/* What the workload wrote: the evidence behind the numbers above. */}
-                <LogExplorer bindingId={binding.id} />
+                <div id="sh-logs" className="scroll-mt-24">
+                  <LogExplorer bindingId={binding.id} />
+                </div>
 
-                <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
+                <div id="sh-incidents" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
                   <ServiceIncidents bindingId={binding.id} />
                   <HealthTransitions bindingId={binding.id} />
                 </div>
 
                 {/* Metadata last. */}
-                <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div id="sh-setup" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   <Panel className="h-full">
                     <PanelHeader
                       title={t("detail.binding.title")}

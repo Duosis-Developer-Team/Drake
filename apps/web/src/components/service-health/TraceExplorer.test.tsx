@@ -199,4 +199,48 @@ describe("TraceExplorer", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(20);
     expect(screen.queryByTestId("trace-requests-more")).not.toBeInTheDocument();
   });
+
+  it("filters the requests to an endpoint picked in the table, and clears it", async () => {
+    const mixed = [
+      { ...page().requests[0], trace_id: "a".repeat(32), route: "GET /fail/*", path: "/fail/1" },
+      { ...page().requests[0], trace_id: "b".repeat(32), route: "GET /orders/*", path: "/orders/1", error: false, http_status: "200" },
+      { ...page().requests[0], trace_id: "c".repeat(32), route: "GET /orders/*", path: "/orders/2", error: false, http_status: "200" },
+    ];
+    fetchMock.mockResolvedValue(respond(page({ requests: mixed })));
+    render(<TraceExplorer bindingId="b1" />);
+
+    const routes = await screen.findByTestId("trace-routes");
+    fireEvent.click(within(routes).getByRole("button", { name: "GET /orders/*" }));
+    const list = screen.getByTestId("trace-requests");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByTestId("trace-route-filter")).toHaveTextContent("Endpoint: GET /orders/*");
+    // Local only: no new request went to the server.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+    expect(within(screen.getByTestId("trace-requests")).getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("groups the loaded requests by endpoint, failing endpoints first", async () => {
+    const mixed = [
+      { ...page().requests[0], trace_id: "a".repeat(32), route: "GET /orders/*", path: "/orders/1", error: false, http_status: "200", duration_ms: 900 },
+      { ...page().requests[0], trace_id: "b".repeat(32), route: "GET /fail/*", path: "/fail/1", error: true, duration_ms: 20 },
+      { ...page().requests[0], trace_id: "c".repeat(32), route: "GET /orders/*", path: "/orders/2", error: false, http_status: "200", duration_ms: 50 },
+    ];
+    fetchMock.mockResolvedValue(respond(page({ requests: mixed })));
+    render(<TraceExplorer bindingId="b1" />);
+
+    await screen.findByTestId("trace-requests");
+    fireEvent.click(screen.getByRole("radio", { name: "By endpoint" }));
+    const groups = screen.getByTestId("trace-request-groups");
+    const headers = within(groups).getAllByRole("button", { expanded: false });
+    expect(headers[0]).toHaveTextContent("GET /fail/*");
+    expect(headers[0]).toHaveTextContent("1 error");
+    expect(headers[1]).toHaveTextContent("GET /orders/*");
+    expect(headers[1]).toHaveTextContent("2 requests");
+    expect(headers[1]).toHaveTextContent("worst 900 ms");
+
+    fireEvent.click(headers[1]);
+    expect(within(groups).getByText("/orders/1")).toBeInTheDocument();
+  });
 });
