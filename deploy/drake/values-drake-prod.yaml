@@ -4,15 +4,25 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@da30c43 by publish
-# run 43711353730. All three — API, web and migration — were built from that
+# Images are pinned to real digests published from main@b9452cb by publish
+# run 43719382201. All three — API, web and migration — were built from that
 # one commit, so they cannot drift apart. The digests are the build step's
 # own `digest` output for each image (the run summary), cross-checked
-# against the `pushing manifest for …:da30c43…@sha256:…` line of the same
+# against the `pushing manifest for …:b9452cb…@sha256:…` line of the same
 # job — not grepped from the build log at large, which also prints a
 # tooling image's digest.
 #
-# This release carries the service detail page redesign, PRs #109, #110,
+# This release carries PR #116: when a service publishes no HTTP metrics,
+# its health's Application section (request rate, error ratio, p95) is
+# derived from the root server spans Drake stores. Untraced workloads stay
+# "not configured"; under 20 requests in the window nothing is judged.
+# Verified against this store before release. No schema change.
+#
+# The digests these replaced (API `29ff3fc0…89f5`, web `df920be6…46ac`)
+# named main@da30c43 and are what revision 42 serves — the rollback target
+# if this one has to come back. Read from the live Deployments.
+#
+# Revision 42 carried the service detail page redesign, PRs #109, #110,
 # #112, #113 and #114: a section index and a last-hour line; endpoint
 # filtering and a by-endpoint view of requests; the timeline strip with its
 # read (GET …/timeline) and an optional start/end window on logs and
@@ -202,11 +212,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit da30c4324cbe3d894478e45318c36f7b10449fe3
+    # Source commit b9452cb49f4cc9645a6d23c9c5873331bbf8a174
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:29ff3fc0e044a29438fb2cd7a4eafe215fdd123524668fe0c3a4119f9c3889f5"
+    digest: "sha256:8572e5816782be726d2f4240e47bf5622bed8afd5f9588767b6132debe4b8ddc"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -229,8 +239,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit da30c4324cbe3d894478e45318c36f7b10449fe3
-    digest: "sha256:df920be6f9fa0df88198f04c5b40eb9d2e20fed424742fb291ee754a934246ac"
+    # Source commit b9452cb49f4cc9645a6d23c9c5873331bbf8a174
+    digest: "sha256:6462e73bf2a7045ee09044afee60e5d1b4b5ba5706f8761214bd8d60ae19ba85"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -252,7 +262,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:29ff3fc0e044a29438fb2cd7a4eafe215fdd123524668fe0c3a4119f9c3889f5"
+    digest: "sha256:8572e5816782be726d2f4240e47bf5622bed8afd5f9588767b6132debe4b8ddc"
   backoffLimit: 0
 
 networkPolicy:
