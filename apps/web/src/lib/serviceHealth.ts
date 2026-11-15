@@ -69,6 +69,8 @@ export interface ApplicationSection extends SectionResult {
   request_rate: number | null;
   error_ratio: number | null;
   latency_p95_seconds: number | null;
+  /** Where the numbers came from: the preset's metrics, or Drake's stored traces. */
+  source?: "metrics" | "traces";
 }
 
 export interface BindingSummary {

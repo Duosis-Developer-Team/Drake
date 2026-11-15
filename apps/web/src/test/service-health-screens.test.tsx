@@ -409,6 +409,25 @@ describe("service health detail", () => {
     expect(within(application).queryByTestId("status-critical")).not.toBeInTheDocument();
   });
 
+  it("says when the application numbers come from Drake's traces", async () => {
+    renderDetail({
+      application: {
+        ...SECTION,
+        metrics_present: true,
+        request_rate: 2,
+        error_ratio: 0.01,
+        latency_p95_seconds: 0.12,
+        source: "traces",
+      },
+    });
+    render(<ServiceHealthDetailPage />);
+
+    const application = await screen.findByTestId("section-application");
+    expect(within(application).getByTestId("application-source")).toHaveTextContent(
+      "From Drake's traces of this workload",
+    );
+  });
+
   it("renders reason codes as text and lists what was not measured", async () => {
     renderDetail({
       status: "degraded",

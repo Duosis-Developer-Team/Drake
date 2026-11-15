@@ -21,6 +21,7 @@ the whole reason this layer exists:
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -202,11 +203,14 @@ class HealthOrchestrator:
         broker: TelemetryBroker,
         registry: TelemetryRegistry,
         cache: HealthCache,
+        trace_golden: Callable[[dict[str, Any], int, datetime], Awaitable[Any]] | None = None,
     ) -> None:
         self._engine = engine
         self._broker = broker
         self._registry = registry
         self._cache = cache
+        # Optional fallback for golden signals (observability.application).
+        self._trace_golden = trace_golden
 
     # ------------------------------------------------------------------
     # binding context
@@ -482,6 +486,22 @@ class HealthOrchestrator:
                 if name in signals
             ),
         )
+
+        if not application.metrics_present and self._trace_golden is not None:
+            # The preset's metrics said nothing; the stored traces may. They
+            # can only fill the section, never mark the reading partial.
+            try:
+                traced = await self._trace_golden(context, policy.window_seconds, moment)
+            except Exception:  # an optional source must never break a verdict
+                traced = None
+            if traced is not None:
+                application = ApplicationSignals(
+                    request_rate=traced.request_rate,
+                    error_ratio=traced.error_ratio,
+                    latency_p95_seconds=traced.latency_p95_seconds,
+                    metrics_present=True,
+                    source="traces",
+                )
 
         result = compute_health(
             now=moment,

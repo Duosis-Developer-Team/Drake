@@ -20,6 +20,8 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from drake_api.incidents.runner import run_cycle
+from drake_api.observability.application import TraceGoldenReader
+from drake_api.observability.store import ClickHouseStore
 from drake_api.service_health.cache import HealthCache
 from drake_api.service_health.orchestrator import HealthOrchestrator
 from drake_api.settings import get_settings
@@ -43,7 +45,15 @@ async def run(batch_size: int, concurrency: int) -> dict[str, int | bool]:
             adapter=PrometheusAdapter(settings),
             metrics=BrokerMetrics(),
         )
-        orchestrator = HealthOrchestrator(engine, broker, registry, HealthCache(redis))
+        orchestrator = HealthOrchestrator(
+            engine,
+            broker,
+            registry,
+            HealthCache(redis),
+            trace_golden=TraceGoldenReader(
+                ClickHouseStore(settings), enabled=settings.observability_traces_enabled
+            ),
+        )
         report = await run_cycle(
             engine,
             orchestrator,
