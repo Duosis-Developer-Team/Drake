@@ -91,6 +91,7 @@ def _orchestrator(request: Request) -> HealthOrchestrator:
         request.app.state.telemetry_broker,
         request.app.state.telemetry_registry,
         HealthCache(request.app.state.telemetry_redis),
+        trace_golden=getattr(request.app.state, "trace_golden", None),
     )
 
 

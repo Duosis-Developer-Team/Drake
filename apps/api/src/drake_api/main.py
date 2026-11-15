@@ -42,6 +42,7 @@ from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
 from drake_api.notifications.worker import NotificationWorker
+from drake_api.observability.application import TraceGoldenReader
 from drake_api.observability.router import router as observability_router
 from drake_api.observability.store import ClickHouseStore
 from drake_api.onboarding.github_provider import GitHubPullRequestProvider
@@ -201,11 +202,15 @@ def create_app(
     # The evaluator reuses the Sprint 5 read path exactly as the API does —
     # same orchestrator, same broker, same budgets — so a scheduled
     # evaluation and a screen refresh can never disagree about a service.
+    app.state.trace_golden = TraceGoldenReader(
+        app.state.observability_store, enabled=settings.observability_traces_enabled
+    )
     app.state.health_orchestrator = HealthOrchestrator(
         get_engine(settings),
         app.state.telemetry_broker,
         app.state.telemetry_registry,
         HealthCache(app.state.telemetry_redis),
+        trace_golden=app.state.trace_golden,
     )
     app.state.incident_runner = (
         EvaluationRunner(

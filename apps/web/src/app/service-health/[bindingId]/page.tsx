@@ -642,6 +642,14 @@ export default function ServiceHealthDetailPage() {
                           <span className="mt-1.5 block text-caption text-ink-muted">
                             {t("detail.application.errorRatio")}
                           </span>
+                          {application.source === "traces" ? (
+                            <span
+                              data-testid="application-source"
+                              className="mt-1 block text-micro text-ink-muted"
+                            >
+                              {t("detail.application.fromTraces")}
+                            </span>
+                          ) : null}
                         </span>
                         <div className="grid grid-cols-1 gap-2">
                           <span className="flex items-center justify-between gap-2 rounded-full bg-surface-2 px-3.5 py-1.5 text-caption">
