@@ -49,6 +49,14 @@ export const traces = defineMessages({
     trace: {
       title: "Trace",
       spans: "{count, plural, one {# span} other {# spans}}",
+      summary: {
+        call: "{share} of the time went to the call {name} ({duration}).",
+        queue: "{share} of the time was spent waiting in the queue ({duration}) before the service picked the request up.",
+        self: "Most of the time was the service's own work; its {calls, plural, one {# outgoing call} other {# outgoing calls}} took {share}.",
+        selfNoCalls: "The service handled this on its own; no outgoing call was recorded.",
+        failed: "The request failed.",
+        failedWith: "The request failed with {status}.",
+      },
       total: "Total {duration}",
       kind: {
         Server: "Server",
@@ -128,6 +136,14 @@ export const traces = defineMessages({
     trace: {
       title: "Trace ayrıntısı",
       spans: "{count} adım",
+      summary: {
+        call: "Sürenin {share} kadarı {name} çağrısında geçti ({duration}).",
+        queue: "Sürenin {share} kadarı, servis isteği almadan önce kuyrukta beklerken geçti ({duration}).",
+        self: "Zamanın çoğu servisin kendi işinde geçti; {calls} dış çağrı sürenin {share} kadarını aldı.",
+        selfNoCalls: "Servis bu isteği kendi başına işledi; dışarıya çağrı kaydedilmedi.",
+        failed: "İstek hatayla sonuçlandı.",
+        failedWith: "İstek {status} hatasıyla sonuçlandı.",
+      },
       total: "Toplam {duration}",
       kind: {
         Server: "Sunucu",
