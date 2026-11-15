@@ -21,7 +21,7 @@ from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
 from drake_api.notifications import repository as repo
-from drake_api.notifications.model import NOTIFIABLE_EVENTS, SEVERITIES
+from drake_api.notifications.model import DESTINATION_TYPES, NOTIFIABLE_EVENTS, SEVERITIES
 from drake_api.settings import Settings
 
 logger = logging.getLogger("drake_api.notifications")
@@ -84,7 +84,7 @@ class DestinationCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     project_id: uuid.UUID
-    destination_type: str = Field(pattern="^(in_app_user|webhook)$")
+    destination_type: str = Field(pattern="^(in_app_user|webhook|email)$")
     display_name: str = Field(min_length=1, max_length=120)
     identity_id: uuid.UUID | None = None
     destination_key: str | None = Field(default=None, max_length=64)
@@ -194,8 +194,9 @@ async def policy_options(
     return {
         "event_types": list(NOTIFIABLE_EVENTS),
         "severities": list(SEVERITIES),
-        "destination_types": ["in_app_user", "webhook"],
+        "destination_types": list(DESTINATION_TYPES),
         "webhook_keys": repo.available_webhook_keys(settings),
+        "email_keys": repo.available_email_keys(settings),
     }
 
 

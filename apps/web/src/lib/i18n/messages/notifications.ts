@@ -105,6 +105,7 @@ export const notifications = defineMessages({
         routingNow: "routing now",
         destinations: "Destinations",
         webhook: "webhook",
+        email: "e-mail",
         inApp: "in-app",
       },
       rules: {
@@ -308,6 +309,7 @@ export const notifications = defineMessages({
         routingNow: "şu anda yönlendiriyor",
         destinations: "Hedefler",
         webhook: "webhook hedefi",
+        email: "e-posta hedefi",
         inApp: "uygulama içi hedef",
       },
       rules: {

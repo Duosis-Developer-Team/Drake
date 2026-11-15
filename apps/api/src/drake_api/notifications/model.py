@@ -32,7 +32,11 @@ DEFAULT_EVENT_TYPES: tuple[str, ...] = ("opened", "auto_resolved")
 # same as widening a subscription someone already wrote.
 SEVERITIES: tuple[str, ...] = ("critical", "high")
 
-DESTINATION_TYPES: tuple[str, ...] = ("in_app_user", "webhook")
+# `email` (ADR-0030) is delivered through the webhook outbox: same frozen
+# payload, same retries and audit, a different transport at send time.
+DESTINATION_TYPES: tuple[str, ...] = ("in_app_user", "webhook", "email")
+# The types whose deliveries go through the outbox rather than the inbox.
+OUTBOX_DESTINATION_TYPES: tuple[str, ...] = ("webhook", "email")
 
 PAYLOAD_SCHEMA_VERSION = 1
 PLANNER_VERSION = 1

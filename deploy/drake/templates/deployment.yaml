@@ -122,6 +122,21 @@ spec:
               value: {{ (.Values.incidents).runnerEnabled | default false | quote }}
             - name: DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS
               value: {{ (.Values.incidents).runnerIntervalSeconds | default 120 | quote }}
+            # Stated in both states, like the incident runner.
+            - name: DRAKE_NOTIFICATION_PLANNER_ENABLED
+              value: {{ (.Values.notifications).plannerEnabled | default false | quote }}
+            - name: DRAKE_WEBHOOK_WORKER_ENABLED
+              value: {{ (.Values.notifications).deliveryEnabled | default false | quote }}
+            {{- $email := (.Values.notifications).email | default dict }}
+            {{- $emailSender := and $email.sender $email.sender.address }}
+            {{- if $emailSender }}
+            - name: DRAKE_NOTIFICATION_EMAIL_SENDER
+              value: {{ include "drake.emailSender" . | quote }}
+            {{- end }}
+            {{- if $email.destinations }}
+            - name: DRAKE_NOTIFICATION_EMAILS
+              value: {{ include "drake.emailDestinations" . | quote }}
+            {{- end }}
             - name: DRAKE_OBSERVABILITY_LOGS_ENABLED
               value: {{ (.Values.observability).logsEnabled | default false | quote }}
             - name: DRAKE_OBSERVABILITY_TRACES_ENABLED
@@ -135,7 +150,8 @@ spec:
             - secretRef:
                 name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
           {{- $observability := or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
-          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability }}
+          {{- $emailMount := $emailSender }}
+          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability $emailMount }}
           {{- if $secretVolumes }}
           volumeMounts:
             {{- if $observability }}
@@ -153,6 +169,11 @@ spec:
               mountPath: {{ (.Values.alerting).secretMountPath | quote }}
               readOnly: true
             {{- end }}
+            {{- if $emailMount }}
+            - name: email-sender
+              mountPath: {{ $email.secretMountPath | default "/etc/drake/email" | quote }}
+              readOnly: true
+            {{- end }}
           {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -164,7 +185,7 @@ spec:
             httpGet: {path: /health/ready, port: http}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
+      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) $emailMount }}
       volumes:
         {{- if or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
         - name: observability-store
@@ -192,6 +213,15 @@ spec:
             # Same 0440 + fsGroup contract as the App key: a Secret volume
             # is root-owned, and 0400 would render, install and then fail at
             # the first read.
+            defaultMode: 0440
+        {{- end }}
+        {{- if $emailMount }}
+        - name: email-sender
+          secret:
+            secretName: {{ required "notifications.email.existingSecret is required when an e-mail sender address is set" $email.existingSecret }}
+            items:
+              - {key: client-secret, path: client-secret}
+            # Same 0440 + fsGroup contract as the other credential mounts.
             defaultMode: 0440
         {{- end }}
       {{- end }}

@@ -35,3 +35,4 @@ or operational details.
 | [ADR-0027](ADR-0027-external-runtime-and-managed-dependencies.md) | Runtimes Drake does not run, and dependencies it does not manage |
 | [ADR-0028](ADR-0028-web-localisation.md) | Web localisation: English and Turkish from one typed catalogue |
 | [ADR-0029](ADR-0029-opentelemetry-logs-and-traces-alongside-datadog.md) | OpenTelemetry logs and traces, stored by Drake in ClickHouse, alongside Datadog |
+| [ADR-0030](ADR-0030-email-notifications-through-microsoft-graph.md) | E-mail notifications through Microsoft Graph, on the webhook outbox |

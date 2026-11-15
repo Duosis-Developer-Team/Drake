@@ -2293,3 +2293,83 @@ def test_production_runs_the_incident_runner_but_delivers_nothing() -> None:
     # Delivery stays a separate, deliberate decision.
     assert env.get("DRAKE_NOTIFICATION_PLANNER_ENABLED", "false") == "false"
     assert env.get("DRAKE_WEBHOOK_WORKER_ENABLED", "false") == "false"
+
+
+# --- e-mail notifications (ADR-0030) ---------------------------------------
+
+_EMAIL_SENDER = (
+    "--set",
+    "notifications.email.sender.tenantId=tenant-1",
+    "--set",
+    "notifications.email.sender.clientId=client-1",
+    "--set",
+    "notifications.email.sender.address=alerts@example.test",
+)
+
+
+def _api_pod(docs: list[dict[str, Any]]) -> dict[str, Any]:
+    [api] = [
+        d
+        for d in by_kind(docs, "Deployment")
+        if d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component") == "api"
+    ]
+    return api["spec"]["template"]["spec"]
+
+
+def test_notification_actors_are_stated_off_by_default_and_no_mail_exists() -> None:
+    env = _api_env(render())
+    assert env["DRAKE_NOTIFICATION_PLANNER_ENABLED"] == "false"
+    assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "false"
+    assert "DRAKE_NOTIFICATION_EMAIL_SENDER" not in env
+    assert "DRAKE_NOTIFICATION_EMAILS" not in env
+    volumes = {v["name"] for v in _api_pod(render()).get("volumes", [])}
+    assert "email-sender" not in volumes
+
+
+def test_an_email_sender_renders_a_reference_and_mounts_only_the_secret() -> None:
+    docs = render(
+        *_EMAIL_SENDER,
+        "--set",
+        "notifications.email.existingSecret=drake-email",
+        "--set-json",
+        'notifications.email.destinations={"drake-test":{"displayName":"Drake test",'
+        '"recipients":["one@example.test","two@example.test"]}}',
+    )
+    env = _api_env(docs)
+    sender = json.loads(env["DRAKE_NOTIFICATION_EMAIL_SENDER"])
+    assert sender == {
+        "tenant_id": "tenant-1",
+        "client_id": "client-1",
+        "sender": "alerts@example.test",
+        "client_secret_file": "/etc/drake/email/client-secret",
+    }
+    assert json.loads(env["DRAKE_NOTIFICATION_EMAILS"]) == {
+        "drake-test": {
+            "display_name": "Drake test",
+            "recipients": ["one@example.test", "two@example.test"],
+        }
+    }
+    pod = _api_pod(docs)
+    [volume] = [v for v in pod["volumes"] if v["name"] == "email-sender"]
+    assert volume["secret"]["secretName"] == "drake-email"
+    assert volume["secret"]["items"] == [{"key": "client-secret", "path": "client-secret"}]
+    assert volume["secret"]["defaultMode"] == 0o440
+    mounts = {m["name"]: m for m in pod["containers"][0]["volumeMounts"]}
+    assert mounts["email-sender"]["readOnly"] is True
+
+
+def test_an_email_sender_without_its_secret_or_ids_is_refused() -> None:
+    assert refuses(*_EMAIL_SENDER)
+    assert refuses(
+        "--set",
+        "notifications.email.sender.address=alerts@example.test",
+        "--set",
+        "notifications.email.existingSecret=drake-email",
+    )
+
+
+def test_production_mails_nobody_until_a_sender_is_configured() -> None:
+    env = _api_env(render_prod())
+    assert env["DRAKE_NOTIFICATION_PLANNER_ENABLED"] == "false"
+    assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "false"
+    assert "DRAKE_NOTIFICATION_EMAIL_SENDER" not in env
