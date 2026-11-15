@@ -157,6 +157,52 @@ export function layoutWaterfall(spans: Span[]): WaterfallRow[] {
   return rows;
 }
 
+/**
+ * Where one request's time went, in a sentence's worth of facts.
+ *
+ * Read from the trace itself: the share of the root span taken by the
+ * longest outgoing call, or by waiting in the queue, or else by the
+ * service's own work. Thresholds are deliberately plain (an outgoing call
+ * that took 40% or more, a queue wait of 30% or more) so the sentence only
+ * ever states what the waterfall below it plainly shows.
+ */
+export type TraceSummary =
+  | { kind: "call"; name: string; share: number; durationMs: number; failed: boolean; status: string | null }
+  | { kind: "queue"; share: number; durationMs: number; failed: boolean; status: string | null }
+  | { kind: "self"; callsShare: number; calls: number; failed: boolean; status: string | null };
+
+export const CALL_SHARE = 0.4;
+export const QUEUE_SHARE = 0.3;
+
+export function summarizeTrace(rows: WaterfallRow[]): TraceSummary | null {
+  const root = rows.find((row) => row.depth === 0)?.span;
+  const total = root?.duration_ms ?? null;
+  if (!root || total === null || !(total > 0)) return null;
+  const failed = root.error;
+  const status = root.attributes["http.response.status_code"] ?? null;
+  const calls = rows.filter((row) => row.span.kind === "Client" && row.span !== root).map((row) => row.span);
+  const longest = calls.reduce<Span | null>(
+    (best, span) => ((span.duration_ms ?? 0) > (best?.duration_ms ?? -1) ? span : best),
+    null,
+  );
+  if (longest && (longest.duration_ms ?? 0) / total >= CALL_SHARE) {
+    return {
+      kind: "call",
+      name: longest.name,
+      share: (longest.duration_ms ?? 0) / total,
+      durationMs: longest.duration_ms ?? 0,
+      failed: failed || longest.error,
+      status,
+    };
+  }
+  const queue = rows.find((row) => row.span.kind === "Internal" && row.span.name === "in queue")?.span;
+  if (queue && (queue.duration_ms ?? 0) / total >= QUEUE_SHARE) {
+    return { kind: "queue", share: (queue.duration_ms ?? 0) / total, durationMs: queue.duration_ms ?? 0, failed, status };
+  }
+  const callsMs = calls.reduce((sum, span) => sum + (span.duration_ms ?? 0), 0);
+  return { kind: "self", callsShare: Math.min(1, callsMs / total), calls: calls.length, failed, status };
+}
+
 /** A duration for people: sub-millisecond, milliseconds, or seconds. */
 export function formatDuration(ms: number | null): string {
   if (ms === null || !Number.isFinite(ms)) return "—";

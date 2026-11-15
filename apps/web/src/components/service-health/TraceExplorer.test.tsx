@@ -256,4 +256,17 @@ describe("TraceExplorer", () => {
     fireEvent.click(screen.getByTestId("window-chip"));
     expect(onClear).toHaveBeenCalled();
   });
+
+  it("opens a trace with a sentence saying where the time went and how it ended", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).includes(`/traces/${TRACE}`) ? respond(DETAIL) : respond(page()),
+    );
+    render(<TraceExplorer bindingId="b1" />);
+
+    const list = await screen.findByTestId("trace-requests");
+    fireEvent.click(within(list).getAllByRole("button")[0]);
+    const summary = await screen.findByTestId("trace-summary");
+    expect(summary).toHaveTextContent("The service handled this on its own");
+    expect(summary).toHaveTextContent("The request failed with 500.");
+  });
 });

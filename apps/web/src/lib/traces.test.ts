@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDuration, layoutWaterfall, traceDetailPath, tracesPath, type Span } from "@/lib/traces";
+import {
+  formatDuration,
+  layoutWaterfall,
+  summarizeTrace,
+  traceDetailPath,
+  tracesPath,
+  type Span,
+} from "@/lib/traces";
 
 function span(overrides: Partial<Span> & Pick<Span, "span_id">): Span {
   return {
@@ -100,5 +107,53 @@ describe("formatDuration", () => {
     [12_500, "12.5 s"],
   ] as const)("%s → %s", (ms, text) => {
     expect(formatDuration(ms)).toBe(text);
+  });
+});
+
+describe("summarizeTrace", () => {
+  const span = (over: Partial<Span>): Span => ({
+    timestamp: "2026-11-15T10:00:00.000Z",
+    span_id: "s",
+    parent_span_id: null,
+    name: "x",
+    kind: "Internal",
+    duration_ms: 0,
+    error: false,
+    status_message: null,
+    attributes: {},
+    pod: null,
+    ...over,
+  });
+  const rootSpan = span({ span_id: "r", name: "POST /pay", kind: "Server", duration_ms: 1000 });
+
+  it("names the outgoing call that took most of the time", () => {
+    const rows = layoutWaterfall([
+      rootSpan,
+      span({ span_id: "c", parent_span_id: "r", name: "POST gw/charge", kind: "Client", duration_ms: 930, error: true }),
+    ]);
+    expect(summarizeTrace(rows)).toMatchObject({ kind: "call", name: "POST gw/charge", failed: true });
+    expect((summarizeTrace(rows) as { share: number }).share).toBeCloseTo(0.93);
+  });
+
+  it("says the request waited in the queue when that is where the time went", () => {
+    const rows = layoutWaterfall([
+      rootSpan,
+      span({ span_id: "q", parent_span_id: "r", name: "in queue", duration_ms: 600 }),
+      span({ span_id: "p", parent_span_id: "r", name: "processing", duration_ms: 390 }),
+    ]);
+    expect(summarizeTrace(rows)).toMatchObject({ kind: "queue", durationMs: 600 });
+  });
+
+  it("falls back to the service's own work, counting the calls it made", () => {
+    const rows = layoutWaterfall([
+      rootSpan,
+      span({ span_id: "c", parent_span_id: "r", name: "SELECT", kind: "Client", duration_ms: 100 }),
+    ]);
+    expect(summarizeTrace(rows)).toMatchObject({ kind: "self", calls: 1 });
+  });
+
+  it("says nothing about a trace with no measured root", () => {
+    expect(summarizeTrace([])).toBeNull();
+    expect(summarizeTrace(layoutWaterfall([span({ kind: "Server", duration_ms: null })]))).toBeNull();
   });
 });

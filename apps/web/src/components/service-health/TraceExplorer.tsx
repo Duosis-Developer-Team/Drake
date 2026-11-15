@@ -37,6 +37,8 @@ import {
   TRACE_RANGES,
   formatDuration,
   layoutWaterfall,
+  summarizeTrace,
+  type TraceSummary,
   traceDetailPath,
   tracesPath,
   type RequestSummary,
@@ -565,6 +567,7 @@ function TraceWaterfall({ bindingId, traceId }: { bindingId: string; traceId: st
 
   const rows = useMemo(() => (detail ? layoutWaterfall(detail.spans) : []), [detail]);
   const total = rows.length > 0 ? Math.max(...rows.map((row) => row.span.duration_ms ?? 0)) : null;
+  const summary = useMemo(() => summarizeTrace(rows), [rows]);
 
   return (
     <div className="space-y-3 border-t border-border bg-surface-2 px-4 py-4" data-testid="trace-waterfall">
@@ -582,6 +585,7 @@ function TraceWaterfall({ bindingId, traceId }: { bindingId: string; traceId: st
       {state === "failed" ? (
         <p className="text-caption text-critical">{t("state.unavailable.title")}</p>
       ) : null}
+      {state === "ok" && summary ? <TraceSummaryLine summary={summary} /> : null}
       {state === "ok" ? (
         <ol className="space-y-1" aria-label={t("trace.title")}>
           {rows.map((row) => {
@@ -635,5 +639,43 @@ function TraceWaterfall({ bindingId, traceId }: { bindingId: string; traceId: st
         </ol>
       ) : null}
     </div>
+  );
+}
+
+
+/** The trace in one sentence: where the time went, and how it ended. */
+function TraceSummaryLine({ summary }: { summary: TraceSummary }) {
+  const t = useT("traces");
+  const share = (value: number) => `${Math.round(value * 100)}%`;
+  let sentence: string;
+  if (summary.kind === "call") {
+    sentence = t("trace.summary.call", {
+      share: share(summary.share),
+      name: summary.name,
+      duration: formatDuration(summary.durationMs),
+    });
+  } else if (summary.kind === "queue") {
+    sentence = t("trace.summary.queue", {
+      share: share(summary.share),
+      duration: formatDuration(summary.durationMs),
+    });
+  } else if (summary.calls === 0) {
+    sentence = t("trace.summary.selfNoCalls");
+  } else {
+    sentence = t("trace.summary.self", { share: share(summary.callsShare), calls: summary.calls });
+  }
+  const ending = summary.failed
+    ? summary.status
+      ? t("trace.summary.failedWith", { status: summary.status })
+      : t("trace.summary.failed")
+    : null;
+  return (
+    <p
+      data-testid="trace-summary"
+      className={`rounded-[0.75rem] px-3 py-2 text-caption ${summary.failed ? toneSpec("critical").chip : "bg-surface text-ink"}`}
+    >
+      {sentence}
+      {ending ? ` ${ending}` : null}
+    </p>
   );
 }
