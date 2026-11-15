@@ -42,7 +42,10 @@ _REPLACEMENTS: tuple[tuple[str, str, str], ...] = (
     ),
     ("re_ip", r"\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b", "<ip>"),
     ("re_hex", r"\b[0-9a-fA-F]{12,}\b", "<hex>"),
-    ("re_num", r"\d+", "<n>"),
+    # A number that is not part of a word: "1700ms" and "ORD-88900" fold,
+    # "v1" in a path and "s3" in a name stay readable. The leading character
+    # is captured and put back (RE2 has no lookbehind).
+    ("re_num", r"(^|[^A-Za-z0-9_])\d+", r"\\1<n>"),
 )
 
 
