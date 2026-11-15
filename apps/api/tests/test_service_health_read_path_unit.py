@@ -183,12 +183,15 @@ def context(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def orchestrator(broker: FakeBroker, redis: FakeRedis | None = None) -> HealthOrchestrator:
+def orchestrator(
+    broker: FakeBroker, redis: FakeRedis | None = None, trace_golden: Any = None
+) -> HealthOrchestrator:
     return HealthOrchestrator(
         engine=None,  # type: ignore[arg-type] - load_context is not exercised here
         broker=broker,  # type: ignore[arg-type]
         registry=FakeRegistry(),  # type: ignore[arg-type]
         cache=HealthCache(redis or FakeRedis()),  # type: ignore[arg-type]
+        trace_golden=trace_golden,
     )
 
 
@@ -808,3 +811,78 @@ async def test_only_a_concurrency_refusal_is_retried(
     await orchestrator(broker).compute(None, context(), now=NOW)
 
     assert broker.calls.count("workload.replicas-ready.v1") == 1
+
+
+# --- golden signals from traces, when the app publishes none ---------------
+
+
+class FakeTraceGolden:
+    def __init__(self, answer: Any) -> None:
+        self.answer = answer
+        self.calls: list[tuple[str, int]] = []
+
+    async def __call__(self, context: dict[str, Any], window_seconds: int, now: datetime) -> Any:
+        self.calls.append((context["workload_name"], window_seconds))
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer
+
+
+def _traced(rate: float, ratio: float | None, p95: float | None) -> Any:
+    from drake_api.observability.application import TraceGoldenSignals
+
+    return TraceGoldenSignals(
+        requests=int(rate * 300), request_rate=rate, error_ratio=ratio, latency_p95_seconds=p95
+    )
+
+
+@pytest.mark.asyncio
+async def test_traces_fill_the_application_section_when_no_metrics_answer() -> None:
+    traces = FakeTraceGolden(_traced(2.0, 0.0, 0.12))
+    result, _ = await orchestrator(FakeBroker(HEALTHY_BASELINE), trace_golden=traces).compute(
+        None, context(), now=NOW
+    )
+    assert traces.calls == [("hermes-api", 300)]
+    assert result.application.status is HealthStatus.HEALTHY
+    assert result.application.detail["source"] == "traces"
+    assert result.application.detail["request_rate"] == 2.0
+    assert "application.golden_signals" not in result.missing_signals
+
+
+@pytest.mark.asyncio
+async def test_a_high_error_ratio_from_traces_is_judged_like_one_from_metrics() -> None:
+    traces = FakeTraceGolden(_traced(2.0, 0.4, 0.2))
+    result, _ = await orchestrator(FakeBroker(HEALTHY_BASELINE), trace_golden=traces).compute(
+        None, context(), now=NOW
+    )
+    assert result.status is HealthStatus.CRITICAL
+    assert "high_error_rate" in [str(r) for r in result.reasons]
+
+
+@pytest.mark.asyncio
+async def test_metrics_win_over_traces_when_the_app_publishes() -> None:
+    traces = FakeTraceGolden(_traced(2.0, 0.9, 9.0))
+    answers = {
+        **HEALTHY_BASELINE,
+        "workload.request-rate.v1": 50.0,
+        "workload.error-ratio.v1": 0.0,
+        "workload.latency-p95.v1": 0.1,
+    }
+    result, _ = await orchestrator(FakeBroker(answers), trace_golden=traces).compute(
+        None, context(preset_key=HTTP_SERVICE.key), now=NOW
+    )
+    assert traces.calls == []
+    assert result.application.detail["source"] == "metrics"
+    assert result.application.status is HealthStatus.HEALTHY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [None, RuntimeError("store down")])
+async def test_an_untraced_workload_or_a_failed_read_changes_nothing(answer: Any) -> None:
+    traces = FakeTraceGolden(answer)
+    result, _ = await orchestrator(FakeBroker(HEALTHY_BASELINE), trace_golden=traces).compute(
+        None, context(), now=NOW
+    )
+    assert result.application.status is HealthStatus.NOT_CONFIGURED
+    assert "application.golden_signals" in result.missing_signals
+    assert result.status is not HealthStatus.CRITICAL

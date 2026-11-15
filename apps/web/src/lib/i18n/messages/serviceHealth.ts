@@ -225,6 +225,7 @@ export const serviceHealth = defineMessages({
         latencyP95: "Latency (p95)",
         noMetrics: "No application metrics",
         noMetricsNote: "No request metrics are published — not counted against its health.",
+        fromTraces: "From Drake's traces of this workload (no application metrics published)",
       },
       why: {
         title: "Why",
@@ -548,6 +549,7 @@ export const serviceHealth = defineMessages({
         latencyP95: "Gecikme (p95)",
         noMetrics: "Uygulama metriği yok",
         noMetricsNote: "İstek metriği yayımlanmıyor; bu, sağlığına karşı sayılmaz.",
+        fromTraces: "Drake'in bu iş yükünden topladığı trace'lerden (uygulama metrik yayınlamıyor)",
       },
       why: {
         title: "Neden",

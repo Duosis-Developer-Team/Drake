@@ -62,6 +62,9 @@ class ApplicationSignals:
     latency_p95_seconds: float | None = None
     # Distinguishes "the app publishes nothing" from "we could not read it".
     metrics_present: bool = False
+    # "metrics" (the preset's Prometheus queries) or "traces" (derived
+    # from the root server spans Drake stores, when no metrics answered).
+    source: str = "metrics"
 
 
 @dataclass(frozen=True)
@@ -296,6 +299,7 @@ def _evaluate_application(
         "request_rate": signals.request_rate,
         "error_ratio": signals.error_ratio,
         "latency_p95_seconds": signals.latency_p95_seconds,
+        "source": signals.source,
     }
 
     if not signals.metrics_present:
