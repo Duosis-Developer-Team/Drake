@@ -267,4 +267,53 @@ describe("LogExplorer", () => {
     await screen.findByText("older in the slice");
     expect(requestedParams(1)).toMatchObject({ start: slice.start, end: slice.end });
   });
+
+  it("groups the window into patterns counted in the store, health checks hidden", async () => {
+    const patterns = {
+      state: "ok",
+      patterns: [
+        {
+          pattern: "payment charge failed: upstream timeout after <n>ms",
+          lines: 118,
+          severity: "ERROR",
+          severity_number: 17,
+          first_at: "2026-11-04T09:05:00+00:00",
+          last_at: "2026-11-04T09:15:00+00:00",
+          latest: "payment charge failed: upstream timeout after 1700ms",
+          earliest: "payment charge failed: upstream timeout after 1650ms",
+        },
+        {
+          pattern: 'INFO: <ip> - "GET /ready HTTP/<n>.<n>" <n> OK',
+          lines: 8642,
+          severity: null,
+          severity_number: 0,
+          first_at: "2026-11-04T09:00:00+00:00",
+          last_at: "2026-11-04T09:16:00+00:00",
+          latest: 'INFO:     10.0.0.1:5000 - "GET /ready HTTP/1.1" 200 OK',
+          earliest: 'INFO:     10.0.0.1:5000 - "GET /ready HTTP/1.1" 200 OK',
+        },
+      ],
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).includes("/logs/patterns") ? respond(patterns) : respond(page({ entries: [line()] })),
+    );
+    render(<LogExplorer bindingId="b1" />);
+
+    await screen.findByTestId("log-lines");
+    fireEvent.change(screen.getByLabelText("Search log lines"), { target: { value: "payment" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Patterns" }));
+
+    const view = await screen.findByTestId("log-patterns");
+    const call = fetchMock.mock.calls.map((c) => String(c[0])).find((u) => u.includes("/logs/patterns"))!;
+    expect(new URL(call, "file:///").searchParams.get("range")).toBe("1h");
+    expect(within(view).getByText("payment charge failed: upstream timeout after <n>ms")).toBeInTheDocument();
+    expect(within(view).getByText("× 118")).toBeInTheDocument();
+    // The health-check pattern is folded away, and counted.
+    expect(within(view).queryByText(/GET \/ready/)).not.toBeInTheDocument();
+    expect(within(view).getByTestId("log-patterns-health")).toHaveTextContent(/8[,.]?642/);
+
+    fireEvent.click(within(view).getByRole("button", { expanded: false }));
+    expect(within(view).getByText("payment charge failed: upstream timeout after 1700ms")).toBeInTheDocument();
+    expect(within(view).getByText("payment charge failed: upstream timeout after 1650ms")).toBeInTheDocument();
+  });
 });

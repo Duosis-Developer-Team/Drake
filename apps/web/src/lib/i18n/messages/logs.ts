@@ -34,6 +34,15 @@ export const logs = defineMessages({
       placeholder: "Search text in log lines",
     },
     pod: { label: "Pod", all: "All pods" },
+    view: { label: "View", lines: "Lines", patterns: "Patterns" },
+    patterns: {
+      summary: "{lines, plural, one {# line} other {# lines}} in {patterns, plural, one {# pattern} other {# patterns}}",
+      times: "× {count}",
+      span: "First {first} · last {last} UTC",
+      latest: "Newest line",
+      earliest: "Oldest line",
+      note: "Counted in the store over every matching line in the window, at most 50 patterns, most severe first. Numbers, IDs, addresses and timestamps are folded into placeholders.",
+    },
     healthChecks: {
       hide: "Hide health checks",
       hidden: "{count, plural, one {# health-check line hidden} other {# health-check lines hidden}}",
@@ -132,6 +141,15 @@ export const logs = defineMessages({
       placeholder: "Log satırlarında metin ara",
     },
     pod: { label: "Pod", all: "Tüm pod'lar" },
+    view: { label: "Görünüm", lines: "Satırlar", patterns: "Desenler" },
+    patterns: {
+      summary: "{patterns} desende {lines} satır",
+      times: "{count} kez",
+      span: "İlk {first} · son {last} UTC",
+      latest: "En yeni satır",
+      earliest: "En eski satır",
+      note: "Penceredeki eşleşen tüm satırlar depoda sayıldı; en fazla 50 desen, en ciddisi üstte. Sayılar, kimlikler, adresler ve zaman damgaları yer tutucuya çevrildi.",
+    },
     healthChecks: {
       hide: "Sağlık kontrollerini gizle",
       hidden: "{count} sağlık kontrolü satırı gizlendi",

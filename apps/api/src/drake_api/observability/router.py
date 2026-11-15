@@ -38,6 +38,7 @@ from drake_api.observability.logs import (
     next_cursor,
     normalize_rows,
 )
+from drake_api.observability.patterns import build_pattern_query, normalize_patterns
 from drake_api.observability.scope import DEFAULT_RANGE, RANGES, WORKLOAD_ATTRIBUTE
 from drake_api.observability.signals import (
     MAX_BINDINGS,
@@ -552,4 +553,71 @@ async def binding_timeline(
         "buckets": bucket_frame(query, now),
         "requests": requests_lane,
         "logs": logs_lane,
+    }
+
+
+@router.get("/service-health/bindings/{binding_id}/logs/patterns")
+async def binding_log_patterns(
+    request: Request,
+    binding_id: uuid.UUID,
+    range_key: str = Query(DEFAULT_LOG_RANGE, alias="range", max_length=8),
+    severity: str = Query("any", max_length=8),
+    q: str = Query("", max_length=100),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """The binding's log lines in the window, grouped by their shape.
+
+    Same visibility (`logs.view`), window, severity floor and term as the
+    log read, and the same three states; the grouping covers every matching
+    line in the window, not one page of them.
+    """
+    settings: Settings = request.app.state.settings
+    binding = await _visible_binding(request, auth, binding_id, LOGS_PERMISSION)
+    now = datetime.now(UTC)
+    base: dict[str, Any] = {
+        "binding_id": str(binding_id),
+        "range": range_key,
+        "as_of": now.isoformat(),
+        "patterns": [],
+    }
+    store = _store(request)
+    connector = store.connector
+    if not settings.observability_logs_enabled or connector is None:
+        return {**base, "state": "not_configured"}
+    try:
+        query = build_pattern_query(
+            database=connector.database,
+            binding=binding,
+            range_key=range_key,
+            severity=severity,
+            term=q,
+            now=now,
+            window_start=start,
+            window_end=end,
+        )
+    except LogQueryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    try:
+        result = await store.query(
+            query.statement,
+            query.parameters,
+            max_rows=query.max_rows,
+            timeout_seconds=connector.timeout_seconds,
+            correlation_id=correlation_id_var.get() or "",
+        )
+        patterns = normalize_patterns(result.rows)
+    except StoreUnavailableError as error:
+        logger.warning("pattern store unavailable", extra={"code": error.code})
+        return {**base, "state": "unavailable", "reason": error.code}
+    except (StoreContractError, ValueError) as error:
+        code = error.code if isinstance(error, StoreContractError) else "store_malformed_row"
+        logger.warning("pattern store contract failure", extra={"code": code})
+        return {**base, "state": "unavailable", "reason": code}
+    return {
+        **base,
+        "state": "ok",
+        "window": {"start": query.start.isoformat(), "end": query.end.isoformat()},
+        "patterns": patterns,
     }
