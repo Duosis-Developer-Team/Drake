@@ -125,9 +125,7 @@ def build_pattern_query(
     # ClickHouse reads String parameters in its escaped format, where ``
     # is a backspace and would silently break the word boundaries. Every
     # backslash is doubled so the regex reaches RE2 as written.
-    parameters.update(
-        {name: pattern.replace("\\", "\\\\") for name, pattern, _ in _REPLACEMENTS}
-    )
+    parameters.update({name: pattern.replace("\\", "\\\\") for name, pattern, _ in _REPLACEMENTS})
     parameters.update(
         {
             "pattern_chars": str(PATTERN_CHARS),
