@@ -267,6 +267,17 @@ deployments:
   ingestEnabled: false
   ingestIntervalSeconds: 120
 
+incidents:
+  # The incident runner: a bounded loop that evaluates every active binding
+  # on a timer and opens an incident only after consecutive, reliable,
+  # critical readings (partial, stale and last-good readings never move a
+  # streak). It writes incidents in Drake and sends nothing anywhere by
+  # itself: delivery is the notification planner and webhook worker, which
+  # are separate switches. Off by default, like every background actor.
+  runnerEnabled: false
+  # Floor of 30 s is enforced by the API's own settings validation.
+  runnerIntervalSeconds: 120
+
 observability:
   # Logs from Drake's own ClickHouse store (ADR-0029, deploy/otel). Off by
   # default: with it off the API answers `not_configured` and connects to

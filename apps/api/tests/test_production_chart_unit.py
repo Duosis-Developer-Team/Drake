@@ -2264,3 +2264,32 @@ def test_production_prefers_the_worker_node_and_never_requires_it() -> None:
             "operator": "In",
             "values": ["node2"],
         }
+
+
+# --- incident runner ----------------------------------------------------------
+
+
+def _api_env(docs: list[dict[str, Any]]) -> dict[str, str]:
+    [api] = [
+        d
+        for d in by_kind(docs, "Deployment")
+        if d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component") == "api"
+    ]
+    return {
+        e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+
+
+def test_the_incident_runner_is_off_unless_turned_on_and_stated_either_way() -> None:
+    env = _api_env(render())
+    assert env["DRAKE_INCIDENT_RUNNER_ENABLED"] == "false"
+    assert env["DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS"] == "120"
+
+
+def test_production_runs_the_incident_runner_but_delivers_nothing() -> None:
+    env = _api_env(render_prod())
+    assert env["DRAKE_INCIDENT_RUNNER_ENABLED"] == "true"
+    assert int(env["DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS"]) >= 60
+    # Delivery stays a separate, deliberate decision.
+    assert env.get("DRAKE_NOTIFICATION_PLANNER_ENABLED", "false") == "false"
+    assert env.get("DRAKE_WEBHOOK_WORKER_ENABLED", "false") == "false"
