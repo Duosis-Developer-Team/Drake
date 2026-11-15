@@ -4,15 +4,28 @@
 # NAMES of Secrets created out of band, and the shape of the release. What
 # it does contain is the deployment decision, which belongs under review.
 #
-# Images are pinned to real digests published from main@155e0e5 by publish
-# run 43635612118. All three — API, web and migration — were built from that
+# Images are pinned to real digests published from main@e097ac5 by publish
+# run 43704934025. All three — API, web and migration — were built from that
 # one commit, so they cannot drift apart. The digests are the build step's
 # own `digest` output for each image (the run summary), cross-checked
-# against the `pushing manifest for …:155e0e5…@sha256:…` line of the same
+# against the `pushing manifest for …:e097ac5…@sha256:…` line of the same
 # job — not grepped from the build log at large, which also prints a
 # tooling image's digest.
 #
-# This release carries PR #104: the requests panel shows 8 requests at a
+# This release carries PRs #109 and #110 on the service detail page: a
+# section index and a last-hour line under the title (#109), endpoint
+# filtering and a by-endpoint view of requests (#109), and the timeline
+# strip with its new read, GET …/timeline, plus an optional start/end
+# window on the logs and traces reads (#110). Both reads use the existing
+# store, scope rules and read-only user; the timeline queries were run
+# against this store before release. No schema change, no new permission,
+# no new flag.
+#
+# The digests these replaced (API `c1849b70…54a9`, web `6ad6396d…9d11`)
+# named main@155e0e5 and are what revision 41 serves — the rollback target
+# if this one has to come back. Read from the live Deployments.
+#
+# Revision 41 carried PR #104: the requests panel shows 8 requests at a
 # time and the log panel 30 lines in a bounded box, each with "show more",
 # instead of listing everything the API returned. Web only; the API image
 # is rebuilt from the same commit and carries no behaviour change (#106 is
@@ -188,11 +201,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 155e0e50463705cae7475dcfd051cef9fcab24d8
+    # Source commit e097ac5a465188a031caf39d9a17283fd950bd0f
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:c1849b70ce038e4f7090077d71b57b6bb11590475e61b3fa27db91c8497e54a9"
+    digest: "sha256:4c817a51debef120169fb2fe5f37b5c45561c850afb70a3addda9174fb51b1ef"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -215,8 +228,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 155e0e50463705cae7475dcfd051cef9fcab24d8
-    digest: "sha256:6ad6396d3c906a93cc961a04a0a8e189f27466fd81362793fd06338f7cf89d11"
+    # Source commit e097ac5a465188a031caf39d9a17283fd950bd0f
+    digest: "sha256:d42e0ececada1808c9f7c36add1527f55fc71ce990860b15955126aee0ee3cdd"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -238,7 +251,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:c1849b70ce038e4f7090077d71b57b6bb11590475e61b3fa27db91c8497e54a9"
+    digest: "sha256:4c817a51debef120169fb2fe5f37b5c45561c850afb70a3addda9174fb51b1ef"
   backoffLimit: 0
 
 networkPolicy:
