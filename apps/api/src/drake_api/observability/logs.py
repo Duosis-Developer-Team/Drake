@@ -29,6 +29,7 @@ from drake_api.observability.scope import (
     SCOPE_PREDICATE,
     ScopeError,
     clickhouse_time,
+    narrow_window,
     parse_store_time,
     scope_parameters,
 )
@@ -107,6 +108,8 @@ def build_log_query(
     limit: int,
     before: datetime | None,
     now: datetime,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
 ) -> LogQuery:
     """Compile a log read for one authorized binding.
 
@@ -128,6 +131,10 @@ def build_log_query(
 
     end = now
     start = now - timedelta(seconds=LOG_RANGES[range_key])
+    try:
+        start, end = narrow_window(start, end, window_start, window_end)
+    except ValueError as error:
+        raise LogQueryError(str(error)) from error
     if before is not None:
         # A page cursor narrows the window from above; it can never move it
         # outside the range the caller chose.

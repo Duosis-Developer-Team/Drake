@@ -17,6 +17,7 @@
 import { ChevronDown, ChevronRight, RefreshCw, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { WindowChip } from "@/components/service-health/TimelineStrip";
 import { IconBubble } from "@/components/service-health/primitives";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Button, SegmentedControl } from "@/components/ui/controls";
@@ -44,6 +45,7 @@ import {
   type TraceRange,
   type TraceSort,
 } from "@/lib/traces";
+import type { TimelineWindow } from "@/lib/timeline";
 
 type Load =
   | { kind: "loading" }
@@ -98,7 +100,16 @@ function percent(ratio: number | null): string {
   return `${value < 10 && value > 0 ? value.toFixed(1) : Math.round(value)}%`;
 }
 
-export function TraceExplorer({ bindingId }: { bindingId: string }) {
+export function TraceExplorer({
+  bindingId,
+  slice = null,
+  onClearSlice,
+}: {
+  bindingId: string;
+  /** A slice picked on the timeline; while set, it replaces the range. */
+  slice?: TimelineWindow | null;
+  onClearSlice?: () => void;
+}) {
   const t = useT("traces");
   const [range, setRange] = useState<TraceRange>("1h");
   const [sort, setSort] = useState<TraceSort>("recent");
@@ -114,6 +125,7 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
   const abortRef = useRef<AbortController | null>(null);
 
+  const effectiveRange: TraceRange = slice ? slice.range : range;
   const fetchPage = useCallback(
     (quiet: boolean) => {
       abortRef.current?.abort();
@@ -124,7 +136,10 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
         setLoad({ kind: "loading" });
         setShown(REQUESTS_STEP);
       }
-      apiGet<TracePage>(tracesPath(bindingId, { range, errorsOnly, sort }), controller.signal)
+      apiGet<TracePage>(
+        tracesPath(bindingId, { range: effectiveRange, errorsOnly, sort, window: slice }),
+        controller.signal,
+      )
         .then((page) => {
           if (controller.signal.aborted) return;
           setLoad({ kind: "page", page });
@@ -143,7 +158,7 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
           if (!controller.signal.aborted) setRefreshing(false);
         });
     },
-    [bindingId, range, errorsOnly, sort],
+    [bindingId, effectiveRange, errorsOnly, sort, slice],
   );
 
   useEffect(() => {
@@ -186,13 +201,17 @@ export function TraceExplorer({ bindingId }: { bindingId: string }) {
         actions={
           load.kind !== "denied" ? (
             <div className="flex flex-wrap items-center gap-2">
-              <SegmentedControl
-                label={t("range.label")}
-                value={range}
-                onChange={setRange}
-                size="compact"
-                options={TRACE_RANGES.map((value) => ({ value, label: value }))}
-              />
+              {slice ? (
+                <WindowChip slice={slice} onClear={onClearSlice} />
+              ) : (
+                <SegmentedControl
+                  label={t("range.label")}
+                  value={range}
+                  onChange={setRange}
+                  size="compact"
+                  options={TRACE_RANGES.map((value) => ({ value, label: value }))}
+                />
+              )}
               <Button
                 size="compact"
                 icon={RefreshCw}

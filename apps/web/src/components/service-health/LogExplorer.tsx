@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { WindowChip } from "@/components/service-health/TimelineStrip";
 import { IconBubble, PILL_SECONDARY } from "@/components/service-health/primitives";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Button, SearchInput, SegmentedControl, Select } from "@/components/ui/controls";
@@ -66,6 +67,7 @@ import {
   type SeverityBand,
   type StructuredBody,
 } from "@/lib/logs";
+import type { TimelineWindow } from "@/lib/timeline";
 
 const LIVE_INTERVAL_MS = 10_000;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -121,7 +123,16 @@ function useDebounced<T>(value: T, delay: number): T {
   return debounced;
 }
 
-export function LogExplorer({ bindingId }: { bindingId: string }) {
+export function LogExplorer({
+  bindingId,
+  slice = null,
+  onClearSlice,
+}: {
+  bindingId: string;
+  /** A slice picked on the timeline; while set, it replaces the range. */
+  slice?: TimelineWindow | null;
+  onClearSlice?: () => void;
+}) {
   const t = useT("logs");
 
   const [range, setRange] = useState<LogRange>("1h");
@@ -141,6 +152,7 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
   const [shown, setShown] = useState(LINES_STEP);
   const abortRef = useRef<AbortController | null>(null);
 
+  const effectiveRange: LogRange = slice ? slice.range : range;
   const fetchNewest = useCallback(
     (quiet: boolean) => {
       abortRef.current?.abort();
@@ -148,7 +160,10 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
       abortRef.current = controller;
       if (quiet) setRefreshing(true);
       else setLoad({ kind: "loading" });
-      apiGet<LogPage>(logsPath(bindingId, { range, severity, term }), controller.signal)
+      apiGet<LogPage>(
+        logsPath(bindingId, { range: effectiveRange, severity, term, window: slice }),
+        controller.signal,
+      )
         .then((page) => {
           if (controller.signal.aborted) return;
           setLoad({ kind: "page", page, entries: page.entries });
@@ -174,7 +189,7 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
           if (!controller.signal.aborted) setRefreshing(false);
         });
     },
-    [bindingId, range, severity, term],
+    [bindingId, effectiveRange, severity, term, slice],
   );
 
   useEffect(() => {
@@ -198,7 +213,13 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
     setLoadingOlder(true);
     setOlderFailed(false);
     apiGet<LogPage>(
-      logsPath(bindingId, { range, severity, term, before: current.page.next_before }),
+      logsPath(bindingId, {
+        range: effectiveRange,
+        severity,
+        term,
+        before: current.page.next_before,
+        window: slice,
+      }),
     )
       .then((older) => {
         setLoad({
@@ -212,7 +233,7 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
       })
       .catch(() => setOlderFailed(true))
       .finally(() => setLoadingOlder(false));
-  }, [load, bindingId, range, severity, term]);
+  }, [load, bindingId, effectiveRange, severity, term, slice]);
 
   const rows = useMemo(() => (load.kind === "page" ? toRows(load.entries) : []), [load]);
   const pods = useMemo(
@@ -273,13 +294,17 @@ export function LogExplorer({ bindingId }: { bindingId: string }) {
         actions={
           load.kind !== "denied" ? (
             <div className="flex flex-wrap items-center gap-2">
-              <SegmentedControl
-                label={t("range.label")}
-                value={range}
-                onChange={setRange}
-                size="compact"
-                options={LOG_RANGES.map((value) => ({ value, label: value }))}
-              />
+              {slice ? (
+                <WindowChip slice={slice} onClear={onClearSlice} />
+              ) : (
+                <SegmentedControl
+                  label={t("range.label")}
+                  value={range}
+                  onChange={setRange}
+                  size="compact"
+                  options={LOG_RANGES.map((value) => ({ value, label: value }))}
+                />
+              )}
               <button
                 type="button"
                 role="switch"

@@ -75,7 +75,13 @@ export const TRACE_PAGE_SIZE = 50;
 
 export function tracesPath(
   bindingId: string,
-  options: { range: TraceRange; errorsOnly: boolean; sort: TraceSort },
+  options: {
+    range: TraceRange;
+    errorsOnly: boolean;
+    sort: TraceSort;
+    /** A slice picked on the timeline; the server keeps it inside `range`. */
+    window?: { start: string; end: string } | null;
+  },
 ): string {
   const params = new URLSearchParams({
     range: options.range,
@@ -83,6 +89,10 @@ export function tracesPath(
     sort: options.sort,
     limit: String(TRACE_PAGE_SIZE),
   });
+  if (options.window) {
+    params.set("start", options.window.start);
+    params.set("end", options.window.end);
+  }
   return `/v1/service-health/bindings/${encodeURIComponent(bindingId)}/traces?${params.toString()}`;
 }
 

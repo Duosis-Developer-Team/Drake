@@ -32,6 +32,7 @@ from drake_api.observability.scope import (
     SCOPE_PREDICATE,
     ScopeError,
     clickhouse_time,
+    narrow_window,
     parse_store_time,
     scope_parameters,
 )
@@ -188,6 +189,8 @@ def build_trace_list(
     sort: str,
     limit: int,
     now: datetime,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
 ) -> TraceListQuery:
     """The route summary, the totals and one page of requests for a binding.
 
@@ -206,6 +209,10 @@ def build_trace_list(
     scope = _scope(binding)
     end = now
     start = now - timedelta(seconds=RANGES[range_key])
+    try:
+        start, end = narrow_window(start, end, window_start, window_end)
+    except ValueError as error:
+        raise TraceQueryError(str(error)) from error
     window = {"start": clickhouse_time(start), "end": clickhouse_time(end), **scope}
     return TraceListQuery(
         routes=Statement(

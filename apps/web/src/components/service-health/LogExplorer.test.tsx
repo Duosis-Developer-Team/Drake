@@ -250,4 +250,21 @@ describe("LogExplorer", () => {
     expect(screen.queryByTestId("log-lines-more")).not.toBeInTheDocument();
     expect(screen.getByTestId("log-load-older")).toBeInTheDocument();
   });
+
+  it("reads a timeline slice instead of its own range, older pages included", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        respond(page({ entries: [line({ body: "in the slice" })], next_before: "2026-11-04T09:26:00+00:00" })),
+      )
+      .mockResolvedValueOnce(respond(page({ entries: [line({ body: "older in the slice" })] })));
+    const slice = { start: "2026-11-04T09:25:00.000Z", end: "2026-11-04T09:27:30.000Z", range: "1h" as const };
+    render(<LogExplorer bindingId="b1" slice={slice} />);
+
+    await screen.findByText("in the slice");
+    expect(requestedParams(0)).toMatchObject({ range: "1h", start: slice.start, end: slice.end });
+    expect(screen.getByTestId("window-chip")).toHaveTextContent("09:25–09:27");
+    fireEvent.click(screen.getByTestId("log-load-older"));
+    await screen.findByText("older in the slice");
+    expect(requestedParams(1)).toMatchObject({ start: slice.start, end: slice.end });
+  });
 });

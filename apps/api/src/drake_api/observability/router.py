@@ -46,6 +46,17 @@ from drake_api.observability.signals import (
     summarize_traces,
 )
 from drake_api.observability.store import ClickHouseStore, StoreContractError, StoreUnavailableError
+from drake_api.observability.timeline import (
+    TimelineQueryError,
+    bucket_frame,
+    build_timeline_query,
+)
+from drake_api.observability.timeline import (
+    normalize_logs as normalize_timeline_logs,
+)
+from drake_api.observability.timeline import (
+    normalize_traces as normalize_timeline_traces,
+)
 from drake_api.observability.traces import (
     DEFAULT_LIMIT as DEFAULT_TRACE_LIMIT,
 )
@@ -88,6 +99,8 @@ async def binding_logs(
     q: str = Query("", max_length=100),
     limit: int = Query(DEFAULT_LIMIT, ge=1, le=200),
     before: datetime | None = Query(None),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
     auth: AuthContext = Depends(require_auth),
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
@@ -120,6 +133,8 @@ async def binding_logs(
             term=q,
             limit=limit,
             before=before,
+            window_start=start,
+            window_end=end,
             now=now,
         )
     except LogQueryError as error:
@@ -185,6 +200,8 @@ async def binding_traces(
     status: str = Query("any", max_length=8),
     sort: str = Query("recent", max_length=8),
     limit: int = Query(DEFAULT_TRACE_LIMIT, ge=1, le=MAX_TRACE_LIMIT),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
     auth: AuthContext = Depends(require_auth),
 ) -> dict[str, Any]:
     """Routes, totals and one page of requests for a bound service.
@@ -217,6 +234,8 @@ async def binding_traces(
             sort=sort,
             limit=limit,
             now=now,
+            window_start=start,
+            window_end=end,
         )
     except TraceQueryError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -425,4 +444,112 @@ async def service_signals(
         "logs": logs_section,
         "traces": traces_section,
         "items": items,
+    }
+
+
+async def _timeline_lane(
+    store: ClickHouseStore,
+    *,
+    enabled: bool,
+    allowed: bool,
+    statement: str,
+    parameters: dict[str, str],
+    max_rows: int,
+    normalize: Any,
+    kind: str,
+) -> dict[str, Any]:
+    """One lane of the timeline (requests or log lines) with its own state."""
+    connector = store.connector
+    if not enabled or connector is None:
+        return {"state": "not_configured", "buckets": []}
+    if not allowed:
+        return {"state": "denied", "buckets": []}
+    try:
+        result = await store.query(
+            statement,
+            parameters,
+            max_rows=max_rows,
+            timeout_seconds=connector.timeout_seconds,
+            correlation_id=correlation_id_var.get() or "",
+        )
+        return {"state": "ok", "buckets": normalize(result.rows)}
+    except StoreUnavailableError as error:
+        logger.warning("timeline store unavailable", extra={"code": error.code, "lane": kind})
+        return {"state": "unavailable", "reason": error.code, "buckets": []}
+    except (StoreContractError, ValueError) as error:
+        code = error.code if isinstance(error, StoreContractError) else "store_malformed_row"
+        logger.warning("timeline store contract failure", extra={"code": code, "lane": kind})
+        return {"state": "unavailable", "reason": code, "buckets": []}
+
+
+@router.get("/service-health/bindings/{binding_id}/timeline")
+async def binding_timeline(
+    request: Request,
+    binding_id: uuid.UUID,
+    range_key: str = Query(DEFAULT_RANGE, alias="range", max_length=8),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """Requests, failures, p95 and error/warning log lines per time bucket.
+
+    The requests lane needs `traces.view`, the logs lane `logs.view`, each
+    at the binding's scope; a caller with neither gets a 404, as for every
+    other read here. A lane the caller may not read says `denied` rather
+    than showing an empty line.
+    """
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        traces_binding = await binding_repo.get_binding(
+            connection, auth.principal, binding_id, permission=TRACES_PERMISSION
+        )
+        logs_binding = await binding_repo.get_binding(
+            connection, auth.principal, binding_id, permission=LOGS_PERMISSION
+        )
+    binding = traces_binding or logs_binding
+    if binding is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+
+    now = datetime.now(UTC)
+    store = _store(request)
+    connector = store.connector
+    try:
+        query = build_timeline_query(
+            database=connector.database if connector else "drake",
+            binding=binding,
+            range_key=range_key,
+            now=now,
+        )
+    except TimelineQueryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    requests_lane, logs_lane = await asyncio.gather(
+        _timeline_lane(
+            store,
+            enabled=settings.observability_traces_enabled,
+            allowed=traces_binding is not None,
+            statement=query.traces,
+            parameters=query.parameters,
+            max_rows=query.max_rows,
+            normalize=lambda rows: normalize_timeline_traces(rows, query),
+            kind="traces",
+        ),
+        _timeline_lane(
+            store,
+            enabled=settings.observability_logs_enabled,
+            allowed=logs_binding is not None,
+            statement=query.logs,
+            parameters=query.parameters,
+            max_rows=query.max_rows,
+            normalize=lambda rows: normalize_timeline_logs(rows, query),
+            kind="logs",
+        ),
+    )
+    return {
+        "binding_id": str(binding_id),
+        "range": range_key,
+        "as_of": now.isoformat(),
+        "bucket_seconds": query.bucket_seconds,
+        "window": {"start": query.start.isoformat(), "end": query.end.isoformat()},
+        "buckets": bucket_frame(query, now),
+        "requests": requests_lane,
+        "logs": logs_lane,
     }
