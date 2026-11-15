@@ -7,7 +7,8 @@
 #
 # Phase 1 of ADR-0029: logs. Phase 3, added 2026-11-04 as a deliberate
 # pilot: eBPF traces for ONE namespace (`hermes-dev`), collected on the
-# worker node only. Nothing that touches an application pod or Datadog —
+# worker node only; widened on 2026-11-15 to four namespaces, still on the
+# worker node only (see `obi.namespaces`). Nothing that touches an application pod or Datadog —
 # OBI's application-mutating switches are fixed off in the chart template
 # and the capabilities they need are not granted (validated by
 # validate.sh). Turning the pilot off is one flag: `obi.enabled: false`.
@@ -33,11 +34,25 @@ obi:
     digest: "sha256:a68d70e934260f72540f157ccf4fb4adfa38f11de060d7d905696dad6a3fca02"
   nodeSelector:
     kubernetes.io/hostname: node2
-  # The pilot allowlist, and the whole of it: one namespace, whose five
-  # bound services run on the node OBI observes. Nothing else on the
-  # cluster is instrumented. Widen only as a new decision.
+  # The allowlist, widened 2026-11-15 as a deliberate decision after the
+  # hermes-dev pilot ran for eleven days without disturbing a workload.
+  # OBI still runs on node2 only, so this traces the pods of these
+  # namespaces that are scheduled there: all of logislot-dev, part of
+  # hermes-test and fikirsepeti-prod. Nothing on node1 is instrumented and
+  # node1 gets no new load. logislot-prod (all on node1) and the hermes
+  # namespace stay out.
   namespaces:
     - hermes-dev
+    - logislot-dev
+    - hermes-test
+    - fikirsepeti-prod
+  # Measured before widening: 65m CPU and 303 MiB working set against a
+  # 384 MiB limit for one namespace. More processes to track means more
+  # eBPF map and symbol memory, and an OOM kill would only cost trace gaps,
+  # but there is no reason to run that close: node2 has ~6.5 GiB free.
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {cpu: 300m, memory: 768Mi}
 
 agent:
   # The application namespaces Drake catalogues, plus Drake itself. Datadog,
