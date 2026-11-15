@@ -415,6 +415,17 @@ telemetry:
 # Reading a service's logs needs `logs.view` at its scope (migration 0023
 # gives it to the Platform Owner template and to nobody else); traces are
 # `traces.view` the same way (migration 0024).
+# Incidents from service health (ADR-0029 follow-up, 2026-11-15). The runner
+# evaluates the 21 bound services every two minutes, through the same
+# orchestrator, broker budgets and caches as the screens, and opens an
+# incident only after consecutive reliable critical readings. It now sees
+# golden signals derived from traces (#116) for the traced services. It
+# sends nothing outside Drake: the notification planner and the webhook
+# worker stay off here.
+incidents:
+  runnerEnabled: true
+  runnerIntervalSeconds: 120
+
 observability:
   logsEnabled: true
   # ON after the OBI pilot proved the data on hermes-dev (drake-otel

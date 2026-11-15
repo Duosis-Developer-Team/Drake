@@ -118,6 +118,10 @@ spec:
             - name: DRAKE_DEPLOYMENT_INGEST_INTERVAL_SECONDS
               value: {{ .Values.deployments.ingestIntervalSeconds | quote }}
             # Stated in both states, like the deployment ingest flag.
+            - name: DRAKE_INCIDENT_RUNNER_ENABLED
+              value: {{ (.Values.incidents).runnerEnabled | default false | quote }}
+            - name: DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS
+              value: {{ (.Values.incidents).runnerIntervalSeconds | default 120 | quote }}
             - name: DRAKE_OBSERVABILITY_LOGS_ENABLED
               value: {{ (.Values.observability).logsEnabled | default false | quote }}
             - name: DRAKE_OBSERVABILITY_TRACES_ENABLED
