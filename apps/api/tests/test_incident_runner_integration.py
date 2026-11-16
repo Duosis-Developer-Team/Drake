@@ -12,10 +12,18 @@ from typing import Any
 
 import pytest
 import redis.asyncio as aioredis
-from drake_api.incidents.runner import LEASE_KEY, EvaluationRunner, run_cycle
+from drake_api.incidents.runner import (
+    LEASE_KEY,
+    MAX_EVALUATION_CONCURRENCY,
+    EvaluationRunner,
+    bounded_concurrency,
+    run_cycle,
+)
 from drake_api.incidents.system_actor import SYSTEM_ISSUER, ensure_system_evaluator
 from drake_api.main import create_app
 from drake_api.rbac.service import Principal
+from drake_api.service_health.orchestrator import MAX_CONCURRENT_QUERIES
+from drake_api.telemetry.budgets import PRINCIPAL_CONCURRENCY
 from harness_s1 import require_it_settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -153,6 +161,38 @@ async def test_evaluation_concurrency_stays_within_its_bound(
 
     assert report.evaluated == 6
     assert orchestrator.peak_in_flight <= 2
+
+
+def test_a_cycle_never_asks_for_more_queries_than_its_principal_may_hold() -> None:
+    # Every evaluation in a cycle is the system evaluator, and each runs up
+    # to MAX_CONCURRENT_QUERIES at once. More bindings in flight than the
+    # principal's budget makes the broker refuse queries, and a refused
+    # query becomes a missing signal: in production a random 3-5 services
+    # read "unknown / partial_result" every cycle at 4 x 4 against 4.
+    assert MAX_EVALUATION_CONCURRENCY * MAX_CONCURRENT_QUERIES <= PRINCIPAL_CONCURRENCY
+    assert bounded_concurrency(4) == MAX_EVALUATION_CONCURRENCY
+    assert bounded_concurrency(0) == 1
+    assert get_settings_default_concurrency() <= MAX_EVALUATION_CONCURRENCY
+
+
+def get_settings_default_concurrency() -> int:
+    from drake_api.settings import Settings
+
+    return int(Settings.model_fields["incident_runner_concurrency"].default)
+
+
+async def test_a_larger_requested_concurrency_is_held_to_the_budget(
+    engine: AsyncEngine, redis: Any
+) -> None:
+    for _ in range(6):
+        await make_world(engine)
+    orchestrator = FakeOrchestrator()
+    orchestrator.delay = 0.05
+
+    report = await run_cycle(engine, orchestrator, redis, concurrency=4)  # type: ignore[arg-type]
+
+    assert report.evaluated == 6
+    assert orchestrator.peak_in_flight == MAX_EVALUATION_CONCURRENCY
 
 
 async def test_the_batch_size_bounds_one_cycle(engine: AsyncEngine, redis: Any) -> None:

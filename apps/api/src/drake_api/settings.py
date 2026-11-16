@@ -359,7 +359,9 @@ class Settings(BaseSettings):
     # no user-supplied interval: the clamp below is the whole contract.
     incident_runner_interval_seconds: float = 60.0
     incident_runner_batch_size: int = 25
-    incident_runner_concurrency: int = 4
+    # Held inside the evaluator's query budget by the runner itself
+    # (incidents.runner.MAX_EVALUATION_CONCURRENCY); a larger value is clamped.
+    incident_runner_concurrency: int = 1
     # How long one cycle may hold the distributed lease. Long enough for a
     # full batch, short enough that a crashed replica's lease expires
     # rather than blocking evaluation until someone notices.
