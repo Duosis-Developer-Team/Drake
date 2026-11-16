@@ -152,8 +152,14 @@ def test_routes_report_ratio_and_milliseconds() -> None:
 
 def test_no_requests_is_no_latency_not_zero() -> None:
     totals = normalize_totals([{"requests": "0", "errors": "0", "p95_ns": None}])
-    assert totals == {"requests": 0, "errors": 0, "error_ratio": None, "p95_ms": None}
-    assert normalize_totals([]) == {"requests": 0, "errors": 0, "error_ratio": None, "p95_ms": None}
+    assert totals == {
+        "requests": 0,
+        "errors": 0,
+        "error_ratio": None,
+        "p95_ms": None,
+        "health_checks": 0,
+    }
+    assert normalize_totals([]) == totals
 
 
 def test_a_nan_quantile_is_no_measurement() -> None:

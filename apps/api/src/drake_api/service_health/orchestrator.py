@@ -30,6 +30,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from drake_api.observability.health_checks import probes_from_summary
 from drake_api.rbac.service import Principal
 from drake_api.service_health.cache import (
     HealthCache,
@@ -237,7 +238,8 @@ class HealthOrchestrator:
                                c.cluster_ref, c.id,
                                p.project_key, e.environment_key, sd.service_key,
                                b.environment_service_id,
-                               i.id, i.config_ref, i.configuration_state
+                               i.id, i.config_ref, i.configuration_state,
+                               ir.payload -> 'spec_summary'
                         FROM service_workload_bindings b
                         JOIN clusters c ON c.id = b.cluster_id
                         JOIN projects p ON p.id = b.project_id
@@ -247,6 +249,10 @@ class HealthOrchestrator:
                                ON i.scope_id = p.scope_id
                               AND i.integration_type = 'prometheus'
                               AND i.lifecycle = 'active'
+                        LEFT JOIN inventory_resources ir
+                               ON ir.cluster_id = b.cluster_id
+                              AND ir.uid = b.resolved_resource_uid
+                              AND ir.lifecycle = 'active'
                         WHERE b.id = :id
                         """
                     ),
@@ -278,6 +284,9 @@ class HealthOrchestrator:
             "datasource_identity": datasource_identity(
                 str(row[16]) if row[16] else None, row[17], str(row[18] or "")
             ),
+            # The workload's HTTP probes, so golden signals from traces do
+            # not count the kubelet as traffic (observability.health_checks).
+            "http_probes": probes_from_summary(row[19]),
         }
 
     # ------------------------------------------------------------------

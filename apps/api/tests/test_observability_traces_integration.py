@@ -131,7 +131,13 @@ async def test_routes_totals_and_requests_come_from_the_bindings_scope(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["state"] == "ok"
-    assert body["totals"] == {"requests": 4, "errors": 1, "error_ratio": 0.25, "p95_ms": 900.0}
+    assert body["totals"] == {
+        "requests": 4,
+        "errors": 1,
+        "error_ratio": 0.25,
+        "p95_ms": 900.0,
+        "health_checks": 0,
+    }
     assert body["routes"][0]["route"] == "POST /v1/payments"
     assert body["requests"][0]["trace_id"] == TRACE
     assert len(store.requests) == 3

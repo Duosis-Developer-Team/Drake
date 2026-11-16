@@ -87,9 +87,20 @@ BoundedStr = Annotated[str, StringConstraints(max_length=512)]
 ContainerRefKey = Literal["name", "image", "image_id"]
 ContainerRef = dict[ContainerRefKey, Annotated[str, StringConstraints(max_length=512)]]
 ContainerRefList = Annotated[list[ContainerRef], Field(max_length=8)]
+# A workload's HTTP probes (path and port only, no headers, no host), so
+# Drake can tell a kubelet probe from traffic. Values are strings, bounded.
+ProbeRefKey = Literal["container", "kind", "path", "port"]
+ProbeRef = dict[ProbeRefKey, Annotated[str, StringConstraints(max_length=256)]]
+ProbeRefList = Annotated[list[ProbeRef], Field(max_length=24)]
 
 SummaryValue = (
-    Annotated[str, StringConstraints(max_length=256)] | int | float | bool | ContainerRefList | None
+    Annotated[str, StringConstraints(max_length=256)]
+    | int
+    | float
+    | bool
+    | ContainerRefList
+    | ProbeRefList
+    | None
 )
 
 

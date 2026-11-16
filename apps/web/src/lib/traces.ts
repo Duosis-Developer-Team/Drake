@@ -15,6 +15,8 @@ export interface TraceTotals {
   errors: number;
   error_ratio: number | null;
   p95_ms: number | null;
+  /** Probes and scrapes in the window, set aside from the numbers above. */
+  health_checks?: number;
 }
 
 export interface RouteSummary {

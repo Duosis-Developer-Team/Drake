@@ -17,6 +17,8 @@ export const traces = defineMessages({
       errorRate: "Error rate",
       p95: "p95 latency",
       noRequests: "No requests in this window",
+      healthChecks:
+        "{count} health checks and metric scrapes in this window are not counted as traffic.",
     },
     routes: {
       title: "Endpoints",
@@ -90,6 +92,8 @@ export const traces = defineMessages({
         title: "No requests in this window",
         description:
           "Nothing was recorded for this service in the selected window. If the service is busy, it may not be instrumented yet.",
+        onlyHealthChecks:
+          "Only health checks and metric scrapes reached this service in the selected window ({count}). None of it is traffic.",
       },
     },
     note: "Recorded at the kernel without changing the service: entry and exit of each request, not the code in between.",
@@ -104,6 +108,8 @@ export const traces = defineMessages({
       errorRate: "Hata oranı",
       p95: "p95 gecikme",
       noRequests: "Bu aralıkta istek yok",
+      healthChecks:
+        "Bu aralıktaki {count} sağlık kontrolü ve metrik toplama isteği trafiğe sayılmadı.",
     },
     routes: {
       title: "Uç noktalar",
@@ -177,6 +183,8 @@ export const traces = defineMessages({
         title: "Bu aralıkta istek yok",
         description:
           "Seçilen aralıkta bu servis için kayıt yok. Servis yoğunsa henüz izlenmiyor olabilir.",
+        onlyHealthChecks:
+          "Seçilen aralıkta bu servise yalnızca sağlık kontrolü ve metrik toplama istekleri geldi ({count}). Bunların hiçbiri trafik değil.",
       },
     },
     note: "Servis değiştirilmeden çekirdekte kaydedilir: her isteğin girişi ve çıkışı, aradaki kod değil.",

@@ -23,6 +23,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from drake_api.observability.health_checks import (
+    health_check_parameter,
+    with_health_check_filter,
+)
 from drake_api.observability.scope import (
     RANGES,
     ScopeError,
@@ -76,7 +80,8 @@ LIMIT {max_groups:UInt16}
 """
 )
 
-# Requests are server spans, root or not, as in observability.traces.
+# Requests are server spans, root or not, without health checks and
+# scrapes, as in observability.traces.
 _TRACES = (
     "SELECT"
     + _GROUP_COLUMNS
@@ -90,6 +95,7 @@ FROM __DATABASE__.otel_traces
     + _NARROW
     + """
   AND SpanKind = 'Server'
+  AND __NOT_HEALTH_CHECK__
 GROUP BY cluster, namespace, deployment, statefulset, daemonset
 LIMIT {max_groups:UInt16}
 """
@@ -159,10 +165,11 @@ def build_signal_query(
         "error_floor": str(_ERROR),
         "warn_floor": str(_WARN),
         "max_groups": str(MAX_GROUPS),
+        "health_checks": health_check_parameter(bindings),
     }
     return SignalQuery(
         logs=_LOGS.replace("__DATABASE__", db),
-        traces=_TRACES.replace("__DATABASE__", db),
+        traces=with_health_check_filter(_TRACES.replace("__DATABASE__", db)),
         parameters=parameters,
         max_rows=MAX_GROUPS,
         start=start,
