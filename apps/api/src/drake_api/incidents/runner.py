@@ -34,11 +34,31 @@ from drake_api.incidents.model import evaluation_from_health
 from drake_api.incidents.processor import ProcessResult, process_evaluation
 from drake_api.incidents.system_actor import ensure_system_evaluator
 from drake_api.rbac.service import Principal
-from drake_api.service_health.orchestrator import HealthOrchestrator
+from drake_api.service_health.orchestrator import MAX_CONCURRENT_QUERIES, HealthOrchestrator
+from drake_api.telemetry.budgets import PRINCIPAL_CONCURRENCY
 
 logger = logging.getLogger("drake_api.incidents.runner")
 
 LEASE_KEY = "incidents:evaluation:cycle"
+
+# How many bindings one cycle evaluates at once. Every evaluation in a
+# cycle runs as one principal, the system evaluator, and the broker lets one
+# principal hold PRINCIPAL_CONCURRENCY queries. One evaluation already runs
+# up to MAX_CONCURRENT_QUERIES of its own. Evaluating more bindings than
+# that budget holds does not make a cycle faster: the queries still go
+# through the same few leases. It only makes the broker refuse the
+# overflow, and after the lease retries a refused query is a missing
+# signal. In production (4 bindings x 4 queries against a budget of 4) that
+# turned a random 3-5 healthy services "unknown / partial_result" in every
+# cycle. Within the budget, a query waits for its own evaluation's
+# semaphore, never for a refusal.
+MAX_EVALUATION_CONCURRENCY = max(1, PRINCIPAL_CONCURRENCY // MAX_CONCURRENT_QUERIES)
+
+
+def bounded_concurrency(requested: int) -> int:
+    """A requested concurrency, held inside the principal's query budget."""
+    return max(1, min(requested, MAX_EVALUATION_CONCURRENCY))
+
 
 # Release only our own token. A blind DEL would let a slow replica delete
 # the lease a faster one legitimately holds.
@@ -134,7 +154,7 @@ async def run_cycle(
     redis: aioredis.Redis,
     *,
     batch_size: int = 25,
-    concurrency: int = 4,
+    concurrency: int = MAX_EVALUATION_CONCURRENCY,
     lease_seconds: int = 120,
     principal: Principal | None = None,
 ) -> CycleReport:
@@ -158,7 +178,7 @@ async def run_cycle(
     report.lease_acquired = True
 
     actor = principal or await ensure_system_evaluator(engine)
-    semaphore = asyncio.Semaphore(max(1, concurrency))
+    semaphore = asyncio.Semaphore(bounded_concurrency(concurrency))
 
     async def evaluate(row: Any) -> ProcessResult | None:
         async with semaphore:
@@ -220,7 +240,7 @@ class EvaluationRunner:
         *,
         interval_seconds: float = 60.0,
         batch_size: int = 25,
-        concurrency: int = 4,
+        concurrency: int = MAX_EVALUATION_CONCURRENCY,
         lease_seconds: int = 120,
     ) -> None:
         self._engine = engine
@@ -230,7 +250,7 @@ class EvaluationRunner:
         # this into a tight loop against someone's Prometheus.
         self._interval = max(15.0, interval_seconds)
         self._batch = max(1, min(batch_size, 200))
-        self._concurrency = max(1, min(concurrency, 8))
+        self._concurrency = bounded_concurrency(concurrency)
         self._lease = max(30, lease_seconds)
         self._task: asyncio.Task[None] | None = None
 

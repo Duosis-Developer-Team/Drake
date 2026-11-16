@@ -81,7 +81,7 @@ async def run(batch_size: int, concurrency: int) -> dict[str, int | bool]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one incident evaluation cycle")
     parser.add_argument("--batch-size", type=int, default=25)
-    parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args()
     result = asyncio.run(run(max(1, args.batch_size), max(1, args.concurrency)))
     sys.stdout.write(json.dumps(result) + "\n")
