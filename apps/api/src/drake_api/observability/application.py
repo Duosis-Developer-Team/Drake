@@ -27,6 +27,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from drake_api.observability.health_checks import (
+    health_check_parameter,
+    with_health_check_filter,
+)
 from drake_api.observability.scope import (
     SCOPE_PREDICATE,
     ScopeError,
@@ -52,9 +56,12 @@ MIN_REQUESTS_TO_JUDGE = 20
 _STATEMENT = """
 SELECT
     count() AS seen,
-    countIf(Timestamp >= {window_start:DateTime64(9, 'UTC')}) AS requests,
-    countIf(Timestamp >= {window_start:DateTime64(9, 'UTC')} AND StatusCode = 'Error') AS errors,
-    quantileIf(0.95)(Duration, Timestamp >= {window_start:DateTime64(9, 'UTC')}) AS p95_ns
+    countIf(Timestamp >= {window_start:DateTime64(9, 'UTC')} AND __NOT_HEALTH_CHECK__) AS requests,
+    countIf(Timestamp >= {window_start:DateTime64(9, 'UTC')} AND __NOT_HEALTH_CHECK__
+            AND StatusCode = 'Error') AS errors,
+    quantileIf(0.95)(Duration,
+                     Timestamp >= {window_start:DateTime64(9, 'UTC')} AND __NOT_HEALTH_CHECK__)
+        AS p95_ns
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {seen_start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
@@ -91,10 +98,15 @@ def build_application_query(
         "workload_kind": context["workload_kind"],
         "workload_name": context["workload_name"],
         "cluster": {"cluster_ref": context["cluster_ref"]},
+        "http_probes": context.get("http_probes") or [],
     }
     scope = scope_parameters(binding)
-    statement = _STATEMENT.replace("__DATABASE__", safe_identifier(database)).replace(
-        "__SCOPE__", SCOPE_PREDICATE.strip()
+    # `seen` counts health checks too: a probe answered is proof the
+    # workload is traced. The rate, errors and p95 do not.
+    statement = with_health_check_filter(
+        _STATEMENT.replace("__DATABASE__", safe_identifier(database)).replace(
+            "__SCOPE__", SCOPE_PREDICATE.strip()
+        )
     )
     return ApplicationQuery(
         statement=statement,
@@ -102,6 +114,7 @@ def build_application_query(
             "window_start": clickhouse_time(now - timedelta(seconds=window_seconds)),
             "seen_start": clickhouse_time(now - SEEN_LOOKBACK),
             "end": clickhouse_time(now),
+            "health_checks": health_check_parameter([binding]),
             **scope,
         },
     )

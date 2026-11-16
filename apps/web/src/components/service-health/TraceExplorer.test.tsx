@@ -160,6 +160,30 @@ describe("TraceExplorer", () => {
     expect(await screen.findByText("No requests in this window")).toBeInTheDocument();
   });
 
+  it("says how many health checks were set aside, and never shows them as traffic", async () => {
+    fetchMock.mockResolvedValueOnce(
+      respond(page({ totals: { requests: 12, errors: 0, error_ratio: 0, p95_ms: 40, health_checks: 539 } })),
+    );
+    const a = render(<TraceExplorer bindingId="b1" />);
+    expect(await screen.findByTestId("trace-health-checks")).toHaveTextContent(
+      "539 health checks and metric scrapes in this window are not counted as traffic.",
+    );
+    expect(within(screen.getByTestId("trace-totals")).getByText("12")).toBeInTheDocument();
+    a.unmount();
+
+    fetchMock.mockResolvedValueOnce(
+      respond(
+        page({
+          totals: { requests: 0, errors: 0, error_ratio: null, p95_ms: null, health_checks: 40 },
+          routes: [],
+          requests: [],
+        }),
+      ),
+    );
+    render(<TraceExplorer bindingId="b2" />);
+    expect(await screen.findByText(/Only health checks and metric scrapes reached this service/)).toBeInTheDocument();
+  });
+
   it("a 404 on a visible binding is missing traces.view", async () => {
     fetchMock.mockResolvedValue(respond({ error: { code: "not_found", message: "not found" } }, 404));
     render(<TraceExplorer bindingId="b1" />);

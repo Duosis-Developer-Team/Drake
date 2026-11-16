@@ -6,6 +6,7 @@ package inventory
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,6 +53,10 @@ const (
 	// Images are references, not payloads: no env, no args, no volumes.
 	maxContainers = 8
 	maxImageLen   = 512
+	// HTTP probes: at most liveness, readiness and startup per container.
+	// Path and port only, never headers or host.
+	maxProbes    = 24
+	maxProbePath = 256
 )
 
 // allowedKeyPrefixes bounds label/annotation cardinality to reviewed keys.
@@ -256,6 +261,9 @@ func specSummary(kind string, obj *unstructured.Unstructured) map[string]any {
 		// say which build is running; it is deliberately not the pod spec,
 		// so no env var, arg, mount or secret reference comes with it.
 		putContainers(out, "containers", containerImages(obj, "spec", "template", "spec", "containers"))
+		// The HTTP probes the kubelet will call, so Drake can tell a probe
+		// from traffic in a workload's traces. Path and port, nothing else.
+		putContainers(out, "http_probes", httpProbes(obj, "spec", "template", "spec", "containers"))
 	case "CronJob":
 		if v, ok := nested(obj, "spec", "schedule"); ok {
 			putSummary(out, "schedule", v)
@@ -482,6 +490,105 @@ func containerImages(obj *unstructured.Unstructured, path ...string) []map[strin
 		return nil
 	}
 	return out
+}
+
+// probeKinds is the fixed order probes are reported in.
+var probeKinds = [...]struct{ kind, field string }{
+	{"liveness", "livenessProbe"},
+	{"readiness", "readinessProbe"},
+	{"startup", "startupProbe"},
+}
+
+// httpProbes returns bounded {container, kind, path, port} entries for the
+// httpGet probes of a container list. A named port is resolved against the
+// container's own ports; a probe whose port cannot be resolved, or that is
+// not httpGet (tcpSocket, exec, grpc), is left out. The query string is cut:
+// it is not part of what identifies the probe and could carry a value.
+func httpProbes(obj *unstructured.Unstructured, path ...string) []map[string]string {
+	raw, ok := nested(obj, path...)
+	if !ok {
+		return nil
+	}
+	list, isList := raw.([]any)
+	if !isList {
+		return nil
+	}
+	out := make([]map[string]string, 0)
+	for index, item := range list {
+		if index >= maxContainers {
+			break
+		}
+		container, isMap := item.(map[string]any)
+		if !isMap {
+			continue
+		}
+		name, _ := container["name"].(string)
+		for _, probe := range probeKinds {
+			if len(out) >= maxProbes {
+				return out
+			}
+			spec, _ := container[probe.field].(map[string]any)
+			get, _ := spec["httpGet"].(map[string]any)
+			if get == nil {
+				continue
+			}
+			port := probePort(get["port"], container)
+			if port == "" {
+				continue
+			}
+			probePath, _ := get["path"].(string)
+			probePath = strings.SplitN(probePath, "?", 2)[0]
+			if probePath == "" {
+				probePath = "/"
+			}
+			if !strings.HasPrefix(probePath, "/") {
+				continue
+			}
+			out = append(out, map[string]string{
+				"container": truncate(name, maxProbePath),
+				"kind":      probe.kind,
+				"path":      truncate(probePath, maxProbePath),
+				"port":      port,
+			})
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// probePort turns an httpGet port (a number, or the name of one of the
+// container's ports) into its decimal string, or "" when it cannot.
+func probePort(value any, container map[string]any) string {
+	number := int64(0)
+	switch typed := value.(type) {
+	case int64:
+		number = typed
+	case float64:
+		number = int64(typed)
+	case string:
+		if parsed, err := strconv.ParseInt(typed, 10, 64); err == nil {
+			number = parsed
+			break
+		}
+		ports, _ := container["ports"].([]any)
+		for _, item := range ports {
+			entry, _ := item.(map[string]any)
+			if entry["name"] == typed {
+				switch p := entry["containerPort"].(type) {
+				case int64:
+					number = p
+				case float64:
+					number = int64(p)
+				}
+			}
+		}
+	}
+	if number < 1 || number > 65535 {
+		return ""
+	}
+	return strconv.FormatInt(number, 10)
 }
 
 // resolvedImages pairs each container with the digest the kubelet actually

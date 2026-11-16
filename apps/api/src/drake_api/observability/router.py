@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
+from drake_api.observability.health_checks import with_http_probes
 from drake_api.observability.logs import (
     DEFAULT_LIMIT,
     DEFAULT_LOG_RANGE,
@@ -175,8 +176,9 @@ async def _visible_binding(
         binding = await binding_repo.get_binding(
             connection, auth.principal, binding_id, permission=permission
         )
-    if binding is None:
-        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+        if binding is None:
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+        [binding] = await with_http_probes(connection, [binding])
     return binding
 
 
@@ -398,6 +400,7 @@ async def service_signals(
         trace_bindings = await binding_repo.get_bindings(
             connection, auth.principal, ids, permission=TRACES_PERMISSION
         )
+        trace_bindings = await with_http_probes(connection, trace_bindings)
 
     # Kinds the store cannot name are left out rather than matched on a
     # guess (the schema allows only these today; this keeps it explicit).
@@ -505,6 +508,8 @@ async def binding_timeline(
         logs_binding = await binding_repo.get_binding(
             connection, auth.principal, binding_id, permission=LOGS_PERMISSION
         )
+        if traces_binding is not None:
+            [traces_binding] = await with_http_probes(connection, [traces_binding])
     binding = traces_binding or logs_binding
     if binding is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)

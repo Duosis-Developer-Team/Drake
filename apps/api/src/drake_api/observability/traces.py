@@ -37,6 +37,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
+from drake_api.observability.health_checks import (
+    health_check_parameter,
+    with_health_check_filter,
+)
 from drake_api.observability.scope import (
     RANGES,
     SCOPE_PREDICATE,
@@ -59,9 +63,10 @@ MAX_SPANS = 500
 _TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
 
 # Every statement below reads one service's spans in one window. A request a
-# service handled is a server span with no parent: OBI emits the in-process
-# steps ("in queue", "processing") as its children, so filtering to roots is
-# what makes one row mean one request.
+# service handled is a server span (see the module docstring); its
+# in-process steps are Internal, so one row is one request. Health checks
+# and scrapes are not traffic (observability.health_checks): the routes and
+# the request list leave them out, and the totals count them separately.
 _ROUTES = """
 SELECT
     SpanName AS route,
@@ -74,6 +79,7 @@ WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
   AND SpanKind = 'Server'
   AND __SCOPE__
+  AND __NOT_HEALTH_CHECK__
 GROUP BY route
 ORDER BY requests DESC
 LIMIT {max_routes:UInt8}
@@ -81,9 +87,10 @@ LIMIT {max_routes:UInt8}
 
 _TOTALS = """
 SELECT
-    count() AS requests,
-    countIf(StatusCode = 'Error') AS errors,
-    quantile(0.95)(Duration) AS p95_ns
+    countIf(NOT __IS_HEALTH_CHECK__) AS requests,
+    countIf(NOT __IS_HEALTH_CHECK__ AND StatusCode = 'Error') AS errors,
+    quantileIf(0.95)(Duration, NOT __IS_HEALTH_CHECK__) AS p95_ns,
+    countIf(__IS_HEALTH_CHECK__) AS health_checks
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
@@ -116,6 +123,7 @@ WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
   AND SpanKind = 'Server'
   AND __SCOPE__
+  AND __NOT_HEALTH_CHECK__
   AND ({errors_only:UInt8} = 0 OR StatusCode = 'Error')
 ORDER BY __ORDER__
 LIMIT {limit:UInt16}
@@ -225,8 +233,10 @@ class TraceListQuery:
 
 
 def _sql(template: str, database: str) -> str:
-    return template.replace("__DATABASE__", safe_identifier(database)).replace(
-        "__SCOPE__", SCOPE_PREDICATE.strip()
+    return with_health_check_filter(
+        template.replace("__DATABASE__", safe_identifier(database)).replace(
+            "__SCOPE__", SCOPE_PREDICATE.strip()
+        )
     )
 
 
@@ -270,7 +280,12 @@ def build_trace_list(
         start, end = narrow_window(start, end, window_start, window_end)
     except ValueError as error:
         raise TraceQueryError(str(error)) from error
-    window = {"start": clickhouse_time(start), "end": clickhouse_time(end), **scope}
+    window = {
+        "start": clickhouse_time(start),
+        "end": clickhouse_time(end),
+        "health_checks": health_check_parameter([binding]),
+        **scope,
+    }
     return TraceListQuery(
         routes=Statement(
             _sql(_ROUTES, database), {**window, "max_routes": str(MAX_ROUTES)}, MAX_ROUTES
@@ -351,6 +366,8 @@ def normalize_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "error_ratio": (errors / requests) if requests else None,
         # No requests means no latency, not a latency of zero.
         "p95_ms": _ms(row.get("p95_ns")) if requests else None,
+        # Probes and scrapes in the same window, set aside rather than hidden.
+        "health_checks": _count(row.get("health_checks", 0)),
     }
 
 

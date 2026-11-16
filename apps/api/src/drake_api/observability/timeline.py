@@ -18,6 +18,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from drake_api.observability.health_checks import (
+    health_check_parameter,
+    with_health_check_filter,
+)
 from drake_api.observability.scope import (
     RANGES,
     SCOPE_PREDICATE,
@@ -44,6 +48,7 @@ WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
   AND SpanKind = 'Server'
   AND __SCOPE__
+  AND __NOT_HEALTH_CHECK__
 GROUP BY t
 ORDER BY t
 LIMIT {max_buckets:UInt8}
@@ -104,10 +109,13 @@ def build_timeline_query(
         "start": clickhouse_time(start),
         "end": clickhouse_time(end),
         "max_buckets": str(MAX_BUCKETS),
+        "health_checks": health_check_parameter([binding]),
         **scope,
     }
     return TimelineQuery(
-        traces=_TRACES.replace("__DATABASE__", db).replace("__SCOPE__", scope_sql),
+        traces=with_health_check_filter(
+            _TRACES.replace("__DATABASE__", db).replace("__SCOPE__", scope_sql)
+        ),
         logs=_LOGS.replace("__DATABASE__", db).replace("__SCOPE__", scope_sql),
         parameters=parameters,
         max_rows=MAX_BUCKETS,

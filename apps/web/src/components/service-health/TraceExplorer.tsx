@@ -248,7 +248,14 @@ export function TraceExplorer({
 
       {page?.state === "ok" && page.totals ? (
         page.totals.requests === 0 && !errorsOnly ? (
-          <EmptyState title={t("state.empty.title")} description={t("state.empty.description")} />
+          <EmptyState
+            title={t("state.empty.title")}
+            description={
+              (page.totals.health_checks ?? 0) > 0
+                ? t("state.empty.onlyHealthChecks", { count: String(page.totals.health_checks) })
+                : t("state.empty.description")
+            }
+          />
         ) : (
           <>
             <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="trace-totals">
@@ -260,6 +267,11 @@ export function TraceExplorer({
               />
               <Tile label={t("totals.p95")} value={formatDuration(page.totals.p95_ms)} />
             </dl>
+            {(page.totals.health_checks ?? 0) > 0 ? (
+              <p className="text-caption text-ink-muted" data-testid="trace-health-checks">
+                {t("totals.healthChecks", { count: String(page.totals.health_checks) })}
+              </p>
+            ) : null}
 
             {page.routes.length > 0 ? (
               <div className="overflow-x-auto rounded-[1rem] border border-border">
