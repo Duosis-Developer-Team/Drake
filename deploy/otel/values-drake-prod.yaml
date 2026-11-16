@@ -41,8 +41,14 @@ obi:
   # hermes-test and fikirsepeti-prod. Nothing on node1 is instrumented and
   # node1 gets no new load. logislot-prod (all on node1) and the hermes
   # namespace stay out.
+  #
+  # hermes-dev left the list on 2026-11-16: Hermes now traces auth, core,
+  # reporting and hermes-mcp there with its own OpenTelemetry SDK. Kept,
+  # OBI would record each of their requests a second time, as a separate
+  # trace (context propagation is off). hermes-dev's frontend and minio,
+  # which have no SDK, are no longer traced. hermes-test stays until Hermes
+  # ships the SDK there.
   namespaces:
-    - hermes-dev
     - logislot-dev
     - hermes-test
     - fikirsepeti-prod
