@@ -69,12 +69,30 @@ end
 return 0
 """
 
+# Extend only our own token. A cycle renews its lease before each binding,
+# so the lease bounds how long a CRASHED replica can block evaluation, not
+# how long a healthy cycle may take. A cycle held inside its query budget
+# (MAX_EVALUATION_CONCURRENCY) runs at the provider's pace: 21 bindings took
+# 104 s in production against a 120 s lease. Without renewal, a little more
+# growth would let the lease expire mid-cycle and a second replica start a
+# parallel cycle, doubling the provider load the budget exists to bound.
+_RENEW = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
 
 @dataclass
 class CycleReport:
     """What one cycle did. Counts only — no per-service detail leaves here."""
 
     lease_acquired: bool = False
+    # The lease could not be renewed (another replica holds it, or Redis is
+    # unreachable). The rest of the cycle was skipped rather than run
+    # without knowing it was alone.
+    lease_lost: bool = False
     evaluated: int = 0
     failed: int = 0
     incidents_opened: int = 0
@@ -180,8 +198,24 @@ async def run_cycle(
     actor = principal or await ensure_system_evaluator(engine)
     semaphore = asyncio.Semaphore(bounded_concurrency(concurrency))
 
+    async def still_ours() -> bool:
+        if report.lease_lost:
+            return False
+        try:
+            renewed = await redis.eval(_RENEW, 1, LEASE_KEY, token, str(lease_seconds))
+        except Exception:
+            renewed = 0
+        if not renewed:
+            if not report.lease_lost:
+                logger.warning("incident runner: lease lost mid-cycle, stopping the cycle")
+            report.lease_lost = True
+            return False
+        return True
+
     async def evaluate(row: Any) -> ProcessResult | None:
         async with semaphore:
+            if not await still_ours():
+                return None
             try:
                 return await evaluate_binding(engine, orchestrator, actor, row)
             except asyncio.CancelledError:
@@ -197,7 +231,7 @@ async def run_cycle(
     try:
         cursor: uuid.UUID | None = None
         remaining = batch_size
-        while remaining > 0:
+        while remaining > 0 and not report.lease_lost:
             page = await _due_bindings(engine, min(remaining, batch_size), cursor)
             if not page:
                 break

@@ -181,6 +181,52 @@ def get_settings_default_concurrency() -> int:
     return int(Settings.model_fields["incident_runner_concurrency"].default)
 
 
+async def test_a_cycle_longer_than_its_lease_keeps_it(engine: AsyncEngine, redis: Any) -> None:
+    # Held inside its query budget, a cycle runs at the provider's pace and
+    # can outlast the lease. The lease is renewed per binding, so a second
+    # replica ticking mid-cycle still finds it held.
+    for _ in range(3):
+        await make_world(engine)
+    orchestrator = FakeOrchestrator()
+    orchestrator.delay = 0.7
+
+    async def second_replica() -> Any:
+        await asyncio.sleep(1.6)  # past the 1 s lease the first cycle took
+        return await run_cycle(engine, FakeOrchestrator(), redis, lease_seconds=1)  # type: ignore[arg-type]
+
+    first, second = await asyncio.gather(
+        run_cycle(engine, orchestrator, redis, lease_seconds=1),  # type: ignore[arg-type]
+        second_replica(),
+    )
+
+    assert first.lease_acquired and first.evaluated == 3 and not first.lease_lost
+    assert not second.lease_acquired
+    assert await redis.get(LEASE_KEY) is None
+
+
+async def test_a_lost_lease_stops_the_cycle(engine: AsyncEngine, redis: Any) -> None:
+    for _ in range(4):
+        await make_world(engine)
+    orchestrator = FakeOrchestrator()
+    orchestrator.delay = 0.2
+
+    async def steal() -> None:
+        await orchestrator.started.wait()
+        await redis.set(LEASE_KEY, "another-replica")
+
+    report, _ = await asyncio.gather(
+        run_cycle(engine, orchestrator, redis),  # type: ignore[arg-type]
+        steal(),
+    )
+
+    assert report.lease_lost
+    # The binding in flight finished; none started after the lease was gone.
+    assert orchestrator.calls == 1
+    # And the other replica's lease was left alone.
+    assert await redis.get(LEASE_KEY) in (b"another-replica", "another-replica")
+    await redis.delete(LEASE_KEY)
+
+
 async def test_a_larger_requested_concurrency_is_held_to_the_budget(
     engine: AsyncEngine, redis: Any
 ) -> None:
