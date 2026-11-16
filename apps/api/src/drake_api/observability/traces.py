@@ -91,6 +91,9 @@ WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND __SCOPE__
 """
 
+# Method, status and path: the stable HTTP name first, the older one when a
+# span carries only that (LEGACY_ATTRIBUTES says why). A legacy target can
+# carry a query string, so only the part before `?` is read.
 _REQUESTS = """
 SELECT
     toString(Timestamp) AS ts,
@@ -98,9 +101,15 @@ SELECT
     SpanName AS route,
     Duration AS duration_ns,
     StatusCode AS status,
-    SpanAttributes['http.request.method'] AS method,
-    SpanAttributes['http.response.status_code'] AS http_status,
-    SpanAttributes['url.path'] AS path,
+    if(SpanAttributes['http.request.method'] != '',
+       SpanAttributes['http.request.method'],
+       SpanAttributes['http.method']) AS method,
+    if(SpanAttributes['http.response.status_code'] != '',
+       SpanAttributes['http.response.status_code'],
+       SpanAttributes['http.status_code']) AS http_status,
+    if(SpanAttributes['url.path'] != '',
+       SpanAttributes['url.path'],
+       splitByChar('?', SpanAttributes['http.target'])[1]) AS path,
     ResourceAttributes['k8s.pod.name'] AS pod
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
@@ -154,7 +163,45 @@ SHOWN_ATTRIBUTES = (
     "rpc.grpc.status_code",
     "messaging.system",
     "messaging.destination.name",
+    # The tool an MCP server ran: one of the server's own catalog, so a
+    # bounded name, never an argument or a result.
+    "mcp.tool.name",
 )
+
+# The same facts under the names OpenTelemetry used before its HTTP and
+# database conventions were declared stable. OBI writes the stable names.
+# An application's SDK may write the older ones: Python's instrumentation
+# still does by default, and switching it (OTEL_SEMCONV_STABILITY_OPT_IN)
+# is an OTEL_* variable a co-installed Datadog tracer could also act on,
+# so Hermes leaves it unset. Drake reads either and shows the stable name.
+# Only facts already allowlisted above are mapped. A raw statement
+# (`db.statement`) is deliberately not one of them.
+LEGACY_ATTRIBUTES: dict[str, str] = {
+    "http.request.method": "http.method",
+    "http.response.status_code": "http.status_code",
+    "url.path": "http.target",
+    "url.scheme": "http.scheme",
+    "server.port": "net.host.port",
+    "network.protocol.version": "http.flavor",
+    "db.system.name": "db.system",
+    "db.operation.name": "db.operation",
+    "db.collection.name": "db.sql.table",
+}
+
+
+def _shown_attributes(attributes: dict[str, Any]) -> dict[str, str]:
+    """The allowlisted attributes of a span, stable names first."""
+    shown: dict[str, str] = {}
+    for key in SHOWN_ATTRIBUTES:
+        value = attributes.get(key)
+        if not value and key in LEGACY_ATTRIBUTES:
+            value = attributes.get(LEGACY_ATTRIBUTES[key])
+            if value and key == "url.path":
+                # `http.target` is the path AND the query string.
+                value = str(value).split("?", 1)[0].split("#", 1)[0]
+        if value:
+            shown[key] = str(value)
+    return shown
 
 
 class TraceQueryError(ValueError):
@@ -345,9 +392,7 @@ def normalize_spans(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "duration_ms": _ms(row.get("duration_ns")),
                 "error": row.get("status") == "Error",
                 "status_message": _text(row.get("status_message")),
-                "attributes": {
-                    key: str(attributes[key]) for key in SHOWN_ATTRIBUTES if attributes.get(key)
-                },
+                "attributes": _shown_attributes(attributes),
                 "pod": _text(row.get("pod")),
             }
         )

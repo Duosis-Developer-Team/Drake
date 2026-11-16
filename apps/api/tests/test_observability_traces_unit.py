@@ -210,6 +210,100 @@ def test_spans_show_only_allowlisted_attributes() -> None:
     assert span["error"] is False
 
 
+def _sdk_span(attributes: dict[str, str]) -> dict[str, str | dict[str, str]]:
+    return {
+        "ts": "2026-11-16 09:41:39.912702528",
+        "span_id": "1111111111111111",
+        "parent_span_id": "",
+        "name": "GET /api/v1/auth/me",
+        "kind": "Server",
+        "duration_ns": "5000000",
+        "status": "Unset",
+        "status_message": "",
+        "attributes": attributes,
+        "pod": "auth-service-1",
+    }
+
+
+def test_an_sdk_span_with_the_older_http_names_shows_the_stable_ones() -> None:
+    # What Hermes's Python SDK writes: no OTEL_SEMCONV_STABILITY_OPT_IN,
+    # because a co-installed Datadog tracer reads OTEL_* variables too.
+    [span] = normalize_spans(
+        [
+            _sdk_span(
+                {
+                    "http.method": "GET",
+                    "http.status_code": "404",
+                    "http.target": "/api/v1/auth/me?token=secret#frag",
+                    "http.scheme": "http",
+                    "http.flavor": "1.1",
+                    "net.host.port": "8001",
+                    "http.route": "/api/v1/auth/me",
+                    "http.user_agent": "curl/8",
+                    "net.peer.ip": "10.0.0.7",
+                    "db.statement": "SELECT * FROM users WHERE id = %(id)s",
+                }
+            )
+        ]
+    )
+    assert span["attributes"] == {
+        "http.request.method": "GET",
+        "http.route": "/api/v1/auth/me",
+        "http.response.status_code": "404",
+        "url.path": "/api/v1/auth/me",
+        "url.scheme": "http",
+        "server.port": "8001",
+        "network.protocol.version": "1.1",
+    }
+
+
+def test_an_mcp_tool_span_shows_which_tool_ran() -> None:
+    [span] = normalize_spans(
+        [_sdk_span({"mcp.tool.name": "list_tasks", "mcp.tool.arguments": "{...}"})]
+    )
+    assert span["attributes"] == {"mcp.tool.name": "list_tasks"}
+
+
+def test_a_stable_name_wins_over_its_older_twin() -> None:
+    [span] = normalize_spans(
+        [_sdk_span({"http.request.method": "POST", "http.method": "GET", "url.path": "/a"})]
+    )
+    assert span["attributes"] == {"http.request.method": "POST", "url.path": "/a"}
+
+
+def test_the_older_database_names_map_but_the_raw_statement_never_shows() -> None:
+    [span] = normalize_spans(
+        [
+            _sdk_span(
+                {
+                    "db.system": "postgresql",
+                    "db.operation": "SELECT",
+                    "db.sql.table": "users",
+                    "db.statement": "SELECT * FROM users WHERE email = 'a@b.c'",
+                }
+            )
+        ]
+    )
+    assert span["attributes"] == {
+        "db.system.name": "postgresql",
+        "db.operation.name": "SELECT",
+        "db.collection.name": "users",
+    }
+
+
+def test_the_request_list_reads_both_http_name_generations() -> None:
+    sql = _list().requests.sql
+    for stable, legacy in (
+        ("http.request.method", "http.method"),
+        ("http.response.status_code", "http.status_code"),
+        ("url.path", "http.target"),
+    ):
+        assert f"SpanAttributes['{stable}']" in sql
+        assert f"SpanAttributes['{legacy}']" in sql
+    # A legacy target's query string never reaches the response.
+    assert "splitByChar('?', SpanAttributes['http.target'])[1]" in sql
+
+
 # --- settings and catalog ---------------------------------------------------------
 
 
