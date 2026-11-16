@@ -22,26 +22,22 @@ imagePullSecrets:
 
 image:
   repository: ghcr.io/duosis-developer-team/drake-cluster-agent
-  # Source commit 5ccd005fd08361bb2c4884bced96dce4ea2afd83, publish run
-  # 41802456917 — the same commit and run as the API and web images this
-  # control plane runs. Digest is the build step's own output, cross-checked
-  # against the job's `pushing manifest …:5ccd005…@sha256:…` line.
+  # Source commit 0f4a33c45fe34d23cb6227999a72f3bb81b66972 (#133), publish
+  # run 43943764494, the same commit as the API and web images. The agent
+  # now reports each workload's HTTP probes (`http_probes`: path and port
+  # only, never a header, host or query string), so Drake can set kubelet
+  # probes aside from traffic. The API that accepts the new field (revision
+  # 51) was rolled out first, so no snapshot could be refused. The build is
+  # also on Go 1.26.11 (go.mod).
   #
-  # Like the previous bump, this one is about Go itself: the agent was built
-  # with Go 1.26.6, which osv-scanner flags for net/http, crypto/tls and
-  # crypto/x509 advisories, plus golang.org/x/net 0.57.0. #88 moved the
-  # build to Go 1.26.10 and x/net 0.62.0. The agent's code is unchanged.
+  # Applied with `helm upgrade --reuse-values --set image.digest=...`, as
+  # before, because the live release carries install-time values
+  # (`clusterId`, the NetworkPolicy CIDRs) that this file does not record.
+  # The server-side dry-run diff against the live manifest was the image
+  # line only. Helm revision 6.
   #
-  # Applied with `helm upgrade --reuse-values --set image.digest=…`, not
-  # with this file alone: the live release also carries values supplied at
-  # install time (`clusterId`, the NetworkPolicy CIDRs) that this file does
-  # not record, and rendering from this file by itself would drop them.
-  # The rendered diff against the live manifest was the image line only.
-  #
-  # The digest it replaces — `ed081776…564c`, main@76b3be9, publish run
-  # 31890748234 — is the rollback target (helm revision 4) and is what the
-  # live Deployment ran when this line was edited.
-  digest: "sha256:7382de76a2770639ce3debe85ab36a130d12d322dc047ddc571e8a190208664c"
+  # Rollback target: `7382de76...664c` (main@5ccd005), helm revision 5.
+  digest: "sha256:221d192c4cd753ed9dca7633ae5a06c30a7f098ae152ea54e06270f9747bbd22"
   pullPolicy: IfNotPresent
 
 # Supplied at install time from the catalog row created during enrollment.
