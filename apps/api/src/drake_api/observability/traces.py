@@ -1,9 +1,19 @@
 """Trace reads: reviewed statements, typed parameters, a safe envelope.
 
-Spans come from OBI (ADR-0029): one span per request a service handled
-(`SpanKind = 'Server'`, no parent), with its in-process steps as children
-and its outgoing calls as client spans. Three reads answer the questions an
-operator asks of a service, in order:
+Spans come from OBI (ADR-0029) or from an application's own OpenTelemetry
+SDK. Either way a service writes one span per request it handled
+(`SpanKind = 'Server'`), its in-process steps as children and its outgoing
+calls as client spans.
+
+A request is every server span, with or without a parent. OBI propagates
+no context, so its server spans are always roots. An SDK does: when
+core-service calls auth-service, auth's server span has core's client span
+as its parent, in another service. Counting only roots would make every
+called service look idle. Within one process an instrumented framework
+writes one server span per request and marks its own steps `Internal`, so
+counting server spans counts each request once.
+
+Three reads answer the questions an operator asks of a service, in order:
 
 - **Routes** — which endpoints, how often, how many failed, how slow (p50,
   p95). One row per route, so a burst of `/orders/123`, `/orders/124`
@@ -62,7 +72,7 @@ SELECT
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
-  AND SpanKind = 'Server' AND ParentSpanId = ''
+  AND SpanKind = 'Server'
   AND __SCOPE__
 GROUP BY route
 ORDER BY requests DESC
@@ -77,7 +87,7 @@ SELECT
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
-  AND SpanKind = 'Server' AND ParentSpanId = ''
+  AND SpanKind = 'Server'
   AND __SCOPE__
 """
 
@@ -95,7 +105,7 @@ SELECT
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
-  AND SpanKind = 'Server' AND ParentSpanId = ''
+  AND SpanKind = 'Server'
   AND __SCOPE__
   AND ({errors_only:UInt8} = 0 OR StatusCode = 'Error')
 ORDER BY __ORDER__

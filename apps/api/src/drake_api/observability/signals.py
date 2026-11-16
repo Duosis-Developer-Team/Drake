@@ -76,7 +76,7 @@ LIMIT {max_groups:UInt16}
 """
 )
 
-# Requests are root server spans, as in observability.traces.
+# Requests are server spans, root or not, as in observability.traces.
 _TRACES = (
     "SELECT"
     + _GROUP_COLUMNS
@@ -89,7 +89,7 @@ FROM __DATABASE__.otel_traces
 """
     + _NARROW
     + """
-  AND SpanKind = 'Server' AND ParentSpanId = ''
+  AND SpanKind = 'Server'
 GROUP BY cluster, namespace, deployment, statefulset, daemonset
 LIMIT {max_groups:UInt16}
 """

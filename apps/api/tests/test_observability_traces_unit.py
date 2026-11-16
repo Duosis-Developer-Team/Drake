@@ -67,7 +67,16 @@ def test_every_statement_is_scoped_to_the_binding_by_parameters_only() -> None:
 def test_one_row_means_one_request() -> None:
     query = _list()
     for statement in (query.routes, query.totals, query.requests):
-        assert "SpanKind = 'Server' AND ParentSpanId = ''" in statement.sql
+        assert "SpanKind = 'Server'" in statement.sql
+
+
+def test_a_server_span_with_a_parent_is_still_a_request() -> None:
+    # An SDK propagates context, so a called service's server span has its
+    # caller's client span as parent. It is still a request that service
+    # handled; only OBI's spans are always roots.
+    query = _list()
+    for statement in (query.routes, query.totals, query.requests):
+        assert "ParentSpanId" not in statement.sql
 
 
 def test_window_and_page_are_bounded() -> None:
