@@ -140,8 +140,15 @@ def check(docs, by_kind, label, expect_obi):
             fail(f"{label}: {name}: hostPID is reserved for OBI")
 
         host_paths = {v["name"]: v["hostPath"]["path"] for v in spec.get("volumes", []) if "hostPath" in v}
+        writable = set()
         if name == "drake-otel-agent":
-            permitted = {"/var/log/pods"}
+            # Pod logs, read-only; and the read-offset store, the one path
+            # the agent may write, under /var/lib/drake-otel only.
+            checkpoint = host_paths.get("checkpoints", "")
+            if not checkpoint.startswith("/var/lib/drake-otel/"):
+                fail(f"{label}: {name}: read offsets must live under /var/lib/drake-otel/")
+            permitted = {"/var/log/pods", checkpoint}
+            writable = {"checkpoints"}
         elif name == OBI_NAME:
             permitted = OBI_HOST_PATHS
         else:
@@ -150,7 +157,11 @@ def check(docs, by_kind, label, expect_obi):
             fail(f"{label}: {name}: host paths {sorted(set(host_paths.values()) - permitted)} are not allowed")
         for c in spec["containers"]:
             for m in c.get("volumeMounts", []):
-                if m["name"] in host_paths and m.get("readOnly") is not True:
+                if (
+                    m["name"] in host_paths
+                    and m["name"] not in writable
+                    and m.get("readOnly") is not True
+                ):
                     fail(f"{label}: {name}: host mount {host_paths[m['name']]} must be read-only")
 
     for w in by_kind["StatefulSet"] + by_kind["Deployment"]:
@@ -160,7 +171,7 @@ def check(docs, by_kind, label, expect_obi):
         if w["metadata"]["name"] == OBI_NAME and not w["spec"]["template"]["spec"].get("nodeSelector"):
             fail(f"{label}: OBI must be pinned with a nodeSelector")
 
-    allowed_resources = {"pods", "namespaces", "replicasets", "services", "nodes"}
+    allowed_resources = {"pods", "namespaces", "replicasets", "jobs", "services", "nodes"}
     for role in by_kind.get("ClusterRole", []):
         for rule in role["rules"]:
             if not set(rule["verbs"]) <= {"get", "list", "watch"}:

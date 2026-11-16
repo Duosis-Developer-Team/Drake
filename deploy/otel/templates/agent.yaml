@@ -1,8 +1,9 @@
 {{- include "drake-otel.require" . -}}
 # The per-node agent. It READS container log files of allowlisted
 # namespaces, enriches them with Kubernetes metadata, and forwards them to
-# the gateway. It writes nothing to the node and listens on no port beyond
-# its own health check. Datadog reads the same files; neither affects the
+# the gateway. The one thing it writes to the node is its read offsets
+# (agent.checkpointDir), so a restart neither drops nor repeats a line. It
+# listens on no port beyond its own health check. Datadog reads the same files; neither affects the
 # other.
 apiVersion: v1
 kind: ServiceAccount
@@ -12,7 +13,7 @@ metadata:
     {{- include "drake-otel.labels" . | nindent 4 }}
 ---
 # Exactly what the k8sattributes processor reads to name a pod's owner:
-# get/list/watch on pods, namespaces and replicasets. No Secrets, no
+# get/list/watch on pods, namespaces, replicasets and jobs. No Secrets, no
 # ConfigMaps, no write verb, no wildcard.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -26,6 +27,10 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  # A pod's Job, to name the CronJob that owns it (k8s.cronjob.name).
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -98,6 +103,8 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /etc/otelcol}
             - {name: pod-logs, mountPath: /var/log/pods, readOnly: true}
+            # Read offsets, so a restart neither loses nor repeats lines.
+            - {name: checkpoints, mountPath: /var/lib/otelcol/checkpoints}
       volumes:
         - name: config
           configMap: {name: drake-otel-agent}
@@ -105,3 +112,7 @@ spec:
           hostPath:
             path: /var/log/pods
             type: Directory
+        - name: checkpoints
+          hostPath:
+            path: {{ .Values.agent.checkpointDir | quote }}
+            type: DirectoryOrCreate
