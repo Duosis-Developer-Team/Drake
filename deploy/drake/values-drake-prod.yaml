@@ -426,6 +426,32 @@ incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
 
+# E-mail for incidents (ADR-0030), sent the way Hermes sends its own mail:
+# the same Azure app registration and the same mailbox, through Microsoft
+# Graph. Only identifiers live here, read off `hermes-dev/hermes-config`.
+# The client secret is in `drake-email-sender` (key `client-secret`),
+# copied out of band from `hermes-dev/hermes-secrets` and mounted as a
+# file. If Hermes rotates that secret, Drake's token request is refused and
+# the delivery is dead-lettered; copying the new one restores it.
+#
+# Nothing is mailed until a destination naming `drake-test` is attached to
+# a policy through the API. The two addresses are the test recipients.
+notifications:
+  plannerEnabled: true
+  deliveryEnabled: true
+  email:
+    sender:
+      tenantId: "6d7f5e10-f771-470c-b372-5ddab61689cf"
+      clientId: "77dc01d8-6383-46ce-bc63-6da9ab8f3614"
+      address: "hermes@duosis.com"
+    existingSecret: drake-email-sender
+    destinations:
+      drake-test:
+        displayName: "Drake test"
+        recipients:
+          - enes.erman@duosis.com
+          - gencay.coskun@duosis.com
+
 observability:
   logsEnabled: true
   # ON after the OBI pilot proved the data on hermes-dev (drake-otel

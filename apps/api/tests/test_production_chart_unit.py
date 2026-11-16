@@ -2286,13 +2286,10 @@ def test_the_incident_runner_is_off_unless_turned_on_and_stated_either_way() -> 
     assert env["DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS"] == "120"
 
 
-def test_production_runs_the_incident_runner_but_delivers_nothing() -> None:
+def test_production_runs_the_incident_runner() -> None:
     env = _api_env(render_prod())
     assert env["DRAKE_INCIDENT_RUNNER_ENABLED"] == "true"
     assert int(env["DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS"]) >= 60
-    # Delivery stays a separate, deliberate decision.
-    assert env.get("DRAKE_NOTIFICATION_PLANNER_ENABLED", "false") == "false"
-    assert env.get("DRAKE_WEBHOOK_WORKER_ENABLED", "false") == "false"
 
 
 # --- e-mail notifications (ADR-0030) ---------------------------------------
@@ -2368,8 +2365,21 @@ def test_an_email_sender_without_its_secret_or_ids_is_refused() -> None:
     )
 
 
-def test_production_mails_nobody_until_a_sender_is_configured() -> None:
-    env = _api_env(render_prod())
-    assert env["DRAKE_NOTIFICATION_PLANNER_ENABLED"] == "false"
-    assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "false"
-    assert "DRAKE_NOTIFICATION_EMAIL_SENDER" not in env
+def test_production_mails_only_the_two_test_recipients_from_the_hermes_mailbox() -> None:
+    docs = render_prod()
+    env = _api_env(docs)
+    assert env["DRAKE_NOTIFICATION_PLANNER_ENABLED"] == "true"
+    assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "true"
+    sender = json.loads(env["DRAKE_NOTIFICATION_EMAIL_SENDER"])
+    assert sender["sender"] == "hermes@duosis.com"
+    assert sender["client_secret_file"] == "/etc/drake/email/client-secret"
+    # The secret is a file reference, never a value in the environment.
+    assert "client_secret" not in sender
+    assert json.loads(env["DRAKE_NOTIFICATION_EMAILS"]) == {
+        "drake-test": {
+            "display_name": "Drake test",
+            "recipients": ["enes.erman@duosis.com", "gencay.coskun@duosis.com"],
+        }
+    }
+    [volume] = [v for v in _api_pod(docs)["volumes"] if v["name"] == "email-sender"]
+    assert volume["secret"]["secretName"] == "drake-email-sender"
