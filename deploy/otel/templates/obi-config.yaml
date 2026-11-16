@@ -63,6 +63,15 @@ data:
       # which is why the list above exists. Stated here, not left as OBI's
       # default.
       exclude_otel_instrumented_services: true
+      # One server span per request for Go programs too. With the Go
+      # tracers on, OBI recorded every request to minio twice, as two
+      # unrelated traces: once from the generic kernel tracer (with the
+      # client address and port) and once from the Go uprobes (with
+      # neither). Measured 2026-11-16: 958 server spans for 479 requests in
+      # an hour. The generic tracer is the one that carries the peer, which
+      # Drake needs to recognise a kubelet probe. It is also the one that
+      # attaches no uprobes to the application.
+      skip_go_specific_tracers: true
     attributes:
       kubernetes:
         enable: "true"

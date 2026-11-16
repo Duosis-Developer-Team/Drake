@@ -197,6 +197,8 @@ def check(docs, by_kind, label, expect_obi):
         discovery = cfg.get("discovery", {})
         if discovery.get("exclude_otel_instrumented_services") is not True:
             fail(f"{label}: OBI must skip services that already export OTLP traces")
+        if discovery.get("skip_go_specific_tracers") is not True:
+            fail(f"{label}: OBI must trace Go programs once (generic tracer only)")
         for rule in discovery.get("exclude_instrument", []) or []:
             # Exact names only: a glob here could silently stop tracing
             # workloads that have no SDK.
