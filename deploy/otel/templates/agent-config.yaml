@@ -10,6 +10,13 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
+      # Where the filelog receiver remembers how far it has read each file.
+      # Without it a restarted agent could only start at the end of every
+      # file, and the lines written while it restarted were never collected.
+      # Offsets only: a few bytes per file, never a log line.
+      file_storage/checkpoints:
+        directory: /var/lib/otelcol/checkpoints
+        create_directory: false
     receivers:
       filelog:
         include:
@@ -20,7 +27,10 @@ data:
           # Never collect Drake's own collection pipeline: a collector
           # that reads its own output is a feedback loop.
           - /var/log/pods/{{ .Release.Namespace }}_*/*/*.log
+        # Applies only to a file the checkpoints have never seen. A file the
+        # agent was reading continues from its saved offset.
         start_at: {{ .Values.agent.startAt }}
+        storage: file_storage/checkpoints
         max_log_size: {{ .Values.agent.maxLogSize }}
         # The container parser reads namespace, pod, pod uid and container
         # name FROM the file path, so the path has to be on the record. It
@@ -99,6 +109,11 @@ data:
             - k8s.deployment.name
             - k8s.statefulset.name
             - k8s.daemonset.name
+            # A CronJob's runs are pods of short-lived Jobs. Without these
+            # two, every run's log lines name only a pod that is gone a
+            # minute later, and nothing ties them to the CronJob that ran.
+            - k8s.job.name
+            - k8s.cronjob.name
             - k8s.container.name
         pod_association:
           - sources:
@@ -124,7 +139,7 @@ data:
           enabled: true
           max_elapsed_time: 60s
     service:
-      extensions: [health_check]
+      extensions: [health_check, file_storage/checkpoints]
       telemetry:
         logs:
           level: warn

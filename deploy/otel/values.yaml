@@ -29,10 +29,14 @@ agent:
   # denylist: a new namespace is not collected until someone decides it
   # should be. Empty refuses to render.
   namespaces: []
-  # Start at the end of each file. There is no checkpoint store, so nothing
-  # is ever written to the node; the cost is that lines written while an
-  # agent restarts are not collected. Datadog still has them.
+  # Where a file the agent has never seen starts: at its end, so a first
+  # install does not replay a node's whole log history. Every file it has
+  # read continues from the offset saved in `checkpointDir`, so a restart or
+  # an upgrade neither drops nor repeats lines.
   startAt: end
+  # The ONE host directory the agent writes: read offsets, a few bytes per
+  # file. It lives outside /var/log so it is never collected itself.
+  checkpointDir: /var/lib/drake-otel/agent-checkpoints
   # Lines longer than this are cut by the receiver before anything else.
   maxLogSize: 64KiB
   memoryLimitMiB: 160
