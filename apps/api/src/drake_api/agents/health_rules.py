@@ -230,6 +230,12 @@ _CRON_HOURLY = re.compile(r"^\d+ \* \* \* \*$")
 _CRON_DAILY = re.compile(r"^\d+ \d+ \* \* \*$")
 
 
+# For a schedule whose interval is not derived (weekly, lists, ranges): how
+# long after its latest scheduled run a missing success means it failed,
+# rather than that it is still running.
+_UNKNOWN_INTERVAL_GRACE = dt.timedelta(hours=6)
+
+
 def _cron_interval_bound(schedule: str) -> dt.timedelta | None:
     schedule = schedule.strip()
     if _CRON_EVERY_MINUTE.match(schedule):
@@ -273,6 +279,20 @@ def _cronjob(
     last_success = _parse_utc(status.get("last_successful_time"))
     if last_success is None:
         reasons.append("no_successful_run_recorded")
+    elif last_success < last_schedule:
+        # The run that started at `last_schedule` has not succeeded (yet). A
+        # run in progress looks the same, so the CronJob is judged failing
+        # only when an EARLIER scheduled run did not succeed either (its
+        # interval is known), or, for a schedule whose interval Drake does
+        # not derive, when the latest run is hours old. In production a
+        # nightly cleanup had failed for three months while this rule still
+        # said healthy, because a success had once been recorded.
+        bound = _cron_interval_bound(schedule) if isinstance(schedule, str) else None
+        if bound is not None:
+            if last_success < last_schedule - bound:
+                reasons.append("recent_runs_failed")
+        elif now - last_schedule > _UNKNOWN_INTERVAL_GRACE:
+            reasons.append("last_run_not_successful")
     if reasons:
         return DEGRADED, sorted(set(reasons))
     return HEALTHY, []
