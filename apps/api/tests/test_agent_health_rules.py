@@ -1,6 +1,7 @@
 """Table-driven unit tests for deterministic health derivation (ADR-0018)."""
 
 import datetime as dt
+from typing import Any
 
 import pytest
 from drake_api.agents.health_rules import derive_health
@@ -385,3 +386,44 @@ def test_daily_cron_lag_detected() -> None:
     health, reasons = derive_health("CronJob", payload, now=now)
     assert health == "degraded"
     assert "schedule_missed" in reasons
+
+
+def _cron(schedule: str, last_schedule: str, last_success: str) -> dict[str, Any]:
+    return {
+        "spec_summary": {"schedule": schedule, "suspend": False},
+        "status_summary": {
+            "last_schedule_time": last_schedule,
+            "last_successful_time": last_success,
+        },
+    }
+
+
+def test_a_cronjob_whose_recent_runs_failed_is_not_healthy() -> None:
+    # Production, 2026-11-16: hermes-dev's nightly cleanup had last
+    # succeeded three months before its latest run, and read healthy.
+    payload = _cron("0 3 * * *", "2026-11-16T03:00:00Z", "2026-08-16T03:01:19Z")
+    now = dt.datetime(2026, 11, 16, 20, 0, tzinfo=dt.UTC)
+    health, reasons = derive_health("CronJob", payload, now=now)
+    assert health == "degraded"
+    assert reasons == ["recent_runs_failed"]
+
+
+def test_a_run_still_in_progress_is_not_a_failure() -> None:
+    # Every minute; the 20:10 run is running and the 20:09 one succeeded.
+    payload = _cron("* * * * *", "2026-11-16T20:10:00Z", "2026-11-16T20:09:15Z")
+    now = dt.datetime(2026, 11, 16, 20, 10, 20, tzinfo=dt.UTC)
+    health, reasons = derive_health("CronJob", payload, now=now)
+    assert health == "healthy", reasons
+
+
+def test_an_unmodelled_schedule_fails_only_after_the_grace() -> None:
+    # Weekly backup: no derived interval. A latest run without a success is
+    # "still running" for six hours, then "not successful".
+    payload = _cron("0 2 * * 1", "2026-11-16T02:00:00Z", "2026-11-09T02:01:39Z")
+    early = dt.datetime(2026, 11, 16, 4, 0, tzinfo=dt.UTC)
+    assert derive_health("CronJob", payload, now=early) == ("healthy", [])
+    late = dt.datetime(2026, 11, 16, 9, 0, tzinfo=dt.UTC)
+    assert derive_health("CronJob", payload, now=late) == (
+        "degraded",
+        ["last_run_not_successful"],
+    )
