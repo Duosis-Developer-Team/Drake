@@ -42,16 +42,29 @@ obi:
   # node1 gets no new load. logislot-prod (all on node1) and the hermes
   # namespace stay out.
   #
-  # hermes-dev left the list on 2026-11-16: Hermes now traces auth, core,
-  # reporting and hermes-mcp there with its own OpenTelemetry SDK. Kept,
-  # OBI would record each of their requests a second time, as a separate
-  # trace (context propagation is off). hermes-dev's frontend and minio,
-  # which have no SDK, are no longer traced. hermes-test stays until Hermes
-  # ships the SDK there.
+  # 2026-11-16: Hermes traces auth, core, reporting and hermes-mcp itself,
+  # with an OpenTelemetry SDK, in both hermes-dev and hermes-test. Those
+  # eight workloads are named in `sdkWorkloads` below, so OBI never traces
+  # them and no request is recorded twice. Everything else in the two
+  # namespaces (frontend, minio, clamav) has no SDK and stays with OBI.
+  # hermes-dev was briefly out of the list that morning; it is back, so
+  # its frontend and minio are traced again.
   namespaces:
+    - hermes-dev
     - logislot-dev
     - hermes-test
     - fikirsepeti-prod
+  # Exact names, checked by validate.sh: a workload is added here the day it
+  # ships an SDK, not before, so nothing goes untraced in between.
+  sdkWorkloads:
+    - {namespace: hermes-dev, deployment: auth-service}
+    - {namespace: hermes-dev, deployment: core-service}
+    - {namespace: hermes-dev, deployment: reporting-service}
+    - {namespace: hermes-dev, deployment: hermes-mcp}
+    - {namespace: hermes-test, deployment: auth-service}
+    - {namespace: hermes-test, deployment: core-service}
+    - {namespace: hermes-test, deployment: reporting-service}
+    - {namespace: hermes-test, deployment: hermes-mcp}
   # Measured before widening: 65m CPU and 303 MiB working set against a
   # 384 MiB limit for one namespace. More processes to track means more
   # eBPF map and symbol memory, and an OOM kill would only cost trace gaps,
