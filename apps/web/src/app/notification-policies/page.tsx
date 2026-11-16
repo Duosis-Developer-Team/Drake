@@ -538,6 +538,7 @@ export default function NotificationPoliciesPage() {
   const webhooks = destinations.filter(
     (d) => d.destination_type === "webhook",
   ).length;
+  const emails = destinations.filter((d) => d.destination_type === "email").length;
 
   const howSteps = [
     { icon: BellRing, title: t("policies.rules.when"), line: t("policies.rules.whenLine") },
@@ -595,8 +596,16 @@ export default function NotificationPoliciesPage() {
                   {webhooks}
                 </span>{" "}
                 {t("policies.kpi.webhook")} ·{" "}
+                {emails > 0 ? (
+                  <>
+                    <span data-tabular className="font-medium text-ink-secondary">
+                      {emails}
+                    </span>{" "}
+                    {t("policies.kpi.email")} ·{" "}
+                  </>
+                ) : null}
                 <span data-tabular className="font-medium text-ink-secondary">
-                  {destinations.length - webhooks}
+                  {destinations.length - webhooks - emails}
                 </span>{" "}
                 {t("policies.kpi.inApp")}
               </p>

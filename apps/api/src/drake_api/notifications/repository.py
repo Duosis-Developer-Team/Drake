@@ -266,6 +266,24 @@ def available_webhook_keys(settings: Settings) -> list[dict[str, Any]]:
     ]
 
 
+def available_email_keys(settings: Settings) -> list[dict[str, Any]]:
+    """The e-mail registry, as the UI is allowed to see it.
+
+    Key, display name and how many people it reaches. The addresses stay in
+    settings, like a webhook's URL: picking a list is a choice an operator
+    already made, not something a policy form should spell out.
+    """
+    return [
+        {
+            "key": key,
+            "display_name": destination.display_name or key,
+            "recipient_count": len(destination.recipients),
+            "payload_schema_version": destination.payload_schema_version,
+        }
+        for key, destination in sorted(settings.notification_emails.items())
+    ]
+
+
 async def _project_scope(connection: AsyncConnection, project_id: uuid.UUID) -> uuid.UUID | None:
     return (
         await connection.execute(
@@ -382,20 +400,23 @@ async def create_destination(
             # cannot see the project should be told, not quietly ignored.
             raise NotificationError("recipient_out_of_scope", "that user cannot see this project")
         destination_key = None
+        schema_version = 1
     elif destination_type == "webhook":
         if destination_key is None or destination_key not in settings.notification_webhooks:
             # The registry is the allowlist. A key that is not in it cannot
             # be created, so a policy can never point at an arbitrary URL.
             raise NotificationError("unknown_destination_key", "unknown webhook destination")
         identity_id = None
+        schema_version = settings.notification_webhooks[destination_key].payload_schema_version
+    elif destination_type == "email":
+        if destination_key is None or destination_key not in settings.notification_emails:
+            # Same allowlist rule: the addresses live in settings, so a
+            # policy can only ever mail a list the operator configured.
+            raise NotificationError("unknown_destination_key", "unknown e-mail destination")
+        identity_id = None
+        schema_version = settings.notification_emails[destination_key].payload_schema_version
     else:
         raise NotificationError("invalid_destination", "unknown destination type")
-
-    schema_version = (
-        settings.notification_webhooks[destination_key].payload_schema_version
-        if destination_key
-        else 1
-    )
     row = (
         await connection.execute(
             text(
@@ -794,7 +815,7 @@ async def list_deliveries(
                 SELECT wd.id, wd.state, wd.attempt_count, wd.next_attempt_at,
                        wd.delivered_at, wd.last_error_code, wd.last_http_status,
                        wd.created_at, d.display_name, ev.event_type, wd.incident_id,
-                       i.title, p.project_key
+                       i.title, p.project_key, d.destination_type
                 FROM webhook_deliveries wd
                 JOIN projects p ON p.id = wd.project_id
                 JOIN notification_destinations d ON d.id = wd.destination_id
@@ -827,6 +848,9 @@ async def list_deliveries(
                 "incident_id": str(row[10]),
                 "incident_title": row[11],
                 "project_key": row[12],
+                # `webhook` or `email`: both are delivered through this
+                # outbox, and the audit should say which one a row was.
+                "channel": row[13],
             }
             for row in rows
         ],

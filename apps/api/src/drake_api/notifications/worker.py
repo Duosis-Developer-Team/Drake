@@ -39,6 +39,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from drake_api.notifications.email import send_email
 from drake_api.notifications.planner import PlanReport, plan_pending
 from drake_api.notifications.webhook import (
     AttemptResult,
@@ -252,25 +253,51 @@ async def deliver_one(
     transport: httpx.AsyncBaseTransport | None = None,
     resolver: Resolver | None = None,
 ) -> str:
-    """Send one claimed delivery and record what happened."""
-    destination = settings.notification_webhooks.get(delivery["destination_key"])
-    if destination is None:
-        await _suppress(engine, delivery["id"], "destination_not_configured")
-        return "suppressed"
+    """Send one claimed delivery and record what happened.
 
-    started_at = datetime.now(UTC)
+    The key decides the channel. Webhook and e-mail keys share one
+    namespace (settings refuses an overlap), so a key resolves to at most
+    one registry entry and nothing here has to guess.
+    """
+    key = delivery["destination_key"]
     payload = delivery["payload"]
     if isinstance(payload, str):
         payload = json.loads(payload)
-    result = await send_webhook(
-        destination,
-        settings,
-        payload=payload,
-        idempotency_key=delivery["idempotency_key"],
-        transport=transport,
-        resolver=resolver,
-    )
-    return await _record_attempt(engine, delivery, result, settings, started_at)
+
+    webhook = settings.notification_webhooks.get(key)
+    if webhook is not None:
+        started_at = datetime.now(UTC)
+        result = await send_webhook(
+            webhook,
+            settings,
+            payload=payload,
+            idempotency_key=delivery["idempotency_key"],
+            transport=transport,
+            resolver=resolver,
+        )
+        return await _record_attempt(engine, delivery, result, settings, started_at)
+
+    email = settings.notification_emails.get(key)
+    if email is not None:
+        sender = settings.notification_email_sender
+        if sender is None:
+            # Recipients without a mailbox to send from: there is nowhere to
+            # send it from, which is "never tried", not "tried and failed".
+            await _suppress(engine, delivery["id"], "email_sender_not_configured")
+            return "suppressed"
+        started_at = datetime.now(UTC)
+        result = await send_email(
+            email,
+            sender,
+            settings,
+            payload=payload,
+            idempotency_key=delivery["idempotency_key"],
+            transport=transport,
+        )
+        return await _record_attempt(engine, delivery, result, settings, started_at)
+
+    await _suppress(engine, delivery["id"], "destination_not_configured")
+    return "suppressed"
 
 
 async def run_delivery_cycle(

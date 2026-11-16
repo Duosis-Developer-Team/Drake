@@ -10,7 +10,7 @@
 import { apiGet, apiMutate } from "@/lib/api";
 
 export type NotificationEventType = "opened" | "acknowledged" | "auto_resolved";
-export type DestinationType = "in_app_user" | "webhook";
+export type DestinationType = "in_app_user" | "webhook" | "email";
 export type DeliveryState =
   | "pending"
   | "processing"
@@ -123,6 +123,14 @@ export interface PolicyOptions {
   severities: string[];
   destination_types: DestinationType[];
   webhook_keys: { key: string; display_name: string; payload_schema_version: number }[];
+  /** E-mail lists from the operator's registry: key, name and size only.
+   * The addresses are not exposed by any endpoint. */
+  email_keys?: {
+    key: string;
+    display_name: string;
+    recipient_count: number;
+    payload_schema_version: number;
+  }[];
 }
 
 export interface DeliveryRow {
@@ -139,6 +147,8 @@ export interface DeliveryRow {
   incident_id: string;
   incident_title: string;
   project_key: string;
+  /** Webhook and e-mail share the delivery outbox. */
+  channel?: "webhook" | "email";
 }
 
 export interface DeliveryAttempt {

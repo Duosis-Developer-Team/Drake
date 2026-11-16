@@ -5,10 +5,11 @@ All values come from the environment (``DRAKE_`` prefix) or an optional local
 localhost and no credential values are embedded in code.
 """
 
+import re
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from drake_api.origin import PublicOrigin, oidc_redirect_url, parse_public_origin
@@ -79,6 +80,73 @@ class WebhookDestination(BaseModel):
     signing_secret_file: str = ""
     timeout_seconds: float = 10.0
     payload_schema_version: int = 1
+
+
+# Deliberately plain: one local part, one domain with a dot, no display
+# name, no comments, no whitespace. Header injection needs a newline or a
+# comma, and neither can get through this.
+_EMAIL_SHAPE = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
+MAX_EMAIL_RECIPIENTS = 10
+# Same shape the database enforces on `destination_key` (migration 0013).
+_DESTINATION_KEY_SHAPE = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
+
+
+class GraphMailSender(BaseModel):
+    """The one Microsoft 365 mailbox Drake sends e-mail from (ADR-0030).
+
+    Client-credentials flow against Microsoft Graph, the same way the other
+    in-house services send mail. `client_secret_file` is a REFERENCE, like
+    every other credential here: the secret is read at send time and never
+    becomes a settings value, a column, a log line or a response.
+
+    The two base URLs exist so a local test can point at a fake Graph. They
+    are operator-owned like everything in this model, and outside
+    local/test they must be https.
+    """
+
+    tenant_id: str
+    client_id: str
+    client_secret_file: str
+    sender: str
+    login_base_url: str = "https://login.microsoftonline.com"
+    graph_base_url: str = "https://graph.microsoft.com"
+    timeout_seconds: float = 10.0
+
+    @field_validator("sender")
+    @classmethod
+    def _plain_sender(cls, value: str) -> str:
+        value = value.strip()
+        if not _EMAIL_SHAPE.fullmatch(value):
+            raise ValueError("the e-mail sender is not a plain address")
+        return value
+
+
+class EmailDestination(BaseModel):
+    """Operator-owned list of addresses, resolved from an opaque key.
+
+    Same contract as `WebhookDestination`: a policy references a KEY, and
+    this map is the only place the addresses exist. Nobody can make Drake
+    mail an address by calling the API.
+    """
+
+    recipients: list[str]
+    display_name: str = ""
+    payload_schema_version: int = 1
+
+    @field_validator("recipients")
+    @classmethod
+    def _bounded_plain_addresses(cls, value: list[str]) -> list[str]:
+        # A short list of plain addresses. Not a mailing-list tool: a typo
+        # that turns into a hundred recipients is worse than a refusal.
+        if not 1 <= len(value) <= MAX_EMAIL_RECIPIENTS:
+            raise ValueError(f"an e-mail destination needs 1 to {MAX_EMAIL_RECIPIENTS} recipients")
+        cleaned = [address.strip() for address in value]
+        for address in cleaned:
+            if not _EMAIL_SHAPE.fullmatch(address):
+                raise ValueError("an e-mail recipient is not a plain address")
+        if len({address.lower() for address in cleaned}) != len(cleaned):
+            raise ValueError("an e-mail destination lists the same address twice")
+        return cleaned
 
 
 class ProtectionConnector(BaseModel):
@@ -322,6 +390,28 @@ class Settings(BaseSettings):
     # Empty by default, so a deployment that configures nothing sends
     # nothing.
     notification_webhooks: dict[str, WebhookDestination] = {}
+    # E-mail (ADR-0030): the sending mailbox, and opaque key → recipients.
+    # Both empty by default, so a deployment that configures nothing mails
+    # nobody. Delivery runs on the same worker and switch as webhooks.
+    notification_email_sender: GraphMailSender | None = None
+    notification_emails: dict[str, EmailDestination] = {}
+
+    @model_validator(mode="after")
+    def _one_namespace_for_destination_keys(self) -> "Settings":
+        # Webhook and e-mail keys share one namespace: a delivery row holds
+        # only the key, and the worker must never have to guess which
+        # registry it meant. Refused at load rather than at send time.
+        shared = set(self.notification_webhooks) & set(self.notification_emails)
+        if shared:
+            raise ValueError(
+                "notification destination keys must be unique across webhooks and e-mail: "
+                + ", ".join(sorted(shared))
+            )
+        for key in self.notification_emails:
+            if not _DESTINATION_KEY_SHAPE.fullmatch(key):
+                raise ValueError(f"e-mail destination key {key!r} has the wrong shape")
+        return self
+
     # Where a notification's incident link points. Empty means links are
     # emitted as relative paths only.
     public_app_base_url: str = ""
@@ -531,6 +621,16 @@ class Settings(BaseSettings):
                 raise RuntimeError(
                     f"notification webhook {key!r} must use https outside local/test"
                 )
+        sender = self.notification_email_sender
+        if sender is not None:
+            # The client secret travels to the login endpoint, and the
+            # message to Graph. Neither may go in the clear.
+            for name, url in (
+                ("login_base_url", sender.login_base_url),
+                ("graph_base_url", sender.graph_base_url),
+            ):
+                if not url.startswith("https://"):
+                    raise RuntimeError(f"e-mail sender {name} must use https outside local/test")
         if self.webhook_max_attempts > 10:
             raise RuntimeError("webhook retry budget above 10 attempts is not bounded delivery")
         for key, alertmanager in self.alertmanager_integrations.items():

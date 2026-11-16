@@ -94,6 +94,28 @@ imagePullSecrets:
 {{- toJson $out -}}
 {{- end -}}
 
+{{/* The e-mail sender, as the settings model expects it (ADR-0030).
+     Only a REFERENCE to the client secret crosses the boundary. */}}
+{{- define "drake.emailSender" -}}
+{{- $email := (.Values.notifications).email -}}
+{{- toJson (dict
+      "tenant_id" (required "notifications.email.sender.tenantId is required when an e-mail sender address is set" $email.sender.tenantId)
+      "client_id" (required "notifications.email.sender.clientId is required when an e-mail sender address is set" $email.sender.clientId)
+      "sender" $email.sender.address
+      "client_secret_file" (printf "%s/client-secret" ($email.secretMountPath | default "/etc/drake/email"))) -}}
+{{- end -}}
+
+{{/* E-mail destinations: opaque key → recipients. */}}
+{{- define "drake.emailDestinations" -}}
+{{- $out := dict -}}
+{{- range $key, $destination := ((.Values.notifications).email).destinations }}
+{{- $_ := set $out $key (dict
+      "display_name" (default "" $destination.displayName)
+      "recipients" (required (printf "notifications.email.destinations.%s.recipients is required" $key) $destination.recipients)) -}}
+{{- end }}
+{{- toJson $out -}}
+{{- end -}}
+
 {{/* Which edge mode is active. */}}
 {{- define "drake.internalMode" -}}
 {{- eq (.Values.edge).mode "internal" -}}

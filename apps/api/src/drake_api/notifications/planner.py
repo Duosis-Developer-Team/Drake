@@ -249,7 +249,11 @@ async def _plan_destination(
         return "in_app"
 
     delivery_id = uuid.uuid4()
-    key = idempotency_key(event.incident_event_id, "webhook", str(destination["destination_key"]))
+    # Webhook and e-mail both land in the outbox. The channel is part of the
+    # key so the two could never collide even if a key were reused across
+    # registries (settings already refuses that).
+    channel = "email" if destination["type"] == "email" else "webhook"
+    key = idempotency_key(event.incident_event_id, channel, str(destination["destination_key"]))
     await connection.execute(
         text(
             """

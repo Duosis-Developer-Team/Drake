@@ -278,6 +278,33 @@ incidents:
   # Floor of 30 s is enforced by the API's own settings validation.
   runnerIntervalSeconds: 120
 
+notifications:
+  # The two background actors behind notification policies (ADR-0024),
+  # stated in both states. The planner turns committed incident events into
+  # in-app notifications and outbox rows; delivery sends the outbox
+  # (webhooks and e-mail). Off by default: a release that starts mailing
+  # people because a default said so is one nobody can safely upgrade.
+  plannerEnabled: false
+  deliveryEnabled: false
+  email:
+    # The Microsoft 365 mailbox Drake sends from (ADR-0030), via Microsoft
+    # Graph with the client-credentials flow. Leave `address` empty and no
+    # e-mail is ever sent. The Azure app needs the Mail.Send application
+    # permission, ideally limited to this one mailbox.
+    sender:
+      tenantId: ""
+      clientId: ""
+      address: ""
+    # Secret with key `client-secret`, mounted as a file. Never an env value.
+    existingSecret: ""
+    secretMountPath: /etc/drake/email
+    # Opaque key → recipients. A policy can only reference a key listed
+    # here, so nobody can make Drake mail an address through the API.
+    destinations: {}
+    #  oncall:
+    #    displayName: "On-call"
+    #    recipients: ["someone@example.com"]
+
 observability:
   # Logs from Drake's own ClickHouse store (ADR-0029, deploy/otel). Off by
   # default: with it off the API answers `not_configured` and connects to
