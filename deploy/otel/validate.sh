@@ -45,6 +45,13 @@ for unset in obi.namespaces obi.nodeSelector obi.image.digest; do
     exit 1
   fi
 done
+# An SDK workload named by half (no deployment) must not render: it would
+# either exclude nothing or exclude a whole namespace.
+if render -f values-drake-prod.yaml "${OBI_SETS[@]}" \
+  --set-json 'obi.sdkWorkloads=[{"namespace":"policy-check-a"}]' >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: OBI rendered an SDK workload without its deployment" >&2
+  exit 1
+fi
 
 OUT="$(mktemp)"
 OUT_OBI="$(mktemp)"
@@ -187,6 +194,16 @@ def check(docs, by_kind, label, expect_obi):
             set(rule) != {"k8s_namespace"} or "*" in str(rule["k8s_namespace"]) for rule in instrument
         ):
             fail(f"{label}: OBI discovery must be an explicit namespace allowlist")
+        discovery = cfg.get("discovery", {})
+        if discovery.get("exclude_otel_instrumented_services") is not True:
+            fail(f"{label}: OBI must skip services that already export OTLP traces")
+        for rule in discovery.get("exclude_instrument", []) or []:
+            # Exact names only: a glob here could silently stop tracing
+            # workloads that have no SDK.
+            if set(rule) != {"k8s_namespace", "k8s_deployment_name"} or any(
+                ch in str(value) for value in rule.values() for ch in "*?["
+            ):
+                fail(f"{label}: an OBI exclusion must name one namespace and one deployment")
 
     return len(docs)
 

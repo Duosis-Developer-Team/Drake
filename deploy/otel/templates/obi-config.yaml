@@ -43,6 +43,26 @@ data:
         {{- range .Values.obi.namespaces }}
         - k8s_namespace: {{ . | quote }}
         {{- end }}
+      # Workloads that trace themselves with an OpenTelemetry SDK. OBI
+      # propagates no context, so tracing them too would record every
+      # request twice, as two unrelated traces. Named, so the exclusion
+      # holds from a pod's first request on.
+      {{- with .Values.obi.sdkWorkloads }}
+      exclude_instrument:
+        {{- range . }}
+        {{- if not (and .namespace .deployment) }}
+        {{- fail "obi.sdkWorkloads entries need both namespace and deployment" }}
+        {{- end }}
+        - k8s_namespace: {{ .namespace | quote }}
+          k8s_deployment_name: {{ .deployment | quote }}
+        {{- end }}
+      {{- end }}
+      # And the backstop for a workload nobody listed yet: once a process
+      # is seen exporting OTLP traces, OBI stops exporting its own for it.
+      # This is behavioural, so it only applies after that first export,
+      # which is why the list above exists. Stated here, not left as OBI's
+      # default.
+      exclude_otel_instrumented_services: true
     attributes:
       kubernetes:
         enable: "true"

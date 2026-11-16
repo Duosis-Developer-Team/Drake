@@ -73,6 +73,11 @@ obi:
     digest: ""
   nodeSelector: {}
   namespaces: []
+  # Workloads inside those namespaces that send their own traces through an
+  # OpenTelemetry SDK. OBI leaves these alone, so each request is counted
+  # once. Example:
+  #   - {namespace: hermes-dev, deployment: core-service}
+  sdkWorkloads: []
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 300m, memory: 384Mi}
