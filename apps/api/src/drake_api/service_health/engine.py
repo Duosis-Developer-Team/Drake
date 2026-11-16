@@ -63,7 +63,7 @@ class ApplicationSignals:
     # Distinguishes "the app publishes nothing" from "we could not read it".
     metrics_present: bool = False
     # "metrics" (the preset's Prometheus queries) or "traces" (derived
-    # from the root server spans Drake stores, when no metrics answered).
+    # from the server spans Drake stores, when no metrics answered).
     source: str = "metrics"
 
 

@@ -43,7 +43,9 @@ def test_statements_narrow_by_parameters_only() -> None:
             assert value not in sql
         assert "otel.otel_" in sql
         assert "__DATABASE__" not in sql
-    assert "SpanKind = 'Server' AND ParentSpanId = ''" in query.traces
+    assert "SpanKind = 'Server'" in query.traces
+    # A called service's server span has a parent in its caller (ADR-0029).
+    assert "ParentSpanId" not in query.traces
     assert query.parameters["start"] == "2026-11-04 11:00:00.000000"
 
 

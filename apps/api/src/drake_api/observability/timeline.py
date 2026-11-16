@@ -42,7 +42,7 @@ SELECT
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
-  AND SpanKind = 'Server' AND ParentSpanId = ''
+  AND SpanKind = 'Server'
   AND __SCOPE__
 GROUP BY t
 ORDER BY t

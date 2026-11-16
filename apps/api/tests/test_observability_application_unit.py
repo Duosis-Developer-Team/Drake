@@ -21,9 +21,11 @@ CONTEXT = {
 }
 
 
-def test_the_statement_reads_root_server_spans_scoped_by_parameters() -> None:
+def test_the_statement_reads_server_spans_scoped_by_parameters() -> None:
     query = build_application_query(database="otel", context=CONTEXT, window_seconds=300, now=NOW)
-    assert "SpanKind = 'Server' AND ParentSpanId = ''" in query.statement
+    assert "SpanKind = 'Server'" in query.statement
+    # A called service's server span has a parent in its caller (ADR-0029).
+    assert "ParentSpanId" not in query.statement
     for value in ("duosis-prod-1", "hermes-dev", "core-service"):
         assert value not in query.statement
     assert query.parameters["window_start"] == "2026-11-15 11:55:00.000000"

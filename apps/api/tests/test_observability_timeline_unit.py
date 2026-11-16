@@ -60,7 +60,9 @@ def test_statements_are_scoped_by_parameters_only() -> None:
         for value in ("duosis-prod-1", "hermes-dev", "core-service"):
             assert value not in sql
         assert "__SCOPE__" not in sql and "__DATABASE__" not in sql
-    assert "SpanKind = 'Server' AND ParentSpanId = ''" in query.traces
+    assert "SpanKind = 'Server'" in query.traces
+    # A called service's server span has a parent in its caller (ADR-0029).
+    assert "ParentSpanId" not in query.traces
     assert query.parameters["workload"] == "core-service"
     assert query.parameters["bucket"] == "150"
 

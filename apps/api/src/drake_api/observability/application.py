@@ -13,7 +13,7 @@ the orchestrator asks only when the preset's metrics answered nothing, so a
 service that does publish metrics keeps them.
 
 What it refuses to do is call an unobserved service healthy. A workload
-with no root server span in the last day is not being traced at all (its
+with no server span in the last day is not being traced at all (its
 namespace or node is not instrumented), and "0 requests" there would be
 read as a quiet, healthy service. That case returns None and the section
 stays honestly "not configured". A workload that has been traced recently
@@ -58,7 +58,7 @@ SELECT
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {seen_start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
-  AND SpanKind = 'Server' AND ParentSpanId = ''
+  AND SpanKind = 'Server'
   AND __SCOPE__
 """
 
