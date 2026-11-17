@@ -36,3 +36,4 @@ or operational details.
 | [ADR-0028](ADR-0028-web-localisation.md) | Web localisation: English and Turkish from one typed catalogue |
 | [ADR-0029](ADR-0029-opentelemetry-logs-and-traces-alongside-datadog.md) | OpenTelemetry logs and traces, stored by Drake in ClickHouse, alongside Datadog |
 | [ADR-0030](ADR-0030-email-notifications-through-microsoft-graph.md) | E-mail notifications through Microsoft Graph, on the webhook outbox |
+| [ADR-0031](ADR-0031-alert-rules-on-stored-health-samples.md) | Alert rules judged on the runner's stored health samples, no new provider queries |

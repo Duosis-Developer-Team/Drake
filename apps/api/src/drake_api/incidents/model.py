@@ -86,6 +86,8 @@ INCIDENT_TITLES: dict[str, str] = {
     str(ReasonCode.PARTIAL_AVAILABILITY): "Replicas missing",
     str(ReasonCode.ROLLOUT_INCOMPLETE): "Rollout stuck",
     GENERIC_CRITICAL_REASON: "Service health critical",
+    # A critical alert rule (ADR-0031); the incident title names the rule.
+    "rule_firing": "An alert rule fired",
 }
 
 TITLE_MAX_LENGTH = 200

@@ -30,6 +30,7 @@ import { NAV_ITEMS } from "@/lib/navigation";
 const SEGMENT_LABELS: Record<string, string> = {
   admin: "Audit & access",
   alerts: "Alerts",
+  "alert-rules": "Alert rules",
   bind: "New binding",
   clusters: "Clusters",
   deployments: "Deployments",

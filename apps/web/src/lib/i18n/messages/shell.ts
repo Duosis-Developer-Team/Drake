@@ -23,6 +23,7 @@ export const shell = defineMessages({
       slo: "Objectives",
       incidents: "Incidents",
       alerts: "Alerts",
+      alertRules: "Alert rules",
       deployments: "Deployments",
       protection: "Protection",
       onboarding: "Onboard project",
@@ -33,6 +34,7 @@ export const shell = defineMessages({
     crumb: {
       admin: "Audit & access",
       alerts: "Alerts",
+      "alert-rules": "Alert rules",
       bind: "New binding",
       clusters: "Clusters",
       deployments: "Deployments",
@@ -146,6 +148,7 @@ export const shell = defineMessages({
       slo: "Hedefler",
       incidents: "Olaylar",
       alerts: "Uyarılar",
+      alertRules: "Alarm kuralları",
       deployments: "Dağıtımlar",
       protection: "Koruma",
       onboarding: "Proje katılımı",
@@ -156,6 +159,7 @@ export const shell = defineMessages({
     crumb: {
       admin: "Denetim ve erişim",
       alerts: "Uyarılar",
+      "alert-rules": "Alarm kuralları",
       bind: "Yeni bağlama",
       clusters: "Kümeler",
       deployments: "Dağıtımlar",

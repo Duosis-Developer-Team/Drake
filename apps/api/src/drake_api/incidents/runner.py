@@ -30,6 +30,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from drake_api.alert_rules.evaluator import record_and_evaluate
 from drake_api.incidents.model import evaluation_from_health
 from drake_api.incidents.processor import ProcessResult, process_evaluation
 from drake_api.incidents.system_actor import ensure_system_evaluator
@@ -153,6 +154,24 @@ async def evaluate_binding(
         return None
 
     payload = await orchestrator.current_health(principal, context, refresh=True)
+    catalog = {
+        "environment_service_id": binding_row[1],
+        "project_id": binding_row[2],
+        "environment_id": binding_row[3],
+        "service_id": binding_row[4],
+    }
+    # Alert rules (ADR-0031) are judged on this same verdict. A failure there
+    # is logged and never stops the binding's own incident lifecycle below.
+    try:
+        await record_and_evaluate(
+            engine,
+            binding_id=binding_id,
+            catalog=catalog,
+            service_key=str(context.get("service_key") or ""),
+            payload=payload,
+        )
+    except Exception:
+        logger.warning("incident runner: alert rules could not be evaluated for a binding")
     evaluation = evaluation_from_health(
         payload,
         context,
