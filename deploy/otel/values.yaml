@@ -37,6 +37,9 @@ agent:
   # The ONE host directory the agent writes: read offsets, a few bytes per
   # file. It lives outside /var/log so it is never collected itself.
   checkpointDir: /var/lib/drake-otel/agent-checkpoints
+  # How often the agent re-lists and re-reads the log files. See
+  # agent-config.yaml for why it is not the receiver's 200 ms default.
+  pollInterval: 1s
   # Lines longer than this are cut by the receiver before anything else.
   maxLogSize: 64KiB
   memoryLimitMiB: 160
