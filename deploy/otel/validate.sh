@@ -210,7 +210,12 @@ def check(docs, by_kind, label, expect_obi):
             fail(f"{label}: OBI must skip services that already export OTLP traces")
         if discovery.get("skip_go_specific_tracers") is not True:
             fail(f"{label}: OBI must trace Go programs once (generic tracer only)")
-        for rule in discovery.get("exclude_instrument", []) or []:
+        rules = discovery.get("exclude_instrument", []) or []
+        if {"k8s_cronjob_name": "?*"} not in rules:
+            fail(f"{label}: OBI must leave CronJob runs alone")
+        for rule in rules:
+            if rule == {"k8s_cronjob_name": "?*"}:
+                continue  # the one reviewed pattern: pods a CronJob owns
             # Exact names only: a glob here could silently stop tracing
             # workloads that have no SDK.
             if set(rule) != {"k8s_namespace", "k8s_deployment_name"} or any(

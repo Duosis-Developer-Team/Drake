@@ -106,6 +106,14 @@ prometheus-pushgateway:
 
 kube-state-metrics:
   enabled: true
+  # On the worker node. Stateless, and on the saturated control-plane node
+  # its liveness probe timed out under load: 29 restarts, each a gap in
+  # every Kubernetes metric. Moved 2026-11-17 with
+  # `helm upgrade --reuse-values --set-json kube-state-metrics.nodeSelector=...`
+  # (release revision 14). The server-side dry-run diff was this nodeSelector
+  # alone.
+  nodeSelector:
+    kubernetes.io/hostname: node2
   # The default collector set includes `secrets`, and collecting a resource
   # means holding cluster-wide `list` on it — which returns the values, not
   # just the metadata kube-state-metrics publishes. Drake's own agent is

@@ -47,16 +47,21 @@ data:
       # propagates no context, so tracing them too would record every
       # request twice, as two unrelated traces. Named, so the exclusion
       # holds from a pod's first request on.
-      {{- with .Values.obi.sdkWorkloads }}
       exclude_instrument:
-        {{- range . }}
+        # Pods of CronJob runs. They are short-lived batch processes, most
+        # gone within seconds, before OBI can attach: it logged about 350
+        # "join target netns" errors an hour for them (2026-11-17), spending
+        # CPU on processes that serve no request. Their outgoing calls are
+        # recorded where they land, by the service they call. "?*" is one
+        # or more characters, so a pod with no CronJob owner never matches.
+        - k8s_cronjob_name: "?*"
+        {{- range .Values.obi.sdkWorkloads }}
         {{- if not (and .namespace .deployment) }}
         {{- fail "obi.sdkWorkloads entries need both namespace and deployment" }}
         {{- end }}
         - k8s_namespace: {{ .namespace | quote }}
           k8s_deployment_name: {{ .deployment | quote }}
         {{- end }}
-      {{- end }}
       # And the backstop for a workload nobody listed yet: once a process
       # is seen exporting OTLP traces, OBI stops exporting its own for it.
       # This is behavioural, so it only applies after that first export,

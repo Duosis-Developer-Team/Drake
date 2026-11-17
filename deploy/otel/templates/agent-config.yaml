@@ -31,6 +31,13 @@ data:
         # agent was reading continues from its saved offset.
         start_at: {{ .Values.agent.startAt }}
         storage: file_storage/checkpoints
+        # How often the include globs are re-listed and the files re-read.
+        # The default (200 ms) kept both agents throttled at their CPU
+        # limit, about 45% of periods (2026-11-17), with the
+        # WorkloadCpuThrottledSustained alert firing since 2026-11-14. With
+        # read offsets kept in checkpoints a slower poll loses nothing. It
+        # only adds up to this much latency to a line.
+        poll_interval: {{ .Values.agent.pollInterval }}
         max_log_size: {{ .Values.agent.maxLogSize }}
         # The container parser reads namespace, pod, pod uid and container
         # name FROM the file path, so the path has to be on the record. It
