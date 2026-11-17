@@ -16,6 +16,7 @@ accepted it.
 import json
 import uuid as uuidlib
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -1443,3 +1444,31 @@ def test_the_slo_contract_carries_no_url_or_promql() -> None:
             assert "rate(" not in node and "{" not in node
 
     walk(document)
+
+
+@pytest.mark.anyio
+async def test_the_webhook_answers_on_the_path_alertmanager_is_configured_with(
+    engine: AsyncEngine, migrated_db: None, tmp_path: Any
+) -> None:
+    """deploy/monitoring and the chart send to /v1/webhooks/alertmanager/{key}.
+
+    In production that path answered 404 from the router's first release
+    until 2026-11-17: the router had no prefix. No alert reached Drake after
+    2026-08-12, and Alertmanager logged every delivery as failed.
+    """
+    monitoring = (
+        Path(__file__).resolve().parents[3] / "deploy" / "monitoring" / "values.yaml"
+    ).read_text()
+    assert "/v1/webhooks/alertmanager/" in monitoring
+
+    settings = require_it_settings()
+    configured = integration(tmp_path)
+    harness = build_harness(
+        settings.model_copy(update={"alertmanager_integrations": {"am-test": configured}})
+    )
+    payload = delivery_payload([alert_payload()])
+    async with harness.api_client() as client:
+        for path in ("/v1/webhooks/alertmanager/am-test", "/webhooks/alertmanager/am-test"):
+            refused = await client.post(path, json=payload)
+            # Routed (an authentication answer), never "no such path".
+            assert refused.status_code == 401, path

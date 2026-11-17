@@ -470,7 +470,7 @@ async def service_health_list(
                 if binding is None
                 else await orchestrator.load_context(uuid.UUID(binding["id"]))
             )
-            health = await orchestrator.current_health(auth.principal, context)
+            health = await orchestrator.listed_health(auth.principal, context)
         # The row keeps only what a list needs to be read at a glance. The
         # full section breakdown lives on the detail screen.
         return {

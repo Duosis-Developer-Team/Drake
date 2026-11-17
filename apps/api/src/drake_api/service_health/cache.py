@@ -37,6 +37,13 @@ FRESH_TTL_SECONDS = 30
 # How long a last-good verdict remains servable during an outage. Past this
 # the honest answer is `unknown`, not an hour-old "healthy".
 LAST_GOOD_TTL_SECONDS = 900
+# How long the latest verdict stays readable by the services LIST. The
+# incident runner recomputes every binding each cycle (about two to four
+# minutes apart), so this outlives several cycles and the list never
+# recomputes 21 verdicts on the request path. Every row carries its
+# `computed_at`, so its age is shown, not hidden. The detail screen still
+# reads `fresh` and recomputes when that has expired.
+RECENT_TTL_SECONDS = 600
 
 _FORBIDDEN_SUBSTRINGS = ("config_ref", "provider_url", "authorization", "bearer ", "promql")
 _MAX_PAYLOAD_BYTES = 128 * 1024
@@ -46,6 +53,7 @@ _MAX_PAYLOAD_BYTES = 128 * 1024
 class HealthCacheKeys:
     fresh: str
     last_good: str
+    recent: str
 
 
 def build_health_cache_keys(
@@ -91,6 +99,7 @@ def build_health_cache_keys(
     return HealthCacheKeys(
         fresh=f"service_health:fresh:{digest}",
         last_good=f"service_health:lastgood:{digest}",
+        recent=f"service_health:recent:{digest}",
     )
 
 
@@ -152,6 +161,9 @@ class HealthCache:
         serialized = json.dumps(payload, sort_keys=True)
         try:
             await self._redis.set(keys.fresh, serialized, ex=FRESH_TTL_SECONDS)
+            # Every verdict, stale-telemetry ones included: it is what the
+            # latest evaluation said, and it says when (`computed_at`).
+            await self._redis.set(keys.recent, serialized, ex=RECENT_TTL_SECONDS)
             if last_good:
                 await self._redis.set(keys.last_good, serialized, ex=LAST_GOOD_TTL_SECONDS)
         except Exception:  # noqa: S110 - cache writes are best-effort
@@ -160,7 +172,7 @@ class HealthCache:
     async def drop(self, key: str) -> None:
         """Forget one fresh verdict.
 
-        Only ever called with a `fresh` key. Last-good entries are never
+        Only ever called with a `fresh` or `recent` key. Last-good entries are never
         deleted here: the whole point of keeping them is that they outlive
         whatever went wrong.
         """
