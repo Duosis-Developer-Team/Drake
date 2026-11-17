@@ -43,6 +43,7 @@ import {
   useWhen,
 } from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { ScheduledJobs } from "@/components/catalog/ScheduledJobs";
 import { Provenance } from "@/components/provenance/Provenance";
 import { Panel, PanelFooter, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -358,6 +359,12 @@ export default function EnvironmentDetailPage() {
                 </ul>
               )}
             </Panel>
+
+            {/* CronJobs are not services: no binding, no service health. They
+                belong to the environment, so they are listed here. */}
+            {!isExternal ? (
+              <ScheduledJobs projectId={projectId} environmentId={environmentId} />
+            ) : null}
           </div>
 
           <div className="page-aside">

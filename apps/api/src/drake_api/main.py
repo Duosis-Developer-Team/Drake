@@ -22,6 +22,7 @@ from drake_api.auth.router import router as auth_router
 from drake_api.auth.sessions import SessionStore
 from drake_api.catalog.router import router as catalog_router
 from drake_api.catalog.router_clusters import router as catalog_clusters_router
+from drake_api.catalog.scheduled_jobs import router as scheduled_jobs_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.db import dispose_engines, get_engine
 from drake_api.deployments.router import router as deployments_router
@@ -300,6 +301,7 @@ def create_app(
     app.include_router(cluster_inventory_router)
     app.include_router(catalog_router)
     app.include_router(catalog_clusters_router)
+    app.include_router(scheduled_jobs_router)
     app.include_router(integrations_router)
     app.include_router(github_router)
     app.include_router(github_onboarding_router)

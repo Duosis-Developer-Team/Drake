@@ -26,6 +26,7 @@ from drake_api.logging import redact
 from drake_api.observability.scope import (
     DEFAULT_RANGE,
     RANGES,
+    SCHEDULED_JOB_ATTRIBUTE,
     SCOPE_PREDICATE,
     ScopeError,
     clickhouse_time,
@@ -110,6 +111,7 @@ def build_log_query(
     now: datetime,
     window_start: datetime | None = None,
     window_end: datetime | None = None,
+    scheduled_job: bool = False,
 ) -> LogQuery:
     """Compile a log read for one authorized binding.
 
@@ -125,7 +127,9 @@ def build_log_query(
     if len(term) > MAX_TERM_LENGTH or not _TERM.match(term):
         raise LogQueryError("unsupported search term")
     try:
-        scope = scope_parameters(binding)
+        scope = scope_parameters(
+            binding, extra_kinds=SCHEDULED_JOB_ATTRIBUTE if scheduled_job else None
+        )
     except ScopeError as error:
         raise LogQueryError(str(error)) from error
 

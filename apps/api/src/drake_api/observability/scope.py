@@ -23,6 +23,13 @@ WORKLOAD_ATTRIBUTE: dict[str, str] = {
     "DaemonSet": "k8s.daemonset.name",
 }
 
+# Not a binding kind, and deliberately not in WORKLOAD_ATTRIBUTE: only the
+# log read of an environment's scheduled jobs (catalog.scheduled_jobs) may
+# name a workload by the CronJob that owns its runs. The log agent writes
+# this attribute on every line of a run's pods. Traces, the timeline and
+# golden signals keep refusing the kind.
+SCHEDULED_JOB_ATTRIBUTE: dict[str, str] = {"CronJob": "k8s.cronjob.name"}
+
 # The WHERE clause every telemetry read shares. Values are typed query
 # parameters; the attribute key for the workload is chosen server-side from
 # WORKLOAD_ATTRIBUTE and also sent as a parameter.
@@ -37,10 +44,14 @@ class ScopeError(ValueError):
     """The binding cannot be expressed as a telemetry scope."""
 
 
-def scope_parameters(binding: dict[str, Any]) -> dict[str, str]:
+def scope_parameters(
+    binding: dict[str, Any], *, extra_kinds: dict[str, str] | None = None
+) -> dict[str, str]:
     """Query parameters naming the binding's workload. Raises for an
-    unsupported kind rather than matching on a guess."""
-    attribute = WORKLOAD_ATTRIBUTE.get(str(binding.get("workload_kind")))
+    unsupported kind rather than matching on a guess. `extra_kinds` widens
+    the accepted kinds for one caller (SCHEDULED_JOB_ATTRIBUTE)."""
+    kinds = {**WORKLOAD_ATTRIBUTE, **(extra_kinds or {})}
+    attribute = kinds.get(str(binding.get("workload_kind")))
     if attribute is None:
         raise ScopeError("unsupported workload kind")
     return {
