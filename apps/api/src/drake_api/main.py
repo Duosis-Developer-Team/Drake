@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
+from drake_api.alert_rules.router import router as alert_rules_router
 from drake_api.alerting.router import router as alerting_router
 from drake_api.alerting.router_webhook import router as alertmanager_webhook_router
 from drake_api.alerting.silences import SilenceWorker
@@ -314,6 +315,7 @@ def create_app(
     app.include_router(observability_router)
     app.include_router(incidents_router)
     app.include_router(alerting_router)
+    app.include_router(alert_rules_router)
     # Alertmanager delivers to /v1/webhooks/alertmanager/{key}, the path the
     # chart and deploy/monitoring configure. The router itself has no prefix,
     # so until 2026-11-17 that path answered 404 and no alert reached Drake

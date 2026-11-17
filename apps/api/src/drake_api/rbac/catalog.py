@@ -7,7 +7,7 @@ never checks a role NAME — authority always flows through role_permissions.
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-CATALOG_VERSION = 6
+CATALOG_VERSION = 7
 
 # Atomic permissions (from the product authority). ``auth.session`` powers
 # nothing by itself — every authenticated user can read their own /v1/me.
@@ -31,6 +31,9 @@ PERMISSIONS: dict[str, str] = {
     "incident.ack": "Acknowledge incidents",
     "incident.assign": "Assign incidents",
     "alert.silence": "Create alert silences",
+    # Writing a rule decides when people are paged, so it is its own grant
+    # rather than a side effect of seeing alerts (ADR-0031).
+    "alert_rule.manage": "Create, change, mute and remove alert rules",
     "notification.view": "View notification policies and delivery audit",
     "notification.manage": "Manage notification policies and destinations",
     "integration.manage": "Manage integrations and connectors",

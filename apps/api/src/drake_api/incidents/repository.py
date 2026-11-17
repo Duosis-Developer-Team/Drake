@@ -40,7 +40,7 @@ DEFAULT_TRANSITIONS = 25
 
 INCIDENT_STATES = frozenset({"open", "acknowledged", "resolved"})
 INCIDENT_SEVERITIES = frozenset({"critical", "high"})
-INCIDENT_SOURCES = frozenset({"service_health", "protection", "alert"})
+INCIDENT_SOURCES = frozenset({"service_health", "protection", "alert", "rule"})
 INCIDENT_PRIORITIES = frozenset({"P1", "P2", "P3", "P4"})
 
 # Fixed windows for "opened within". A free-form range would be another

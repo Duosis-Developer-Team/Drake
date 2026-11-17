@@ -17,6 +17,7 @@
  */
 import {
   Bell,
+  BellRing,
   Boxes,
   FolderKanban,
   Gauge,
@@ -112,6 +113,14 @@ export const NAVIGATION: NavGroup[] = [
         href: "/alerts",
         icon: Bell,
         matchPrefix: "/alerts",
+        anyPermission: ["alert.view"],
+      },
+      {
+        key: "alertRules",
+        label: "Alert rules",
+        href: "/alert-rules",
+        icon: BellRing,
+        matchPrefix: "/alert-rules",
         anyPermission: ["alert.view"],
       },
       {

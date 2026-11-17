@@ -1,0 +1,17 @@
+# Exceptions to the dependency scan (ci.yml: dependency-scan).
+#
+# Each entry needs an expiry and a reason. When the expiry passes, the scan
+# fails again, so nobody can forget an exception.
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17T00:00:00Z
+reason = """
+picomatch <= 4.0.7 ReDoS through repeated extglobs. No fixed release exists:
+4.0.7 is the latest version on npm as of 2026-11-17, and the latest vite,
+vitest and tinyglobby still require picomatch ^4. Only build and test tooling
+pulls it in (vite, vitest, tinyglobby, fdir). Those tools match glob patterns
+written in this repository, never input from users, and nothing that ships in
+the Drake images contains picomatch. Remove this entry and add a pnpm override
+once a fixed version is published.
+"""
