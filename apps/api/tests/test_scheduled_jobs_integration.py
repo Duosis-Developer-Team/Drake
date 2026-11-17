@@ -168,3 +168,35 @@ async def test_logs_are_only_for_this_environments_own_cronjobs(engine: AsyncEng
     assert own.json()["cronjob"] == "api-cleanup"
     for refused in (foreign, unknown, malformed):
         assert refused.status_code == 404
+
+
+def test_only_the_scheduled_job_log_read_may_name_a_cronjob() -> None:
+    """Traces, the timeline and golden signals keep refusing the kind; the
+    one read that needs it asks for it explicitly."""
+    from datetime import UTC, datetime
+
+    from drake_api.observability.logs import LogQueryError, build_log_query
+    from drake_api.observability.scope import ScopeError, scope_parameters
+
+    cronjob = {
+        "namespace": "hermes-dev",
+        "workload_kind": "CronJob",
+        "workload_name": "hermes-api-cleanup",
+        "cluster": {"cluster_ref": "duosis-prod-1"},
+    }
+    with pytest.raises(ScopeError):
+        scope_parameters(cronjob)
+    args: dict[str, Any] = {
+        "database": "otel",
+        "binding": cronjob,
+        "range_key": "24h",
+        "severity": "any",
+        "term": "",
+        "limit": 10,
+        "before": None,
+        "now": datetime(2026, 11, 17, tzinfo=UTC),
+    }
+    with pytest.raises(LogQueryError):
+        build_log_query(**args)
+    query = build_log_query(**args, scheduled_job=True)
+    assert query.parameters["workload_attribute"] == "k8s.cronjob.name"

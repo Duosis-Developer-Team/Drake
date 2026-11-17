@@ -278,6 +278,7 @@ async def scheduled_job_logs(
             limit=limit,
             before=before,
             now=now,
+            scheduled_job=True,
         )
     except LogQueryError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
