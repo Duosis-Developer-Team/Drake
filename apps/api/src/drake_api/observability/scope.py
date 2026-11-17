@@ -21,6 +21,10 @@ WORKLOAD_ATTRIBUTE: dict[str, str] = {
     "Deployment": "k8s.deployment.name",
     "StatefulSet": "k8s.statefulset.name",
     "DaemonSet": "k8s.daemonset.name",
+    # Not a binding kind: an environment's scheduled jobs read their logs by
+    # the CronJob that owns the run (catalog.scheduled_jobs). The log agent
+    # writes this attribute on every line of a run's pods.
+    "CronJob": "k8s.cronjob.name",
 }
 
 # The WHERE clause every telemetry read shares. Values are typed query

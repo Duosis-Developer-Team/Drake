@@ -18,6 +18,7 @@ import { logs } from "./logs";
 import { notifications } from "./notifications";
 import { onboarding } from "./onboarding";
 import { protection } from "./protection";
+import { scheduledJobs } from "./scheduledJobs";
 import { serviceHealth } from "./serviceHealth";
 import { shell } from "./shell";
 import { signals } from "./signals";
@@ -34,6 +35,7 @@ export const MESSAGES = {
   alerting,
   deployments,
   serviceHealth,
+  scheduledJobs,
   logs,
   traces,
   signals,
