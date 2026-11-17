@@ -314,6 +314,12 @@ def create_app(
     app.include_router(observability_router)
     app.include_router(incidents_router)
     app.include_router(alerting_router)
+    # Alertmanager delivers to /v1/webhooks/alertmanager/{key}, the path the
+    # chart and deploy/monitoring configure. The router itself has no prefix,
+    # so until 2026-11-17 that path answered 404 and no alert reached Drake
+    # after 2026-08-12. Both paths are served: /v1 is the one in use, and the
+    # unprefixed one stays for any sender configured against it.
+    app.include_router(alertmanager_webhook_router, prefix="/v1")
     app.include_router(alertmanager_webhook_router)
     app.include_router(notifications_router)
     app.include_router(telemetry_router)

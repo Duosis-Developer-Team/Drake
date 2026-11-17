@@ -673,7 +673,7 @@ async def test_refresh_bypasses_the_cache() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalidate_drops_only_the_fresh_verdict() -> None:
+async def test_invalidate_drops_the_fresh_and_recent_verdicts() -> None:
     """Last-good outlives invalidation; that is the point of keeping it."""
     redis = FakeRedis()
     orch = orchestrator(FakeBroker(HEALTHY_BASELINE), redis)
@@ -683,7 +683,48 @@ async def test_invalidate_drops_only_the_fresh_verdict() -> None:
 
     await orch.invalidate(ctx)
     assert keys.fresh not in redis.store
+    assert keys.recent not in redis.store
     assert keys.last_good in redis.store
+
+
+@pytest.mark.asyncio
+async def test_the_list_reads_the_latest_verdict_without_querying_again() -> None:
+    """The services list is served from the runner's last evaluation.
+
+    In production a list of 21 services recomputed every verdict on the
+    request path and took 7-8 seconds. Once a verdict has been computed (by
+    the runner, every cycle), the list reads it, after `fresh` has expired
+    too, and keeps its `computed_at` so its age is shown.
+    """
+    redis = FakeRedis()
+    broker = FakeBroker(HEALTHY_BASELINE)
+    orch = orchestrator(broker, redis)
+    ctx = context()
+    computed = await orch.current_health(None, ctx, refresh=True)
+    keys = orch.cache_keys(ctx)
+    calls = len(broker.calls)
+
+    # The 30-second fresh entry is gone; the recent one remains.
+    redis.store.pop(keys.fresh)
+    listed = await orch.listed_health(None, ctx)
+
+    assert listed["cached"] is True
+    assert listed["status"] == computed["status"]
+    assert listed["computed_at"] == computed["computed_at"]
+    assert len(broker.calls) == calls
+
+
+@pytest.mark.asyncio
+async def test_the_list_computes_only_a_binding_that_has_no_verdict_yet() -> None:
+    redis = FakeRedis()
+    broker = FakeBroker(HEALTHY_BASELINE)
+    orch = orchestrator(broker, redis)
+
+    listed = await orch.listed_health(None, context())
+
+    assert listed["status"] == "healthy"
+    assert listed["cached"] is False
+    assert broker.calls
 
 
 # --- bounded series ------------------------------------------------------
