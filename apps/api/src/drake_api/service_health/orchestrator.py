@@ -591,6 +591,26 @@ class HealthOrchestrator:
         await self._cache.put(keys, payload, last_good="telemetry_stale" not in payload["reasons"])
         return payload
 
+    async def listed_health(
+        self, principal: Principal, context: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """A verdict for the services LIST: the latest one already computed.
+
+        The incident runner evaluates every active binding each cycle and
+        stores the verdict, so a list of services reads those instead of
+        querying the provider for every row on the request path. In
+        production that took 7-8 seconds for 21 services. The row keeps
+        its `computed_at`, so it shows its age. Only a binding with no
+        stored verdict at all is computed here, as before.
+        """
+        if context is not None:
+            keys = self.cache_keys(context)
+            for key in (keys.fresh, keys.recent):
+                cached = await self._cache.get(key)
+                if cached is not None:
+                    return {**cached, "cached": True}
+        return await self.current_health(principal, context)
+
     async def invalidate(self, context: dict[str, Any]) -> None:
         """Drop the fresh verdict for a binding's *current* identity.
 
@@ -601,6 +621,9 @@ class HealthOrchestrator:
         """
         keys = self.cache_keys(context)
         await self._cache.drop(keys.fresh)
+        # The list reads `recent` too; a reconfigured binding must not keep
+        # showing the verdict from before.
+        await self._cache.drop(keys.recent)
 
     # ------------------------------------------------------------------
     # bounded time-series
