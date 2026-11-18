@@ -60,7 +60,8 @@ SELECT
     countIf(Timestamp >= {window_start:DateTime64(9, 'UTC')} AND __NOT_HEALTH_CHECK__
             AND StatusCode = 'Error') AS errors,
     quantileIf(0.95)(Duration,
-                     Timestamp >= {window_start:DateTime64(9, 'UTC')} AND __NOT_HEALTH_CHECK__)
+                     Timestamp >= {window_start:DateTime64(9, 'UTC')} AND __NOT_HEALTH_CHECK__
+                     AND __NOT_LONG_LIVED__)
         AS p95_ns
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {seen_start:DateTime64(9, 'UTC')}

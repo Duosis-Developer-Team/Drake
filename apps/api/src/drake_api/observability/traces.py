@@ -72,8 +72,8 @@ SELECT
     SpanName AS route,
     count() AS requests,
     countIf(StatusCode = 'Error') AS errors,
-    quantile(0.5)(Duration) AS p50_ns,
-    quantile(0.95)(Duration) AS p95_ns
+    quantileIf(0.5)(Duration, __NOT_LONG_LIVED__) AS p50_ns,
+    quantileIf(0.95)(Duration, __NOT_LONG_LIVED__) AS p95_ns
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
@@ -89,7 +89,7 @@ _TOTALS = """
 SELECT
     countIf(NOT __IS_HEALTH_CHECK__) AS requests,
     countIf(NOT __IS_HEALTH_CHECK__ AND StatusCode = 'Error') AS errors,
-    quantileIf(0.95)(Duration, NOT __IS_HEALTH_CHECK__) AS p95_ns,
+    quantileIf(0.95)(Duration, NOT __IS_HEALTH_CHECK__ AND __NOT_LONG_LIVED__) AS p95_ns,
     countIf(__IS_HEALTH_CHECK__) AS health_checks
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}

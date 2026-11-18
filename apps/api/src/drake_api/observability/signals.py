@@ -88,7 +88,7 @@ _TRACES = (
     + """
     count() AS requests,
     countIf(StatusCode = 'Error') AS errors,
-    quantile(0.95)(Duration) AS p95_ns,
+    quantileIf(0.95)(Duration, __NOT_LONG_LIVED__) AS p95_ns,
     max(Timestamp) AS newest
 FROM __DATABASE__.otel_traces
 """
