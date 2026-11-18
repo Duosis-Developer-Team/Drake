@@ -90,6 +90,15 @@ IS_HEALTH_CHECK = f"""(
 
 NOT_HEALTH_CHECK = f"NOT {IS_HEALTH_CHECK}"
 
+# A server span longer than this is a long-lived connection (a server-sent
+# event stream, a websocket, a kept-alive socket an eBPF probe saw), not a
+# request waiting for its answer: hermes-mcp's GET /mcp streams last hours
+# and read as a 6-hour p95 (2026-11-18). Proxies end real requests far
+# sooner. Such spans still count as requests and errors; they stay out of
+# latency percentiles only.
+LONG_LIVED_SECONDS = 300
+NOT_LONG_LIVED = f"Duration < {LONG_LIVED_SECONDS * 1_000_000_000}"
+
 
 def probes_from_summary(spec_summary: Any) -> list[tuple[str, str]]:
     """The (path, port) pairs of a workload's HTTP probes, from the agent's
@@ -173,7 +182,10 @@ async def with_http_probes(
 
 
 def with_health_check_filter(sql: str) -> str:
-    """Fill a statement's `__IS_HEALTH_CHECK__` / `__NOT_HEALTH_CHECK__`."""
-    return sql.replace("__NOT_HEALTH_CHECK__", NOT_HEALTH_CHECK).replace(
-        "__IS_HEALTH_CHECK__", IS_HEALTH_CHECK
+    """Fill a statement's `__IS_HEALTH_CHECK__` / `__NOT_HEALTH_CHECK__` and
+    `__NOT_LONG_LIVED__`."""
+    return (
+        sql.replace("__NOT_HEALTH_CHECK__", NOT_HEALTH_CHECK)
+        .replace("__IS_HEALTH_CHECK__", IS_HEALTH_CHECK)
+        .replace("__NOT_LONG_LIVED__", NOT_LONG_LIVED)
     )

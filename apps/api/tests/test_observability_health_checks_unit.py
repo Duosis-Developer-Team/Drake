@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from drake_api.observability.application import build_application_query
 from drake_api.observability.health_checks import (
     IS_HEALTH_CHECK,
+    LONG_LIVED_SECONDS,
     MAX_PROBES_PER_WORKLOAD,
     health_check_parameter,
     probes_from_summary,
@@ -129,4 +130,34 @@ def test_the_timeline_the_board_and_golden_signals_leave_them_out_too() -> None:
     assert "AND NOT (" in golden.statement
     assert golden.parameters["health_checks"] == "[('hermes-test','frontend','/','80')]"
     for statement in (timeline.traces, board.traces, golden.statement):
+        assert "__" not in statement
+
+
+def test_long_lived_connections_stay_out_of_every_latency_percentile() -> None:
+    """A server span longer than five minutes is a stream, not a slow
+    request: every percentile leaves it out, every count keeps it."""
+    long_lived = f"Duration < {LONG_LIVED_SECONDS * 1_000_000_000}"
+    query = _trace_list()
+    assert query.routes.sql.count(long_lived) == 2, "p50 and p95 of each route"
+    assert long_lived in query.totals.sql
+    assert "count" in query.totals.sql.split(long_lived)[0]
+    timeline = build_timeline_query(database="otel", binding=BINDING, range_key="1h", now=NOW)
+    board = build_signal_query(database="otel", bindings=[BINDING], range_key="1h", now=NOW)
+    golden = build_application_query(
+        database="otel",
+        context={
+            "namespace": "hermes-test",
+            "workload_kind": "Deployment",
+            "workload_name": "frontend",
+            "cluster_ref": "duosis-prod-1",
+            "http_probes": [("/", "80")],
+        },
+        window_seconds=300,
+        now=NOW,
+    )
+    for statement in (timeline.traces, board.traces, golden.statement):
+        assert f"quantileIf(0.95)(Duration, {long_lived})" in statement or (
+            long_lived in statement and "quantileIf(0.95)" in statement
+        )
+        assert "count() AS" in statement or "countIf(" in statement
         assert "__" not in statement

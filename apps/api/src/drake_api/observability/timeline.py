@@ -42,7 +42,7 @@ SELECT
     toUnixTimestamp(toStartOfInterval(Timestamp, INTERVAL {bucket:UInt32} SECOND)) AS t,
     count() AS requests,
     countIf(StatusCode = 'Error') AS errors,
-    quantile(0.95)(Duration) AS p95_ns
+    quantileIf(0.95)(Duration, __NOT_LONG_LIVED__) AS p95_ns
 FROM __DATABASE__.otel_traces
 WHERE Timestamp >= {start:DateTime64(9, 'UTC')}
   AND Timestamp < {end:DateTime64(9, 'UTC')}
