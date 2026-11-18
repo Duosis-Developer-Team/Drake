@@ -40,6 +40,8 @@ from drake_api.github_app.service import DeliveryRecoveryWorker, GitHubReconcile
 from drake_api.health import router as health_router
 from drake_api.incidents.router import router as incidents_router
 from drake_api.incidents.runner import EvaluationRunner
+from drake_api.infrastructure.router import router as infrastructure_router
+from drake_api.infrastructure.service import InfrastructureService
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
@@ -207,6 +209,9 @@ def create_app(
     app.state.trace_golden = TraceGoldenReader(
         app.state.observability_store, enabled=settings.observability_traces_enabled
     )
+    app.state.infrastructure = InfrastructureService(
+        get_engine(settings), app.state.telemetry_broker, app.state.telemetry_redis
+    )
     app.state.health_orchestrator = HealthOrchestrator(
         get_engine(settings),
         app.state.telemetry_broker,
@@ -314,6 +319,7 @@ def create_app(
     app.include_router(service_health_router)
     app.include_router(observability_router)
     app.include_router(incidents_router)
+    app.include_router(infrastructure_router)
     app.include_router(alerting_router)
     app.include_router(alert_rules_router)
     # Alertmanager delivers to /v1/webhooks/alertmanager/{key}, the path the

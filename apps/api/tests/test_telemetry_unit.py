@@ -50,8 +50,12 @@ def test_authoritative_registry_loads_and_hashes() -> None:
     # +3 metrics and +3 templates for capacity headroom: filesystem free
     # ratio, volume claims by phase, certificate life left. Things that fill
     # up silently and are only noticed once they have run out.
-    assert len(registry.metrics) == 30
-    assert len(registry.templates) == 36
+    # +23 metrics and +23 templates for the infrastructure screen (ADR-0032):
+    # per-node series and capacity, per namespace-on-node usage, requests,
+    # limits, running pods and restarts, and per-pod values inside one
+    # namespace (the first namespace-scope templates).
+    assert len(registry.metrics) == 53
+    assert len(registry.templates) == 59
     # +1 board: cluster capacity, the first cluster-scope dashboard.
     assert len(registry.dashboards) == 3
     assert len(registry.content_hash) == 64

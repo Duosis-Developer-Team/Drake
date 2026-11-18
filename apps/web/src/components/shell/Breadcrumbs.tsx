@@ -37,6 +37,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   environments: "Environments",
   github: "GitHub",
   incidents: "Incidents",
+  infrastructure: "Infrastructure",
   integrations: "Integrations",
   inventory: "Inventory",
   "notification-deliveries": "Deliveries",

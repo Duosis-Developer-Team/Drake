@@ -226,6 +226,592 @@
       }
     },
     {
+      "key": "cluster.namespace_cpu_limit",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_limits",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU limits of each namespace's running pods on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_cpu_requested",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_requests",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU requested by each namespace's running pods on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_cpu_usage",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_cpu_usage_seconds_total",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU each namespace's containers use on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_memory_limit",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_limits",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory limits of each namespace's running pods on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_memory_requested",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_requests",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory requested by each namespace's running pods on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_memory_usage",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_memory_working_set_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Working-set memory of each namespace's containers on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_restarts_24h",
+      "version": 1,
+      "type": "gauge",
+      "unit": "restarts",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_status_restarts_total",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Container restarts in the last 24 hours, per namespace on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.namespace_running_pods",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_info",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "namespace",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Running pods of each namespace on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_cpu_allocatable",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_node_status_allocatable",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU each node offers to pods.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_cpu_cores",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_cpu_seconds_total",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Logical CPUs on each node.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_cpu_utilization",
+      "version": 1,
+      "type": "gauge",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_cpu_seconds_total",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Share of each node's CPU that is not idle.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_load5",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_load5",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Five-minute load average of each node: runnable and waiting tasks.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_memory_allocatable",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_node_status_allocatable",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory each node offers to pods.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_memory_utilization",
+      "version": 1,
+      "type": "gauge",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_memory_MemAvailable_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Share of each node's memory in use: total minus what the kernel reports available.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_pods_allocatable",
+      "version": 1,
+      "type": "gauge",
+      "unit": "count",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_node_status_allocatable",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "How many pods each node accepts.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_root_disk_size",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_filesystem_size_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Size of each node's root filesystem.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "cluster.node_root_disk_used",
+      "version": 1,
+      "type": "gauge",
+      "unit": "ratio",
+      "sourceType": "prometheus",
+      "sourceFamily": "node_filesystem_avail_bytes",
+      "allowedInputLabels": [
+        "cluster_ref"
+      ],
+      "allowedOutputLabels": [
+        "node"
+      ],
+      "forbiddenLabels": [
+        "pod",
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Share of each node's root filesystem in use.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
       "key": "cluster.pvc_by_phase",
       "version": 1,
       "type": "gauge",
@@ -258,6 +844,211 @@
       "provenance": {
         "kind": "registry",
         "ref": "sprint-13f6",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "namespace.pod_cpu_limit",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_limits",
+      "allowedInputLabels": [
+        "cluster_ref",
+        "namespace"
+      ],
+      "allowedOutputLabels": [
+        "pod"
+      ],
+      "forbiddenLabels": [
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU limit of each running pod of one namespace.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "namespace.pod_cpu_requested",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_requests",
+      "allowedInputLabels": [
+        "cluster_ref",
+        "namespace"
+      ],
+      "allowedOutputLabels": [
+        "pod"
+      ],
+      "forbiddenLabels": [
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU requested by each running pod of one namespace.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "namespace.pod_cpu_usage",
+      "version": 1,
+      "type": "gauge",
+      "unit": "cores",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_cpu_usage_seconds_total",
+      "allowedInputLabels": [
+        "cluster_ref",
+        "namespace"
+      ],
+      "allowedOutputLabels": [
+        "pod",
+        "node"
+      ],
+      "forbiddenLabels": [
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "CPU each pod of one namespace uses.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "namespace.pod_memory_limit",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_resource_limits",
+      "allowedInputLabels": [
+        "cluster_ref",
+        "namespace"
+      ],
+      "allowedOutputLabels": [
+        "pod"
+      ],
+      "forbiddenLabels": [
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Memory limit of each running pod of one namespace.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "namespace.pod_memory_usage",
+      "version": 1,
+      "type": "gauge",
+      "unit": "bytes",
+      "sourceType": "prometheus",
+      "sourceFamily": "container_memory_working_set_bytes",
+      "allowedInputLabels": [
+        "cluster_ref",
+        "namespace"
+      ],
+      "allowedOutputLabels": [
+        "pod"
+      ],
+      "forbiddenLabels": [
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Working-set memory of each pod of one namespace.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
+        "revision": "1"
+      }
+    },
+    {
+      "key": "namespace.pod_restarts_24h",
+      "version": 1,
+      "type": "gauge",
+      "unit": "restarts",
+      "sourceType": "prometheus",
+      "sourceFamily": "kube_pod_container_status_restarts_total",
+      "allowedInputLabels": [
+        "cluster_ref",
+        "namespace"
+      ],
+      "allowedOutputLabels": [
+        "pod"
+      ],
+      "forbiddenLabels": [
+        "container",
+        "instance",
+        "tenant",
+        "customer",
+        "route",
+        "path"
+      ],
+      "capability": "telemetry",
+      "profiles": [
+        "kubernetes-service-v1"
+      ],
+      "lifecycle": "active",
+      "description": "Container restarts of each pod of one namespace in the last 24 hours.",
+      "provenance": {
+        "kind": "registry",
+        "ref": "adr-0032",
         "revision": "1"
       }
     },

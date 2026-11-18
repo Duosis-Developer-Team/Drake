@@ -470,6 +470,33 @@ class TelemetryBroker:
                 },
                 provider_scope_id=row[8],
             )
+        if scope_type == "namespace":
+            # ADR-0032. The scope id is the inventory row of a Namespace the
+            # cluster agent reported; cluster_ref and the namespace name both
+            # come from that row and its cluster, so the caller names a row,
+            # never a label value. Authorization and the provider integration
+            # are the cluster's: a namespace has no scope of its own.
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT c.scope_id, c.cluster_ref, r.name
+                        FROM inventory_resources r JOIN clusters c ON c.id = r.cluster_id
+                        WHERE r.id = :id AND r.kind = 'Namespace' AND r.lifecycle = 'active'
+                          AND c.lifecycle = 'active'
+                        """
+                    ),
+                    {"id": scope_id},
+                )
+            ).first()
+            if row is None:
+                return None
+            return ResolvedScope(
+                scope_id=row[0],
+                scope_ref=f"{row[1]}/{row[2]}",
+                source_values={"cluster_ref": str(row[1]), "namespace": str(row[2])},
+                provider_scope_id=row[0],
+            )
         if scope_type == "cluster":
             row = (
                 await connection.execute(
