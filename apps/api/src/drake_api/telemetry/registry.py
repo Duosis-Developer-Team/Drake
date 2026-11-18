@@ -297,9 +297,11 @@ def load_registry(registry_dir: Path | None = None) -> TelemetryRegistry:
             f"{where}: cache TTLs must be positive",
         )
         _require(
-            # `workload` scopes a query to one bound workload; its source
-            # values come from a binding row, not from the caller.
-            set(template.scope_types) <= {"environment", "service", "cluster", "workload"},
+            # `workload` scopes a query to one bound workload and `namespace`
+            # to one namespace of one cluster (ADR-0032); their source values
+            # come from a binding or an inventory row, never from the caller.
+            set(template.scope_types)
+            <= {"environment", "service", "cluster", "workload", "namespace"},
             f"{where}: unsupported scope type",
         )
         templates[template_id] = template

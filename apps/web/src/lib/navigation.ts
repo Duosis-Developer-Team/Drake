@@ -27,6 +27,7 @@ import {
   Puzzle,
   Rocket,
   Send,
+  Server,
   Shield,
   ShieldCheck,
   Siren,
@@ -83,6 +84,14 @@ export const NAVIGATION: NavGroup[] = [
         href: "/clusters",
         icon: Boxes,
         matchPrefix: "/clusters",
+        anyPermission: ["cluster.view"],
+      },
+      {
+        key: "infrastructure",
+        label: "Infrastructure",
+        href: "/infrastructure",
+        icon: Server,
+        matchPrefix: "/infrastructure",
         anyPermission: ["cluster.view"],
       },
       {

@@ -14,6 +14,7 @@ import { commandCenter } from "./commandCenter";
 import { common } from "./common";
 import { deployments } from "./deployments";
 import { incidents } from "./incidents";
+import { infrastructure } from "./infrastructure";
 import { integrations } from "./integrations";
 import { logs } from "./logs";
 import { notifications } from "./notifications";
@@ -33,6 +34,7 @@ export const MESSAGES = {
   catalog,
   clusters,
   incidents,
+  infrastructure,
   alerting,
   alertRules,
   deployments,

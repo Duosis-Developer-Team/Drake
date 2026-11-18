@@ -21,11 +21,15 @@
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:220
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:235
 /repo/.secret-scan-tree/packages/contracts/registry/dashboard-templates.json:generic-api-key:342
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:441
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:562
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:646
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:689
-/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:685
+# Re-derived for ADR-0032: the infrastructure templates sort ahead of the
+# environment.* ones, so these four identifiers moved down the file. Each line
+# was read again: environment.latency-p95.v1, environment.replicas-unavailable.v1,
+# environment.scrape-up.v1, environment.waiting-reason.v1. None of the new
+# template keys is flagged.
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:1146
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:1267
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:1351
+/repo/.secret-scan-tree/packages/contracts/registry/query-templates.json:generic-api-key:1390
 
 # History findings (commit-scoped):
 b3958083c566868468fbeb7ad9f088913283cf80:packages/contracts/registry/dashboard-templates.json:generic-api-key:49

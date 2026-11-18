@@ -144,6 +144,7 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
         "apps/api/tests/test_notification_tls_integration.py",
         "apps/api/tests/test_notification_email_integration.py",
         "apps/api/tests/test_alert_rules_integration.py",
+        "apps/api/tests/test_infrastructure_integration.py",
     ),
     "integrations": (
         "apps/api/tests/test_github_identity_integration.py",
@@ -192,6 +193,7 @@ BACKEND_INTEGRATION_MAP: list[tuple[str, tuple[str, ...]]] = [
     ("apps/api/src/drake_api/alerting/**", ("telemetry",)),
     ("apps/api/src/drake_api/incidents/**", ("telemetry",)),
     ("apps/api/src/drake_api/alert_rules/**", ("telemetry",)),
+    ("apps/api/src/drake_api/infrastructure/**", ("telemetry",)),
     ("apps/api/src/drake_api/notifications/**", ("telemetry",)),
     ("apps/api/src/drake_api/github_app/**", ("integrations",)),
     ("apps/api/src/drake_api/integrations/**", ("integrations",)),
