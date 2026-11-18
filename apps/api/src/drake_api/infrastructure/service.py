@@ -51,6 +51,9 @@ logger = logging.getLogger("drake_api.infrastructure")
 FRESH_SECONDS = 60
 KEEP_SECONDS = 15 * 60
 QUERY_CONCURRENCY = 2
+# A namespace's pods are what a person waits for after a click: three at a
+# time still leaves a lease free under the broker's per-principal four.
+POD_QUERY_CONCURRENCY = 3
 CURRENT_WINDOW = 600  # "now" values: the last point of a 10-minute window
 
 # Templates read as a 24-hour series (the last point is "now").
@@ -544,7 +547,7 @@ class InfrastructureService:
         scope_id = row[0]
         now = int(time.time())
         step = step_for(min(200, max(1, int(pod_count))))
-        gate = asyncio.Semaphore(QUERY_CONCURRENCY)
+        gate = asyncio.Semaphore(POD_QUERY_CONCURRENCY)
         jobs = {
             name: _query(
                 self._broker,

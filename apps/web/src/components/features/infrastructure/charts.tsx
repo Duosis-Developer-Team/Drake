@@ -352,12 +352,14 @@ export function Spark({
   title,
   format,
   tipTitle,
+  className,
 }: {
   data: SeriesValue[];
   color: string;
   title: string;
   format: (v: number) => string;
   tipTitle: (index: number) => string;
+  className?: string;
 }) {
   const id = useId().replace(/:/g, "");
   const W = 130;
@@ -370,7 +372,7 @@ export function Spark({
   const line = pts(data, x, y);
   return (
     <>
-      <svg ref={h.ref} className={s.spark} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true" onMouseMove={h.onMove} onMouseLeave={h.onLeave}>
+      <svg ref={h.ref} className={className ?? s.spark} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true" onMouseMove={h.onMove} onMouseLeave={h.onLeave}>
         <defs>
           <linearGradient id={`p${id}`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0" stopColor={color} stopOpacity=".3" />
@@ -383,6 +385,134 @@ export function Spark({
       </svg>
       {h.hover ? (
         <Tip x={h.hover.x} y={h.hover.y} title={tipTitle(h.hover.i)} rows={[{ label: title, value: data[h.hover.i] === null ? "—" : format(data[h.hover.i] as number) }]} />
+      ) : null}
+    </>
+  );
+}
+
+/** A smooth path through the real points (monotone, so it never overshoots). */
+function smooth(points: [number, number][]): string {
+  if (points.length < 2) return points.length ? `M${points[0][0]},${points[0][1]}` : "";
+  let d = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`;
+  for (let i = 1; i < points.length; i++) {
+    const [x0, y0] = points[i - 1];
+    const [x1, y1] = points[i];
+    const mx = (x0 + x1) / 2;
+    d += ` C${mx.toFixed(1)},${y0.toFixed(1)} ${mx.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  }
+  return d;
+}
+
+/**
+ * Usage against the two numbers that bound it: what was requested (the
+ * guaranteed share) and the limit (the ceiling). The zones say where the
+ * line sits without reading an axis.
+ */
+export function ZoneChart({
+  data,
+  request,
+  limit,
+  format,
+  requestLabel,
+  limitLabel,
+  timeLabel,
+  tipTitle,
+  usedLabel,
+  label,
+  width = 1000,
+  height = 220,
+}: {
+  data: SeriesValue[];
+  request: number | null;
+  limit: number | null;
+  format: (v: number) => string;
+  requestLabel: string;
+  limitLabel: string;
+  timeLabel: (hoursAgo: number) => string;
+  tipTitle: (index: number) => string;
+  usedLabel: string;
+  label: string;
+  width?: number;
+  height?: number;
+}) {
+  const id = useId().replace(/:/g, "");
+  const n = data.length;
+  const L = 8;
+  const R = 112;
+  const T = 14;
+  const B = 24;
+  const real = data.filter((v): v is number => v !== null);
+  // A limit far above what is used would flatten the line, so the scale
+  // follows use and request; such a limit is pinned to the top edge.
+  const top = Math.max(1e-9, ...real, request ?? 0);
+  const roomy = limit !== null && limit <= top * 2.2;
+  const max = roomy ? Math.max(top, limit ?? 0) * 1.12 : top * 1.6;
+  const limitOff = limit !== null && !roomy;
+  const x = (i: number) => L + (i / Math.max(1, n - 1)) * (width - L - R);
+  const y = (v: number) => T + (1 - Math.min(v, max) / max) * (height - T - B);
+  const h = useHover(n, width, L, R);
+  const pointsXY: [number, number][] = [];
+  data.forEach((v, i) => {
+    if (v !== null) pointsXY.push([x(i), y(v)]);
+  });
+  const path = smooth(pointsXY);
+  const baseY = y(0);
+  const first = pointsXY[0];
+  const last = pointsXY[pointsXY.length - 1];
+  const tag = (v: number, text: string, color: string) => (
+    <g>
+      <rect x={width - R + 10} y={Math.max(0, y(v) - 10)} width={R - 14} height={20} rx={10} fill={`color-mix(in srgb, ${color} 16%, var(--surface-1))`} />
+      <text x={width - R + 10 + (R - 14) / 2} y={Math.max(10, y(v)) + 4} textAnchor="middle" fontSize="11.5" fill={color} fontFamily="var(--font-mono)">
+        {text}
+      </text>
+    </g>
+  );
+  return (
+    <>
+      <svg ref={h.ref} className={s.chart} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} onMouseMove={h.onMove} onMouseLeave={h.onLeave}>
+        <defs>
+          <linearGradient id={`z${id}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="var(--accent)" stopOpacity=".32" />
+            <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {request ? (
+          <rect x={L} y={y(request)} width={width - L - R} height={baseY - y(request)} fill="color-mix(in srgb, var(--accent) 7%, transparent)" rx={6} />
+        ) : null}
+        {request && limit && limit > request ? (
+          <rect x={L} y={y(limit)} width={width - L - R} height={y(request) - y(limit)} fill="color-mix(in srgb, var(--warn) 8%, transparent)" rx={6} />
+        ) : null}
+        <line x1={L} x2={width - R} y1={baseY} y2={baseY} stroke="var(--hair)" />
+        {request ? <line x1={L} x2={width - R} y1={y(request)} y2={y(request)} stroke="var(--accent)" strokeOpacity=".55" strokeDasharray="2 4" /> : null}
+        {limit && !limitOff ? <line x1={L} x2={width - R} y1={y(limit)} y2={y(limit)} stroke="var(--warn)" strokeOpacity=".7" strokeDasharray="2 4" /> : null}
+        {first && last ? <path d={`${path} L${last[0]},${baseY} L${first[0]},${baseY} Z`} fill={`url(#z${id})`} /> : null}
+        <path d={path} fill="none" stroke="var(--accent)" strokeWidth="2.25" strokeLinecap="round" />
+        {last ? <circle cx={last[0]} cy={last[1]} r="5" fill="var(--accent)" stroke="var(--surface-1)" strokeWidth="2.5" /> : null}
+        {request ? tag(request, requestLabel, "var(--accent)") : null}
+        {limit ? tag(limit, limitOff ? `${limitLabel} ↑` : limitLabel, "var(--warn)") : null}
+        {[24, 12, 0].map((ago, k) => (
+          <text key={ago} x={x(Math.round(((24 - ago) / 24) * (n - 1)))} y={height - 5} textAnchor={k === 0 ? "start" : k === 2 ? "end" : "middle"} fontSize="11" fill="var(--ink-3)" fontFamily="var(--font-mono)">
+            {timeLabel(ago)}
+          </text>
+        ))}
+        {h.hover && data[h.hover.i] !== null ? (
+          <g pointerEvents="none">
+            <line x1={x(h.hover.i)} x2={x(h.hover.i)} y1={T} y2={baseY} stroke="var(--ink-3)" />
+            <circle cx={x(h.hover.i)} cy={y(data[h.hover.i] as number)} r="4.5" fill="var(--surface-1)" stroke="var(--accent)" strokeWidth="2" />
+          </g>
+        ) : null}
+      </svg>
+      {h.hover ? (
+        <Tip
+          x={h.hover.x}
+          y={h.hover.y}
+          title={tipTitle(h.hover.i)}
+          rows={[
+            { label: usedLabel, value: data[h.hover.i] === null ? "—" : format(data[h.hover.i] as number), color: "var(--accent)" },
+            ...(request ? [{ label: requestLabel, value: "" }] : []),
+            ...(limit ? [{ label: limitLabel, value: "" }] : []),
+          ]}
+        />
       ) : null}
     </>
   );
