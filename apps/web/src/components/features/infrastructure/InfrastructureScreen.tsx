@@ -19,6 +19,7 @@ import {
   addSeries,
   fetchClusters,
   fetchNamespacePods,
+  prefetchNamespacePods,
   fetchSnapshot,
   lastReal,
   limitVerdict,
@@ -32,7 +33,7 @@ import {
   type SeriesValue,
 } from "@/lib/infrastructure";
 
-import { LineChart, Spark, StackedChart, type Band } from "./charts";
+import { LineChart, Spark, StackedChart, ZoneChart, type Band } from "./charts";
 import s from "./infrastructure.module.css";
 
 const POLL_MS = 60_000;
@@ -50,8 +51,6 @@ function useNum() {
       v === null || v === undefined ? "—" : `${fmt.number(v * 100, { maximumFractionDigits: v * 100 < 10 ? 1 : 0 })}%`,
   };
 }
-/** Names come from the cluster; they are escaped before entering a sentence's markup. */
-const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const level = (v: number | null): Level => (v === null ? "" : v >= 0.9 ? "crit" : v >= 0.75 ? "warn" : "");
 
 interface EnvRow {
@@ -165,7 +164,6 @@ export function InfrastructureScreen() {
     <PageFrame>
       <div className={s.root}>
         <div className={s.eyebrow}>
-          <span className={s.cap}>{t("title")}</span>
           <span className={s.live}>
             <i />
             {t("refresh")}
@@ -206,24 +204,13 @@ function Loaded({ snap }: { snap: InfraSnapshot }) {
     const perCore = node.load5.now !== null && node.cores ? node.load5.now / node.cores : null;
     return { days, perCore };
   };
-  const issues: string[] = [];
-  for (const node of snap.nodes) {
-    const { days, perCore } = facts(node);
-    if ((node.memory.now ?? 0) >= 0.9) issues.push(`<span class="${s.c}">${t("headline.memory", { node: esc(node.name), value: pct(node.memory.now) })}</span>`);
-    if (days !== null && days < 45) issues.push(`<span class="${s.w}">${t("headline.disk", { node: esc(node.name), days })}</span>`);
-    if (perCore !== null && perCore > 2) issues.push(`<span class="${s.w}">${t("headline.load", { node: esc(node.name) })}</span>`);
-    if ((node.cpu.now ?? 0) >= 0.9) issues.push(`<span class="${s.w}">${t("headline.cpu", { node: esc(node.name), value: pct(node.cpu.now) })}</span>`);
-  }
   const pods = snap.nodes.reduce((sum, node) => sum + (node.pods.running ?? 0), 0);
-  const shown = issues.slice(0, 2);
-  const headline =
-    `<b>${t("headline.machines", { count: snap.nodes.length })}</b>, ${t("headline.pods", { count: Math.round(pods) })}. ` +
-    (shown.length ? `${shown.join(", ")}${issues.length > 2 ? `; ${t("headline.more", { count: issues.length - 2 })}` : ""}.` : t("headline.calm"));
-
   return (
     <>
-      {/* The headline is built only from catalogue strings and API numbers. */}
-      <h1 className={s.h1} dangerouslySetInnerHTML={{ __html: headline }} />
+      <header className={s.head}>
+        <h1 className={s.h1}>{t("title")}</h1>
+        <p>{t("summary", { cluster: snap.cluster.name, machines: t("headline.machines", { count: snap.nodes.length }), pods: t("headline.pods", { count: Math.round(pods) }) })}</p>
+      </header>
       {snap.state === "partial" ? <p className={s.partial}>{t("state.partial")}</p> : null}
       <Ledger snap={snap} facts={facts} n={n} pct={pct} />
       <WhoUses snap={snap} />
@@ -250,6 +237,11 @@ function Ledger({
   const fmt = useFormat();
   const [open, setOpen] = useState<string | null>(null);
   const [sort, setSort] = useState<Key | null>(null);
+  const worst = (node: NodeSnapshot) => {
+    const vals = [node.cpu.now, node.memory.now, node.disk.now].map((v) => v ?? 0);
+    const lv = level(Math.max(...vals));
+    return lv === "crit" ? "var(--crit)" : lv === "warn" ? "var(--warn)" : "var(--ok)";
+  };
   const nsCount = (node: string) => new Set(snap.namespaces.filter((x) => x.node === node).map((x) => x.namespace)).size;
 
   const cell = (node: NodeSnapshot, key: Key) => {
@@ -257,21 +249,21 @@ function Ledger({
     switch (key) {
       case "cpu":
         return { v: pct(node.cpu.now), use: node.cpu.now ?? 0, req: node.cpu.allocatable && node.cpu.requested !== null ? node.cpu.requested / node.cpu.allocatable : null, lv: level(node.cpu.now),
-          sub: t("ledger.cores", { used: n(node.cpu.now !== null && node.cores ? node.cpu.now * node.cores : null), total: n(node.cores, 0), requested: n(node.cpu.requested) }), note: null as string | null, sort: node.cpu.now ?? 0 };
+          sub: t("ledger.cores", { used: n(node.cpu.now !== null && node.cores ? node.cpu.now * node.cores : null), total: n(node.cores, 0), requested: n(node.cpu.requested) }), note: null as string | null, sort: node.cpu.now ?? 0, series: node.cpu.series as SeriesValue[] | null, fmt: (v: number) => pct(v) };
       case "memory":
         return { v: pct(node.memory.now), use: node.memory.now ?? 0, req: node.memory.allocatable && node.memory.requested !== null ? node.memory.requested / node.memory.allocatable : null, lv: level(node.memory.now),
           sub: t("ledger.memoryUse", { requested: n(node.memory.requested !== null ? node.memory.requested / GiB : null), total: n(node.memory.allocatable !== null ? node.memory.allocatable / GiB : null) }),
-          note: (node.memory.now ?? 0) >= 0.9 ? t("ledger.memoryHigh") : null, sort: node.memory.now ?? 0 };
+          note: (node.memory.now ?? 0) >= 0.9 ? t("ledger.memoryHigh") : null, sort: node.memory.now ?? 0, series: node.memory.series, fmt: (v: number) => pct(v) };
       case "disk":
         return { v: pct(node.disk.now), use: node.disk.now ?? 0, req: null, lv: days !== null && days < 45 ? "warn" as Level : level(node.disk.now),
           sub: t("ledger.diskUse", { used: n(node.disk.now !== null && node.disk.size_bytes ? (node.disk.now * node.disk.size_bytes) / GiB : null, 0), total: n(node.disk.size_bytes ? node.disk.size_bytes / GiB : null, 0) }),
-          note: days !== null && days < 45 ? t("ledger.diskFills", { days }) : null, sort: node.disk.now ?? 0 };
+          note: days !== null && days < 45 ? t("ledger.diskFills", { days }) : null, sort: node.disk.now ?? 0, series: node.disk.series, fmt: (v: number) => pct(v) };
       case "load":
         return { v: n(node.load5.now), use: Math.min(1, (perCore ?? 0) / 3), req: null, lv: (perCore ?? 0) > 2 ? "warn" as Level : "" as Level,
-          sub: t("ledger.loadUse", { cores: n(node.cores, 0), perCore: n(perCore) }), note: (perCore ?? 0) > 2 ? t("ledger.loadHigh", { ratio: n(perCore) }) : null, sort: perCore ?? 0 };
+          sub: t("ledger.loadUse", { cores: n(node.cores, 0), perCore: n(perCore) }), note: (perCore ?? 0) > 2 ? t("ledger.loadHigh", { ratio: n(perCore) }) : null, sort: perCore ?? 0, series: node.load5.series, fmt: (v: number) => n(v) };
       case "pods":
         return { v: n(node.pods.running, 0), use: node.pods.running !== null && node.pods.allocatable ? node.pods.running / node.pods.allocatable : 0, req: null, lv: "" as Level,
-          sub: t("ledger.podsUse", { max: n(node.pods.allocatable, 0), namespaces: nsCount(node.name) }), note: null, sort: node.pods.running ?? 0 };
+          sub: t("ledger.podsUse", { max: n(node.pods.allocatable, 0), namespaces: nsCount(node.name) }), note: null, sort: node.pods.running ?? 0, series: null, fmt: (v: number) => n(v, 0) };
     }
   };
   const nodes = sort ? [...snap.nodes].sort((a, b) => cell(b, sort).sort - cell(a, sort).sort) : snap.nodes;
@@ -293,7 +285,7 @@ function Ledger({
       {nodes.map((node) => (
         <div key={node.name} className={s.lr}>
           <div className={s.who}>
-            <h2>{node.name}</h2>
+            <h2><i className={s.nd} style={{ ["--c" as string]: worst(node) }} />{node.name}</h2>
             <p>{node.kubelet_version ? t("ledger.kubelet", { version: node.kubelet_version }) : ""}</p>
           </div>
           {KEYS.map((k) => {
@@ -302,7 +294,10 @@ function Ledger({
             return (
               <button key={k} type="button" className={`${s.cell} ${c.lv ? s[c.lv] : ""}`} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)}>
                 <span className={`${s.cap} ${s.k}`}>{t(`ledger.${k}`)}</span>
-                <span className={s.v}>{c.v}</span>
+                <span className={s.vrow}>
+                  <span className={s.v}>{c.v}</span>
+                  {c.series ? <Spark data={c.series} color={c.lv === "crit" ? "var(--crit)" : c.lv === "warn" ? "var(--warn)" : "var(--ink-3)"} title={t(`ledger.${k}`)} format={c.fmt} tipTitle={clock} className={s.lspark} /> : null}
+                </span>
                 <span className={s.meter}>
                   <i style={{ width: `${Math.min(100, c.use * 100)}%` }} />
                   {c.req !== null ? <u style={{ left: `calc(${Math.min(100, c.req * 100)}% - 1px)` }} /> : null}
@@ -462,28 +457,27 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
   const nBad = groups.filter((g) => g.bad || g.warn).length;
   const scopeName = scope === "all" ? t("who.theCluster") : scope;
 
-  const option = (value: string, name: string, f: number | null, sub: string) => (
-    <button key={value} type="button" className={`${s.scb} ${(f ?? 0) >= 0.85 ? s.hot : ""}`} aria-pressed={scope === value} onClick={() => { setScope(value); setSelected(null); }}>
-      <span className={s.scn}><b>{name}</b><span>{t("who.full", { value: pct(f) })}</span></span>
-      <span className={s.scbar}><i style={{ width: `${Math.min(100, (f ?? 0) * 100)}%` }} /></span>
-      <span className={s.scs}>{sub}</span>
+  const option = (value: string, name: string, f: number | null) => (
+    <button key={value} type="button" className={`${s.segItem} ${(f ?? 0) >= 0.85 ? s.hot : ""}`} aria-pressed={scope === value} onClick={() => { setScope(value); setSelected(null); }}>
+      <span className={s.segTop}><b>{name}</b><em>{pct(f)}</em></span>
+      <span className={s.segBar}><i style={{ width: `${Math.min(100, (f ?? 0) * 100)}%` }} /></span>
     </button>
   );
 
   return (
     <section className={s.occ} aria-label={t("who.title", { scope: t("who.wholeCluster") })}>
-      <h2>{t("who.title", { scope: scope === "all" ? t("who.wholeCluster") : scope })}</h2>
-      <div className={s.bar}>
-        <div className={s.tg}>
-          <span className={s.cap}>{t("who.which")}</span>
-          {option("all", t("who.wholeOption"), allFill, t("who.machinesCount", { count: snap.nodes.length }))}
-          {snap.nodes.map((x) => option(x.name, x.name, fill(x), measure === "cpu" ? `${n(x.cpu.allocatable, 1)} ${t("panel.cores")}` : `${n((x.memory.allocatable ?? 0) / GiB, 1)} GiB`))}
-        </div>
-        <div className={s.tg}>
-          <span className={s.cap}>{t("who.by")}</span>
+      <div className={s.occHead}>
+        <h2>{t("who.title", { scope: scope === "all" ? t("who.wholeCluster") : scope })}</h2>
+        <div className={s.measure} role="group" aria-label={t("who.by")}>
           {(["cpu", "memory"] as Measure[]).map((m) => (
-            <button key={m} type="button" className={s.pill} aria-pressed={measure === m} onClick={() => setMeasure(m)}>{t(`who.${m}`)}</button>
+            <button key={m} type="button" aria-pressed={measure === m} onClick={() => setMeasure(m)}>{t(`who.${m}`)}</button>
           ))}
+        </div>
+      </div>
+      <div className={s.bar}>
+        <div className={s.seg} role="group" aria-label={t("who.which")}>
+          {option("all", t("who.wholeOption"), allFill)}
+          {snap.nodes.map((x) => option(x.name, x.name, fill(x)))}
         </div>
         <input className={s.search} type="search" value={q} placeholder={t("who.search")} aria-label={t("who.search")} onChange={(e) => setQ(e.target.value.trim().toLowerCase())} />
       </div>
@@ -535,7 +529,11 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
         return (
           <div key={g.key}>
             <button type="button" className={`${s.prow} ${focus === focusKey ? s.hot : ""}`} aria-expanded={open} style={{ ["--c" as string]: hue(g.key) }}
-              onClick={() => { setOpenGroup(open ? null : g.key); setSelected(null); }} onMouseEnter={() => setFocus(focusKey)} onMouseLeave={() => setFocus(null)}>
+              onClick={() => {
+                setOpenGroup(open ? null : g.key);
+                setSelected(null);
+                if (!open) prefetchNamespacePods(snap.cluster.id, g.envs.map((x) => x.namespace));
+              }} onMouseEnter={() => setFocus(focusKey)} onMouseLeave={() => setFocus(null)}>
               <span className={`${s.rk} ${s.d}`}>{groups.indexOf(g) + 1}</span>
               <span className={s.nm}><i /><span><b>{g.name}</b><small>{t("who.environments", { count: g.envs.length })} · {t("who.podsCount", { count: Math.round(g.pods) })}</small></span></span>
               <span className={s.us}>
@@ -554,16 +552,26 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
                 <div className={s.eh}><span /><span className={s.cap}>{t("who.envHeader")}</span><span className={s.cap}>CPU</span><span className={s.cap}>{t("who.memory")}</span><span className={s.cap}>{t("who.colState")}</span></div>
                 {g.envs.map((e) => {
                   const tone = envTone(e);
-                  const cv = verdictText(t, n, pct, e.cpu, e.cpuRequested);
-                  const mv = limitText(t, pct, e.memory, e.memoryLimit);
+                  const cpuTone = requestVerdict(e.cpu, e.cpuRequested) === "over" ? "warn" : "";
+                  const memV = limitVerdict(e.memory, e.memoryLimit);
+                  const memTone = memV === "crit" ? "crit" : memV === "near" ? "warn" : "";
                   return (
                     <div key={e.key}>
                       <button type="button" className={s.erow} aria-expanded={selected === e.key} onClick={() => setSelected(selected === e.key ? null : e.key)}>
                         <span className={s.dot} style={{ ["--c" as string]: tone === "crit" ? "var(--crit)" : tone === "warn" ? "var(--warn)" : "var(--ok)" }} />
                         <span className={s.pn}><b>{e.namespace}</b><span>{e.nodes.join(", ")} · {t("who.podsCount", { count: Math.round(e.pods ?? 0) })}</span></span>
-                        <span className={s.tx}><b>{n(e.cpu, 2)}</b> / {n(e.cpuRequested, 2)} {t("panel.cores")}<small className={s[cv.cls]}>{cv.title}</small></span>
-                        <span className={s.tx}><b>{n(e.memory !== null ? e.memory / GiB : null, 2)}</b> / {n(e.memoryLimit !== null ? e.memoryLimit / GiB : null, 1)} GiB<small className={s[mv.cls]}>{mv.text}</small></span>
-                        <span className={`${s.tx} ${tone ? s[tone] : s.ok}`}>{tone ? issueText(t, pct, e) : t("state2.ok")}<small className={s.muted}>{selected === e.key ? t("who.closePods") : t("who.openPods")}</small></span>
+                        <span className={s.pmc}>
+                          <Meter used={e.cpu} mark={e.cpuRequested} cap={e.cpuLimit} tone={cpuTone} />
+                          <small>{t("panel.cpuOf", { used: n(e.cpu, 2), requested: n(e.cpuRequested, 2) })}</small>
+                        </span>
+                        <span className={s.pmc}>
+                          <Meter used={e.memory} mark={null} cap={e.memoryLimit} tone={memTone} />
+                          <small>{t("panel.memOf", { used: n(e.memory !== null ? e.memory / GiB : null, 2), limit: n(e.memoryLimit !== null ? e.memoryLimit / GiB : null, 1) })}</small>
+                        </span>
+                        <span className={s.est}>
+                          <span className={`${s.chip} ${tone ? s[tone] : s.quiet}`}>{tone ? issueText(t, pct, e) : t("state2.ok")}</span>
+                          <svg className={s.chev} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
+                        </span>
                       </button>
                       {selected === e.key ? <PodPanel clusterId={snap.cluster.id} env={e} groupName={g.name} scope={scope} onClose={() => setSelected(null)} /> : null}
                     </div>
@@ -589,14 +597,6 @@ function verdictText(t: Tr, n: (v: number | null | undefined, d?: number) => str
   if (v === "fits") return { cls: "ok", title: t("verdict.fits"), sub: t("verdict.fitsSub", { share: pct((used ?? 0) / (requested ?? 1)) }) };
   return { cls: "muted", title: t("verdict.unknown"), sub: t("verdict.unknownSub") };
 }
-function limitText(t: Tr, pct: (v: number | null | undefined) => string, used: number | null, limit: number | null) {
-  const v = limitVerdict(used, limit);
-  const share = pct(used !== null && limit ? used / limit : null);
-  if (v === "crit") return { cls: "crit", text: t("verdict.limitCrit", { share }) };
-  if (v === "near") return { cls: "warn", text: t("verdict.limitNear", { share }) };
-  if (v === "ok") return { cls: "muted", text: t("verdict.limitOk", { share }) };
-  return { cls: "muted", text: t("verdict.limitNone") };
-}
 function issueText(t: Tr, pct: (v: number | null | undefined) => string, e: EnvRow) {
   if ((e.restarts ?? 0) > 0) return t("state2.restarts", { count: Math.round(e.restarts ?? 0) });
   if (e.memory !== null && e.memoryLimit && e.memory / e.memoryLimit >= 0.85) return t("state2.memoryLimit", { share: pct(e.memory / e.memoryLimit) });
@@ -604,123 +604,157 @@ function issueText(t: Tr, pct: (v: number | null | undefined) => string, e: EnvR
 }
 
 /* ---------- one environment's pods ---------- */
+function Meter({ used, mark, cap, tone }: { used: number | null; mark: number | null; cap: number | null; tone: string }) {
+  const scale = Math.max(cap ?? 0, (mark ?? 0) * 1.6, used ?? 0, 1e-9);
+  return (
+    <span className={s.pm}>
+      <i className={tone ? s[tone] : ""} style={{ width: `${Math.min(100, ((used ?? 0) / scale) * 100)}%` }} />
+      {mark ? <u style={{ left: `calc(${Math.min(100, (mark / scale) * 100)}% - 1px)` }} /> : null}
+    </span>
+  );
+}
+
 function PodPanel({ clusterId, env, groupName, scope, onClose }: { clusterId: string; env: EnvRow; groupName: string; scope: string; onClose: () => void }) {
   const t = useT("infrastructure");
   const fmt = useFormat();
   const { n, pct } = useNum();
   const [data, setData] = useState<NamespacePods | null>(null);
   const [failed, setFailed] = useState(false);
-  const [hover, setHover] = useState<number | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     fetchNamespacePods(clusterId, env.namespace)
       .then((d) => live && setData(d))
       .catch(() => live && setFailed(true));
-    return () => { live = false; };
+    return () => {
+      live = false;
+    };
   }, [clusterId, env.namespace]);
-  if (failed) return <div className={s.panel}><p className={s.notice}>{t("panel.error")}</p></div>;
-  if (!data) return <div className={s.panel}><p className={s.notice}>{t("panel.loading")}</p></div>;
+
+  const head = (
+    <div className={s.ph}>
+      <div>
+        <span className={s.cap}>{groupName}</span>
+        <h3>{env.namespace}</h3>
+        <p>
+          {t("who.podsCount", { count: Math.round(env.pods ?? 0) })} · {env.nodes.join(", ")}
+          {env.project ? ` · ${t("panel.linked", { project: env.project.project_name, environment: env.project.environment_key })}` : ""}
+        </p>
+      </div>
+      <div className={s.acts}>
+        {env.project ? (
+          <Link className={`${s.btn} ${s.btnGo}`} href={`/service-health?project_id=${encodeURIComponent(env.project.project_id)}&environment_id=${encodeURIComponent(env.project.environment_id)}`}>
+            {t("panel.health")}
+          </Link>
+        ) : null}
+        <button type="button" className={s.btn} onClick={onClose}>{t("panel.close")}</button>
+      </div>
+    </div>
+  );
+  if (failed) return <section className={s.panel} aria-label={env.namespace}>{head}<p className={s.pmsg}>{t("panel.error")}</p></section>;
+  if (!data)
+    return (
+      <section className={s.panel} aria-label={env.namespace} aria-busy="true">
+        {head}
+        <div className={s.skel}><i /><i /><i /></div>
+      </section>
+    );
+
   const pods = data.pods.filter((p) => scope === "all" || p.node === scope);
-  const total = pods.reduce((sum, p) => sum + (p.cpu.now ?? 0), 0);
+  const focus = pods.find((p) => p.pod === picked) ?? null;
   let envSeries = new Array<SeriesValue>(data.times.length).fill(null);
   for (const p of pods) envSeries = addSeries(envSeries, p.cpu.series);
-  const envReq = pods.reduce((sum, p) => sum + (p.cpu_requested ?? 0), 0);
-  const envLim = pods.reduce((sum, p) => sum + (p.cpu_limit ?? 0), 0);
-  const focus = hover !== null ? pods[hover] : null;
-  const seriesNow = focus ? focus.cpu.series : envSeries;
-  const req = focus ? focus.cpu_requested ?? 0 : envReq;
-  const lim = focus ? focus.cpu_limit ?? 0 : envLim;
-  const who = focus ? focus.pod : t("panel.allPods", { namespace: env.namespace });
-  const peak = peakOf(seriesNow);
+  const series = focus ? focus.cpu.series : envSeries;
+  const req = focus ? focus.cpu_requested : pods.reduce((sum, p) => sum + (p.cpu_requested ?? 0), 0) || null;
+  const lim = focus ? focus.cpu_limit : pods.reduce((sum, p) => sum + (p.cpu_limit ?? 0), 0) || null;
+  const total = pods.reduce((sum, p) => sum + (p.cpu.now ?? 0), 0);
   const clock = (i: number) => new Date((data.times[i] ?? 0) * 1000).toLocaleTimeString(fmt.tag, { hour: "2-digit", minute: "2-digit" });
-  const now = lastReal(seriesNow);
-  const ratio = now !== null && req ? now / req : null;
+  const peak = peakOf(series);
+  const now = lastReal(series);
   const top = [...pods].sort((a, b) => (b.cpu.now ?? 0) - (a.cpu.now ?? 0))[0];
   const e = env.cpu !== null && env.cpuRequested ? env.cpu / env.cpuRequested : null;
   const mr = env.memory !== null && env.memoryLimit ? env.memory / env.memoryLimit : null;
-  const advice: string[] = [];
-  if (top && pods.length > 1 && total > 0) advice.push(t("panel.topPod", { pod: `<b>${esc(top.pod)}</b>`, share: pct((top.cpu.now ?? 0) / total) }));
-  if (e !== null && e < 0.5) advice.push(t("panel.idleAdvice", { share: `<b>${pct(e)}</b>`, value: `<b>${n((env.cpuRequested ?? 0) - (env.cpu ?? 0) * 1.3, 2)}</b>` }));
-  else if (e !== null && e > 1.05) advice.push(t("panel.overAdvice", { share: `<b>${pct(e - 1)}</b>`, value: n((env.cpu ?? 0) * 1.2, 2) }));
-  else if (e !== null) advice.push(t("panel.fitsAdvice", { share: pct(e) }));
-  if (mr !== null && mr >= 0.85) advice.push(t("panel.memoryAdvice", { share: `<b>${pct(mr)}</b>` }));
-  if ((env.restarts ?? 0) > 0) advice.push(t("panel.restartAdvice", { count: `<b>${Math.round(env.restarts ?? 0)}</b>` }));
   const cv = verdictText(t, n, pct, env.cpu, env.cpuRequested);
+  const chips: { tone: string; text: string }[] = [];
+  if (!focus && top && pods.length > 1 && total > 0) chips.push({ tone: "", text: t("panel.insightTop", { pod: top.pod, share: pct((top.cpu.now ?? 0) / total) }) });
+  if (!focus && e !== null && e < 0.5) chips.push({ tone: "cool", text: t("panel.insightIdle", { value: n((env.cpuRequested ?? 0) - (env.cpu ?? 0), 2) }) });
+  if (!focus && e !== null && e > 1.05) chips.push({ tone: "warn", text: t("panel.insightOver", { share: pct(e - 1) }) });
+  const podChip = (p: (typeof pods)[number]) => {
+    if ((p.restarts_24h ?? 0) > 0) return { tone: "crit", text: t("panel.chipRestarts", { count: Math.round(p.restarts_24h ?? 0) }) };
+    const m = limitVerdict(p.memory, p.memory_limit);
+    if (m === "crit") return { tone: "crit", text: t("panel.chipCrit") };
+    if (m === "near") return { tone: "warn", text: t("panel.chipNear") };
+    const v = requestVerdict(p.cpu.now, p.cpu_requested);
+    if (v === "over") return { tone: "warn", text: t("panel.chipOver") };
+    if (v === "idle") return { tone: "cool", text: t("panel.chipIdle") };
+    return { tone: "", text: t("panel.chipOk") };
+  };
+  const who = focus ? focus.pod : t("panel.allPodsShort");
   return (
     <section className={s.panel} aria-label={env.namespace}>
-      <div className={s.ph}>
-        <div>
-          <span className={s.cap}>{groupName}</span>
-          <h3>{env.namespace}</h3>
-          <p>{t("who.podsCount", { count: pods.length })} · {env.nodes.join(", ")} · {env.project ? t("panel.linked", { project: env.project.project_name, environment: env.project.environment_key }) : t("panel.unclaimed")}</p>
-        </div>
-        <div className={s.acts}>
-          {env.project ? <Link className={`${s.btn} ${s.btnGo}`} href={`/service-health?project_id=${encodeURIComponent(env.project.project_id)}&environment_id=${encodeURIComponent(env.project.environment_id)}`}>{t("panel.health")}</Link> : null}
-          <button type="button" className={s.btn} onClick={onClose}>{t("panel.close")}</button>
-        </div>
-      </div>
+      {head}
       <div className={s.stats}>
         <div className={e !== null && e > 1.05 ? s.warn : ""}><span className={s.cap}>{t("panel.cpu")}</span><b>{n(env.cpu, 2)}<small>{t("panel.cores")}</small></b><span className={s.x}>{t("panel.cpuSub", { requested: n(env.cpuRequested, 2), limit: n(env.cpuLimit, 2) })}</span></div>
-        <div className={mr !== null && mr >= 0.95 ? s.crit : mr !== null && mr >= 0.85 ? s.warn : ""}><span className={s.cap}>{t("panel.memory")}</span><b>{n(env.memory !== null ? env.memory / GiB : null, 2)}<small>{t("panel.gib")}</small></b><span className={s.x}>{t("panel.memorySub", { limit: n(env.memoryLimit !== null ? env.memoryLimit / GiB : null, 2), share: pct(mr) })}</span></div>
-        <div className={cv.cls === "cool" ? s.cool : cv.cls === "warn" ? s.warn : ""}><span className={s.cap}>{t("panel.request")}</span><b>{cv.title}</b><span className={s.x}>{cv.sub}</span></div>
+        <div className={mr !== null && mr >= 0.95 ? s.crit : mr !== null && mr >= 0.85 ? s.warn : ""}><span className={s.cap}>{t("panel.memory")}</span><b>{n(env.memory !== null ? env.memory / GiB : null, 2)}<small>{t("panel.gib")}</small></b><span className={s.x}>{t("panel.memorySub", { limit: n(env.memoryLimit !== null ? env.memoryLimit / GiB : null, 1), share: pct(mr) })}</span></div>
+        <div className={cv.cls === "cool" ? s.cool : cv.cls === "warn" ? s.warn : ""}><span className={s.cap}>{t("panel.request")}</span><b className={s.word}>{cv.title}</b><span className={s.x}>{cv.sub}</span></div>
         <div className={(env.restarts ?? 0) >= 3 ? s.crit : (env.restarts ?? 0) > 0 ? s.warn : ""}><span className={s.cap}>{t("panel.restarts")}</span><b>{env.restarts ? t("panel.times", { count: Math.round(env.restarts) }) : t("panel.none")}</b><span className={s.x}>{t("panel.last24")}</span></div>
       </div>
-      <div className={s.pb}>
-        <div className={s.pchart}>
-          <h4>{t("panel.chartTitle", { who })}</h4>
-          <p>
-            {now !== null && peak ? t("panel.chartSay", { now: n(now, 2), peak: n(peak.value, 2), time: clock(peak.index) }) : null}{" "}
-            {ratio !== null ? (ratio > 1.05 ? <span className={s.warn}>{t("panel.chartOver", { ratio: n(ratio) })}</span> : ratio < 0.4 ? <span className={s.cool}>{t("panel.chartIdle", { share: pct(ratio) })}</span> : t("panel.chartFits", { share: pct(ratio) })) : null}
-          </p>
-          <LineChart
-            data={seriesNow}
-            lines={[
-              ...(req ? [{ value: req, label: t("panel.requestTag", { value: n(req, 2) }), color: "var(--ink-2)", dash: "3 4" }] : []),
-              ...(lim ? [{ value: lim, label: t("panel.limitTag", { value: n(lim, 2) }), color: "var(--crit)", dash: "7 4" }] : []),
-            ]}
-            color="var(--accent)"
-            format={(v) => n(v, v < 1 ? 2 : 1)}
-            timeLabel={(h) => (h === 0 ? t("who.now") : t("who.hoursAgo", { count: h }))}
-            peakLabel={(value, i) => t("panel.peakTag", { value, time: clock(i) })}
-            label={t("panel.chartTitle", { who })}
-            width={700}
-            tipTitle={clock}
-            tipRows={(i) => [
-              { label: t("panel.used"), value: seriesNow[i] === null ? "—" : n(seriesNow[i] as number, 2), color: "var(--accent)" },
-              ...(req ? [{ label: t("panel.requestLine"), value: n(req, 2) }] : []),
-              ...(lim ? [{ label: t("panel.limitLine"), value: n(lim, 2) }] : []),
-            ]}
-          />
-          <div className={s.legend}>
-            <span style={{ ["--c" as string]: "var(--accent)" }}><i />{t("panel.used")}</span>
-            <span style={{ ["--c" as string]: "var(--ink-2)" }}><i className={s.dash} />{t("panel.requestLine")}</span>
-            <span style={{ ["--c" as string]: "var(--crit)" }}><i className={s.dash} />{t("panel.limitLine")}</span>
+
+      <div className={s.pchart}>
+        <div className={s.pch}>
+          <div>
+            <h4>{t("panel.chartTitle", { who })}</h4>
+            <p>
+              {now !== null && peak ? t("panel.chartSay", { now: n(now, 2), peak: n(peak.value, 2), time: clock(peak.index) }) : null}
+            </p>
           </div>
+          {chips.length ? (
+            <div className={s.chips}>
+              {chips.slice(0, 2).map((c) => <span key={c.text} className={`${s.chip} ${c.tone ? s[c.tone] : ""}`}>{c.text}</span>)}
+            </div>
+          ) : null}
         </div>
-        <div className={s.say}>
-          <h4>{t("panel.seeing")}</h4>
-          {advice.map((a) => <p key={a} dangerouslySetInnerHTML={{ __html: a }} />)}
+        <ZoneChart
+          data={series}
+          request={req}
+          limit={lim}
+          format={(v) => `${n(v, 2)} ${t("panel.cores")}`}
+          requestLabel={t("panel.zoneRequest", { value: n(req, 2) })}
+          limitLabel={t("panel.zoneLimit", { value: n(lim, 2) })}
+          timeLabel={(h) => (h === 0 ? t("who.now") : t("who.hoursAgo", { count: h }))}
+          tipTitle={clock}
+          usedLabel={t("panel.used")}
+          label={t("panel.chartTitle", { who })}
+        />
+        <div className={s.zl}>
+          <span><i className={s.zr} />{t("panel.zoneLegendRequest")}</span>
+          <span><i className={s.zw} />{t("panel.zoneLegendLimit")}</span>
         </div>
       </div>
-      <div className={s.pt}>
-        <table className={s.pods}>
-          <thead><tr><th>{t("panel.colPod")}</th><th>{t("panel.colCpu")}</th><th>{t("panel.colMemory")}</th><th>{t("panel.colState")}</th></tr></thead>
-          <tbody onMouseLeave={() => setHover(null)}>
-            {pods.map((p, i) => {
-              const c1 = verdictText(t, n, pct, p.cpu.now, p.cpu_requested);
-              const m1 = limitText(t, pct, p.memory, p.memory_limit);
-              return (
-                <tr key={p.pod} className={hover === i ? s.on : ""} onMouseEnter={() => setHover(i)}>
-                  <td><b>{p.pod}</b><small className={s.muted}>{p.node ?? "—"}</small></td>
-                  <td>{t("panel.cpuCell", { used: n(p.cpu.now, 2), requested: n(p.cpu_requested, 2) })}<small className={s[c1.cls]}>{c1.cls === "warn" ? c1.sub : c1.title}</small></td>
-                  <td>{t("panel.memoryCell", { used: n(p.memory !== null ? p.memory / GiB : null, 2), limit: n(p.memory_limit !== null ? p.memory_limit / GiB : null, 2) })}<small className={s[m1.cls]}>{m1.text}</small></td>
-                  <td className={(p.restarts_24h ?? 0) > 0 ? s.crit : ""}>{(p.restarts_24h ?? 0) > 0 ? t("panel.restarted", { count: Math.round(p.restarts_24h ?? 0) }) : t("panel.running")}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p className={s.hint}>{t("panel.hint")}</p>
+
+      <div className={s.plist}>
+        <div className={s.plh}><span className={s.cap}>{t("panel.colPod")}</span><span className={s.cap}>{t("panel.colCpu")}</span><span className={s.cap}>{t("panel.colMemory")}</span><span className={s.cap}>{t("panel.colState")}</span></div>
+        {pods.map((p) => {
+          const chip = podChip(p);
+          const cpuTone = requestVerdict(p.cpu.now, p.cpu_requested) === "over" ? "warn" : "";
+          const memV = limitVerdict(p.memory, p.memory_limit);
+          const memTone = memV === "crit" ? "crit" : memV === "near" ? "warn" : "";
+          return (
+            <button key={p.pod} type="button" className={s.prow2} aria-pressed={picked === p.pod} onClick={() => setPicked(picked === p.pod ? null : p.pod)}>
+              <span className={s.pnm}><b>{p.pod}</b><small>{p.node ?? "—"}</small></span>
+              <span className={s.pmc}>
+                <Meter used={p.cpu.now} mark={p.cpu_requested} cap={p.cpu_limit} tone={cpuTone} />
+                <small>{t("panel.cpuOf", { used: n(p.cpu.now, 2), requested: n(p.cpu_requested, 2) })}</small>
+              </span>
+              <span className={s.pmc}>
+                <Meter used={p.memory} mark={null} cap={p.memory_limit} tone={memTone} />
+                <small>{t("panel.memOf", { used: n(p.memory !== null ? p.memory / GiB : null, 2), limit: n(p.memory_limit !== null ? p.memory_limit / GiB : null, 1) })}</small>
+              </span>
+              <span><span className={`${s.chip} ${chip.tone ? s[chip.tone] : s.quiet}`}>{chip.text}</span></span>
+            </button>
+          );
+        })}
+        <p className={s.hint}>{t("panel.pick")}</p>
       </div>
     </section>
   );

@@ -101,10 +101,33 @@ export function fetchSnapshot(clusterId: string, signal?: AbortSignal): Promise<
   return apiGet<InfraSnapshot>(`/v1/infrastructure/clusters/${encodeURIComponent(clusterId)}`, signal);
 }
 
+const POD_CACHE_MS = 60_000;
+const podCache = new Map<string, { at: number; value: Promise<NamespacePods> }>();
+
+/**
+ * A namespace's pods, remembered for a minute. Opening a project asks for
+ * its environments' pods in the background (`prefetchNamespacePods`), so
+ * the click on an environment usually finds them already here.
+ */
 export function fetchNamespacePods(clusterId: string, namespace: string): Promise<NamespacePods> {
-  return apiGet<NamespacePods>(
+  const key = `${clusterId}/${namespace}`;
+  const hit = podCache.get(key);
+  if (hit && Date.now() - hit.at < POD_CACHE_MS) return hit.value;
+  const value = apiGet<NamespacePods>(
     `/v1/infrastructure/clusters/${encodeURIComponent(clusterId)}/namespaces/${encodeURIComponent(namespace)}`,
   );
+  podCache.set(key, { at: Date.now(), value });
+  value.catch(() => podCache.delete(key));
+  return value;
+}
+
+export function prefetchNamespacePods(clusterId: string, namespaces: string[]): void {
+  for (const ns of namespaces.slice(0, 6)) void fetchNamespacePods(clusterId, ns).catch(() => undefined);
+}
+
+/** Tests only. */
+export function clearPodCache(): void {
+  podCache.clear();
 }
 
 export const GiB = 1024 ** 3;

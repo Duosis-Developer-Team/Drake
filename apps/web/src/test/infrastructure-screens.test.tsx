@@ -1,13 +1,14 @@
 /**
  * The infrastructure screen renders the API's snapshot in plain words, in
- * both languages: the headline names what needs attention, the ledger
- * shows each machine, the project table explains each project against its
- * request, and opening an environment loads its pods.
+ * both languages: a quiet title and summary, the ledger shows each
+ * machine, the project table explains each project against its request,
+ * and opening an environment loads its pods, each of which can be picked.
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import InfrastructurePage from "@/app/infrastructure/page";
+import { clearPodCache } from "@/lib/infrastructure";
 import { LocaleProvider } from "@/lib/i18n";
 import { SessionProvider } from "@/lib/session";
 import { installFetchMock, makeMe } from "@/test/mock-api";
@@ -113,19 +114,21 @@ function routes() {
   });
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  clearPodCache();
+});
 
 describe("infrastructure screen", () => {
-  it("leads with what needs attention and lists every machine", async () => {
+  it("names the cluster and lists every machine", async () => {
     routes();
     render(
       <SessionProvider>
         <InfrastructurePage />
       </SessionProvider>,
     );
-    const headline = await screen.findByRole("heading", { level: 1 });
-    expect(headline).toHaveTextContent("2 machines");
-    expect(headline).toHaveTextContent("node2's disk fills in about 20 days");
+    expect(await screen.findByRole("heading", { level: 1, name: "Infrastructure" })).toBeInTheDocument();
+    expect(screen.getByText("Duosis Production · 2 machines · 78 pods")).toBeInTheDocument();
     const ledger = screen.getByRole("region", { name: "Machine" });
     expect(within(ledger).getByRole("heading", { name: "node1" })).toBeInTheDocument();
     expect(within(ledger).getByText("At this rate it fills in ≈20 days")).toBeInTheDocument();
@@ -144,8 +147,14 @@ describe("infrastructure screen", () => {
     fireEvent.click(await screen.findByRole("button", { name: /drake-otel/ }));
     const panel = await screen.findByRole("region", { name: "drake-otel" });
     expect((await within(panel).findAllByText("clickhouse-0")).length).toBeGreaterThan(0);
-    expect(within(panel).getAllByText(/1\.4× what it requested/).length).toBeGreaterThan(0);
-    expect(within(panel).getAllByText("Running, never restarted").length).toBe(2);
+    expect(within(panel).getAllByText(/1\.2× what it requested/).length).toBeGreaterThan(0);
+    expect(within(panel).getByText("near memory limit")).toBeInTheDocument();
+    expect(within(panel).getByText("over-reserved")).toBeInTheDocument();
+    const pod = within(panel).getByRole("button", { name: /clickhouse-0/ });
+    expect(pod).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(pod);
+    expect(pod).toHaveAttribute("aria-pressed", "true");
+    expect(within(panel).getAllByText(/clickhouse-0/).length).toBeGreaterThan(1);
     await waitFor(() =>
       expect(calls.some((c) => c.path === "/v1/infrastructure/clusters/c1/namespaces/drake-otel")).toBe(true),
     );
@@ -170,7 +179,7 @@ describe("infrastructure screen", () => {
 });
 
 describe("infrastructure screen in Turkish", () => {
-  it("renders the headline and the table from the catalogue", async () => {
+  it("renders the title and the table from the catalogue", async () => {
     routes();
     render(
       <LocaleProvider locale="tr">
@@ -179,10 +188,9 @@ describe("infrastructure screen in Turkish", () => {
         </SessionProvider>
       </LocaleProvider>,
     );
-    const headline = await screen.findByRole("heading", { level: 1 });
-    expect(headline).toHaveTextContent("2 makine");
-    expect(headline).toHaveTextContent("node2'un diski yaklaşık 20 günde dolacak");
+    expect(await screen.findByRole("heading", { level: 1, name: "Altyapı" })).toBeInTheDocument();
+    expect(screen.getByText("Duosis Production · 2 makine · 78 pod")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Drake.*İsteğini aşıyor/s })).toBeInTheDocument();
-    expect(screen.getByText("Hangi makineler")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Hangi makineler" })).toBeInTheDocument();
   });
 });
