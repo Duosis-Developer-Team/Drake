@@ -93,6 +93,37 @@ data:
               warn: [warning, WARNING, Warning, {min: 40, max: 49}]
               error: [err, ERR, {min: 50, max: 59}]
               fatal: [critical, CRITICAL, Critical, panic, PANIC, {min: 60, max: 69}]
+          # Plain-text lines name their level near the start, in the form
+          # each program prints it: PostgreSQL "… UTC [45] FATAL:  …",
+          # uvicorn "INFO:     …", Python logging "… mcp.server INFO …".
+          # Without this a database repeating a FATAL every few seconds
+          # counted as zero errors (2026-11-18, hermes-test). Only an
+          # upper-case level word among the first five tokens counts, so a
+          # word in the message itself is not mistaken for the level. A line
+          # with no such word passes through unchanged.
+          - type: regex_parser
+            id: text-level
+            if: 'attributes["drake.json"] == nil'
+            parse_from: body
+            parse_to: attributes["drake.text"]
+            regex: '^(?:\S+\s+){0,4}?\[?(?P<lvl>TRACE|DEBUG[1-5]?|INFO|NOTICE|LOG|WARN|WARNING|ERROR|FATAL|PANIC|CRITICAL)\]?:?\s'
+            on_error: send_quiet
+          - type: severity_parser
+            id: text-level-severity
+            if: 'attributes["drake.text"] != nil and attributes["drake.text"]["lvl"] != nil'
+            parse_from: attributes["drake.text"]["lvl"]
+            on_error: send_quiet
+            # PostgreSQL's own names: LOG is its ordinary message, DEBUG1-5
+            # its debug depths.
+            mapping:
+              debug: [DEBUG1, DEBUG2, DEBUG3, DEBUG4, DEBUG5]
+              info: [LOG, NOTICE]
+              warn: [WARNING]
+              fatal: [PANIC, CRITICAL]
+          - type: remove
+            id: drop-text-scratch
+            if: 'attributes["drake.text"] != nil'
+            field: attributes["drake.text"]
           - type: remove
             id: drop-json-scratch
             if: 'attributes["drake.json"] != nil'
