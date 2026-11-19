@@ -1,6 +1,6 @@
 # ADR-0033: Custom dashboards, built from reads Drake already trusts
 
-**Status:** Accepted (first part: the environment overview read)
+**Status:** Accepted (parts 1 and 2: the environment overview read, findings)
 **Extends:** ADR-0011 (states are not zeros), ADR-0015 (query broker), ADR-0029 (OpenTelemetry alongside Prometheus), ADR-0031 (alert rules), ADR-0032 (infrastructure screen)
 
 ## Context
@@ -81,15 +81,40 @@ A request may carry at most 32 bindings. The widest range has 30 buckets,
 and 32 × 30 stays under the reader profile's 1000-row ceiling. The
 row-ceiling test reads that ceiling from the deployed configuration.
 
+### What needs attention, found from the same numbers
+
+The prototype's "needs attention" items were analysed by hand. Drake now
+finds them itself, from the sections the overview already answered. It
+makes no further read (`observability.findings`, pure functions).
+
+There are four detectors, each with conservative thresholds:
+
+| Kind | Fires when | Severity |
+|---|---|---|
+| `periodic_error_logs` | error-or-worse lines keep coming at a steady rate (≥ 90% of buckets since they first appeared, coefficient of variation ≤ 0.3, at least 6 full buckets) | warning |
+| `connection_per_query` | a service opens a new database connection for ≥ 20% of its queries (≥ 100 connects) | warning |
+| `slow_call` | one bound service calls another with p95 ≥ 1 s (≥ 10 calls). When the callee also has a `connection_per_query` finding, that is named as the likely cause | warning |
+| `client_errors` | ≥ 5% of a service's answers are 4xx (≥ 20) | info when only 401/403, warning otherwise |
+
+- Steadiness is judged from the first error line, not from the window
+  start. Before #149, PostgreSQL's FATAL lines had no severity, so the same
+  probe failure looked new six hours into the window.
+- A detector only speaks when its sections answered `ok`. One that could
+  not run is listed in `skipped`, so "no findings" is never claimed for a
+  part that could not be read.
+- The API carries kinds, bindings and numbers. The screen does the wording.
+
+Checked read-only against production hermes-test on 2026-11-19, it finds
+what we found by hand:
+- the FATAL lines from auth-db and core-db (`pg_isready` without `-d`);
+- the missing connection pool in auth-service;
+- the 401s in core-service.
+
+It also found a missing pool in core-service, which the hand analysis
+had missed.
+
 ## Still to come
 
-These are decided separately, in the order they ship:
-- **Findings detectors.** The prototype's "needs attention" items were
-  analysed by hand. Drake will find them itself from four patterns:
-  - error lines repeating on a fixed period;
-  - a high connection-per-query ratio;
-  - slow calls whose time goes to connecting;
-  - 4xx bursts from one client.
 - **Dashboard storage.** Additive tables for dashboards and their versions:
   - Drake generates a default dashboard per project and environment.
   - Widgets can be reordered, resized (S/M/L) and added from the catalog.
