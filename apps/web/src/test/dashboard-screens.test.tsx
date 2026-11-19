@@ -106,6 +106,19 @@ describe("dashboards", () => {
     expect(body.layout.find((w: { key: string }) => w.key === "logs").hidden).toBe(true);
   });
 
+  it("opens a service's details inside the dashboard instead of leaving it", async () => {
+    routes();
+    render(<SessionProvider><EnvironmentDashboardPage /></SessionProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "auth-service" }));
+    const panel = await screen.findByRole("complementary", { name: "auth-service" });
+    expect(panel).toHaveTextContent("Busiest routes");
+    expect(panel).toHaveTextContent("POST /internal/authz/resolve");
+    expect(panel).toHaveTextContent("← core-service");
+    expect(screen.getByRole("link", { name: "Open its service health page" })).toHaveAttribute("href", "/service-health/auth");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "auth-service" })).not.toBeInTheDocument());
+  });
+
   it("offers no editing to someone who may only look", async () => {
     routes({ can_manage: false });
     render(<SessionProvider><EnvironmentDashboardPage /></SessionProvider>);

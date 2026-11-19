@@ -254,3 +254,58 @@ async def test_bounded_inputs(engine: AsyncEngine, tmp_path: Path) -> None:
     assert too_many.status_code == 422
     assert bad_range.status_code == 422
     assert none.status_code == 422
+
+
+async def test_a_second_read_is_served_from_the_cache(engine: AsyncEngine, tmp_path: Path) -> None:
+    harness, store = overview_harness(tmp_path)
+    binding = await _bound(engine, harness)
+
+    async with owner(harness, engine) as client:
+        first = (await client.get(f"/v1/service-health/overview?binding_id={binding['id']}")).json()
+        asked = len(store.requests)
+        second = (
+            await client.get(f"/v1/service-health/overview?binding_id={binding['id']}")
+        ).json()
+
+    assert asked == 8
+    assert len(store.requests) == asked  # nothing asked of the store again
+    assert first["age_seconds"] == 0
+    assert second["codes"] == first["codes"]
+    assert second["bindings"] == first["bindings"]
+
+
+async def test_at_most_three_statements_run_at_once() -> None:
+    import asyncio
+
+    from drake_api.observability import overview_router
+
+    running = 0
+    peak = 0
+
+    class Slow:
+        connector = type("C", (), {"timeout_seconds": 5.0})()
+
+        async def query(self, *args: Any, **kwargs: Any) -> Any:
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.02)
+            running -= 1
+            return type("R", (), {"rows": []})()
+
+    gate = asyncio.Semaphore(overview_router.CONCURRENCY)
+    statements = {n: ("SELECT 1", 10) for n in overview_router._NORMALIZE}
+    fake_query = type("Q", (), {"statements": statements, "parameters": {}})()
+    await asyncio.gather(
+        *(
+            overview_router._section(
+                Slow(),  # type: ignore[arg-type]
+                name="log_patterns",
+                enabled=True,
+                query=fake_query,
+                gate=gate,
+            )
+            for _ in range(8)
+        )
+    )
+    assert peak == 3

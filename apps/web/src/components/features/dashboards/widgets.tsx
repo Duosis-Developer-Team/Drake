@@ -6,7 +6,6 @@
  * number the API did not send.
  */
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiGet } from "@/lib/api";
@@ -29,12 +28,13 @@ import type { NamespaceSnapshot } from "@/lib/infrastructure";
 import { traceDetailPath, tracesPath, type TraceDetail, type TracePage } from "@/lib/traces";
 
 import s from "./dashboards.module.css";
+import { useTip, type TipLine } from "./tip";
 
 type T = ReturnType<typeof useT<"dashboards">>;
 const PALETTE = ["var(--s1)", "var(--s4)", "var(--s3)", "var(--s2)", "var(--s6)", "var(--s5)"];
 export const colourOf = (index: number) => PALETTE[index % PALETTE.length];
 
-function useN() {
+export function useN() {
   const fmt = useFormat();
   return {
     n: (v: number | null | undefined, d = 0) =>
@@ -80,7 +80,7 @@ function useWidth<E extends HTMLElement>(): [React.RefObject<E | null>, number] 
   return [ref, width];
 }
 
-function HourTicks({ buckets, every = 3 }: { buckets: number[]; every?: number }) {
+export function HourTicks({ buckets, every = 3 }: { buckets: number[]; every?: number }) {
   const { hour } = useN();
   const n = buckets.length;
   return (
@@ -112,6 +112,15 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
   const errs = errorsPerBucket(overview);
   const peak = Math.max(...rpm.map((v) => v ?? 0), 1e-9);
   const cls = (v: number | null) => (v === null ? s["c-none"] : v >= SLOW_MS ? s["c-slow"] : v >= 100 ? s["c-mid"] : s["c-fast"]);
+  const tip = useTip();
+  const { hour } = useN();
+  const at = (e: React.MouseEvent, i: number) =>
+    tip.show(e, [
+      [hour(overview.buckets[i])],
+      [t("overview.laneRequests"), rpm[i] === null ? "—" : n(rpm[i], 1)],
+      [t("overview.tipSlowest"), worst[i] === null ? t("overview.noRequests") : ms(worst[i])],
+      [t("overview.laneErrors"), errs[i] === null ? "—" : n(errs[i])],
+    ]);
   return (
     <>
       <div className={s.kpis}>
@@ -128,7 +137,7 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
           </span>
           <div className={s.bars}>
             {rpm.map((v, i) => (
-              <i key={i} title={`${v === null ? "—" : n(v, 1)}`} style={{ height: `${Math.max(4, ((v ?? 0) / peak) * 100)}%`, animationDelay: `${i * 12}ms` }} />
+              <i key={i} onMouseMove={(e) => at(e, i)} onMouseLeave={tip.hide} style={{ height: `${Math.max(4, ((v ?? 0) / peak) * 100)}%`, animationDelay: `${i * 12}ms` }} />
             ))}
           </div>
         </div>
@@ -139,7 +148,7 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
           </span>
           <div className={s.cells}>
             {worst.map((v, i) => (
-              <i key={i} className={cls(v)} title={v === null ? t("overview.noRequests") : `p95 ${ms(v)}`} style={{ animationDelay: `${300 + i * 12}ms` }} />
+              <i key={i} className={cls(v)} onMouseMove={(e) => at(e, i)} onMouseLeave={tip.hide} style={{ animationDelay: `${300 + i * 12}ms` }} />
             ))}
           </div>
         </div>
@@ -150,7 +159,7 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
           </span>
           <div className={s.cells}>
             {errs.map((v, i) => (
-              <i key={i} className={v === null ? s["c-none"] : v ? s["c-err"] : s["c-ok"]} title={v === null ? "—" : n(v)} style={{ animationDelay: `${300 + i * 12}ms` }} />
+              <i key={i} className={v === null ? s["c-none"] : v ? s["c-err"] : s["c-ok"]} onMouseMove={(e) => at(e, i)} onMouseLeave={tip.hide} style={{ animationDelay: `${300 + i * 12}ms` }} />
             ))}
           </div>
         </div>
@@ -189,8 +198,9 @@ function spark(values: number[], width = 196, height = 28) {
   return { d: curve(pts), area: `${curve(pts)}L${width},${height}L0,${height}Z` };
 }
 
-export function ServicesWidget({ lines, t }: { lines: ServiceLine[]; t: T }) {
-  const { n, ms, pct } = useN();
+export function ServicesWidget({ lines, buckets, onOpen, t }: { lines: ServiceLine[]; buckets: number[]; onOpen: (id: string) => void; t: T }) {
+  const { n, ms, pct, hour } = useN();
+  const tip = useTip();
   const mx = Math.max(...lines.map((l) => l.requests ?? 0), 1);
   const lp = (v: number) => Math.max(0, Math.min(100, (Math.log10(Math.max(1, v)) / 4) * 100));
   return (
@@ -210,10 +220,10 @@ export function ServicesWidget({ lines, t }: { lines: ServiceLine[]; t: T }) {
         const tone = status === "healthy" ? "" : status === "degraded" ? "warn" : status === "critical" ? "bad" : "mute";
         const { d, area } = spark(l.perBucket);
         return (
-          <div key={l.bindingId} className={s.tr} style={{ animationDelay: `${200 + i * 60}ms` }}>
+          <div key={l.bindingId} className={`${s.tr} ${s.trOpen}`} style={{ animationDelay: `${200 + i * 60}ms` }} onClick={(e) => { if (!(e.target as HTMLElement).closest("button, svg")) onOpen(l.bindingId); }}>
             <span className={s.svc}>
               <i style={{ background: c }} />
-              <Link href={`/service-health/${l.bindingId}`}>{l.name}</Link>
+              <button type="button" className={s.svcBtn} onClick={() => onOpen(l.bindingId)}>{l.name}</button>
             </span>
             <span className={`${s.pill} ${tone ? s[tone] : ""}`}>{t(`status.${status}` as never)}</span>
             <span className={s.meter}>
@@ -233,10 +243,35 @@ export function ServicesWidget({ lines, t }: { lines: ServiceLine[]; t: T }) {
                 </>
               )}
             </span>
-            <svg viewBox="0 0 196 28" width="196" height="28" aria-hidden>
-              <path d={area} style={{ fill: c }} fillOpacity={0.14} />
-              <path d={d} fill="none" style={{ stroke: c }} strokeWidth={1.6} />
-            </svg>
+            <span className={s.sparkCell}>
+              <svg
+                viewBox="0 0 196 28"
+                width="196"
+                height="28"
+                role="img"
+                aria-label={t("services.window")}
+                onMouseMove={(e) => {
+                  const box = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+                  const i = Math.max(0, Math.min(l.perBucket.length - 1, Math.round(((e.clientX - box.left) / box.width) * (l.perBucket.length - 1))));
+                  if (!l.perBucket.length) return;
+                  tip.show(e, [
+                    [`${l.name} · ${hour(buckets[i])}`],
+                    [t("services.requests"), n(l.perBucket[i])],
+                    ["p95", l.p95PerBucket[i] === null ? "—" : ms(l.p95PerBucket[i])],
+                    [t("services.errors"), n(l.errorsPerBucket[i])],
+                  ]);
+                }}
+                onMouseLeave={tip.hide}
+              >
+                <path d={area} style={{ fill: c }} fillOpacity={0.14} />
+                <path d={d} fill="none" style={{ stroke: c }} strokeWidth={1.6} />
+              </svg>
+              {l.requests ? (
+                <small>{t("services.sparkNote", { last: n(l.perBucket[l.perBucket.length - 1] ?? 0), peak: n(Math.max(...l.perBucket)) })}</small>
+              ) : (
+                <small>{t("services.noTraffic")}</small>
+              )}
+            </span>
           </div>
         );
       })}
@@ -246,8 +281,9 @@ export function ServicesWidget({ lines, t }: { lines: ServiceLine[]; t: T }) {
 
 /* ================= traffic graph ================= */
 
-export function TrafficGraphWidget({ lines, overview, t }: { lines: ServiceLine[]; overview: Overview; t: T }) {
+export function TrafficGraphWidget({ lines, overview, onOpen, t }: { lines: ServiceLine[]; overview: Overview; onOpen: (id: string) => void; t: T }) {
   const { n, ms } = useN();
+  const tip = useTip();
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<string | null>(null);
   const { nodes, edges } = useMemo(() => trafficGraph(lines, overview), [lines, overview]);
@@ -282,8 +318,17 @@ export function TrafficGraphWidget({ lines, overview, t }: { lines: ServiceLine[
     });
   }
   const mxe = Math.max(...edges.map((e) => e.count), 1);
+  const nodeTip = (node: GraphNode): TipLine[] => {
+    const lines2: TipLine[] = [[node.kind === "users" ? t("graph.users") : node.label]];
+    lines2.push([node.kind === "database" ? t("graph.queriesUnit") : t("graph.requestsUnit"), n(node.requests)]);
+    if (node.p95 !== null) lines2.push(["p95", node.longLived ? t("graph.streaming") : ms(node.p95)]);
+    if (node.codes) for (const [code, v] of Object.entries(node.codes).sort((a, b) => b[1] - a[1]).slice(0, 4)) lines2.push([code, n(v)]);
+    if (node.kind === "service") lines2.push([t("graph.openHint")]);
+    return lines2;
+  };
   const colour = (node: GraphNode) =>
     node.kind === "users" ? "var(--ink-3)" : node.kind === "database" ? "var(--teal)" : colourBy.get(node.id) ?? "var(--blue)";
+  const labelOf = (id: string) => (id === "users" ? t("graph.users") : nodes.find((x) => x.id === id)?.label ?? id);
   const linked = (id: string) => (hover ? hover === id || edges.some((e) => (e.from === hover && e.to === id) || (e.to === hover && e.from === id)) : false);
 
   return (
@@ -314,7 +359,7 @@ export function TrafficGraphWidget({ lines, overview, t }: { lines: ServiceLine[
           const k = slow ? "w" : e.kind === "query" ? "q" : "n";
           const on = hover !== null && (e.from === hover || e.to === hover);
           return (
-            <g key={i} className={`${s.edge} ${e.kind === "query" ? s.query : ""} ${slow ? s.slowEdge : ""} ${on ? s.on : ""}`} style={{ animationDelay: `${i * 90}ms` }}>
+            <g key={i} className={`${s.edge} ${e.kind === "query" ? s.query : ""} ${slow ? s.slowEdge : ""} ${on ? s.on : ""}`} style={{ animationDelay: `${i * 90}ms` }} onMouseMove={(ev) => tip.show(ev, [[`${labelOf(e.from)} → ${labelOf(e.to)}`], [e.kind === "query" ? t("graph.queriesUnit") : t("graph.requestsUnit"), n(e.count)], ...(e.p95 !== null ? ([["p95", ms(e.p95)]] as TipLine[]) : [])])} onMouseLeave={tip.hide}>
               <path d={d} className={s.bs} strokeWidth={w} markerEnd={`url(#dash-arrow-${k})`} />
               <path d={d} className={s.fl} strokeWidth={Math.max(1.5, w * 0.5)} />
               <g className={s.lb}>
@@ -347,7 +392,7 @@ export function TrafficGraphWidget({ lines, overview, t }: { lines: ServiceLine[
           const unit = node.kind === "users" ? t("graph.requestsUnit") : node.kind === "database" ? t("graph.queriesUnit") : t("graph.perMinute");
           const lat = node.kind === "users" ? "" : node.longLived ? t("graph.streaming") : node.p95 === null ? "" : `p95 ${ms(node.p95)}`;
           return (
-            <g key={node.id} className={`${s.node} ${node.slow ? s.slowNode : ""} ${linked(node.id) ? s.on : ""}`} transform={`translate(${p.x},${p.y})`} style={{ ["--c" as string]: c, animationDelay: `${i * 80}ms` }} onMouseEnter={() => setHover(node.id)} onMouseLeave={() => setHover(null)}>
+            <g key={node.id} className={`${s.node} ${node.slow ? s.slowNode : ""} ${linked(node.id) ? s.on : ""}`} transform={`translate(${p.x},${p.y})`} onMouseEnter={() => setHover(node.id)} onMouseMove={(ev) => tip.show(ev, nodeTip(node))} onMouseLeave={() => { setHover(null); tip.hide(); }} onClick={() => node.kind === "service" && onOpen(node.id)} style={{ ["--c" as string]: c, animationDelay: `${i * 80}ms`, cursor: node.kind === "service" ? "pointer" : "default" }}>
               <circle r={rr + 14} className={s.halo} />
               <circle r={rr} className={s.tk} />
               {segments.map(([f, sc], j) => {
@@ -457,7 +502,8 @@ export function FindingsWidget({ overview, lines, t }: { overview: Overview; lin
 }
 
 function FindingChart({ finding, overview, t }: { finding: Finding; overview: Overview; t: T }) {
-  const { n, ms } = useN();
+  const { n, ms, hour } = useN();
+  const tip = useTip();
   const [ref, width] = useWidth<HTMLDivElement>();
   const W = Math.max(320, width || 400);
   const H = 84;
@@ -471,7 +517,7 @@ function FindingChart({ finding, overview, t }: { finding: Finding; overview: Ov
       <>
         {lines.map((b, i) => {
           const h = b.errors ? Math.max(3, (b.errors / mx) * (H - 22)) : 2;
-          return <rect key={i} x={i * bw + 1} y={H - 18 - h} width={Math.max(2, bw - 2)} height={h} rx={2} style={{ fill: b.errors ? "var(--red)" : "var(--line)" }}><title>{n(b.errors)}</title></rect>;
+          return <rect key={i} x={i * bw + 1} y={H - 18 - h} width={Math.max(2, bw - 2)} height={h} rx={2} style={{ fill: b.errors ? "var(--red)" : "var(--line)" }} onMouseMove={(e) => tip.show(e, [[hour(b.t)], [t("findings.periodic.unit"), n(b.errors)]])} onMouseLeave={tip.hide} />;
         })}
         <text x={0} y={H - 2} className="ax" style={{ fontSize: 10.5, fill: "var(--ink-3)" }}>{t("findings.periodic.axis")}</text>
       </>
@@ -614,7 +660,8 @@ function SlowCallEvidence({ from, to, t }: { from: string; to: string; t: T }) {
 /* ================= latency heatmap ================= */
 
 export function HeatmapWidget({ overview, t }: { overview: Overview; t: T }) {
-  const { n, hour } = useN();
+  const { n, hour, ms } = useN();
+  const tip = useTip();
   const [ref, width] = useWidth<HTMLDivElement>();
   const latency = answered(overview.latency);
   const traffic = answered(overview.traffic);
@@ -640,9 +687,7 @@ export function HeatmapWidget({ overview, t }: { overview: Overview; t: T }) {
             const o = 0.22 + 0.78 * (Math.log(v + 1) / Math.log(mx + 1));
             const c = b >= latency.slow_from_class ? "var(--amber)" : "var(--blue)";
             return (
-              <rect key={`${i}-${b}`} className={s.hc} x={L + i * cw + 1} y={rowY(b) + 1} width={Math.max(1, cw - 2)} height={ch - 2} rx={3} style={{ fill: `color-mix(in srgb, ${c} ${Math.round(o * 100)}%, var(--card))`, animationDelay: `${i * 14 + (12 - b) * 8}ms` }}>
-                <title>{`${hour(overview.buckets[i])} · ${n(v)}`}</title>
-              </rect>
+              <rect key={`${i}-${b}`} className={s.hc} x={L + i * cw + 1} y={rowY(b) + 1} width={Math.max(1, cw - 2)} height={ch - 2} rx={3} style={{ fill: `color-mix(in srgb, ${c} ${Math.round(o * 100)}%, var(--card))`, animationDelay: `${i * 14 + (12 - b) * 8}ms` }} onMouseMove={(e) => tip.show(e, [[hour(overview.buckets[i])], [t("heat.tipRange"), `${ms(latency.classes[b]?.lo_ms ?? 0)} – ${latency.classes[b]?.hi_ms === null || latency.classes[b] === undefined ? "∞" : ms(latency.classes[b].hi_ms)}`], [t("heat.tipCount"), n(v)]])} onMouseLeave={tip.hide} />
             );
           }),
         )}
@@ -680,6 +725,7 @@ export function HeatmapWidget({ overview, t }: { overview: Overview; t: T }) {
 
 export function EndpointsWidget({ overview, lines, mode, t }: { overview: Overview; lines: ServiceLine[]; mode: "busy" | "slow"; t: T }) {
   const { n, ms } = useN();
+  const tip = useTip();
   const routes = answered(overview.routes) ?? [];
   const colourBy = new Map(lines.map((l, i) => [l.bindingId, colourOf(i)]));
   const nameBy = new Map(lines.map((l) => [l.bindingId, l.name]));
@@ -696,7 +742,7 @@ export function EndpointsWidget({ overview, lines, mode, t }: { overview: Overvi
         const f = mode === "busy" ? Math.log10(r.requests + 1) / Math.log10(mxn + 1) : (r.p95_ms ?? 0) / mxp;
         const bar = mode === "busy" ? `linear-gradient(90deg, color-mix(in srgb, ${c} 55%, transparent), ${c})` : slow ? "linear-gradient(90deg, color-mix(in srgb, var(--amber) 45%, transparent), var(--amber))" : "linear-gradient(90deg, color-mix(in srgb, var(--blue) 45%, transparent), var(--blue))";
         return (
-          <div key={`${r.binding_id}${r.route}`} className={s.bRow} style={{ animationDelay: `${200 + i * 50}ms` }}>
+          <div key={`${r.binding_id}${r.route}`} className={s.bRow} style={{ animationDelay: `${200 + i * 50}ms` }} onMouseMove={(e) => tip.show(e, [[r.route], [t("endpoints.tipService"), nameBy.get(r.binding_id) ?? ""], [t("services.requests"), n(r.requests)], ["p50", ms(r.p50_ms)], ["p95", ms(r.p95_ms)], ["p99", ms(r.p99_ms)], [t("services.errors"), n(r.errors)], ["4xx", n(r.client_errors)]])} onMouseLeave={tip.hide}>
             <span className={s.rank}>{i + 1}</span>
             <div className={s.bMain}>
               <div className={s.bTop}>
@@ -780,6 +826,8 @@ export function CapacityWidget({ namespaces, t }: { namespaces: NamespaceSnapsho
 
 export function DatabasesWidget({ overview, lines, t }: { overview: Overview; lines: ServiceLine[]; t: T }) {
   const { n, ms } = useN();
+  const tip = useTip();
+  const nameBy = new Map(lines.map((l) => [l.bindingId, l.name]));
   const rows = (answered(overview.databases) ?? []).slice().sort((a, b) => b.calls - a.calls).slice(0, 6);
   const colourBy = new Map(lines.map((l, i) => [l.bindingId, colourOf(i)]));
   if (!rows.length) return <p className={s.calm}>{t("databases.none")}</p>;
@@ -789,7 +837,7 @@ export function DatabasesWidget({ overview, lines, t }: { overview: Overview; li
     <div>
       <div className={s.dbTop}><b>{n(total)}</b><span>{t("databases.operations")}</span></div>
       {rows.map((r, i) => (
-        <div key={`${r.binding_id}${r.operation}${r.database}`} className={`${s.dbRow} ${r.operation === "connect" ? s.hot : ""}`} style={{ animationDelay: `${200 + i * 50}ms` }}>
+        <div key={`${r.binding_id}${r.operation}${r.database}`} className={`${s.dbRow} ${r.operation === "connect" ? s.hot : ""}`} style={{ animationDelay: `${200 + i * 50}ms` }} onMouseMove={(e) => tip.show(e, [[r.operation], [t("endpoints.tipService"), nameBy.get(r.binding_id) ?? ""], [t("databases.tipDatabase"), r.database ?? r.system ?? "—"], [t("databases.operations"), n(r.calls)], ["p95", ms(r.p95_ms)], [t("services.errors"), n(r.errors)]])} onMouseLeave={tip.hide}>
           <span className={s.dbOp}><i style={{ background: colourBy.get(r.binding_id) }} /><code title={r.database ?? ""}>{r.operation}</code></span>
           <span className={s.dbBar}><b style={{ width: `${Math.max(1.5, (Math.log10(r.calls + 1) / Math.log10(mx + 1)) * 100)}%` }} /></span>
           <strong>{n(r.calls)}</strong>

@@ -122,6 +122,8 @@ export interface Section<T> {
   state: SectionState;
   reason?: string;
   data?: T | null;
+  /** The store did not answer this time; this is its last good answer. */
+  stale?: boolean;
 }
 
 export interface TrafficBucket {
@@ -201,6 +203,8 @@ export interface Overview {
   log_lines: Section<LogBucket[]>;
   log_patterns: Section<LogPattern[]>;
   findings: { items: Finding[]; skipped: string[] };
+  /** Seconds since these numbers were read; 0 when read for this request. */
+  age_seconds?: number;
 }
 
 export const OVERVIEW_RANGES = ["6h", "24h"] as const;
@@ -253,6 +257,8 @@ export interface ServiceLine {
   errors: number | null;
   worstP95: number | null;
   perBucket: number[];
+  p95PerBucket: (number | null)[];
+  errorsPerBucket: number[];
   slowBuckets: number;
   codes: Record<string, number> | null;
   longLived: boolean;
@@ -277,6 +283,8 @@ export function serviceLines(rows: ServiceHealthRow[], overview: Overview | null
         errors: t ? t.buckets.reduce((a, b) => a + b.errors, 0) : null,
         worstP95: p95s.length ? Math.max(...p95s) : null,
         perBucket: (t?.buckets ?? []).map((b) => b.requests),
+        p95PerBucket: (t?.buckets ?? []).map((b) => b.p95_ms),
+        errorsPerBucket: (t?.buckets ?? []).map((b) => b.errors),
         slowBuckets: p95s.filter((v) => v >= SLOW_MS).length,
         codes: codes?.find((c) => c.binding_id === id)?.codes ?? null,
         longLived: own.length > 0 && own.every((r) => r.long_lived === r.requests),
