@@ -25,6 +25,7 @@ from drake_api.catalog.router import router as catalog_router
 from drake_api.catalog.router_clusters import router as catalog_clusters_router
 from drake_api.catalog.scheduled_jobs import router as scheduled_jobs_router
 from drake_api.correlation import CorrelationIdMiddleware
+from drake_api.dashboards.router import router as dashboards_router
 from drake_api.db import dispose_engines, get_engine
 from drake_api.deployments.router import router as deployments_router
 from drake_api.deployments.worker import DeploymentIngestWorker
@@ -320,6 +321,7 @@ def create_app(
     app.include_router(service_health_router)
     app.include_router(observability_router)
     app.include_router(observability_overview_router)
+    app.include_router(dashboards_router)
     app.include_router(incidents_router)
     app.include_router(infrastructure_router)
     app.include_router(alerting_router)

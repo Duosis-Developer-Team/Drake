@@ -43,6 +43,10 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         # Sprint 4 agent/inventory tables reference clusters with RESTRICT;
         # clear them first whenever they exist (order-independent resets).
         for table in (
+            # Dashboards (ADR-0033) reference environments and projects with
+            # RESTRICT, so their history clears before either.
+            "dashboard_versions",
+            "dashboards",
             # Sprint 11 onboarding tables reference github projections,
             # identities and the catalog with RESTRICT, so they clear first.
             "gitops_requests",
