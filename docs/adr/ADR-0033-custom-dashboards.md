@@ -1,6 +1,6 @@
 # ADR-0033: Custom dashboards, built from reads Drake already trusts
 
-**Status:** Accepted (parts 1–3: the overview read, findings, storage)
+**Status:** Accepted
 **Extends:** ADR-0011 (states are not zeros), ADR-0015 (query broker), ADR-0029 (OpenTelemetry alongside Prometheus), ADR-0031 (alert rules), ADR-0032 (infrastructure screen)
 
 ## Context
@@ -143,9 +143,27 @@ Permissions:
   the Platform Owner template only, as 0026 did for alert rules.
 - Every save is audited (`dashboard.save`).
 
-## Still to come
+### The screen
 
-- **The screen,** ported from the v18 prototype.
+`/dashboards` lists every environment with services. `/dashboards/{environment}`
+draws the v18 design from the overview read, in nine widgets:
+- the overview: four numbers, then requests, speed and errors on one time axis;
+- service status;
+- traffic between services, as a node graph with response-code rings;
+- what needs attention, each finding with its own small chart. A slow
+  call's evidence is a donut of where the slowest request's time went;
+- the latency heatmap, with totals per row;
+- the endpoint leaderboard (most called / slowest);
+- capacity, from the infrastructure read (ADR-0032);
+- database operations;
+- the make-up of the logs.
+
+Behaviour:
+- The screen polls once a minute.
+- A section that did not answer says so, never draws a zero.
+- With `dashboard.manage` you can move, resize and hide widgets, then save
+  with a note. A conflicting save is reported, not overwritten. History
+  restores a version by saving it again.
 
 ## Consequences
 

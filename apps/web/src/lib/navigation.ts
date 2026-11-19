@@ -24,6 +24,7 @@ import {
   HeartPulse,
   LayoutDashboard,
   PackagePlus,
+  PanelsTopLeft,
   Puzzle,
   Rocket,
   Send,
@@ -56,7 +57,17 @@ export const NAVIGATION: NavGroup[] = [
   {
     key: "overview",
     label: "Overview",
-    items: [{ key: "commandCenter", label: "Command Center", href: "/", icon: LayoutDashboard }],
+    items: [
+      { key: "commandCenter", label: "Command Center", href: "/", icon: LayoutDashboard },
+      {
+        key: "dashboards",
+        label: "Dashboards",
+        href: "/dashboards",
+        icon: PanelsTopLeft,
+        matchPrefix: "/dashboards",
+        anyPermission: ["environment.view"],
+      },
+    ],
   },
   {
     key: "estate",
