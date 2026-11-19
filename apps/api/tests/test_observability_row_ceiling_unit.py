@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
-from drake_api.observability import logs, patterns, signals, timeline, traces
+from drake_api.observability import logs, overview, patterns, signals, timeline, traces
 
 ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = [
@@ -40,6 +40,11 @@ def test_every_read_bound_fits_the_reader_ceiling(path: Path) -> None:
         "traces.MAX_LIMIT": traces.MAX_LIMIT,
         "traces.MAX_ROUTES": traces.MAX_ROUTES,
         "traces.MAX_SPANS": traces.MAX_SPANS,
+        "overview.MAX_ROWS": overview.MAX_ROWS,
+        "overview.MAX_ROUTES": overview.MAX_ROUTES,
+        "overview.MAX_CALLS": overview.MAX_CALLS,
+        "overview.MAX_DB_OPERATIONS": overview.MAX_DB_OPERATIONS,
+        "overview.MAX_LOG_PATTERNS": overview.MAX_LOG_PATTERNS,
     }
     too_big = {name: value for name, value in bounds.items() if value > ceiling}
     assert not too_big, f"above the reader's max_result_rows ({ceiling}): {too_big}"
