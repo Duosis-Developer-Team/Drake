@@ -283,3 +283,58 @@
 @media (prefers-reduced-motion: reduce) {
   .root * { animation: none !important; }
 }
+
+/* ---------- tooltip ---------- */
+.tip { position: fixed; z-index: 60; pointer-events: none; min-width: 170px; max-width: 320px; padding: 10px 12px; border-radius: 12px; background: var(--surface-inverse, #181818); color: #f1f1f1; box-shadow: 0 16px 40px -12px rgb(0 0 0 / .45); display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.tip b { font-size: 12px; font-weight: 600; color: #f1f1f1; margin-bottom: 2px; overflow-wrap: anywhere; }
+.tip span { display: flex; justify-content: space-between; gap: 16px; }
+.tip em { font-style: normal; color: #b5b5b5; }
+.tip strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---------- services table: open in place ---------- */
+.trOpen { cursor: pointer; }
+.svcBtn { all: unset; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svcBtn:hover, .svcBtn:focus-visible { text-decoration: underline; }
+.sparkCell { display: flex; flex-direction: column; gap: 2px; }
+.sparkCell small { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- service drawer ---------- */
+.drawerShade { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / .28); display: flex; justify-content: flex-end; animation: fade .2s ease both; }
+.drawer { width: min(620px, 100vw); height: 100%; overflow-y: auto; background: var(--card); border-left: 1px solid var(--line); box-shadow: -20px 0 48px -20px rgb(0 0 0 / .35); padding: 22px 26px 30px; display: flex; flex-direction: column; gap: 20px; animation: slideIn .28s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes slideIn { from { transform: translateX(40px); opacity: 0; } }
+.dHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.dHead h2 { margin: 4px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
+.dHead h2 i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.dKind { font-size: 12px; color: var(--ink-3); }
+.dKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 14px; }
+.dKpis div { padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; }
+.dKpis div + div { border-left: 1px solid var(--line); }
+.dKpis span { font-size: 11.5px; color: var(--ink-3); }
+.dKpis b { font-size: 20px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dKpis .warnK b { color: var(--amber); }
+.dSec h3 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; }
+.dSec h3 small { font-size: 11.5px; font-weight: 400; color: var(--ink-3); }
+.dBars { display: flex; gap: 2px; height: 90px; align-items: flex-end; }
+.dBars i { flex: 1; border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--c) 70%, transparent); transform-origin: bottom; animation: growY .5s cubic-bezier(.2, .8, .2, 1) both; }
+.dBars i:hover { background: var(--c); }
+.dLat { position: relative; display: flex; gap: 2px; height: 90px; align-items: flex-end; }
+.dLat i { flex: 1; border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--blue) 55%, transparent); transform-origin: bottom; animation: growY .5s cubic-bezier(.2, .8, .2, 1) both; }
+.dLat i.slowDot { background: var(--amber); }
+.dLat u { position: absolute; left: 0; right: 0; border-top: 1.5px dashed color-mix(in srgb, var(--amber) 70%, transparent); pointer-events: none; }
+.dLat u span { position: absolute; right: 0; top: -16px; font-size: 10.5px; color: var(--amber); text-decoration: none; }
+.dRow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 70px 64px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); font-size: 12.5px; }
+.dRow code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dRow b, .dRow em { text-align: right; font-style: normal; font-variant-numeric: tabular-nums; }
+.dRow em { color: var(--ink-3); }
+.dTrack { height: 8px; border-radius: 4px; background: var(--card-2); overflow: hidden; }
+.dTrack em { display: block; height: 100%; border-radius: 4px; background: var(--ok); }
+.dTrack em.c4 { background: var(--violet); } .dTrack em.bad5 { background: var(--red); }
+.dTable { display: flex; flex-direction: column; font-size: 12.5px; }
+.dTh, .dTr { display: grid; grid-template-columns: minmax(0, 1fr) 64px 60px 60px 60px 44px; gap: 8px; align-items: center; padding: 7px 0; }
+.dTh { font-size: 11px; color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.dTr { border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.dTr code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dTh span:not(:first-child), .dTr span { text-align: right; font-variant-numeric: tabular-nums; }
+.slowText { color: var(--amber); font-weight: 600; }
+.dFinding { margin: 0 0 6px; font-size: 13px; color: var(--ink-2); }
+.dLink { align-self: flex-start; text-decoration: none; }

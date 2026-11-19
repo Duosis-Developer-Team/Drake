@@ -38,6 +38,8 @@ import { fetchServiceHealthList, type ServiceHealthRow } from "@/lib/serviceHeal
 import { useSession } from "@/lib/session";
 
 import s from "./dashboards.module.css";
+import { ServiceDrawer } from "./ServiceDrawer";
+import { TipProvider } from "./tip";
 import {
   CapacityWidget,
   DatabasesWidget,
@@ -48,6 +50,7 @@ import {
   OverviewWidget,
   ServicesWidget,
   TrafficGraphWidget,
+  colourOf,
 } from "./widgets";
 
 const POLL_MS = 60_000;
@@ -65,6 +68,7 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
   const [error, setError] = useState<"not_found" | "failed" | null>(null);
   const [range, setRange] = useState<OverviewRange>("24h");
   const [epMode, setEpMode] = useState<"busy" | "slow">("busy");
+  const [opened, setOpened] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<WidgetSlot[]>([]);
@@ -175,9 +179,9 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
       case "overview":
         return { title: t("widget.overview"), sub: t("rangeNote", { range: t(`range.${range}`) }), body: <OverviewWidget overview={overview!} t={t} /> };
       case "services":
-        return { title: t("widget.services"), body: <ServicesWidget lines={lines} t={t} /> };
+        return { title: t("widget.services"), body: <ServicesWidget lines={lines} buckets={overview?.buckets ?? []} onOpen={setOpened} t={t} /> };
       case "traffic_graph":
-        return answered(overview!.traffic) ? { title: t("widget.traffic_graph"), body: <TrafficGraphWidget lines={lines} overview={overview!} t={t} /> } : sectionState(t, "traffic_graph", overview!.traffic.state);
+        return answered(overview!.traffic) ? { title: t("widget.traffic_graph"), body: <TrafficGraphWidget lines={lines} overview={overview!} onOpen={setOpened} t={t} /> } : sectionState(t, "traffic_graph", overview!.traffic.state);
       case "findings":
         return { title: t("widget.findings"), sub: t("findings.sub", { count: overview!.findings.items.length }), body: <FindingsWidget overview={overview!} lines={lines} t={t} /> };
       case "latency_heatmap":
@@ -212,8 +216,10 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
   const visible = layout.filter((w) => !w.hidden);
   const hidden = layout.filter((w) => w.hidden);
 
+  const openedIndex = lines.findIndex((l) => l.bindingId === opened);
   return (
     <PageFrame width="wide">
+      <TipProvider>
       <div className={s.root}>
         <div className={s.head}>
           <div>
@@ -222,6 +228,7 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
             <p className={s.sub}>
               {t("subtitle", { project: dashboard.project_name, environment: dashboard.environment_key, services: bindings.length })}
               {dashboard.saved && dashboard.updated_at ? ` · ${t("savedAt", { version: dashboard.version, when: fmt.date(dashboard.updated_at, { dateStyle: "medium", timeStyle: "short" }) })}` : ` · ${t("default")}`}
+              {overview ? ` · ${(overview.age_seconds ?? 0) < 60 ? t("freshNow") : t("readAgo", { minutes: Math.round((overview.age_seconds ?? 0) / 60) })}` : ""}
             </p>
           </div>
           <div className={s.tools}>
@@ -308,7 +315,11 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
           })}
         </div>
         {editing && hidden.length === 0 && <p className={s.sub} style={{ marginTop: 14 }}><Eye size={12} /> {t("edit.allShown")}</p>}
+        {openedIndex >= 0 && (
+          <ServiceDrawer line={lines[openedIndex]} lines={lines} overview={overview} colour={colourOf(openedIndex)} onClose={() => setOpened(null)} t={t} />
+        )}
       </div>
+      </TipProvider>
     </PageFrame>
   );
 }

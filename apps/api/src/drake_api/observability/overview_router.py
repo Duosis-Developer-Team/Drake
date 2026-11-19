@@ -11,10 +11,24 @@ Visibility is the signal read's (observability.router): trace sections need
 binding the caller may read neither for is absent, as a 404 would be.
 Every section carries its own state, because "no store", "store down" and
 "nothing happened" must not read alike (ADR-0011).
+
+The eight statements each scan a day of spans. Run together they slowed
+each other to 9-11 s in production, and the join hit the reader's 10 s
+ceiling. So at most three run at once, and the answer is kept in Redis per
+exact set of authorized bindings: served at once for a minute, served and
+refreshed in the background for fifteen. A section the store could not
+answer this time falls back to its last good answer, marked as such. The
+cache is looked up only after authorization, and its key is the set of
+binding rows the caller was allowed, so it never serves one caller another
+caller's scope.
 """
 
 import asyncio
+import contextlib
+import hashlib
+import json
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -56,6 +70,11 @@ router = APIRouter(prefix="/v1", tags=["observability"])
 LOGS_PERMISSION = "logs.view"
 TRACES_PERMISSION = "traces.view"
 
+CONCURRENCY = 3
+FRESH_SECONDS = 60
+KEEP_SECONDS = 15 * 60
+_REFRESHING: set[asyncio.Task[None]] = set()
+
 _NORMALIZE: dict[str, Callable[[list[dict[str, Any]], OverviewQuery], Any]] = {
     "traffic": normalize_traffic,
     "latency": normalize_latency,
@@ -74,6 +93,7 @@ async def _section(
     name: str,
     enabled: bool,
     query: OverviewQuery | None,
+    gate: asyncio.Semaphore,
 ) -> dict[str, Any]:
     """One statement's answer with its own state."""
     connector = store.connector
@@ -84,13 +104,14 @@ async def _section(
         return {"state": "ok", "data": None}
     statement, max_rows = query.statements[name]
     try:
-        result = await store.query(
-            statement,
-            query.parameters,
-            max_rows=max_rows,
-            timeout_seconds=connector.timeout_seconds,
-            correlation_id=correlation_id_var.get() or "",
-        )
+        async with gate:
+            result = await store.query(
+                statement,
+                query.parameters,
+                max_rows=max_rows,
+                timeout_seconds=connector.timeout_seconds,
+                correlation_id=correlation_id_var.get() or "",
+            )
         return {"state": "ok", "data": _NORMALIZE[name](result.rows, query)}
     except StoreUnavailableError as error:
         logger.warning("overview store unavailable", extra={"code": error.code, "section": name})
@@ -147,7 +168,54 @@ async def service_overview(
     except OverviewQueryError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
+    visible = {b["id"] for b in log_bindings} | {b["id"] for b in trace_bindings}
+    listed = [
+        {
+            "binding_id": str(i),
+            "traces": any(b["id"] == str(i) for b in trace_bindings),
+            "logs": any(b["id"] == str(i) for b in log_bindings),
+        }
+        for i in ids
+        if str(i) in visible
+    ]
+    key = _cache_key(range_key, trace_bindings, log_bindings, settings)
+    redis = request.app.state.telemetry_redis
+    cached = await _read(redis, key)
+
+    async def compute() -> dict[str, Any]:
+        body = await _compute(
+            store,
+            settings,
+            range_key=range_key,
+            trace_query=trace_query,
+            log_query=log_query,
+            now=now,
+            previous=(cached or {}).get("body"),
+        )
+        await _write(redis, key, body)
+        return body
+
+    if cached is not None:
+        age = time.time() - float(cached.get("stored_at", 0))
+        if age >= FRESH_SECONDS:
+            await _refresh_in_background(redis, key, compute)
+        return {**cached["body"], "bindings": listed, "age_seconds": round(age)}
+    body = await compute()
+    return {**body, "bindings": listed, "age_seconds": 0}
+
+
+async def _compute(
+    store: ClickHouseStore,
+    settings: Settings,
+    *,
+    range_key: str,
+    trace_query: OverviewQuery | None,
+    log_query: OverviewQuery | None,
+    now: datetime,
+    previous: dict[str, Any] | None,
+) -> dict[str, Any]:
     names = [*TRACE_STATEMENTS, *LOG_STATEMENTS]
+    gate = asyncio.Semaphore(CONCURRENCY)
     answers = await asyncio.gather(
         *(
             _section(
@@ -159,13 +227,23 @@ async def service_overview(
                     else settings.observability_logs_enabled
                 ),
                 query=trace_query if name in TRACE_STATEMENTS else log_query,
+                gate=gate,
             )
             for name in names
         )
     )
     sections = dict(zip(names, answers, strict=True))
+    # A section the store could not answer this time keeps its last good
+    # answer, said to be one, rather than going blank for a minute.
+    for name, section in list(sections.items()):
+        old = (previous or {}).get(name)
+        if (
+            section.get("state") == "unavailable"
+            and isinstance(old, dict)
+            and old.get("state") == "ok"
+        ):
+            sections[name] = {**old, "stale": True}
     frame = trace_query or log_query
-    visible = {b["id"] for b in log_bindings} | {b["id"] for b in trace_bindings}
     return {
         "range": range_key,
         "as_of": now.isoformat(),
@@ -177,19 +255,70 @@ async def service_overview(
             "start": (now - timedelta(seconds=RANGES[range_key])).isoformat(),
             "end": now.isoformat(),
         },
-        "bindings": [
-            {
-                "binding_id": str(i),
-                "traces": any(b["id"] == str(i) for b in trace_bindings),
-                "logs": any(b["id"] == str(i) for b in log_bindings),
-            }
-            for i in ids
-            if str(i) in visible
-        ],
         **sections,
         # Found from the sections above; no further read (observability.findings).
         "findings": find(sections),
     }
+
+
+def _cache_key(
+    range_key: str,
+    trace_bindings: list[dict[str, Any]],
+    log_bindings: list[dict[str, Any]],
+    settings: Settings,
+) -> str:
+    identity = {
+        "range": range_key,
+        "traces": sorted(str(b["id"]) for b in trace_bindings),
+        "logs": sorted(str(b["id"]) for b in log_bindings),
+        "enabled": [settings.observability_traces_enabled, settings.observability_logs_enabled],
+    }
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    return f"overview:v1:{digest}"
+
+
+async def _read(redis: Any, key: str) -> dict[str, Any] | None:
+    try:
+        raw = await redis.get(key)
+        value = json.loads(raw) if raw else None
+    except Exception:
+        return None
+    if isinstance(value, dict) and isinstance(value.get("body"), dict):
+        return value
+    return None
+
+
+async def _write(redis: Any, key: str, body: dict[str, Any]) -> None:
+    # Only an answer with something in it is worth keeping.
+    if not any(
+        isinstance(v, dict) and v.get("state") == "ok" and v.get("data") is not None
+        for v in body.values()
+    ):
+        return
+    with contextlib.suppress(Exception):
+        await redis.set(key, json.dumps({"stored_at": time.time(), "body": body}), ex=KEEP_SECONDS)
+
+
+async def _refresh_in_background(redis: Any, key: str, compute: Callable[[], Any]) -> None:
+    try:
+        acquired = await redis.set(f"{key}:refresh", "1", nx=True, ex=90)
+    except Exception:
+        return
+    if not acquired:
+        return
+
+    async def run() -> None:
+        try:
+            await compute()
+        except Exception:
+            logger.warning("overview: background refresh failed")
+        finally:
+            with contextlib.suppress(Exception):
+                await redis.delete(f"{key}:refresh")
+
+    task = asyncio.create_task(run(), name="overview-refresh")
+    _REFRESHING.add(task)
+    task.add_done_callback(_REFRESHING.discard)
 
 
 def _store(request: Request) -> ClickHouseStore:
