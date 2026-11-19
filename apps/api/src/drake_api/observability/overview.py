@@ -49,6 +49,7 @@ MAX_CALLS = 200
 MAX_DB_OPERATIONS = 200
 MAX_LOG_PATTERNS = 20
 PATTERN_CHARS = 160
+MAX_PATTERN_WORKLOADS = 8  # bindings named per log shape
 
 # Latency classes: a third of a decade each, from 1 ms. Class 0 holds
 # everything under ~2.15 ms, class 12 everything from 10 s up. Class 9
@@ -233,7 +234,8 @@ SELECT
     count() AS lines,
     max(SeverityNumber) AS severity_number,
     argMax(SeverityText, SeverityNumber) AS severity_text,
-    uniqExact(wk) AS workloads
+    uniqExact(wk) AS workloads,
+    groupUniqArray({max_pattern_workloads:UInt8})(wk) AS wks
 FROM (
     SELECT
         SeverityNumber,
@@ -318,6 +320,7 @@ def build_overview_query(
         "max_db": str(MAX_DB_OPERATIONS),
         "max_patterns": str(MAX_LOG_PATTERNS),
         "pattern_chars": str(PATTERN_CHARS),
+        "max_pattern_workloads": str(MAX_PATTERN_WORKLOADS),
     }
     parameters.update({name: pattern.replace("\\", "\\\\") for name, pattern, _ in _REPLACEMENTS})
 
@@ -521,9 +524,16 @@ def normalize_log_lines(rows: list[dict[str, Any]], query: OverviewQuery) -> lis
     return out
 
 
-def normalize_log_patterns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def normalize_log_patterns(
+    rows: list[dict[str, Any]], query: OverviewQuery
+) -> list[dict[str, Any]]:
+    """The commonest log shapes, each with the bindings that wrote it."""
     out: list[dict[str, Any]] = []
     for row in _rows(rows):
+        wks = row.get("wks") or []
+        if not isinstance(wks, list):
+            raise ValueError("wks")
+        bindings = sorted({query.keys[w] for w in map(str, wks) if w in query.keys})
         out.append(
             {
                 "pattern": str(row.get("pattern") or ""),
@@ -531,6 +541,7 @@ def normalize_log_patterns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "severity_number": _count(row.get("severity_number")),
                 "severity_text": str(row.get("severity_text") or "") or None,
                 "workloads": _count(row.get("workloads")),
+                "binding_ids": bindings,
             }
         )
     return out

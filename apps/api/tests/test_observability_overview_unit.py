@@ -279,11 +279,14 @@ def test_log_lines_and_patterns() -> None:
                 "lines": "28782",
                 "severity_number": 21,
                 "severity_text": "FATAL",
-                "workloads": "1",
+                "workloads": "2",
+                "wks": [CORE_KEY, STRANGER],
             }
-        ]
+        ],
+        q,
     )
-    assert patterns[0]["severity_number"] == 21 and patterns[0]["workloads"] == 1
+    assert patterns[0]["binding_ids"] == ["b-core"]  # the stranger is not named
+    assert patterns[0]["severity_number"] == 21 and patterns[0]["workloads"] == 2
 
 
 def test_a_malformed_row_is_refused() -> None:

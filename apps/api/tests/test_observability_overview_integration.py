@@ -178,6 +178,8 @@ async def test_every_section_answers_for_the_requested_binding_only(
     # A call from a workload the caller was not given is not a call here.
     assert body["calls"]["data"] == []
     assert body["log_patterns"]["data"][0]["lines"] == 40
+    # Too few to be a finding; every detector could run.
+    assert body["findings"] == {"items": [], "skipped": []}
 
     # Another workload in the namespace never leaves the API.
     for word in ("someone-else", "GET /secret", "SELECT secret"):

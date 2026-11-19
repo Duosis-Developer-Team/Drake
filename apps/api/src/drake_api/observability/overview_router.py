@@ -3,7 +3,8 @@
 `GET /v1/service-health/overview?binding_id=…&range=…` answers, for every
 requested binding the caller may read, the numbers a custom dashboard
 draws: traffic per bucket, the latency histogram, status codes, routes,
-calls between the services, database operations and the log make-up.
+calls between the services, database operations and the log make-up, and
+what needs attention, found from those numbers (observability.findings).
 
 Visibility is the signal read's (observability.router): trace sections need
 `traces.view` and log sections `logs.view`, each at the binding's scope. A
@@ -24,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
+from drake_api.observability.findings import find
 from drake_api.observability.health_checks import with_http_probes
 from drake_api.observability.overview import (
     LOG_STATEMENTS,
@@ -62,7 +64,7 @@ _NORMALIZE: dict[str, Callable[[list[dict[str, Any]], OverviewQuery], Any]] = {
     "calls": normalize_calls,
     "databases": normalize_databases,
     "log_lines": normalize_log_lines,
-    "log_patterns": lambda rows, _query: normalize_log_patterns(rows),
+    "log_patterns": normalize_log_patterns,
 }
 
 
@@ -161,6 +163,7 @@ async def service_overview(
             for name in names
         )
     )
+    sections = dict(zip(names, answers, strict=True))
     frame = trace_query or log_query
     visible = {b["id"] for b in log_bindings} | {b["id"] for b in trace_bindings}
     return {
@@ -183,7 +186,9 @@ async def service_overview(
             for i in ids
             if str(i) in visible
         ],
-        **dict(zip(names, answers, strict=True)),
+        **sections,
+        # Found from the sections above; no further read (observability.findings).
+        "findings": find(sections),
     }
 
 
