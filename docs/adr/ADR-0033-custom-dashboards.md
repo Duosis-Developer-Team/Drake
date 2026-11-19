@@ -1,6 +1,6 @@
 # ADR-0033: Custom dashboards, built from reads Drake already trusts
 
-**Status:** Accepted (parts 1 and 2: the environment overview read, findings)
+**Status:** Accepted (parts 1–3: the overview read, findings, storage)
 **Extends:** ADR-0011 (states are not zeros), ADR-0015 (query broker), ADR-0029 (OpenTelemetry alongside Prometheus), ADR-0031 (alert rules), ADR-0032 (infrastructure screen)
 
 ## Context
@@ -113,14 +113,38 @@ what we found by hand:
 It also found a missing pool in core-service, which the hand analysis
 had missed.
 
+### One dashboard per environment, every save a version
+
+Migration 0027 adds two tables, additive only:
+- `dashboards`: one row per environment, holding its title and layout;
+- `dashboard_versions`: every saved layout, kept.
+
+An environment without a row still has a dashboard. Drake draws the
+default layout at version 0, and the first save writes version 1.
+
+A layout is an ordered list of widgets from a fixed catalog of nine. Each
+entry has a key, a size (S, M or L) and whether it is hidden.
+- A widget carries no query. What it draws is decided by its key, so a layout
+  can never read anything the fixed reads do not.
+- At least one widget is shown.
+- A widget added to the catalog later comes back hidden in older layouts.
+
+Saving and history:
+- A save names the version it edited. A save over a newer one is a 409,
+  never a silent overwrite.
+- Restoring is saving an old layout again, so history only grows.
+- There is no delete endpoint. Archiving is a column, and the foreign keys
+  are RESTRICT.
+
+Permissions:
+- Seeing a dashboard is `environment.view`. Every number on it still needs
+  `traces.view` or `logs.view`.
+- Saving needs the new `dashboard.manage` at the project. It is granted to
+  the Platform Owner template only, as 0026 did for alert rules.
+- Every save is audited (`dashboard.save`).
+
 ## Still to come
 
-- **Dashboard storage.** Additive tables for dashboards and their versions:
-  - Drake generates a default dashboard per project and environment.
-  - Widgets can be reordered, resized (S/M/L) and added from the catalog.
-  - Removing a dashboard archives it; nothing is deleted.
-  - Every save is a new version that can be restored.
-  - New `dashboard.view` and `dashboard.manage` permissions.
 - **The screen,** ported from the v18 prototype.
 
 ## Consequences
