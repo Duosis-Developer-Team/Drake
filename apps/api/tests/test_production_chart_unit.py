@@ -2290,8 +2290,10 @@ def test_production_runs_the_incident_runner_but_delivers_nothing() -> None:
     env = _api_env(render_prod())
     assert env["DRAKE_INCIDENT_RUNNER_ENABLED"] == "true"
     assert int(env["DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS"]) >= 60
-    # Delivery stays a separate, deliberate decision.
-    assert env.get("DRAKE_NOTIFICATION_PLANNER_ENABLED", "false") == "false"
+    # In-app notifications only (2026-11-20): the planner routes incident
+    # events to Drake's own inbox. Delivery, the only way anything leaves
+    # Drake, stays a separate, deliberate decision.
+    assert env.get("DRAKE_NOTIFICATION_PLANNER_ENABLED", "false") == "true"
     assert env.get("DRAKE_WEBHOOK_WORKER_ENABLED", "false") == "false"
 
 
@@ -2370,6 +2372,8 @@ def test_an_email_sender_without_its_secret_or_ids_is_refused() -> None:
 
 def test_production_mails_nobody_until_a_sender_is_configured() -> None:
     env = _api_env(render_prod())
-    assert env["DRAKE_NOTIFICATION_PLANNER_ENABLED"] == "false"
+    # The planner may write in-app notifications; nothing is sent while
+    # the delivery worker is off and no sender is configured.
     assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "false"
     assert "DRAKE_NOTIFICATION_EMAIL_SENDER" not in env
+    assert env.get("DRAKE_NOTIFICATION_EMAILS", "{}") in ("", "{}")
