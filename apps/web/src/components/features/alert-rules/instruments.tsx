@@ -320,14 +320,23 @@ export function SignalChart({
   const B = 30;
   const from = now - DAY_MS;
   const data = numeric(points);
-  const max = Math.max(threshold * 1.4, ...data.map((d) => d.v), 1e-9) * 1.06;
+  // An anomaly rule's threshold moves with its normal: drawn as a line
+  // through each point's own edge rather than one flat level.
+  const moving = points.some((p) => p.threshold !== undefined);
+  const edges = moving
+    ? points.flatMap((p) =>
+        p.threshold === null || p.threshold === undefined ? [] : [{ t: Date.parse(p.at), v: p.threshold }],
+      )
+    : [];
+  const lineAt = moving ? (edges[edges.length - 1]?.v ?? 0) : threshold;
+  const max = Math.max(lineAt * 1.4, ...data.map((d) => d.v), ...edges.map((d) => d.v), 1e-9) * 1.06;
   const x = (t: number) => L + ((t - from) / DAY_MS) * (W - L - R);
   const y = (v: number) => T + (1 - v / max) * (H - T - B);
   const color = severityTone(severity);
   const pts = data.map((d) => `${x(d.t).toFixed(1)},${y(d.v).toFixed(1)}`).join(" ");
   const last = data[data.length - 1];
-  const lastBreached =
-    last !== undefined && (operator === "<" ? last.v < threshold : last.v > threshold);
+  const below = operator === "<" || operator === "below_normal";
+  const lastBreached = last !== undefined && (below ? last.v < lineAt : last.v > lineAt);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
       <defs>
@@ -383,19 +392,29 @@ export function SignalChart({
           />
         </>
       ) : null}
-      <line
-        x1={L}
-        x2={W - R}
-        y1={y(threshold)}
-        y2={y(threshold)}
-        stroke={color}
-        strokeWidth="1.5"
-        strokeDasharray="7 5"
-      />
-      <rect x={W - R - 96} y={y(threshold) - 21} width="96" height="17" rx="4" fill={color} />
+      {moving ? (
+        <polyline
+          points={edges.map((d) => `${x(d.t).toFixed(1)},${y(d.v).toFixed(1)}`).join(" ")}
+          fill="none"
+          stroke={color}
+          strokeWidth="1.5"
+          strokeDasharray="7 5"
+        />
+      ) : (
+        <line
+          x1={L}
+          x2={W - R}
+          y1={y(threshold)}
+          y2={y(threshold)}
+          stroke={color}
+          strokeWidth="1.5"
+          strokeDasharray="7 5"
+        />
+      )}
+      <rect x={W - R - 96} y={y(lineAt) - 21} width="96" height="17" rx="4" fill={color} />
       <text
         x={W - R - 48}
-        y={y(threshold) - 9}
+        y={y(lineAt) - 9}
         textAnchor="middle"
         fontSize="11"
         fontWeight="500"

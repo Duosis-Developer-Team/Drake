@@ -27,10 +27,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.alert_rules.model import (
-    RULE_SIGNALS,
-    TELEMETRY_SIGNALS,
+    ANOMALY_OPERATORS,
+    STORED_SIGNALS,
+    STORED_TELEMETRY,
     RuleCondition,
     RuleState,
+    anomaly_threshold,
+    baseline_windows,
+    effective_operator,
+    normal_band,
     sample_from_health,
     step,
 )
@@ -43,7 +48,8 @@ SAMPLE_RETENTION = timedelta(days=8)
 
 _COVERING_RULES = """
 SELECT r.id, r.name, r.signal, r.operator, r.threshold, r.for_seconds, r.severity,
-       r.muted_until, s.state, s.breach_since, s.firing_since, s.incident_id
+       r.muted_until, s.state, s.breach_since, s.firing_since, s.incident_id,
+       r.log_contains, r.route
 FROM alert_rules r
 LEFT JOIN alert_rule_states s ON s.rule_id = r.id AND s.binding_id = :binding
 WHERE r.enabled
@@ -80,7 +86,7 @@ async def _record_sample(
             ON CONFLICT (binding_id, observed_at) DO NOTHING
             """
         ),
-        {"binding": binding_id, "at": at, **dict.fromkeys(RULE_SIGNALS), **sample},
+        {"binding": binding_id, "at": at, **dict.fromkeys(STORED_SIGNALS), **sample},
     )
     await connection.execute(
         text(
@@ -88,6 +94,31 @@ async def _record_sample(
         ),
         {"binding": binding_id, "cut": at - SAMPLE_RETENTION},
     )
+
+
+async def _baseline(
+    connection: AsyncConnection, binding_id: uuid.UUID, signal: str, at: datetime
+) -> list[float]:
+    """This binding's stored values of *signal* at this time of day over
+    the past week (alert_rules.model.baseline_windows)."""
+    if signal not in STORED_SIGNALS:
+        return []
+    windows = baseline_windows(at)
+    clauses = " OR ".join(f"observed_at BETWEEN :s{i} AND :e{i}" for i in range(len(windows)))
+    params: dict[str, Any] = {"binding": binding_id}
+    for i, (start, end) in enumerate(windows):
+        params[f"s{i}"] = start
+        params[f"e{i}"] = end
+    rows = (
+        await connection.execute(
+            text(
+                f"SELECT {signal} FROM service_health_samples "  # noqa: S608 - whitelisted column
+                f"WHERE binding_id = :binding AND ({clauses}) AND {signal} IS NOT NULL"
+            ),
+            params,
+        )
+    ).all()
+    return [float(r[0]) for r in rows]
 
 
 async def _incident_event(
@@ -196,6 +227,7 @@ async def record_and_evaluate(
     payload: dict[str, Any],
     telemetry: dict[str, float | None] | None = None,
     now: datetime | None = None,
+    rule_values: dict[str, float | None] | None = None,
 ) -> int:
     """Store this cycle's sample and step every covering rule. Returns how
     many rules changed state, for the cycle report.
@@ -205,9 +237,11 @@ async def record_and_evaluate(
     signals are left unknown but the telemetry still counts, observed at
     *now*: the store answered this minute even if the provider did not.
     """
-    fresh_telemetry = {k: v for k, v in (telemetry or {}).items() if k in TELEMETRY_SIGNALS}
+    fresh_telemetry = {k: v for k, v in (telemetry or {}).items() if k in STORED_TELEMETRY}
+    filtered = rule_values or {}
     if payload.get("served_from_last_good") or payload.get("cached"):
-        if now is None or not any(v is not None for v in fresh_telemetry.values()):
+        fresh = [*fresh_telemetry.values(), *filtered.values()]
+        if now is None or not any(v is not None for v in fresh):
             return 0
         at = now
         sample: dict[str, float | None] = dict(fresh_telemetry)
@@ -233,10 +267,28 @@ async def record_and_evaluate(
         ).all()
         for row in rules:
             rule_id, name, signal, operator, threshold, for_seconds, severity = row[:7]
-            muted_until, state, breach_since, firing_since, incident_id = row[7:]
-            condition = RuleCondition(signal, operator, float(threshold), int(for_seconds))
+            muted_until, state, breach_since, firing_since, incident_id = row[7:12]
+            log_contains, route = row[12:14]
             previous = RuleState(state or "ok", breach_since, firing_since)
-            value = sample.get(signal)
+            # A rule that filters by text or endpoint has its own value this
+            # cycle (alert_rules.telemetry); every other rule reads the sample.
+            if log_contains is not None or route is not None:
+                value = filtered.get(str(rule_id))
+            else:
+                value = sample.get(signal)
+            if operator in ANOMALY_OPERATORS:
+                # Judged against this signal's normal at this time of day;
+                # with too little history there is nothing to judge.
+                band = normal_band(
+                    await _baseline(connection, binding_id, signal, at), signal, float(threshold)
+                )
+                bound = anomaly_threshold(operator, band)
+                if bound is None:
+                    value = None
+                threshold = bound if bound is not None else threshold
+            condition = RuleCondition(
+                signal, effective_operator(operator), float(threshold), int(for_seconds)
+            )
             result = step(condition, value, previous, at)
             new_incident = incident_id
             if result.event == "fired":

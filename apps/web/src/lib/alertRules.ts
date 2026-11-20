@@ -20,8 +20,14 @@ export type Signal =
   | "error_logs"
   | "fatal_logs"
   | "slow_requests"
-  | "slowest_route_p95_seconds";
-export type Operator = ">" | "<";
+  | "slowest_route_p95_seconds"
+  | "matching_logs";
+/** Fixed thresholds, or the signal against its own normal (ADR-0035). */
+export type Operator = ">" | "<" | "above_normal" | "below_normal";
+export const ANOMALY_OPERATORS: ReadonlySet<Operator> = new Set(["above_normal", "below_normal"]);
+/** The comparison an operator makes once its threshold is known. */
+export const comparison = (operator: Operator): ">" | "<" =>
+  operator === "<" || operator === "below_normal" ? "<" : ">";
 export type Severity = "critical" | "warning";
 export type RuleStatus = "firing" | "pending" | "ok" | "muted" | "disabled" | "no_data";
 
@@ -37,6 +43,7 @@ export const SIGNALS: Signal[] = [
   "fatal_logs",
   "slow_requests",
   "slowest_route_p95_seconds",
+  "matching_logs",
 ];
 
 /**
@@ -57,6 +64,7 @@ export const SIGNAL_SOURCE: Record<Signal, SignalSource> = {
   fatal_logs: "logs",
   slow_requests: "traces",
   slowest_route_p95_seconds: "traces",
+  matching_logs: "logs",
 };
 export const SIGNAL_SOURCES: SignalSource[] = ["metrics", "logs", "traces"];
 
@@ -105,6 +113,10 @@ export interface AlertRule {
   version: number;
   created_at: string;
   updated_at: string;
+  /** Only log lines containing this text (log signals). */
+  log_contains: string | null;
+  /** Only this endpoint (trace signals). */
+  route: string | null;
   target: { project: string; environment: string | null; service: string | null };
   can_manage: boolean;
   states: RuleState[];
@@ -132,6 +144,8 @@ export interface RuleList {
 export interface SeriesPoint {
   at: string;
   value: number | null;
+  /** An anomaly rule's threshold at this point: the edge of its normal. */
+  threshold?: number | null;
 }
 
 export interface BindingSeries {
@@ -168,6 +182,8 @@ export interface RuleDraft {
   threshold: number;
   for_seconds: number;
   severity: Severity;
+  log_contains?: string | null;
+  route?: string | null;
 }
 
 export interface RulePreview {
@@ -191,6 +207,17 @@ export function fetchRuleOptions(): Promise<RuleOptions> {
 
 export function fetchRuleHistory(ruleId: string): Promise<RuleHistory> {
   return apiGet<RuleHistory>(`/v1/alert-rules/${encodeURIComponent(ruleId)}/history`);
+}
+
+export function fetchRuleRoutes(target: {
+  project_id: string;
+  environment_id: string | null;
+  service_id: string | null;
+}): Promise<{ routes: string[] }> {
+  const query = new URLSearchParams({ project_id: target.project_id });
+  if (target.environment_id) query.set("environment_id", target.environment_id);
+  if (target.service_id) query.set("service_id", target.service_id);
+  return apiGet<{ routes: string[] }>(`/v1/alert-rules/routes?${query}`);
 }
 
 export function previewRule(csrfToken: string, draft: RuleDraft, signal?: AbortSignal) {

@@ -267,6 +267,56 @@ describe("alert rules screen", () => {
       severity: "critical",
     });
   });
+
+  it("watches a text in the logs only once the text is given", async () => {
+    const calls = routes();
+    render(
+      <SessionProvider>
+        <AlertRulesPage />
+      </SessionProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Create rule/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /A text in the logs/ }));
+    expect(await within(dialog).findByText(/Type the text to look for/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Lines containing"), {
+      target: { value: "payment failed" },
+    });
+    await waitFor(() =>
+      expect(
+        calls.some((call) => {
+          if (call.path !== "/v1/alert-rules/preview") return false;
+          const body = JSON.parse(String(call.init?.body));
+          return body.signal === "matching_logs" && body.log_contains === "payment failed";
+        }),
+      ).toBe(true),
+    );
+    expect(within(dialog).getByText(/“payment failed”/)).toBeInTheDocument();
+  });
+
+  it("judges against normal with a sensitivity instead of a threshold", async () => {
+    const calls = routes();
+    render(
+      <SessionProvider>
+        <AlertRulesPage />
+      </SessionProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Create rule/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /Unusual error logs/ }));
+    expect(await within(dialog).findByLabelText("Sensitivity")).toBeInTheDocument();
+    expect(within(dialog).getByText("3 × the usual spread")).toBeInTheDocument();
+    expect(within(dialog).getByText(/rises above its normal|stays above its normal/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.path === "/v1/alert-rules/preview" &&
+            JSON.parse(String(call.init?.body)).operator === "above_normal",
+        ),
+      ).toBe(true),
+    );
+  });
 });
 
 describe("alert rules screen in Turkish", () => {

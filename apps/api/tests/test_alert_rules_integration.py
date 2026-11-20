@@ -303,6 +303,66 @@ async def test_a_stale_verdict_still_records_this_minutes_logs(engine: AsyncEngi
     assert [tuple(r) for r in stored] == [(now, 40.0, None)]
 
 
+async def test_a_rule_that_matches_text_is_judged_on_its_own_value(engine: AsyncEngine) -> None:
+    world = await make_world(engine)
+    rule = await make_rule(engine, world, signal="matching_logs", threshold=0, for_seconds=0)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE alert_rules SET log_contains = 'payment failed' WHERE id = :r"),
+            {"r": rule},
+        )
+    start = NOW - timedelta(minutes=50)
+    for index, matched in enumerate([None, 3.0, 0.0]):
+        await record_and_evaluate(
+            engine,
+            binding_id=world["binding_id"],
+            catalog=catalog(world),
+            service_key="api",
+            payload=payload(start + timedelta(minutes=index), error_ratio=0.0),
+            rule_values={str(rule): matched},
+        )
+    # Unknown moved nothing; three matching lines fired; none resolved it.
+    assert await rule_events(engine, rule) == ["fired", "resolved"]
+
+
+async def test_an_anomaly_rule_fires_against_this_hours_normal(engine: AsyncEngine) -> None:
+    world = await make_world(engine)
+    rule = await make_rule(engine, world, signal="error_logs", threshold=3, for_seconds=0)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE alert_rules SET operator = 'above_normal' WHERE id = :r"), {"r": rule}
+        )
+        # A week of history at this time of day: about ten error lines.
+        for day in range(1, 8):
+            for minute in range(-25, 26, 5):
+                at = NOW - timedelta(days=day, minutes=minute)
+                await connection.execute(
+                    text(
+                        "INSERT INTO service_health_samples (binding_id, observed_at, error_logs) "
+                        "VALUES (:b, :at, :v) ON CONFLICT DO NOTHING"
+                    ),
+                    {"b": world["binding_id"], "at": at, "v": 10 + (minute % 3)},
+                )
+    for index, logs in enumerate([12.0, 40.0]):
+        await record_and_evaluate(
+            engine,
+            binding_id=world["binding_id"],
+            catalog=catalog(world),
+            service_key="api",
+            payload=payload(NOW - timedelta(minutes=4 - index), error_ratio=0.0),
+            telemetry={"error_logs": logs},
+        )
+    # 12 is normal for this hour; 40 is not.
+    assert await rule_events(engine, rule) == ["fired"]
+    async with engine.connect() as connection:
+        bound = (
+            await connection.execute(
+                text("SELECT threshold FROM alert_rule_events WHERE rule_id = :r"), {"r": rule}
+            )
+        ).scalar_one()
+    assert 12 < bound < 40  # the normal's upper edge, recorded with the event
+
+
 async def test_the_sampler_reads_a_page_of_bindings_in_two_statements(
     engine: AsyncEngine,
 ) -> None:
@@ -417,6 +477,8 @@ async def test_rule_crud_is_audited_versioned_and_listed_with_history(
                 "signal": signal,
                 "threshold": threshold,
             }
+            if signal == "matching_logs":
+                each["log_contains"] = "payment failed"
             saved = await client.post("/v1/alert-rules", json=each, headers=await _csrf(client))
             assert saved.status_code == 201, (signal, saved.text)
             draft = {k: v for k, v in each.items() if k != "name"}
@@ -424,6 +486,33 @@ async def test_rule_crud_is_audited_versioned_and_listed_with_history(
                 "/v1/alert-rules/preview", json=draft, headers=await _csrf(client)
             )
             assert tried.status_code == 200, (signal, tried.text)
+
+        # A rule against its own normal, and one on a single endpoint.
+        for extra in (
+            {"operator": "above_normal", "threshold": 3},
+            {"signal": "slowest_route_p95_seconds", "threshold": 1, "route": "POST /checkout"},
+        ):
+            each = {**body, "name": f"Kind {sorted(extra)}", **extra}
+            saved = await client.post("/v1/alert-rules", json=each, headers=await _csrf(client))
+            assert saved.status_code == 201, (extra, saved.text)
+            listed = (await client.get(f"/v1/alert-rules?project_id={world['project_id']}")).json()
+            mine = next(r for r in listed["rules"] if r["id"] == saved.json()["id"])
+            assert mine["route"] == extra.get("route") and mine["operator"] == each["operator"]
+            tried = await client.post(
+                "/v1/alert-rules/preview",
+                json={k: v for k, v in each.items() if k != "name"},
+                headers=await _csrf(client),
+            )
+            assert tried.status_code == 200, (extra, tried.text)
+        mixed = {**body, "operator": "above_normal", "threshold": 3, "log_contains": "x"}
+        assert (
+            await client.post("/v1/alert-rules", json=mixed, headers=await _csrf(client))
+        ).status_code == 422
+        routes = await client.get(
+            f"/v1/alert-rules/routes?project_id={world['project_id']}"
+            f"&environment_id={world['environment_id']}&service_id={world['service_id']}"
+        )
+        assert routes.status_code == 200 and isinstance(routes.json()["routes"], list)
 
         await feed(engine, world, [0.3, 0.3, 0.01], NOW - timedelta(minutes=8))
 

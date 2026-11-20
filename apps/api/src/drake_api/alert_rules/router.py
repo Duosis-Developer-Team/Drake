@@ -16,7 +16,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from drake_api.alert_rules import repository as repo
-from drake_api.alert_rules.model import MAX_FOR_SECONDS, OPERATORS, RULE_SIGNALS, SEVERITIES
+from drake_api.alert_rules.model import (
+    MAX_FILTER_TEXT,
+    MAX_FOR_SECONDS,
+    MAX_ROUTE,
+    OPERATORS,
+    RULE_SIGNALS,
+    SEVERITIES,
+)
+from drake_api.alert_rules.telemetry import TelemetrySampler
 from drake_api.audit.service import AuditEventData, record_audit_event_in
 from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
@@ -38,8 +46,9 @@ Signal = Literal[
     "fatal_logs",
     "slow_requests",
     "slowest_route_p95_seconds",
+    "matching_logs",
 ]
-Operator = Literal[">", "<"]
+Operator = Literal[">", "<", "above_normal", "below_normal"]
 Severity = Literal["critical", "warning"]
 
 
@@ -47,6 +56,15 @@ Severity = Literal["critical", "warning"]
 assert set(get_args(Signal)) == set(RULE_SIGNALS)
 assert set(get_args(Operator)) == set(OPERATORS)
 assert set(get_args(Severity)) == set(SEVERITIES)
+
+
+def _sampler(request: Request) -> TelemetrySampler:
+    settings: Settings = request.app.state.settings
+    return TelemetrySampler(
+        request.app.state.observability_store,
+        logs_enabled=settings.observability_logs_enabled,
+        traces_enabled=settings.observability_traces_enabled,
+    )
 
 
 def _fail(error: repo.RuleError) -> HTTPException:
@@ -65,6 +83,10 @@ class Condition(BaseModel):
     threshold: float = Field(ge=0)
     for_seconds: int = Field(ge=0, le=MAX_FOR_SECONDS)
     severity: Severity
+    # Only lines containing this text (log signals), or only this endpoint
+    # (trace signals) — ADR-0035.
+    log_contains: str | None = Field(default=None, min_length=1, max_length=MAX_FILTER_TEXT)
+    route: str | None = Field(default=None, min_length=1, max_length=MAX_ROUTE)
 
 
 class Target(BaseModel):
@@ -93,6 +115,8 @@ class RuleUpdate(BaseModel):
     threshold: float | None = Field(default=None, ge=0)
     for_seconds: int | None = Field(default=None, ge=0, le=MAX_FOR_SECONDS)
     severity: Severity | None = None
+    log_contains: str | None = Field(default=None, min_length=1, max_length=MAX_FILTER_TEXT)
+    route: str | None = Field(default=None, min_length=1, max_length=MAX_ROUTE)
     enabled: bool | None = None
     expected_version: int = Field(ge=1)
 
@@ -132,6 +156,25 @@ async def rule_options(
     }
 
 
+@router.get("/alert-rules/routes")
+async def rule_routes(
+    request: Request,
+    project_id: uuid.UUID,
+    environment_id: uuid.UUID | None = None,
+    service_id: uuid.UUID | None = None,
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """The endpoints a single-endpoint rule on this target can name."""
+    settings: Settings = request.app.state.settings
+    target = {"project_id": project_id, "environment_id": environment_id, "service_id": service_id}
+    async with get_engine(settings).connect() as connection:
+        try:
+            found = await repo.routes(connection, auth.principal, target, _sampler(request), _now())
+        except repo.RuleError as error:
+            raise _fail(error) from error
+    return {"routes": found}
+
+
 @router.get("/alert-rules")
 async def list_rules(
     request: Request,
@@ -151,7 +194,14 @@ async def preview_rule(
     settings: Settings = request.app.state.settings
     async with get_engine(settings).connect() as connection:
         try:
-            return await repo.preview(connection, auth.principal, payload.model_dump(), _now())
+            return await repo.preview(
+                connection,
+                auth.principal,
+                payload.model_dump(),
+                _now(),
+                _sampler(request),
+                request.app.state.telemetry_redis,
+            )
         except repo.RuleError as error:
             raise _fail(error) from error
 
@@ -189,7 +239,10 @@ async def update_rule(
     auth: AuthContext = Depends(require_csrf),
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
-    values = payload.model_dump(exclude_none=True, exclude={"expected_version"})
+    # A filter can be cleared by sending it as null; every other field
+    # left out or null keeps its value.
+    sent = payload.model_dump(exclude_unset=True, exclude={"expected_version"})
+    values = {k: v for k, v in sent.items() if v is not None or k in ("log_contains", "route")}
     actor = uuid.UUID(auth.session.identity_id)
     async with get_engine(settings).begin() as connection:
         try:
@@ -249,6 +302,13 @@ async def rule_history(
     settings: Settings = request.app.state.settings
     async with get_engine(settings).connect() as connection:
         try:
-            return await repo.rule_history(connection, auth.principal, rule_id, _now())
+            return await repo.rule_history(
+                connection,
+                auth.principal,
+                rule_id,
+                _now(),
+                _sampler(request),
+                request.app.state.telemetry_redis,
+            )
         except repo.RuleError as error:
             raise _fail(error) from error
