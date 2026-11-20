@@ -376,6 +376,8 @@ async def test_rule_crud_is_audited_versioned_and_listed_with_history(
 
         options = (await client.get("/v1/alert-rules/options")).json()
         assert "error_ratio" in options["signals"]
+        assert "fatal_logs" in options["signals"]
+        assert options["evaluation_interval_seconds"] >= 15
         assert any(p["id"] == str(world["project_id"]) for p in options["projects"])
 
         body = {

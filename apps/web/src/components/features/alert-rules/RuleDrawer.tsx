@@ -641,7 +641,7 @@ export function RuleDrawer({
           </div>
         </div>
         <div className={s.df}>
-          <span className={`${s.cap} ${s.d}`}>{t("drawer.checkedEvery")}</span>
+          <span className={`${s.cap} ${s.d}`}>{t("drawer.checkedEvery", { duration: duration(options?.evaluation_interval_seconds ?? 60) })}</span>
           {error ? <span className={s.err}>{error}</span> : null}
           <span style={{ display: "flex", gap: 8 }}>
             <button type="button" className={s.btn} onClick={onClose}>
