@@ -26,7 +26,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from drake_api.alert_rules.model import RuleCondition, RuleState, sample_from_health, step
+from drake_api.alert_rules.model import (
+    RULE_SIGNALS,
+    TELEMETRY_SIGNALS,
+    RuleCondition,
+    RuleState,
+    sample_from_health,
+    step,
+)
 
 logger = logging.getLogger("drake_api.alert_rules.evaluator")
 
@@ -65,13 +72,15 @@ async def _record_sample(
             """
             INSERT INTO service_health_samples
                 (binding_id, observed_at, error_ratio, latency_p95_seconds, request_rate,
-                 restarts, cpu_utilization, memory_utilization, unavailable_replicas)
+                 restarts, cpu_utilization, memory_utilization, unavailable_replicas,
+                 error_logs, fatal_logs, slow_requests, slowest_route_p95_seconds)
             VALUES (:binding, :at, :error_ratio, :latency_p95_seconds, :request_rate,
-                    :restarts, :cpu_utilization, :memory_utilization, :unavailable_replicas)
+                    :restarts, :cpu_utilization, :memory_utilization, :unavailable_replicas,
+                    :error_logs, :fatal_logs, :slow_requests, :slowest_route_p95_seconds)
             ON CONFLICT (binding_id, observed_at) DO NOTHING
             """
         ),
-        {"binding": binding_id, "at": at, **sample},
+        {"binding": binding_id, "at": at, **dict.fromkeys(RULE_SIGNALS), **sample},
     )
     await connection.execute(
         text(
@@ -185,15 +194,29 @@ async def record_and_evaluate(
     catalog: dict[str, Any],
     service_key: str,
     payload: dict[str, Any],
+    telemetry: dict[str, float | None] | None = None,
+    now: datetime | None = None,
 ) -> int:
     """Store this cycle's sample and step every covering rule. Returns how
-    many rules changed state, for the cycle report."""
+    many rules changed state, for the cycle report.
+
+    *telemetry* holds the log and trace signals (alert_rules.telemetry),
+    read this cycle. When the health verdict is old evidence, the metric
+    signals are left unknown but the telemetry still counts, observed at
+    *now*: the store answered this minute even if the provider did not.
+    """
+    fresh_telemetry = {k: v for k, v in (telemetry or {}).items() if k in TELEMETRY_SIGNALS}
     if payload.get("served_from_last_good") or payload.get("cached"):
-        return 0
-    at = _parse(payload.get("computed_at"))
-    if at is None:
-        return 0
-    sample = sample_from_health(payload)
+        if now is None or not any(v is not None for v in fresh_telemetry.values()):
+            return 0
+        at = now
+        sample: dict[str, float | None] = dict(fresh_telemetry)
+    else:
+        parsed = _parse(payload.get("computed_at"))
+        if parsed is None:
+            return 0
+        at = parsed
+        sample = {**sample_from_health(payload), **fresh_telemetry}
     changed = 0
     async with engine.begin() as connection:
         await _record_sample(connection, binding_id, at, sample)

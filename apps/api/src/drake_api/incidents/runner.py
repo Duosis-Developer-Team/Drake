@@ -24,6 +24,7 @@ import contextlib
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -31,6 +32,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from drake_api.alert_rules.evaluator import record_and_evaluate
+from drake_api.alert_rules.telemetry import TelemetrySampler
 from drake_api.incidents.model import evaluation_from_health
 from drake_api.incidents.processor import ProcessResult, process_evaluation
 from drake_api.incidents.system_actor import ensure_system_evaluator
@@ -140,6 +142,7 @@ async def evaluate_binding(
     orchestrator: HealthOrchestrator,
     principal: Principal,
     binding_row: Any,
+    telemetry: dict[str, float | None] | None = None,
 ) -> ProcessResult | None:
     """One binding: fresh evaluation, then the lifecycle decision.
 
@@ -169,6 +172,8 @@ async def evaluate_binding(
             catalog=catalog,
             service_key=str(context.get("service_key") or ""),
             payload=payload,
+            telemetry=telemetry,
+            now=datetime.now(UTC),
         )
     except Exception:
         logger.warning("incident runner: alert rules could not be evaluated for a binding")
@@ -194,6 +199,7 @@ async def run_cycle(
     concurrency: int = MAX_EVALUATION_CONCURRENCY,
     lease_seconds: int = 120,
     principal: Principal | None = None,
+    sampler: TelemetrySampler | None = None,
 ) -> CycleReport:
     """One bounded sweep, guarded by a distributed lease.
 
@@ -231,12 +237,12 @@ async def run_cycle(
             return False
         return True
 
-    async def evaluate(row: Any) -> ProcessResult | None:
+    async def evaluate(row: Any, telemetry: dict[str, float | None] | None) -> ProcessResult | None:
         async with semaphore:
             if not await still_ours():
                 return None
             try:
-                return await evaluate_binding(engine, orchestrator, actor, row)
+                return await evaluate_binding(engine, orchestrator, actor, row, telemetry)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -254,7 +260,19 @@ async def run_cycle(
             page = await _due_bindings(engine, min(remaining, batch_size), cursor)
             if not page:
                 break
-            results = await asyncio.gather(*(evaluate(row) for row in page))
+            # Log and trace signals for the whole page in two statements
+            # (ADR-0034). Without them a rule on them simply has no data.
+            telemetry: dict[str, dict[str, float | None]] = {}
+            if sampler is not None:
+                try:
+                    telemetry = await sampler.sample(
+                        engine, [row[0] for row in page], datetime.now(UTC)
+                    )
+                except Exception:
+                    logger.warning("incident runner: telemetry signals could not be read")
+            results = await asyncio.gather(
+                *(evaluate(row, telemetry.get(str(row[0]))) for row in page)
+            )
             for result in results:
                 if result is None:
                     continue
@@ -295,8 +313,10 @@ class EvaluationRunner:
         batch_size: int = 25,
         concurrency: int = MAX_EVALUATION_CONCURRENCY,
         lease_seconds: int = 120,
+        sampler: TelemetrySampler | None = None,
     ) -> None:
         self._engine = engine
+        self._sampler = sampler
         self._orchestrator = orchestrator
         self._redis = redis
         # Floors, not suggestions: a misconfigured interval cannot turn
@@ -336,6 +356,7 @@ class EvaluationRunner:
                     batch_size=self._batch,
                     concurrency=self._concurrency,
                     lease_seconds=self._lease,
+                    sampler=self._sampler,
                 )
             except asyncio.CancelledError:
                 raise

@@ -159,6 +159,7 @@ export interface DeploymentFilters {
   rolloutState?: RolloutState;
   evidenceState?: EvidenceState;
   startedWithin?: string;
+  limit?: number;
 }
 
 export function deploymentListPath(filters: DeploymentFilters): string {
@@ -172,6 +173,7 @@ export function deploymentListPath(filters: DeploymentFilters): string {
   if (filters.rolloutState) query.set("rollout_state", filters.rolloutState);
   if (filters.evidenceState) query.set("evidence_state", filters.evidenceState);
   if (filters.startedWithin) query.set("started_within", filters.startedWithin);
+  if (filters.limit) query.set("limit", String(filters.limit));
   const suffix = query.toString() ? `?${query}` : "";
   return `/v1/deployments${suffix}`;
 }

@@ -67,8 +67,22 @@ function routes(over: Record<string, unknown> = {}) {
     "/v1/dashboards/e1": { status: 200, body: { ...DASHBOARD, ...over } },
     "/v1/service-health/services": { status: 200, body: { items: [row("core", "core-service"), row("auth", "auth-service")], total: 2, limit: 100, offset: 0 } },
     "/v1/service-health/overview": { status: 200, body: OVERVIEW },
+    "/v1/deployments": { status: 200, body: { items: [DEPLOY], next_cursor: null, total: 1, limit: 50 } },
   });
 }
+
+// Inside the second bucket of OVERVIEW, and a regression after it.
+const DEPLOY = {
+  id: "d1", namespace: "hermes-test", workload_kind: "Deployment", workload_name: "auth-service", revision: 7,
+  observed_generation: 7, images: [], primary_image: null, primary_digest: null, short_digest: "abc123", commit_sha: "f00dcafe",
+  short_commit: "f00dcaf", workflow: { provider: null, repository: null, run_id: null, run_url: null },
+  evidence_state: "verified", evidence_detail: {}, rollout_state: "healthy", rollout_reason: null,
+  replicas: { desired: 2, ready: 2, updated: 2, available: 2 },
+  rollout_started_at: new Date((1_763_403_600 + 900) * 1000).toISOString(), rollout_completed_at: null,
+  last_seen_at: "", cluster: { cluster_ref: "c", id: "c1" }, project_key: "hermes", environment_key: "test",
+  service_key: "auth-service", environment_service_id: "es-auth", binding_id: "auth", previous_revision_id: null,
+  health_comparison: { verdict: "regressed", incident_count: 0 },
+};
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -117,6 +131,22 @@ describe("dashboards", () => {
     expect(screen.getByRole("link", { name: "Open its service health page" })).toHaveAttribute("href", "/service-health/auth");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "auth-service" })).not.toBeInTheDocument());
+  });
+
+  it("marks a deploy on the charts and opens that service from the pin", async () => {
+    const calls = routes();
+    render(<SessionProvider><EnvironmentDashboardPage /></SessionProvider>);
+    const pin = await screen.findByRole("button", { name: "auth-service deployed f00dcaf" });
+    const asked = calls.find((c) => c.path.startsWith("/v1/deployments"))!;
+    expect(asked.path).toContain("environment_id=e1");
+    expect(asked.path).toContain("started_within=24h");
+    fireEvent.mouseMove(pin);
+    const tip = await screen.findByRole("tooltip");
+    expect(tip).toHaveTextContent("auth-service deployed");
+    expect(tip).toHaveTextContent("f00dcaf");
+    fireEvent.click(pin);
+    const panel = await screen.findByRole("complementary", { name: "auth-service" });
+    expect(panel).toHaveTextContent("Deploys");
   });
 
   it("offers no editing to someone who may only look", async () => {

@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from drake_api.alert_rules.model import SIGNALS, RuleCondition, replay, validate
+from drake_api.alert_rules.model import RATIO_SIGNALS, RULE_SIGNALS, RuleCondition, replay, validate
 from drake_api.catalog.authz import visible_scope_ids
 from drake_api.rbac.service import Principal
 
@@ -436,7 +436,7 @@ async def delete_rule(
 async def _samples(
     connection: AsyncConnection, binding_ids: list[uuid.UUID], signal: str, since: datetime
 ) -> dict[str, list[tuple[datetime, float | None]]]:
-    if signal not in SIGNALS:
+    if signal not in RULE_SIGNALS:
         raise RuleError("invalid_rule", "unknown signal")
     rows = (
         await connection.execute(
@@ -521,7 +521,7 @@ async def preview(
     suggestion = None
     for factor in (1.25, 1.5, 0.75):
         candidate = threshold * factor
-        if values["signal"] in ("error_ratio", "cpu_utilization", "memory_utilization"):
+        if values["signal"] in RATIO_SIGNALS:
             candidate = min(candidate, 1.0)
         count = len(episodes_at(candidate))
         if count != len(found):
@@ -578,7 +578,7 @@ async def options(connection: AsyncConnection, principal: Principal) -> dict[str
         if not any(s["id"] == str(sid) for s in env["services"]):
             env["services"].append({"id": str(sid), "key": skey})
     return {
-        "signals": list(SIGNALS),
+        "signals": list(RULE_SIGNALS),
         "projects": [
             {**p, "environments": list(p["environments"].values())} for p in projects.values()
         ],

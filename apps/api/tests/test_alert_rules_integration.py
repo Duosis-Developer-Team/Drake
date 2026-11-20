@@ -56,6 +56,7 @@ async def make_rule(
     for_seconds: int = 120,
     muted_until: datetime | None = None,
     scope: str = "project",
+    signal: str = "error_ratio",
 ) -> uuidlib.UUID:
     async with engine.begin() as connection:
         return (
@@ -65,7 +66,7 @@ async def make_rule(
                     INSERT INTO alert_rules
                         (project_id, environment_id, service_id, name, signal, operator,
                          threshold, for_seconds, severity, muted_until)
-                    VALUES (:p, :e, :s, 'Errors high', 'error_ratio', '>', :t, :f, :sev, :m)
+                    VALUES (:p, :e, :s, 'Errors high', :signal, '>', :t, :f, :sev, :m)
                     RETURNING id
                     """
                 ),
@@ -77,6 +78,7 @@ async def make_rule(
                     "f": for_seconds,
                     "sev": severity,
                     "m": muted_until,
+                    "signal": signal,
                 },
             )
         ).scalar_one()
@@ -237,6 +239,113 @@ async def test_a_rule_on_another_service_does_not_cover_this_binding(engine: Asy
     rule = await make_rule(engine, other, for_seconds=0, scope="service")
     await feed(engine, world, [0.9], NOW - timedelta(minutes=3))
     assert await rule_events(engine, rule) == []
+
+
+async def test_a_fatal_log_rule_opens_an_incident_and_closes_it(engine: AsyncEngine) -> None:
+    world = await make_world(engine)
+    rule = await make_rule(engine, world, signal="fatal_logs", threshold=0, for_seconds=0)
+    start = NOW - timedelta(minutes=30)
+    for index, fatal in enumerate([0.0, 2.0, 1.0, 0.0]):
+        await record_and_evaluate(
+            engine,
+            binding_id=world["binding_id"],
+            catalog=catalog(world),
+            service_key="api",
+            payload=payload(start + timedelta(minutes=index), error_ratio=0.0),
+            telemetry={"fatal_logs": fatal, "error_logs": fatal},
+        )
+    assert await rule_events(engine, rule) == ["fired", "resolved"]
+    assert [tuple(r[1:]) for r in await rule_incidents(engine, rule)] == [
+        ("resolved", "rule", "rule_resolved")
+    ]
+    async with engine.connect() as connection:
+        stored = (
+            await connection.execute(
+                text(
+                    "SELECT fatal_logs, error_ratio FROM service_health_samples "
+                    "WHERE binding_id = :b ORDER BY observed_at"
+                ),
+                {"b": world["binding_id"]},
+            )
+        ).all()
+    assert [tuple(r) for r in stored] == [(0.0, 0.0), (2.0, 0.0), (1.0, 0.0), (0.0, 0.0)]
+
+
+async def test_a_stale_verdict_still_records_this_minutes_logs(engine: AsyncEngine) -> None:
+    world = await make_world(engine)
+    logs = await make_rule(engine, world, signal="error_logs", threshold=5, for_seconds=0)
+    metric = await make_rule(engine, world, for_seconds=0)
+    old = NOW - timedelta(minutes=40)
+    now = NOW - timedelta(minutes=2)
+    await record_and_evaluate(
+        engine,
+        binding_id=world["binding_id"],
+        catalog=catalog(world),
+        service_key="api",
+        payload=payload(old, error_ratio=0.9, served_from_last_good=True),
+        telemetry={"error_logs": 40.0},
+        now=now,
+    )
+    # The log rule saw a new observation; the metric rule saw only old
+    # evidence and stays where it was.
+    assert await rule_events(engine, logs) == ["fired"]
+    assert await rule_events(engine, metric) == []
+    async with engine.connect() as connection:
+        stored = (
+            await connection.execute(
+                text(
+                    "SELECT observed_at, error_logs, error_ratio FROM service_health_samples "
+                    "WHERE binding_id = :b"
+                ),
+                {"b": world["binding_id"]},
+            )
+        ).all()
+    assert [tuple(r) for r in stored] == [(now, 40.0, None)]
+
+
+async def test_the_sampler_reads_a_page_of_bindings_in_two_statements(
+    engine: AsyncEngine,
+) -> None:
+    from drake_api.alert_rules.telemetry import TelemetrySampler
+
+    world = await make_world(engine)
+    async with engine.connect() as connection:
+        cluster_ref, namespace, kind, name = (
+            await connection.execute(
+                text(
+                    "SELECT c.cluster_ref, b.namespace, b.workload_kind, b.workload_name "
+                    "FROM service_workload_bindings b JOIN clusters c ON c.id = b.cluster_id "
+                    "WHERE b.id = :b"
+                ),
+                {"b": world["binding_id"]},
+            )
+        ).one()
+    wk = f"{cluster_ref}|{namespace}|{str(kind).lower()}|{name}"
+    asked: list[str] = []
+
+    class Store:
+        connector = type("C", (), {"database": "drake", "timeout_seconds": 5.0})()
+
+        async def query(self, statement: str, parameters: dict[str, str], **_: Any) -> Any:
+            asked.append(statement)
+            assert wk in parameters["workloads"]
+            if "otel_logs" in statement:
+                rows = [{"wk": wk, "errors": "7", "fatal": "0"}]
+            else:
+                rows = [{"wk": wk, "slow": "3", "routes": "2", "route_p95_ns": 2_000_000_000}]
+            return type("R", (), {"rows": rows})()
+
+    sampler = TelemetrySampler(Store(), logs_enabled=True, traces_enabled=True)  # type: ignore[arg-type]
+    out = await sampler.sample(engine, [world["binding_id"]], NOW)
+    assert len(asked) == 2
+    assert out[str(world["binding_id"])] == {
+        "error_logs": 7.0,
+        "fatal_logs": 0.0,
+        "slow_requests": 3.0,
+        "slowest_route_p95_seconds": 2.0,
+    }
+    off = TelemetrySampler(Store(), logs_enabled=False, traces_enabled=False)  # type: ignore[arg-type]
+    assert await off.sample(engine, [world["binding_id"]], NOW) == {}
 
 
 # --- API --------------------------------------------------------------------

@@ -16,7 +16,11 @@ export type Signal =
   | "restarts"
   | "cpu_utilization"
   | "memory_utilization"
-  | "unavailable_replicas";
+  | "unavailable_replicas"
+  | "error_logs"
+  | "fatal_logs"
+  | "slow_requests"
+  | "slowest_route_p95_seconds";
 export type Operator = ">" | "<";
 export type Severity = "critical" | "warning";
 export type RuleStatus = "firing" | "pending" | "ok" | "muted" | "disabled" | "no_data";
@@ -29,7 +33,32 @@ export const SIGNALS: Signal[] = [
   "cpu_utilization",
   "memory_utilization",
   "unavailable_replicas",
+  "error_logs",
+  "fatal_logs",
+  "slow_requests",
+  "slowest_route_p95_seconds",
 ];
+
+/**
+ * Where a signal is measured (ADR-0034). Metrics come from the health
+ * verdict; logs and traces are counted from the store over the last five
+ * minutes, every minute.
+ */
+export type SignalSource = "metrics" | "logs" | "traces";
+export const SIGNAL_SOURCE: Record<Signal, SignalSource> = {
+  error_ratio: "metrics",
+  latency_p95_seconds: "metrics",
+  request_rate: "metrics",
+  restarts: "metrics",
+  cpu_utilization: "metrics",
+  memory_utilization: "metrics",
+  unavailable_replicas: "metrics",
+  error_logs: "logs",
+  fatal_logs: "logs",
+  slow_requests: "traces",
+  slowest_route_p95_seconds: "traces",
+};
+export const SIGNAL_SOURCES: SignalSource[] = ["metrics", "logs", "traces"];
 
 /** Ratios are stored 0..1 and shown as percentages. */
 export const RATIO_SIGNALS: ReadonlySet<Signal> = new Set([
@@ -213,7 +242,7 @@ export function formatSignal(
     const pct = value * 100;
     return `${number(pct, { maximumFractionDigits: pct < 100 ? 1 : 0 })}%`;
   }
-  if (signal === "latency_p95_seconds") {
+  if (signal === "latency_p95_seconds" || signal === "slowest_route_p95_seconds") {
     return value >= 1
       ? `${number(value, { maximumFractionDigits: 2 })}s`
       : `${number(value * 1000, { maximumFractionDigits: 0 })}ms`;

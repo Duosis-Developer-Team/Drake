@@ -114,6 +114,20 @@
 .key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .laneKey { padding-left: 144px; }
 
+/* ---------- deploy markers ---------- */
+.laneStack { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.dlines { position: absolute; top: 0; bottom: 0; left: 144px; right: 0; pointer-events: none; }
+.dlines i { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 1.5px dashed color-mix(in srgb, var(--violet) 75%, transparent); }
+.dlines i.dlBad { border-left-color: var(--red); }
+.dBox { position: relative; }
+.dBox .dlines { left: 0; }
+.rail { position: relative; height: 22px; border-radius: 6px; background: color-mix(in srgb, var(--card-2) 60%, transparent); }
+.railNone { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; font-style: normal; color: var(--ink-3); }
+.pin { position: absolute; top: 50%; width: 12px; height: 12px; padding: 0; border: 2px solid var(--card); border-radius: 3px; background: var(--violet); transform: translate(-50%, -50%) rotate(45deg); cursor: pointer; animation: fade .4s ease both; }
+.pin:hover, .pin:focus-visible { outline: 2px solid color-mix(in srgb, var(--violet) 45%, transparent); outline-offset: 2px; }
+.pin.pinBad { background: var(--red); }
+.keyPin { background: var(--violet); transform: rotate(45deg) scale(.85); }
+
 /* ---------- services table ---------- */
 .th, .tr { display: grid; grid-template-columns: 180px 100px minmax(140px, 1.3fr) 70px minmax(180px, 1.6fr) 196px; gap: 24px; align-items: center; }
 .th { font-size: 11.5px; color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
