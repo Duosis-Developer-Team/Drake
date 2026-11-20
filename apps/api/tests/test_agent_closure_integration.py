@@ -473,3 +473,73 @@ async def test_snapshot_ttl_and_bounded_cleanup(engine: AsyncEngine, tmp_path: P
         # The projection itself is NEVER touched by cleanup.
         final = await _counts(engine, cluster_a)
         assert final["projection"] >= 3
+
+
+async def test_missing_resources_leave_after_retention(engine: AsyncEngine, tmp_path: Path) -> None:
+    """Rows that left the cluster leave the projection after their window:
+    events after a day, other kinds after a week. Active rows, recent
+    missing rows and other clusters are never touched, and one pass is
+    bounded."""
+    world = await seed_catalog_world(engine)
+    settings = ca_settings(tmp_path).model_copy(
+        update={"agent_cleanup_batch_rows": 2, "agent_missing_prune_rows_per_pass": 5}
+    )
+    cluster_a = str(world["cluster_a"].id)
+    cluster_b = str(world["cluster_b"].id)
+
+    async def put(cluster: str, kind: str, lifecycle: str, hours_ago: int) -> None:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO inventory_resources (cluster_id, api_group, api_version,
+                        kind, namespace, name, uid, resource_version, lifecycle,
+                        last_seen_at, observed_at)
+                    VALUES (:cluster, '', 'v1', :kind, 'ns', :name, :uid, '1', :lifecycle,
+                        now() - make_interval(hours => :hours), now())
+                    """
+                ),
+                {
+                    "cluster": cluster,
+                    "kind": kind,
+                    "name": f"{kind.lower()}-{uuidlib.uuid4().hex[:8]}",
+                    "uid": str(uuidlib.uuid4()),
+                    "lifecycle": lifecycle,
+                    "hours": hours_ago,
+                },
+            )
+
+    for _ in range(4):
+        await put(cluster_a, "Event", "missing", 30)  # past the 24 h event window
+    await put(cluster_a, "Event", "missing", 2)  # still inside it
+    for _ in range(3):
+        await put(cluster_a, "Pod", "missing", 200)  # past the 168 h window
+    await put(cluster_a, "Pod", "missing", 30)  # a day old: an event would go, a pod stays
+    await put(cluster_a, "Pod", "active", 500)  # present, however old its last change
+    await put(cluster_b, "Event", "missing", 30)  # another cluster
+
+    async def count(cluster: str, kind: str, lifecycle: str) -> int:
+        async with engine.connect() as connection:
+            return int(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM inventory_resources WHERE cluster_id = :c "
+                            "AND kind = :k AND lifecycle = :l AND namespace = 'ns'"
+                        ),
+                        {"c": cluster, "k": kind, "l": lifecycle},
+                    )
+                ).scalar_one()
+            )
+
+    first = await run_inventory_maintenance(engine, settings, uuidlib.UUID(cluster_a))
+    assert first["missing_pruned"] == 5, "one pass is bounded by the per-pass limit"
+    second = await run_inventory_maintenance(engine, settings, uuidlib.UUID(cluster_a))
+    assert second["missing_pruned"] == 2, "the rest drains on the next pass"
+    third = await run_inventory_maintenance(engine, settings, uuidlib.UUID(cluster_a))
+    assert third["missing_pruned"] == 0, "nothing past retention is left"
+
+    assert await count(cluster_a, "Event", "missing") == 1
+    assert await count(cluster_a, "Pod", "missing") == 1
+    assert await count(cluster_a, "Pod", "active") == 1
+    assert await count(cluster_b, "Event", "missing") == 1

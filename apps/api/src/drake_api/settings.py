@@ -306,6 +306,16 @@ class Settings(BaseSettings):
     agent_change_event_retention_days: int = 30
     agent_change_event_row_limit: int = 20_000
     agent_cleanup_batch_rows: int = 5_000
+    # How long a resource that left the cluster stays in the projection as
+    # `missing`. Events churn fastest (Kubernetes itself keeps them about an
+    # hour), so they go after a day; everything else after a week. Before
+    # these bounds existed nothing ever left: on 2026-11-18 drake-prod held
+    # 4.2 million missing rows (3.8 M events, 220 k pods, 220 k jobs), 3.2 GB.
+    agent_missing_retention_hours: int = 168
+    agent_missing_event_retention_hours: int = 24
+    # Upper bound on missing rows removed by one maintenance pass, so a
+    # backlog drains over many passes instead of one long delete.
+    agent_missing_prune_rows_per_pass: int = 20_000
     # The internal agent listener's own TLS identity (server cert) and the
     # client-CA used for CERT_REQUIRED verification are configured on the
     # listener (scripts/run_internal_agent_api.py); these settings gate the
@@ -554,6 +564,10 @@ class Settings(BaseSettings):
             raise RuntimeError("change-event retention below 7 days is local/test only")
         if self.agent_snapshot_history_limit < 10:
             raise RuntimeError("snapshot history limit below 10 is local/test only")
+        if self.agent_missing_retention_hours < 24:
+            raise RuntimeError("missing-resource retention below 24 hours is local/test only")
+        if self.agent_missing_event_retention_hours < 1:
+            raise RuntimeError("missing-event retention below 1 hour is local/test only")
         if self.github_app_enabled:
             if not (self.github_app_private_key_file and self.github_webhook_secret_file):
                 raise RuntimeError(
