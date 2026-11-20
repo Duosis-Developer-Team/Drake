@@ -181,6 +181,18 @@ export function formattersFor(locale: Locale) {
       const h = Math.round((abs % 86400) / 3600);
       return compact ? short("daysShort", d) : `${short("daysShort", d)} ${short("hoursShort", h)}`;
     },
+    /** A latency in milliseconds: "403 ms", "1.32 s" / "1,32 sn". */
+    latency: (ms: number | null | undefined): string => {
+      if (ms === null || ms === undefined || Number.isNaN(ms)) return MISSING;
+      if (ms < 1000) {
+        return common("time.millisecondsShort", {
+          count: new Intl.NumberFormat(tag, { maximumFractionDigits: ms < 10 ? 1 : 0 }).format(ms),
+        });
+      }
+      return common("time.secondsPrecise", {
+        value: new Intl.NumberFormat(tag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(ms / 1000),
+      });
+    },
     /** A UTC instant, printed with its zone: the product's one timestamp form. */
     utc: (value: string | number | Date | null | undefined): string => {
       if (value === null || value === undefined || value === "") return MISSING;

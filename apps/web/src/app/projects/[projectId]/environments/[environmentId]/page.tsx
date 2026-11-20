@@ -44,6 +44,7 @@ import {
 } from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { ScheduledJobs } from "@/components/catalog/ScheduledJobs";
+import { ServiceMapPanel } from "@/components/service-map/ServiceMapPanel";
 import { Provenance } from "@/components/provenance/Provenance";
 import { Panel, PanelFooter, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -270,6 +271,17 @@ export default function EnvironmentDetailPage() {
             </p>
           </StatTile>
         </div>
+
+        {/* Who calls whom in this environment — only where workloads run
+            in a cluster Tracery reads; an external runtime has no traces. */}
+        {data.cluster ? (
+          <div className="mb-6">
+            <ServiceMapPanel
+              environmentId={environmentId}
+              environmentLabel={data.scope.ref}
+            />
+          </div>
+        ) : null}
 
         <div className="page-split">
           <div className="page-main">

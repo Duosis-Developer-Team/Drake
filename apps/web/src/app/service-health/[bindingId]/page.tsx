@@ -33,6 +33,8 @@ import {
 import { LogExplorer } from "@/components/service-health/LogExplorer";
 import { SectionNav, type SectionNavItem } from "@/components/service-health/SectionNav";
 import { TimelineStrip } from "@/components/service-health/TimelineStrip";
+import { ServiceMapPanel } from "@/components/service-map/ServiceMapPanel";
+import { useBindingEnvironment } from "@/lib/serviceMap";
 import { TraceExplorer } from "@/components/service-health/TraceExplorer";
 import {
   RangeSelector,
@@ -330,6 +332,7 @@ function sectionItems(
   return [
     { id: "sh-overview", label: t("detail.nav.overview") },
     { id: "sh-timeline", label: t("detail.nav.timeline") },
+    { id: "sh-map", label: t("detail.nav.map") },
     { id: "sh-why", label: t("detail.nav.why") },
     ...(facts.history ? [{ id: "sh-history", label: t("detail.nav.history") }] : []),
     { id: "sh-requests", label: t("detail.nav.requests"), badge: count(facts.requestErrors) },
@@ -694,6 +697,10 @@ export default function ServiceHealthDetailPage() {
                   />
                 </div>
 
+                <div id="sh-map" className="scroll-mt-24">
+                  <BindingServiceMap bindingId={binding.id} fallbackLabel={binding.service_key} />
+                </div>
+
                 {/* Why + resource pressure. */}
                 <div id="sh-why" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
                   <Panel className="h-full">
@@ -991,5 +998,20 @@ export default function ServiceHealthDetailPage() {
         }}
       </Gate>
     </PageFrame>
+  );
+}
+
+/** This service, what it calls and what calls it — from its environment's traces. */
+function BindingServiceMap({ bindingId, fallbackLabel }: { bindingId: string; fallbackLabel: string }) {
+  const { environmentId, label, resolved } = useBindingEnvironment(bindingId);
+  // Outside the reader's service list there is no environment to read.
+  if (resolved && !environmentId) return null;
+  return (
+    <ServiceMapPanel
+      environmentId={environmentId}
+      focusBindingId={bindingId}
+      focusLabel={label ?? fallbackLabel}
+      compact
+    />
   );
 }

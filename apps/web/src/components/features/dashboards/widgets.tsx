@@ -19,7 +19,6 @@ import {
   trafficGraph,
   worstP95,
   type Finding,
-  type GraphNode,
   type Overview,
   type ServiceLine,
 } from "@/lib/dashboards";
@@ -27,6 +26,8 @@ import { useFormat, useT } from "@/lib/i18n";
 import type { DeploymentRow } from "@/lib/deployments";
 import type { NamespaceSnapshot } from "@/lib/infrastructure";
 import { traceDetailPath, tracesPath, type TraceDetail, type TracePage } from "@/lib/traces";
+
+import { ServiceMap } from "@/components/service-map/ServiceMap";
 
 import s from "./dashboards.module.css";
 import { useTip, type TipLine } from "./tip";
@@ -388,154 +389,14 @@ export function ServicesWidget({ lines, buckets, onOpen, t }: { lines: ServiceLi
 
 /* ================= traffic graph ================= */
 
-export function TrafficGraphWidget({ lines, overview, onOpen, t }: { lines: ServiceLine[]; overview: Overview; onOpen: (id: string) => void; t: T }) {
-  const { n, ms } = useN();
-  const tip = useTip();
-  const [ref, width] = useWidth<HTMLDivElement>();
-  const [hover, setHover] = useState<string | null>(null);
-  const { nodes, edges } = useMemo(() => trafficGraph(lines, overview), [lines, overview]);
-  const W = Math.max(700, width || 1000);
-  const colourBy = new Map(lines.map((l, i) => [l.bindingId, colourOf(i)]));
-
-  // Columns by depth: users, then services by how far down the call chain
-  // they sit, then databases.
-  const depth = new Map<string, number>([["users", 0]]);
-  for (const node of nodes) if (node.kind === "service") depth.set(node.id, 1);
-  for (let pass = 0; pass < nodes.length; pass++)
-    for (const e of edges)
-      if (e.kind === "call") depth.set(e.to, Math.max(depth.get(e.to) ?? 1, (depth.get(e.from) ?? 1) + 1));
-  const serviceMax = Math.max(1, ...nodes.filter((x) => x.kind === "service").map((x) => depth.get(x.id) ?? 1));
-  for (const node of nodes) if (node.kind === "database") depth.set(node.id, serviceMax + 1);
-  const cols = serviceMax + 2;
-  const byCol = new Map<number, GraphNode[]>();
-  for (const node of nodes) {
-    const c = depth.get(node.id) ?? 1;
-    byCol.set(c, [...(byCol.get(c) ?? []), node]);
-  }
-  const crowded = Math.max(1, ...[...byCol.values()].map((list) => list.length));
-  const H = Math.max(470, crowded * 160 + 90);
-  const mxr = Math.max(...nodes.map((x) => x.requests), 1);
-  const R = (x: GraphNode) => 30 + 20 * (Math.log10(x.requests + 1) / Math.log10(mxr + 1));
-  const pos = new Map<string, { x: number; y: number; r: number; c: number }>();
-  for (const [c, list] of byCol) {
-    list.forEach((node, i) => {
-      const x = 70 + (c / Math.max(1, cols - 1)) * (W - 140);
-      const y = 50 + ((i + 0.5) / list.length) * (H - 110);
-      pos.set(node.id, { x, y, r: R(node), c });
-    });
-  }
-  const mxe = Math.max(...edges.map((e) => e.count), 1);
-  const nodeTip = (node: GraphNode): TipLine[] => {
-    const lines2: TipLine[] = [[node.kind === "users" ? t("graph.users") : node.label]];
-    lines2.push([node.kind === "database" ? t("graph.queriesUnit") : t("graph.requestsUnit"), n(node.requests)]);
-    if (node.p95 !== null) lines2.push(["p95", node.longLived ? t("graph.streaming") : ms(node.p95)]);
-    if (node.codes) for (const [code, v] of Object.entries(node.codes).sort((a, b) => b[1] - a[1]).slice(0, 4)) lines2.push([code, n(v)]);
-    if (node.kind === "service") lines2.push([t("graph.openHint")]);
-    return lines2;
-  };
-  const colour = (node: GraphNode) =>
-    node.kind === "users" ? "var(--ink-3)" : node.kind === "database" ? "var(--teal)" : colourBy.get(node.id) ?? "var(--blue)";
-  const labelOf = (id: string) => (id === "users" ? t("graph.users") : nodes.find((x) => x.id === id)?.label ?? id);
-  const linked = (id: string) => (hover ? hover === id || edges.some((e) => (e.from === hover && e.to === id) || (e.to === hover && e.from === id)) : false);
-
+export function TrafficGraphWidget({ lines, overview, onOpen }: { lines: ServiceLine[]; overview: Overview; onOpen: (id: string) => void; t: T }) {
+  const graph = useMemo(() => trafficGraph(lines, overview), [lines, overview]);
   return (
-    <div ref={ref} className={`${s.graph} ${hover ? s.hov : ""}`}>
-      <svg viewBox={`0 0 ${W} ${H}`} height={H} role="img" aria-label={t("graph.title")}>
-        <defs>
-          {["n", "q", "w"].map((k) => (
-            <marker key={k} id={`dash-arrow-${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-              <path d="M0,0L10,5L0,10z" style={{ fill: k === "q" ? "var(--teal)" : k === "w" ? "var(--amber)" : "color-mix(in srgb, var(--ink-3) 60%, transparent)" }} />
-            </marker>
-          ))}
-        </defs>
-        {edges.map((e, i) => {
-          const a = pos.get(e.from);
-          const b = pos.get(e.to);
-          if (!a || !b) return null;
-          const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
-          const sx = a.x + ux * (a.r + 12), sy = a.y + uy * (a.r + 12), ex = b.x - ux * (b.r + 16), ey = b.y - uy * (b.r + 16);
-          const skip = Math.max(0, Math.abs(b.c - a.c) - 1);
-          const bend = 26 + skip * 70, mx = (sx + ex) / 2 - uy * bend, my = (sy + ey) / 2 + ux * bend;
-          const slow = e.kind === "call" && (e.p95 ?? 0) >= SLOW_MS;
-          const tt = slow ? 0.3 : e.kind === "query" ? 0.72 : skip ? 0.7 : 0.5;
-          const lx = (1 - tt) ** 2 * sx + 2 * (1 - tt) * tt * mx + tt * tt * ex;
-          const ly = (1 - tt) ** 2 * sy + 2 * (1 - tt) * tt * my + tt * tt * ey;
-          const w = 1.5 + 6 * (Math.log10(e.count + 1) / Math.log10(mxe + 1));
-          const d = `M${sx},${sy}Q${mx},${my} ${ex},${ey}`;
-          const text = e.kind === "query" ? t("graph.queries", { count: n(e.count) }) : slow ? `${n(e.count)} · ${ms(e.p95)}` : n(e.count);
-          const k = slow ? "w" : e.kind === "query" ? "q" : "n";
-          const on = hover !== null && (e.from === hover || e.to === hover);
-          return (
-            <g key={i} className={`${s.edge} ${e.kind === "query" ? s.query : ""} ${slow ? s.slowEdge : ""} ${on ? s.on : ""}`} style={{ animationDelay: `${i * 90}ms` }} onMouseMove={(ev) => tip.show(ev, [[`${labelOf(e.from)} → ${labelOf(e.to)}`], [e.kind === "query" ? t("graph.queriesUnit") : t("graph.requestsUnit"), n(e.count)], ...(e.p95 !== null ? ([["p95", ms(e.p95)]] as TipLine[]) : [])])} onMouseLeave={tip.hide}>
-              <path d={d} className={s.bs} strokeWidth={w} markerEnd={`url(#dash-arrow-${k})`} />
-              <path d={d} className={s.fl} strokeWidth={Math.max(1.5, w * 0.5)} />
-              <g className={s.lb}>
-                <rect x={lx - text.length * 3.3 - 9} y={ly - 11} width={text.length * 6.6 + 18} height={22} rx={11} />
-                <text x={lx} y={ly + 4} textAnchor="middle">{text}</text>
-              </g>
-            </g>
-          );
-        })}
-        {nodes.map((node, i) => {
-          const p = pos.get(node.id);
-          if (!p) return null;
-          const c = colour(node);
-          const rr = p.r + 7;
-          const C = 2 * Math.PI * rr;
-          let segments: [number, string][] = [[1, c]];
-          if (node.codes) {
-            const tot = Object.values(node.codes).reduce((a, b) => a + b, 0) || 1;
-            const c4 = Object.entries(node.codes).filter(([k]) => k.startsWith("4")).reduce((a, [, v]) => a + v, 0);
-            const c5 = Object.entries(node.codes).filter(([k]) => k.startsWith("5")).reduce((a, [, v]) => a + v, 0);
-            segments = ([[(tot - c4 - c5) / tot, "var(--ok)"], [c4 / tot, "var(--violet)"], [c5 / tot, "var(--red)"]] as [number, string][]).filter(([f]) => f > 0);
-          }
-          let off = 0;
-          const series = node.series.length ? node.series : [0, 0];
-          const mxs = Math.max(...series, 1e-9);
-          const ww = p.r * 1.5, hh = p.r * 0.42, x0 = -ww / 2, y0 = p.r * 0.82;
-          const wave = curve(series.map((v, j): [number, number] => [x0 + (j / Math.max(1, series.length - 1)) * ww, y0 - (v / mxs) * hh]));
-          const big = node.kind === "service" ? n(series.reduce((a, b) => a + b, 0) / Math.max(1, (overview.bucket_seconds ?? 3600) / 60) / Math.max(1, series.length), 1) : n(node.requests);
-          const label = node.kind === "users" ? t("graph.users") : node.label;
-          const unit = node.kind === "users" ? t("graph.requestsUnit") : node.kind === "database" ? t("graph.queriesUnit") : t("graph.perMinute");
-          const lat = node.kind === "users" ? "" : node.longLived ? t("graph.streaming") : node.p95 === null ? "" : `p95 ${ms(node.p95)}`;
-          return (
-            <g key={node.id} className={`${s.node} ${node.slow ? s.slowNode : ""} ${linked(node.id) ? s.on : ""}`} transform={`translate(${p.x},${p.y})`} onMouseEnter={() => setHover(node.id)} onMouseMove={(ev) => tip.show(ev, nodeTip(node))} onMouseLeave={() => { setHover(null); tip.hide(); }} onClick={() => node.kind === "service" && onOpen(node.id)} style={{ ["--c" as string]: c, animationDelay: `${i * 80}ms`, cursor: node.kind === "service" ? "pointer" : "default" }}>
-              <circle r={rr + 14} className={s.halo} />
-              <circle r={rr} className={s.tk} />
-              {segments.map(([f, sc], j) => {
-                const l = Math.max(0, C * f - (segments.length > 1 ? 3 : 0));
-                const el = <circle key={j} r={rr} className={s.rg} style={{ stroke: sc }} strokeDasharray={`${l} ${C}`} strokeDashoffset={-off} transform="rotate(-90)" />;
-                off += C * f;
-                return el;
-              })}
-              <circle r={p.r} className={s.core} />
-              <clipPath id={`dash-clip-${i}`}><circle r={p.r - 1.5} /></clipPath>
-              <g clipPath={`url(#dash-clip-${i})`}>
-                <path d={`${wave}L${x0 + ww},${p.r}L${x0},${p.r}Z`} className={s.wv} />
-                <path d={wave} className={s.wl} />
-              </g>
-              <text y={-1} textAnchor="middle" className={s.big}>{big}</text>
-              <text y={15} textAnchor="middle" className={s.sm}>{unit}</text>
-              <text y={rr + 24} textAnchor="middle" className={s.nm}>{label}</text>
-              <text y={rr + 40} textAnchor="middle" className={s.lt}>{lat}</text>
-              {node.kind !== "users" && (
-                <g className={`${s.bd} ${node.slow ? s.w : s.o}`} transform={`translate(${-rr * 0.72},${-rr * 0.72})`}>
-                  <circle r={11} />
-                  <path d={node.slow ? "M0,-5V1.5M0,4.6V4.8" : "M-4.2,0.3L-1.2,3.2L4.4,-3"} />
-                </g>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <div className={s.key}>
-        <span><i style={{ background: "var(--ok)" }} />{t("graph.ok")}</span>
-        <span><i style={{ background: "var(--violet)" }} />4xx</span>
-        <span><i style={{ background: "var(--red)" }} />5xx</span>
-        <span><i style={{ width: 18, height: 4, background: "var(--ink-3)" }} />{t("graph.width")}</span>
-        <span><i style={{ width: 18, height: 3, background: "var(--amber)" }} />{t("graph.slow")}</span>
-      </div>
-    </div>
+    <ServiceMap
+      graph={graph}
+      bucketSeconds={overview.bucket_seconds ?? 3600}
+      onOpen={(node) => onOpen(node.id)}
+    />
   );
 }
 
