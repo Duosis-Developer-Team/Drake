@@ -125,6 +125,7 @@ const HISTORY = {
 
 const OPTIONS = {
   signals: ["error_ratio"],
+  evaluation_interval_seconds: 120,
   projects: [
     {
       id: "p1",
@@ -243,6 +244,8 @@ describe("alert rules screen", () => {
     const picker = within(dialog).getByLabelText("Signal");
     const groups = Array.from(picker.querySelectorAll("optgroup")).map((g) => g.getAttribute("label"));
     expect(groups).toEqual(["Metrics", "Logs", "Traces"]);
+    // The deployment's own interval, not a default.
+    expect(within(dialog).getByText("Checked every 2m")).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: "Fatal log lines (5 min)" })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: "Slowest endpoint p95" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: /A fatal log line/ }));

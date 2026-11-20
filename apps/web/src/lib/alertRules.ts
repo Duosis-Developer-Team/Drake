@@ -150,6 +150,8 @@ export interface RuleHistory {
 
 export interface RuleOptions {
   signals: Signal[];
+  /** How often the incident runner judges rules on this deployment. */
+  evaluation_interval_seconds?: number;
   projects: {
     id: string;
     key: string;

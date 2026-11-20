@@ -119,7 +119,13 @@ async def rule_options(
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     async with get_engine(settings).connect() as connection:
-        return await repo.options(connection, auth.principal)
+        body = await repo.options(connection, auth.principal)
+    # How often the runner judges a rule, so the screen says what is true
+    # for this deployment rather than a default (120 s in prod).
+    return {
+        **body,
+        "evaluation_interval_seconds": max(15, int(settings.incident_runner_interval_seconds)),
+    }
 
 
 @router.get("/alert-rules")
