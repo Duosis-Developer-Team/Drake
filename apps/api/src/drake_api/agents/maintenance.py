@@ -18,6 +18,7 @@ step commits separately and is idempotent, so overlapping runs and
 retries are safe; the advisory lock keeps concurrent runs from racing.
 """
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -261,7 +262,12 @@ async def _prune_missing_resources(
 
 
 async def prune_missing_resources(
-    engine: AsyncEngine, settings: Settings, cluster_id: uuid.UUID, *, max_rows: int
+    engine: AsyncEngine,
+    settings: Settings,
+    cluster_id: uuid.UUID,
+    *,
+    max_rows: int,
+    pause_seconds: float = 0.0,
 ) -> int:
     """Remove projection rows that left the cluster longer ago than the
     retention: events after a day, everything else after a week. Returns how
@@ -280,7 +286,13 @@ async def prune_missing_resources(
     waiting on the row lock) and survives.
 
     Each batch is its own short transaction under the maintenance lock, so
-    a long drain never holds a lock or a snapshot open for long."""
+    a long drain never holds a lock or a snapshot open for long. Batches
+    take the oldest rows first through `ix_inventory_missing_since`
+    (migration 0030), so a batch costs its own size, not a table scan.
+
+    `pause_seconds` sleeps between batches. The maintenance pass does not
+    need it (20 k rows at most); a drain of millions of rows uses it to
+    leave the disk to the applications sharing the node."""
     removed = 0
     while removed < max_rows:
         batch_size = min(settings.agent_cleanup_batch_rows, max_rows - removed)
@@ -295,6 +307,10 @@ async def prune_missing_resources(
                             SELECT c.id FROM inventory_resources c
                             WHERE c.cluster_id = :cluster_id
                               AND c.lifecycle = 'missing'
+                              -- The bound ix_inventory_missing_since can
+                              -- range-scan; the CASE below then applies the
+                              -- per-kind retention to what it returns.
+                              AND c.last_seen_at < now() - make_interval(hours => :floor_hours)
                               AND c.last_seen_at < now() - make_interval(hours => CASE
                                   WHEN c.kind = 'Event' THEN :event_hours
                                   ELSE :retention_hours END)
@@ -303,6 +319,7 @@ async def prune_missing_resources(
                                   WHERE b.cluster_id = c.cluster_id
                                     AND b.resolved_resource_uid = c.uid
                               )
+                            ORDER BY c.last_seen_at
                             LIMIT :batch
                         )
                           AND r.lifecycle = 'missing'
@@ -316,6 +333,10 @@ async def prune_missing_resources(
                         "cluster_id": cluster_id,
                         "event_hours": settings.agent_missing_event_retention_hours,
                         "retention_hours": settings.agent_missing_retention_hours,
+                        "floor_hours": min(
+                            settings.agent_missing_event_retention_hours,
+                            settings.agent_missing_retention_hours,
+                        ),
                         "batch": batch_size,
                     },
                 )
@@ -323,4 +344,6 @@ async def prune_missing_resources(
         removed += len(batch)
         if len(batch) < batch_size:
             break
+        if pause_seconds > 0:
+            await asyncio.sleep(pause_seconds)
     return removed

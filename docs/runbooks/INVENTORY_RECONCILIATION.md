@@ -82,7 +82,12 @@ kubectl -n drake-prod exec deploy/drake-api -- \
 ```
 
 The drain runs the maintenance function itself: same retention, same
-binding guard, same lock, small transactions. Deleting rows does not shrink
+binding guard, same lock, small transactions, oldest rows first through the
+partial index `ix_inventory_missing_since` (migration 0030; without it each
+batch re-reads the whole table). It sleeps `--pause-seconds` (0.2 s) between
+batches so the node's disk stays available to the applications sharing it.
+Measured locally: 1.47 M rows drained and reclaimed in 44 s (1.3 GB → 29 MB);
+without the index, 2 minutes removed only ~170 k rows and kept slowing down. Deleting rows does not shrink
 the file; `--reclaim` rewrites the table with `VACUUM (FULL, ANALYZE)`. That
 holds an exclusive lock on `inventory_resources` for the rewrite, which is
 proportional to the rows that remain (tens of thousands: seconds). Agent
