@@ -23,6 +23,7 @@ import { onboarding } from "./onboarding";
 import { protection } from "./protection";
 import { scheduledJobs } from "./scheduledJobs";
 import { serviceHealth } from "./serviceHealth";
+import { serviceMap } from "./serviceMap";
 import { shell } from "./shell";
 import { signals } from "./signals";
 import { traces } from "./traces";
@@ -41,6 +42,7 @@ export const MESSAGES = {
   alertRules,
   deployments,
   serviceHealth,
+  serviceMap,
   scheduledJobs,
   logs,
   traces,
