@@ -405,6 +405,26 @@ async def test_rule_crud_is_audited_versioned_and_listed_with_history(
             await client.post("/v1/alert-rules", json=orphan, headers=await _csrf(client))
         ).status_code == 422
 
+        # Every signal the options offer can be saved and previewed: the
+        # screen never offers a rule the API would refuse.
+        for signal in options["signals"]:
+            threshold = (
+                0.05 if signal in ("error_ratio", "cpu_utilization", "memory_utilization") else 1
+            )
+            each = {
+                **body,
+                "name": f"Every signal {signal}",
+                "signal": signal,
+                "threshold": threshold,
+            }
+            saved = await client.post("/v1/alert-rules", json=each, headers=await _csrf(client))
+            assert saved.status_code == 201, (signal, saved.text)
+            draft = {k: v for k, v in each.items() if k != "name"}
+            tried = await client.post(
+                "/v1/alert-rules/preview", json=draft, headers=await _csrf(client)
+            )
+            assert tried.status_code == 200, (signal, tried.text)
+
         await feed(engine, world, [0.3, 0.3, 0.01], NOW - timedelta(minutes=8))
 
         listing = (await client.get(f"/v1/alert-rules?project_id={world['project_id']}")).json()
