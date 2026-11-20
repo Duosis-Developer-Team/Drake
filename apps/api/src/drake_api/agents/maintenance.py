@@ -254,33 +254,62 @@ async def _bound_change_events(
 async def _prune_missing_resources(
     engine: AsyncEngine, settings: Settings, cluster_id: uuid.UUID
 ) -> int:
+    """The maintenance step: one bounded pass of `prune_missing_resources`."""
+    return await prune_missing_resources(
+        engine, settings, cluster_id, max_rows=settings.agent_missing_prune_rows_per_pass
+    )
+
+
+async def prune_missing_resources(
+    engine: AsyncEngine, settings: Settings, cluster_id: uuid.UUID, *, max_rows: int
+) -> int:
     """Remove projection rows that left the cluster longer ago than the
-    retention: events after a day, everything else after a week. Only rows
-    already marked missing qualify, so nothing a user sees as present is
-    ever removed. Bounded per pass; a backlog drains over several passes."""
+    retention: events after a day, everything else after a week. Returns how
+    many rows went, at most `max_rows`.
+
+    What is never removed:
+    - an active row: only rows already marked missing qualify;
+    - a row a service binding resolves to. A bound workload that was
+      deleted stays visible as missing for as long as the binding exists,
+      so the binding keeps saying "your workload is gone" instead of
+      falling back to "not reported yet".
+
+    The outer WHERE repeats the qualifying conditions. A row the agent
+    reports again between the sub-select and the delete is re-checked on
+    its new version (Postgres re-evaluates the outer predicate after
+    waiting on the row lock) and survives.
+
+    Each batch is its own short transaction under the maintenance lock, so
+    a long drain never holds a lock or a snapshot open for long."""
     removed = 0
-    while removed < settings.agent_missing_prune_rows_per_pass:
-        batch_size = min(
-            settings.agent_cleanup_batch_rows,
-            settings.agent_missing_prune_rows_per_pass - removed,
-        )
+    while removed < max_rows:
+        batch_size = min(settings.agent_cleanup_batch_rows, max_rows - removed)
         async with engine.begin() as connection:
             await _locked(connection, cluster_id)
             batch = (
                 await connection.execute(
                     text(
                         """
-                        DELETE FROM inventory_resources
-                        WHERE id IN (
-                            SELECT id FROM inventory_resources
-                            WHERE cluster_id = :cluster_id
-                              AND lifecycle = 'missing'
-                              AND last_seen_at < now() - make_interval(hours => CASE
-                                  WHEN kind = 'Event' THEN :event_hours
+                        DELETE FROM inventory_resources r
+                        WHERE r.id IN (
+                            SELECT c.id FROM inventory_resources c
+                            WHERE c.cluster_id = :cluster_id
+                              AND c.lifecycle = 'missing'
+                              AND c.last_seen_at < now() - make_interval(hours => CASE
+                                  WHEN c.kind = 'Event' THEN :event_hours
                                   ELSE :retention_hours END)
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM service_workload_bindings b
+                                  WHERE b.cluster_id = c.cluster_id
+                                    AND b.resolved_resource_uid = c.uid
+                              )
                             LIMIT :batch
                         )
-                        RETURNING id
+                          AND r.lifecycle = 'missing'
+                          AND r.last_seen_at < now() - make_interval(hours => CASE
+                              WHEN r.kind = 'Event' THEN :event_hours
+                              ELSE :retention_hours END)
+                        RETURNING r.id
                         """
                     ),
                     {
