@@ -14,6 +14,7 @@ import { commandCenter } from "./commandCenter";
 import { dashboards } from "./dashboards";
 import { common } from "./common";
 import { deployments } from "./deployments";
+import { errors } from "./errors";
 import { incidents } from "./incidents";
 import { infrastructure } from "./infrastructure";
 import { integrations } from "./integrations";
@@ -33,6 +34,7 @@ export const MESSAGES = {
   shell,
   commandCenter,
   dashboards,
+  errors,
   catalog,
   clusters,
   incidents,

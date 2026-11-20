@@ -49,6 +49,7 @@ from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
 from drake_api.notifications.worker import NotificationWorker
 from drake_api.observability.application import TraceGoldenReader
+from drake_api.observability.errors_router import router as observability_errors_router
 from drake_api.observability.overview_router import router as observability_overview_router
 from drake_api.observability.router import router as observability_router
 from drake_api.observability.store import ClickHouseStore
@@ -327,6 +328,7 @@ def create_app(
     app.include_router(service_health_router)
     app.include_router(observability_router)
     app.include_router(observability_overview_router)
+    app.include_router(observability_errors_router)
     app.include_router(dashboards_router)
     app.include_router(incidents_router)
     app.include_router(infrastructure_router)

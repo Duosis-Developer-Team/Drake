@@ -1,0 +1,99 @@
+/*
+ * Error tracking (ADR-0036). Drake tokens only, so light and dark follow
+ * the shell. Each kind has one colour: exceptions red, failed requests
+ * amber, error logs violet.
+ */
+.root {
+  --card: var(--surface-1);
+  --card-2: var(--surface-2);
+  --line: var(--border-subtle);
+  --ink: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-3: var(--text-muted);
+  --red: var(--status-critical);
+  --amber: var(--status-warning);
+  --violet: var(--series-3);
+  --ok: var(--brand-accent);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes growY { from { transform: scaleY(0); } }
+
+.bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.field select, .filters select {
+  min-width: 240px; height: 36px; padding: 0 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 13px;
+}
+.segment { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--card-2); border: 1px solid var(--line); }
+.segment button { border: 0; background: transparent; color: var(--ink-3); padding: 7px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.segment button[aria-pressed="true"] { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / .2); }
+
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kpi {
+  --k: var(--ok);
+  text-align: left; display: flex; flex-direction: column; gap: 6px; padding: 16px 18px;
+  border-radius: 16px; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  cursor: pointer; animation: rise .4s ease both; position: relative; overflow: hidden;
+}
+.kpi::after { content: ""; position: absolute; inset: auto 0 0 0; height: 3px; background: var(--k); opacity: .0; transition: opacity .2s; }
+.kpi:hover::after, .kpi.on::after { opacity: 1; }
+.kpi span { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.kpi span svg { color: var(--k); }
+.kpi b { font-size: 30px; line-height: 1; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.kpi small { font-size: 11.5px; color: var(--ink-3); }
+.kpi.on { border-color: color-mix(in srgb, var(--k) 55%, var(--line)); }
+.k_exception { --k: var(--red); }
+.k_failed_request { --k: var(--amber); }
+.k_error_log { --k: var(--violet); }
+
+.warn { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+.filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.asof { font-size: 12px; color: var(--ink-3); }
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.issue { --k: var(--ok); border-radius: 14px; border: 1px solid var(--line); background: var(--card); overflow: hidden; animation: rise .35s ease both; border-left: 3px solid var(--k); }
+.row { width: 100%; display: grid; grid-template-columns: 34px minmax(0, 1fr) 168px 64px 18px; gap: 14px; align-items: center; padding: 14px 16px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.row:hover { background: color-mix(in srgb, var(--card-2) 60%, transparent); }
+.icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--k); background: color-mix(in srgb, var(--k) 14%, transparent); }
+.main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.titleText { font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { font-size: 12px; color: var(--ink-3); }
+.meta em { font-style: normal; color: var(--k); }
+.trend { display: flex; align-items: flex-end; gap: 2px; height: 30px; }
+.trend i { flex: 1; border-radius: 2px; background: var(--card-2); transform-origin: bottom; animation: growY .5s ease both; }
+.trend i.hot { background: color-mix(in srgb, var(--k) 75%, transparent); }
+.count { text-align: right; font-size: 16px; font-variant-numeric: tabular-nums; }
+.flip { transform: rotate(180deg); }
+.row svg:last-child { color: var(--ink-3); transition: transform .2s; }
+
+.detail { padding: 4px 18px 18px 64px; display: flex; flex-direction: column; gap: 10px; animation: rise .25s ease both; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin: 0; }
+.facts div { padding: 10px 12px; border-radius: 10px; background: var(--card-2); }
+.facts dt { font-size: 11px; color: var(--ink-3); }
+.facts dd { margin: 4px 0 0; font-size: 13px; word-break: break-word; }
+.cap { font-size: 11.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; }
+.pre { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--card-2); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto; }
+.stack { max-height: 320px; color: var(--ink-2); }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.trace { font-size: 12px; color: var(--ink-3); }
+.trace code { font-family: var(--font-mono, ui-monospace, monospace); color: var(--ink-2); }
+.link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--line); color: var(--ink); }
+.link:hover { background: var(--card-2); }
+.note { margin: 0; font-size: 11.5px; color: var(--ink-3); }
+
+.clean { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 48px 24px; border-radius: 18px; border: 1px dashed var(--line); background: var(--card); animation: rise .4s ease both; }
+.clean svg { color: var(--ok); }
+.clean b { font-size: 18px; }
+.clean p { margin: 0; max-width: 520px; font-size: 13px; color: var(--ink-3); }
+.hint { margin: 0; font-size: 12px; color: var(--ink-3); }
+
+@media (max-width: 900px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .row { grid-template-columns: 34px minmax(0, 1fr) 56px 18px; }
+  .trend { display: none; }
+  .detail { padding-left: 18px; }
+}

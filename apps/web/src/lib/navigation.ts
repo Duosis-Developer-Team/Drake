@@ -19,6 +19,7 @@ import {
   Bell,
   BellRing,
   Boxes,
+  Bug,
   FolderKanban,
   Gauge,
   HeartPulse,
@@ -125,6 +126,14 @@ export const NAVIGATION: NavGroup[] = [
         href: "/incidents",
         icon: Siren,
         matchPrefix: "/incidents",
+        anyPermission: ["environment.view"],
+      },
+      {
+        key: "errors",
+        label: "Errors",
+        href: "/errors",
+        icon: Bug,
+        matchPrefix: "/errors",
         anyPermission: ["environment.view"],
       },
       {
