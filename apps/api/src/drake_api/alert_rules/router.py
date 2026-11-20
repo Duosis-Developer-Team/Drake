@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from drake_api.alert_rules import repository as repo
-from drake_api.alert_rules.model import MAX_FOR_SECONDS, OPERATORS, SEVERITIES, SIGNALS
+from drake_api.alert_rules.model import MAX_FOR_SECONDS, OPERATORS, RULE_SIGNALS, SEVERITIES
 from drake_api.audit.service import AuditEventData, record_audit_event_in
 from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
@@ -34,13 +34,17 @@ Signal = Literal[
     "cpu_utilization",
     "memory_utilization",
     "unavailable_replicas",
+    "error_logs",
+    "fatal_logs",
+    "slow_requests",
+    "slowest_route_p95_seconds",
 ]
 Operator = Literal[">", "<"]
 Severity = Literal["critical", "warning"]
 
 
 # The literals above are the model's vocabularies, spelled out for the schema.
-assert set(get_args(Signal)) == set(SIGNALS)
+assert set(get_args(Signal)) == set(RULE_SIGNALS)
 assert set(get_args(Operator)) == set(OPERATORS)
 assert set(get_args(Severity)) == set(SEVERITIES)
 
