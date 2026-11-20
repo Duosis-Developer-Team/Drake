@@ -49,7 +49,7 @@ _QUALIFYING = """
 """
 
 
-async def _run(cluster_ref: str, dry_run: bool, reclaim: bool) -> int:
+async def _run(cluster_ref: str, dry_run: bool, reclaim: bool, pause_seconds: float) -> int:
     settings = get_settings()
     engine = get_engine(settings)
     async with engine.connect() as connection:
@@ -84,7 +84,9 @@ async def _run(cluster_ref: str, dry_run: bool, reclaim: bool) -> int:
     removed = 0
     started = time.monotonic()
     while True:
-        batch = await prune_missing_resources(engine, settings, cluster_id, max_rows=CHUNK)
+        batch = await prune_missing_resources(
+            engine, settings, cluster_id, max_rows=CHUNK, pause_seconds=pause_seconds
+        )
         removed += batch
         print(f"  removed {removed} ({time.monotonic() - started:.0f} s)")
         if batch < CHUNK:
@@ -124,10 +126,18 @@ def main() -> int:
         action="store_true",
         help="after draining, rewrite the table to give disk back (exclusive lock, seconds)",
     )
+    parser.add_argument(
+        "--pause-seconds",
+        type=float,
+        default=0.2,
+        help="sleep between delete batches, to leave disk I/O to the node's applications",
+    )
     args = parser.parse_args()
+    if not 0 <= args.pause_seconds <= 10:
+        parser.error("--pause-seconds is between 0 and 10")
     if args.dry_run and args.reclaim:
         parser.error("--dry-run and --reclaim are exclusive")
-    return asyncio.run(_run(args.cluster_ref, args.dry_run, args.reclaim))
+    return asyncio.run(_run(args.cluster_ref, args.dry_run, args.reclaim, args.pause_seconds))
 
 
 if __name__ == "__main__":
