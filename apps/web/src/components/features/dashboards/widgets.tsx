@@ -122,7 +122,7 @@ export function useDeployTip() {
     show: (e: React.MouseEvent, d: DeploymentRow) => {
       const lines: TipLine[] = [
         [t("deploys.tipTitle", { service: d.service_key ?? d.workload_name })],
-        [t("deploys.tipAt"), fmt.date(d.rollout_started_at, { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })],
+        [t("deploys.tipAt"), new Date(d.rollout_started_at).toLocaleString(fmt.tag, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })],
         [t("deploys.tipCommit"), d.short_commit ?? d.short_digest ?? "—"],
         [t("deploys.tipRollout"), dt.dyn("rollout", d.rollout_state)],
       ];
