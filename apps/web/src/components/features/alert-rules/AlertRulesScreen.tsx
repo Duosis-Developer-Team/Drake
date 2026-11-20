@@ -43,7 +43,14 @@ import {
   tone,
   type Span,
 } from "./instruments";
-import { RuleDrawer, TEMPLATE_KEYS, useDuration, type TemplateKey } from "./RuleDrawer";
+import {
+  RuleDrawer,
+  TEMPLATE_KEYS,
+  filteredName,
+  sentenceFor,
+  useDuration,
+  type TemplateKey,
+} from "./RuleDrawer";
 
 const REFRESH_MS = 60_000;
 const MAX_RINGS = 9;
@@ -499,7 +506,7 @@ export function AlertRulesScreen() {
                           <span className={s.nm}>
                             <b>{rule.name}</b>
                             <span>
-                              {t.dyn("signal", rule.signal)} · {scopeText(rule, all)}
+                              {filteredName(t.dyn("signal", rule.signal), rule.log_contains, rule.route)} · {scopeText(rule, all)}
                             </span>
                           </span>
                           <span className={s.lane}>
@@ -694,14 +701,9 @@ function Inspector({
   }
   events.sort((a, b) => b.at - a.at);
 
-  const sentenceKey =
-    rule.for_seconds > 0
-      ? rule.operator === "<"
-        ? "sentence.belowFor"
-        : "sentence.aboveFor"
-      : rule.operator === "<"
-        ? "sentence.below"
-        : "sentence.above";
+  const sentenceKey = sentenceFor(rule.operator, rule.for_seconds);
+  const ruleSignal = filteredName(t.dyn("signal", rule.signal), rule.log_contains, rule.route);
+  const anomaly = rule.operator === "above_normal" || rule.operator === "below_normal";
   const muted = rule.muted_until !== null && Date.parse(rule.muted_until) > now;
 
   return (
@@ -740,7 +742,7 @@ function Inspector({
             now={now}
             format={show}
             timeLabel={time}
-            thresholdLabel={t("now.threshold", { value: show(rule.threshold) })}
+            thresholdLabel={anomaly ? t("now.normalEdge") : t("now.threshold", { value: show(rule.threshold) })}
             nowLabel={t("register.timelineNow")}
             label={t("inspector.chartCaption", { signal: t.dyn("signal", rule.signal) })}
           />
@@ -751,7 +753,7 @@ function Inspector({
       <div className={s.inspSide}>
         <p className={s.ruleLine}>
           {t(sentenceKey, {
-            signal: t.dyn("signal", rule.signal),
+            signal: ruleSignal,
             threshold: show(rule.threshold),
             duration: duration(rule.for_seconds),
           })}

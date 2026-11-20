@@ -28,13 +28,39 @@ SIGNALS: dict[str, tuple[str, str]] = {
 }
 # Read from the logs and traces store over the last five minutes, not from
 # the health verdict (alert_rules.telemetry, ADR-0034). Counts, and seconds.
-LOG_SIGNALS = ("error_logs", "fatal_logs")
+LOG_SIGNALS = ("error_logs", "fatal_logs", "matching_logs")
 TRACE_SIGNALS = ("slow_requests", "slowest_route_p95_seconds")
 TELEMETRY_SIGNALS = (*LOG_SIGNALS, *TRACE_SIGNALS)
-# Every signal a rule may watch, and a column of service_health_samples.
+# `matching_logs` only exists with a text to match, so it is judged per
+# rule and never stored; the others are columns of service_health_samples.
+STORED_TELEMETRY = tuple(s for s in TELEMETRY_SIGNALS if s != "matching_logs")
+STORED_SIGNALS = (*SIGNALS, *STORED_TELEMETRY)
+# Every signal a rule may watch.
 RULE_SIGNALS = (*SIGNALS, *TELEMETRY_SIGNALS)
 RATIO_SIGNALS = ("error_ratio", "cpu_utilization", "memory_utilization")
-OPERATORS = (">", "<")
+# Counted per line or per request: a "normal" for them is a whole number.
+COUNT_SIGNALS = (
+    "restarts",
+    "unavailable_replicas",
+    "error_logs",
+    "fatal_logs",
+    "matching_logs",
+    "slow_requests",
+)
+# Fixed thresholds, and two that judge against the signal's own normal
+# (ADR-0035): the same time of day over the last week.
+ANOMALY_OPERATORS = ("above_normal", "below_normal")
+OPERATORS = (">", "<", *ANOMALY_OPERATORS)
+MAX_FILTER_TEXT = 200
+MAX_ROUTE = 300
+# Sensitivity of an anomaly rule: how many spreads away from normal.
+MIN_SENSITIVITY = 1.0
+MAX_SENSITIVITY = 10.0
+# A normal needs this many past samples at this time of day, or the rule
+# has no judgement to make (no data, not a breach).
+MIN_BASELINE = 30
+BASELINE_DAYS = 7
+BASELINE_HALF_WINDOW = timedelta(minutes=30)
 SEVERITIES = ("critical", "warning")
 MAX_FOR_SECONDS = 86400
 
@@ -111,13 +137,26 @@ class Episode:
     peak: float
 
 
-def replay(condition: RuleCondition, samples: list[tuple[datetime, float | None]]) -> list[Episode]:
+def replay(
+    condition: RuleCondition,
+    samples: list[tuple[datetime, float | None]],
+    thresholds: list[float | None] | None = None,
+) -> list[Episode]:
     """Every time the rule would have fired over these samples (oldest
-    first), using `step` itself."""
+    first), using `step` itself. *thresholds*, when given, is the threshold
+    in force at each sample (an anomaly rule's moving normal); a sample
+    without one has nothing to be judged against."""
     state = RuleState()
     episodes: list[Episode] = []
     current: dict[str, Any] | None = None
-    for at, value in samples:
+    for index, (at, value) in enumerate(samples):
+        if thresholds is not None:
+            bound = thresholds[index]
+            if bound is None:
+                value = None
+            condition = RuleCondition(
+                condition.signal, condition.operator, bound or 0.0, condition.for_seconds
+            )
         result = step(condition, value, state, at)
         state = result.state
         if result.event == "fired":
@@ -136,10 +175,35 @@ def replay(condition: RuleCondition, samples: list[tuple[datetime, float | None]
     return episodes
 
 
-def validate(signal: str, operator: str, threshold: float, for_seconds: int, severity: str) -> None:
+def validate(
+    signal: str,
+    operator: str,
+    threshold: float,
+    for_seconds: int,
+    severity: str,
+    log_contains: str | None = None,
+    route: str | None = None,
+) -> None:
     """Refuse a rule the evaluator could not judge honestly."""
     if signal not in RULE_SIGNALS:
         raise ValueError("unknown signal")
+    if log_contains is not None:
+        if signal not in LOG_SIGNALS:
+            raise ValueError("only a log signal can match text")
+        if not 1 <= len(log_contains) <= MAX_FILTER_TEXT or not log_contains.strip():
+            raise ValueError("the text to match is 1 to 200 characters")
+    if signal == "matching_logs" and log_contains is None:
+        raise ValueError("matching_logs needs the text to match")
+    if route is not None:
+        if signal not in TRACE_SIGNALS:
+            raise ValueError("only a trace signal can watch one endpoint")
+        if not 1 <= len(route) <= MAX_ROUTE or not route.strip():
+            raise ValueError("the endpoint is 1 to 300 characters")
+    if operator in ANOMALY_OPERATORS:
+        if log_contains is not None or route is not None:
+            raise ValueError("an anomaly rule judges a stored signal, not a filtered one")
+        if not MIN_SENSITIVITY <= threshold <= MAX_SENSITIVITY:
+            raise ValueError("sensitivity is between 1 and 10")
     if operator not in OPERATORS:
         raise ValueError("unknown operator")
     if severity not in SEVERITIES:
@@ -148,7 +212,96 @@ def validate(signal: str, operator: str, threshold: float, for_seconds: int, sev
         raise ValueError("for_seconds out of range")
     if threshold != threshold or threshold in (float("inf"), float("-inf")):
         raise ValueError("threshold must be a number")
-    if signal in RATIO_SIGNALS and not 0 <= threshold <= 1:
+    if operator not in ANOMALY_OPERATORS and signal in RATIO_SIGNALS and not 0 <= threshold <= 1:
         raise ValueError("a ratio threshold is between 0 and 1")
     if threshold < 0:
         raise ValueError("threshold must not be negative")
+
+
+# --- anomaly: a signal against its own normal (ADR-0035) ------------------
+
+
+def _floor(signal: str, median: float) -> float:
+    """The smallest spread a normal is given. A signal that never moved
+    (zero errors all week) would otherwise call any change an anomaly."""
+    if signal in COUNT_SIGNALS:
+        return 1.0
+    if signal in RATIO_SIGNALS:
+        return 0.01
+    if signal in ("latency_p95_seconds", "slowest_route_p95_seconds"):
+        return max(0.05, 0.1 * abs(median))
+    if signal == "request_rate":
+        return max(0.1, 0.1 * abs(median))
+    return max(1e-6, 0.1 * abs(median))
+
+
+@dataclass(frozen=True)
+class Band:
+    low: float
+    median: float
+    high: float
+
+
+def normal_parts(values: list[float], signal: str) -> tuple[float, float] | None:
+    """(median, spread) of past values: the spread is the scaled median
+    absolute deviation, never below the signal's floor. None when there are
+    too few values to call anything normal."""
+    if len(values) < MIN_BASELINE:
+        return None
+    ordered = sorted(values)
+    median = _median(ordered)
+    deviation = _median(sorted(abs(v - median) for v in ordered)) * 1.4826
+    return median, max(deviation, _floor(signal, median))
+
+
+def band_of(parts: tuple[float, float] | None, sensitivity: float) -> Band | None:
+    if parts is None:
+        return None
+    median, spread = parts
+    return Band(max(0.0, median - sensitivity * spread), median, median + sensitivity * spread)
+
+
+def normal_band(values: list[float], signal: str, sensitivity: float) -> Band | None:
+    """Median ± sensitivity x spread of past values (`normal_parts`)."""
+    return band_of(normal_parts(values, signal), sensitivity)
+
+
+def _median(ordered: list[float]) -> float:
+    n = len(ordered)
+    mid = n // 2
+    return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def baseline_windows(at: datetime) -> list[tuple[datetime, datetime]]:
+    """The same time of day (± half an hour) on each of the previous
+    BASELINE_DAYS days: what "normal at this hour" is drawn from."""
+    return [
+        (
+            at - timedelta(days=d) - BASELINE_HALF_WINDOW,
+            at - timedelta(days=d) + BASELINE_HALF_WINDOW,
+        )
+        for d in range(1, BASELINE_DAYS + 1)
+    ]
+
+
+def baseline_values(times: list[datetime], values: list[float | None], at: datetime) -> list[float]:
+    """Past values inside `baseline_windows(at)`. *times* is sorted."""
+    from bisect import bisect_left, bisect_right
+
+    out: list[float] = []
+    for start, end in baseline_windows(at):
+        lo = bisect_left(times, start)
+        hi = bisect_right(times, end)
+        out.extend(v for v in values[lo:hi] if v is not None)
+    return out
+
+
+def anomaly_threshold(operator: str, band: Band | None) -> float | None:
+    """The fixed-comparison threshold an anomaly rule applies right now."""
+    if band is None:
+        return None
+    return band.high if operator == "above_normal" else band.low
+
+
+def effective_operator(operator: str) -> str:
+    return "<" if operator == "below_normal" else ">" if operator == "above_normal" else operator

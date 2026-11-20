@@ -10,11 +10,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  ANOMALY_OPERATORS,
   RATIO_SIGNALS,
   SIGNALS,
   SIGNAL_SOURCE,
   SIGNAL_SOURCES,
   createRule,
+  fetchRuleRoutes,
   formatSignal,
   previewRule,
   updateRule,
@@ -41,7 +43,10 @@ type TemplateKey =
   | "traffic"
   | "fatalLogs"
   | "errorLogs"
-  | "slowRoute";
+  | "slowRoute"
+  | "textInLogs"
+  | "unusualErrors"
+  | "unusualLatency";
 
 const TEMPLATES: Record<
   TemplateKey,
@@ -56,6 +61,9 @@ const TEMPLATES: Record<
   fatalLogs: { signal: "fatal_logs", operator: ">", threshold: 0, for_seconds: 0, severity: "critical" },
   errorLogs: { signal: "error_logs", operator: ">", threshold: 20, for_seconds: 300, severity: "warning" },
   slowRoute: { signal: "slowest_route_p95_seconds", operator: ">", threshold: 1, for_seconds: 300, severity: "warning" },
+  textInLogs: { signal: "matching_logs", operator: ">", threshold: 0, for_seconds: 0, severity: "critical" },
+  unusualErrors: { signal: "error_logs", operator: "above_normal", threshold: 3, for_seconds: 600, severity: "warning" },
+  unusualLatency: { signal: "latency_p95_seconds", operator: "above_normal", threshold: 3, for_seconds: 600, severity: "warning" },
 };
 const TEMPLATE_KEYS = Object.keys(TEMPLATES) as TemplateKey[];
 
@@ -72,9 +80,28 @@ const RANGES: Record<Signal, { min: number; max: number; step: number }> = {
   fatal_logs: { min: 0, max: 50, step: 1 },
   slow_requests: { min: 0, max: 500, step: 1 },
   slowest_route_p95_seconds: { min: 0.1, max: 10, step: 0.1 },
+  matching_logs: { min: 0, max: 200, step: 1 },
 };
+/** An anomaly rule's threshold is a sensitivity: spreads away from normal. */
+const SENSITIVITY = { min: 1, max: 10, step: 0.5 };
 
 const DURATIONS = [0, 60, 120, 300, 600, 900, 1800, 3600];
+
+/** Which sentence describes a rule: fixed or against normal, held or at once. */
+export function sentenceFor(operator: Operator, forSeconds: number) {
+  const held = forSeconds > 0;
+  if (operator === "above_normal") return held ? "sentence.aboveNormalFor" : "sentence.aboveNormal";
+  if (operator === "below_normal") return held ? "sentence.belowNormalFor" : "sentence.belowNormal";
+  if (operator === "<") return held ? "sentence.belowFor" : "sentence.below";
+  return held ? "sentence.aboveFor" : "sentence.above";
+}
+
+/** A signal's name with what it is narrowed to. */
+export function filteredName(name: string, text: string | null, endpoint: string | null): string {
+  if (text) return `${name} “${text}”`;
+  if (endpoint) return `${name} · ${endpoint}`;
+  return name;
+}
 
 export function useDuration() {
   const common = useT("common");
@@ -132,6 +159,9 @@ export function RuleDrawer({
   const [threshold, setThreshold] = useState(0.05);
   const [forSeconds, setForSeconds] = useState(300);
   const [severity, setSeverity] = useState<Severity>("critical");
+  const [logContains, setLogContains] = useState("");
+  const [route, setRoute] = useState("");
+  const [routeChoices, setRouteChoices] = useState<string[]>([]);
   const [preview, setPreview] = useState<RulePreview | null>(null);
   const [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle");
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
@@ -156,6 +186,8 @@ export function RuleDrawer({
       setThreshold(rule.threshold);
       setForSeconds(rule.for_seconds);
       setSeverity(rule.severity);
+      setLogContains(rule.log_contains ?? "");
+      setRoute(rule.route ?? "");
     } else {
       const key = initialTemplate ?? "errors";
       const preset = TEMPLATES[key];
@@ -170,6 +202,8 @@ export function RuleDrawer({
       setThreshold(preset.threshold);
       setForSeconds(preset.for_seconds);
       setSeverity(preset.severity);
+      setLogContains("");
+      setRoute("");
     }
     const focus = window.setTimeout(() => firstField.current?.focus(), 0);
     return () => window.clearTimeout(focus);
@@ -183,18 +217,43 @@ export function RuleDrawer({
     ? [rule.target.project, rule.target.environment ?? t("scope.allEnvironments"), rule.target.service ?? t("scope.allServices")].join(" / ")
     : [project?.key ?? "—", environment?.key ?? t("scope.allEnvironments"), service?.key ?? t("scope.allServices")].join(" / ");
 
-  const draft: RuleDraft | null = projectId
-    ? {
-        project_id: projectId,
-        environment_id: environmentId || null,
-        service_id: serviceId || null,
-        signal,
-        operator,
-        threshold,
-        for_seconds: forSeconds,
-        severity,
-      }
-    : null;
+  const source = SIGNAL_SOURCE[signal];
+  const text = source === "logs" ? logContains.trim() : "";
+  const endpoint = source === "traces" ? route.trim() : "";
+  const anomaly = ANOMALY_OPERATORS.has(operator);
+  // A text rule needs its text; nothing else is incomplete.
+  const incomplete = signal === "matching_logs" && !text;
+  const draft: RuleDraft | null =
+    projectId && !incomplete
+      ? {
+          project_id: projectId,
+          environment_id: environmentId || null,
+          service_id: serviceId || null,
+          signal,
+          operator,
+          threshold,
+          for_seconds: forSeconds,
+          severity,
+          log_contains: text || null,
+          route: endpoint || null,
+        }
+      : null;
+
+  // The endpoints the target served, for a single-endpoint rule.
+  useEffect(() => {
+    if (!open || source !== "traces" || !projectId) return;
+    let cancelled = false;
+    fetchRuleRoutes({
+      project_id: projectId,
+      environment_id: environmentId || null,
+      service_id: serviceId || null,
+    })
+      .then((body) => !cancelled && setRouteChoices(body.routes))
+      .catch(() => !cancelled && setRouteChoices([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, source, projectId, environmentId, serviceId]);
   const draftKey = draft ? JSON.stringify(draft) : "";
 
   // Debounced server replay.
@@ -223,15 +282,8 @@ export function RuleDrawer({
   }, [open, draftKey, csrfToken]);
 
   const show = (value: number) => formatSignal(signal, value, fmt.number);
-  const signalName = t.dyn("signal", signal);
-  const sentenceKey =
-    forSeconds > 0
-      ? operator === "<"
-        ? "sentence.belowFor"
-        : "sentence.aboveFor"
-      : operator === "<"
-        ? "sentence.below"
-        : "sentence.above";
+  const signalName = filteredName(t.dyn("signal", signal), text, endpoint);
+  const sentenceKey = sentenceFor(operator, forSeconds);
   const sentence = t(sentenceKey, {
     signal: signalName,
     threshold: show(threshold),
@@ -250,14 +302,38 @@ export function RuleDrawer({
     setThreshold(preset.threshold);
     setForSeconds(preset.for_seconds);
     setSeverity(preset.severity);
+    setLogContains("");
+    setRoute("");
   };
 
   const changeSignal = (next: Signal) => {
     setTemplate(null);
     setSignal(next);
-    const range = RANGES[next];
-    setThreshold((current) => Math.min(range.max, Math.max(range.min, current)));
-    if (next === "request_rate") setOperator("<");
+    if (!anomaly) {
+      const range = RANGES[next];
+      setThreshold((current) => Math.min(range.max, Math.max(range.min, current)));
+    }
+    if (next === "request_rate" && !anomaly) setOperator("<");
+    // A text-only signal has no stored history to call normal.
+    if (next === "matching_logs" && anomaly) {
+      setOperator(">");
+      setThreshold(0);
+    }
+  };
+
+  const changeOperator = (next: Operator) => {
+    setTemplate(null);
+    const wasAnomaly = anomaly;
+    setOperator(next);
+    if (ANOMALY_OPERATORS.has(next) && !wasAnomaly) setThreshold(3);
+    if (!ANOMALY_OPERATORS.has(next) && wasAnomaly) {
+      // Back to a fixed threshold: the template value for this signal, or
+      // the low end of its range.
+      const preset = Object.values(TEMPLATES).find(
+        (tpl) => tpl.signal === signal && !ANOMALY_OPERATORS.has(tpl.operator),
+      );
+      setThreshold(preset?.threshold ?? RANGES[signal].min);
+    }
   };
 
   const save = async () => {
@@ -273,6 +349,8 @@ export function RuleDrawer({
           threshold,
           for_seconds: forSeconds,
           severity,
+          log_contains: text || null,
+          route: endpoint || null,
           expected_version: rule.version,
         });
       } else {
@@ -458,28 +536,79 @@ export function RuleDrawer({
                   id="ar-direction"
                   className={s.input}
                   value={operator}
-                  onChange={(event) => {
-                    setTemplate(null);
-                    setOperator(event.target.value as Operator);
-                  }}
+                  onChange={(event) => changeOperator(event.target.value as Operator)}
                 >
                   <option value=">">{t("drawer.above")}</option>
                   <option value="<">{t("drawer.below")}</option>
+                  <option value="above_normal" disabled={Boolean(text || endpoint) || signal === "matching_logs"}>
+                    {t("drawer.aboveNormal")}
+                  </option>
+                  <option value="below_normal" disabled={Boolean(text || endpoint) || signal === "matching_logs"}>
+                    {t("drawer.belowNormal")}
+                  </option>
                 </select>
               </div>
             </div>
 
+            {source === "logs" ? (
+              <div className={s.f}>
+                <label className={s.cap} htmlFor="ar-contains">
+                  {signal === "matching_logs" ? t("drawer.containsRequired") : t("drawer.contains")}
+                </label>
+                <input
+                  id="ar-contains"
+                  className={s.input}
+                  maxLength={200}
+                  placeholder={t("drawer.containsPlaceholder")}
+                  value={logContains}
+                  disabled={anomaly}
+                  onChange={(event) => {
+                    setTemplate(null);
+                    setLogContains(event.target.value);
+                  }}
+                />
+                <small className={s.d}>{anomaly ? t("drawer.filterNotWithNormal") : t("drawer.containsHint")}</small>
+              </div>
+            ) : null}
+
+            {source === "traces" ? (
+              <div className={s.f}>
+                <label className={s.cap} htmlFor="ar-route">
+                  {t("drawer.route")}
+                </label>
+                <input
+                  id="ar-route"
+                  className={s.input}
+                  maxLength={300}
+                  list="ar-route-choices"
+                  placeholder={t("drawer.routePlaceholder")}
+                  value={route}
+                  disabled={anomaly}
+                  onChange={(event) => {
+                    setTemplate(null);
+                    setRoute(event.target.value);
+                  }}
+                />
+                <datalist id="ar-route-choices">
+                  {routeChoices.map((choice) => (
+                    <option key={choice} value={choice} />
+                  ))}
+                </datalist>
+                <small className={s.d}>{anomaly ? t("drawer.filterNotWithNormal") : t("drawer.routeHint")}</small>
+              </div>
+            ) : null}
+
             <div className={s.f}>
               <label className={s.cap} htmlFor="ar-threshold">
-                {t("drawer.threshold")}
+                {anomaly ? t("drawer.sensitivity") : t("drawer.threshold")}
               </label>
               <div className={s.thr}>
                 <input
                   id="ar-threshold"
                   type="range"
-                  min={range.min}
-                  max={range.max}
-                  step={range.step}
+                  min={anomaly ? SENSITIVITY.min : range.min}
+                  max={anomaly ? SENSITIVITY.max : range.max}
+                  step={anomaly ? SENSITIVITY.step : range.step}
                   value={threshold}
                   onChange={(event) => {
                     setTemplate(null);
@@ -487,16 +616,18 @@ export function RuleDrawer({
                   }}
                 />
                 <output className={s.d} htmlFor="ar-threshold">
-                  {show(threshold)}
+                  {anomaly ? t("drawer.sensitivityValue", { value: fmt.number(threshold) }) : show(threshold)}
                 </output>
               </div>
+              {anomaly ? <small className={s.d}>{t("drawer.sensitivityHint")}</small> : null}
               <input
+                hidden={anomaly}
                 aria-label={t("drawer.threshold")}
                 type="number"
                 className={s.input}
                 style={{ marginTop: 8 }}
                 min={0}
-                max={RATIO_SIGNALS.has(signal) ? 100 : undefined}
+                max={RATIO_SIGNALS.has(signal) && !anomaly ? 100 : undefined}
                 step="any"
                 value={toShown(signal, threshold)}
                 onChange={(event) => {
@@ -553,6 +684,7 @@ export function RuleDrawer({
             <p className={s.plain}>
               <b>{targetText}</b>: {sentence}, <b>{action}</b>. {t("sentence.routing")}
             </p>
+            {incomplete ? <p className={s.d}>{t("drawer.needsText")}</p> : null}
           </form>
 
           <div className={s.pv} style={{ ["--c" as string]: previewTone }} aria-live="polite">

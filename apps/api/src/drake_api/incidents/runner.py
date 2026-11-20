@@ -32,7 +32,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from drake_api.alert_rules.evaluator import record_and_evaluate
-from drake_api.alert_rules.telemetry import TelemetrySampler
+from drake_api.alert_rules.telemetry import RuleFilter, TelemetrySampler
 from drake_api.incidents.model import evaluation_from_health
 from drake_api.incidents.processor import ProcessResult, process_evaluation
 from drake_api.incidents.system_actor import ensure_system_evaluator
@@ -137,12 +137,45 @@ async def _due_bindings(engine: AsyncEngine, limit: int, after: uuid.UUID | None
     return list(rows)
 
 
+async def _page_filters(engine: AsyncEngine, page: list[Any]) -> list[RuleFilter]:
+    """Enabled rules that filter by text or endpoint and cover at least one
+    binding of this page."""
+    projects = sorted({row[2] for row in page})
+    async with engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT id, signal, log_contains, route, project_id, environment_id, service_id
+                    FROM alert_rules
+                    WHERE enabled AND project_id = ANY(:projects)
+                      AND (log_contains IS NOT NULL OR route IS NOT NULL)
+                    ORDER BY id
+                    """
+                ),
+                {"projects": projects},
+            )
+        ).all()
+    out: list[RuleFilter] = []
+    for rule_id, signal, log_contains, route, project, environment, service in rows:
+        covers = any(
+            row[2] == project
+            and (environment is None or row[3] == environment)
+            and (service is None or row[4] == service)
+            for row in page
+        )
+        if covers:
+            out.append(RuleFilter(str(rule_id), signal, log_contains, route))
+    return out
+
+
 async def evaluate_binding(
     engine: AsyncEngine,
     orchestrator: HealthOrchestrator,
     principal: Principal,
     binding_row: Any,
     telemetry: dict[str, float | None] | None = None,
+    rule_values: dict[str, float | None] | None = None,
 ) -> ProcessResult | None:
     """One binding: fresh evaluation, then the lifecycle decision.
 
@@ -174,6 +207,7 @@ async def evaluate_binding(
             payload=payload,
             telemetry=telemetry,
             now=datetime.now(UTC),
+            rule_values=rule_values,
         )
     except Exception:
         logger.warning("incident runner: alert rules could not be evaluated for a binding")
@@ -237,12 +271,18 @@ async def run_cycle(
             return False
         return True
 
-    async def evaluate(row: Any, telemetry: dict[str, float | None] | None) -> ProcessResult | None:
+    async def evaluate(
+        row: Any,
+        telemetry: dict[str, float | None] | None,
+        rule_values: dict[str, float | None] | None,
+    ) -> ProcessResult | None:
         async with semaphore:
             if not await still_ours():
                 return None
             try:
-                return await evaluate_binding(engine, orchestrator, actor, row, telemetry)
+                return await evaluate_binding(
+                    engine, orchestrator, actor, row, telemetry, rule_values
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -262,16 +302,22 @@ async def run_cycle(
                 break
             # Log and trace signals for the whole page in two statements
             # (ADR-0034). Without them a rule on them simply has no data.
+            # Rules that filter by text or endpoint add two more (ADR-0035).
             telemetry: dict[str, dict[str, float | None]] = {}
+            rule_values: dict[str, dict[str, float | None]] = {}
             if sampler is not None:
                 try:
-                    telemetry = await sampler.sample(
-                        engine, [row[0] for row in page], datetime.now(UTC)
+                    filters = await _page_filters(engine, page)
+                    telemetry, rule_values = await sampler.sample_all(
+                        engine, [row[0] for row in page], datetime.now(UTC), filters
                     )
                 except Exception:
                     logger.warning("incident runner: telemetry signals could not be read")
             results = await asyncio.gather(
-                *(evaluate(row, telemetry.get(str(row[0]))) for row in page)
+                *(
+                    evaluate(row, telemetry.get(str(row[0])), rule_values.get(str(row[0])))
+                    for row in page
+                )
             )
             for result in results:
                 if result is None:

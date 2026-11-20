@@ -20,7 +20,24 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from drake_api.alert_rules.model import RATIO_SIGNALS, RULE_SIGNALS, RuleCondition, replay, validate
+from drake_api.alert_rules.model import (
+    ANOMALY_OPERATORS,
+    BASELINE_DAYS,
+    MAX_SENSITIVITY,
+    MIN_SENSITIVITY,
+    RATIO_SIGNALS,
+    RULE_SIGNALS,
+    STORED_SIGNALS,
+    RuleCondition,
+    anomaly_threshold,
+    band_of,
+    baseline_values,
+    effective_operator,
+    normal_parts,
+    replay,
+    validate,
+)
+from drake_api.alert_rules.telemetry import MAX_SERIES_BINDINGS, RuleFilter, TelemetrySampler
 from drake_api.catalog.authz import visible_scope_ids
 from drake_api.rbac.service import Principal
 
@@ -47,7 +64,8 @@ def _sentinel(ids: set[uuid.UUID]) -> list[uuid.UUID]:
 _RULE_COLUMNS = """
     r.id, r.project_id, r.environment_id, r.service_id, r.name, r.signal, r.operator,
     r.threshold, r.for_seconds, r.severity, r.enabled, r.muted_until, r.version,
-    r.created_at, r.updated_at, p.project_key, e.environment_key, sd.service_key, p.scope_id
+    r.created_at, r.updated_at, p.project_key, e.environment_key, sd.service_key, p.scope_id,
+    r.log_contains, r.route
 """
 _RULE_FROM = """
 FROM alert_rules r
@@ -75,6 +93,8 @@ def _rule_row(row: Any) -> dict[str, Any]:
         "created_at": row[13].isoformat(),
         "updated_at": row[14].isoformat(),
         "target": {"project": row[15], "environment": row[16], "service": row[17]},
+        "log_contains": row[19],
+        "route": row[20],
     }
 
 
@@ -294,6 +314,8 @@ def _check(values: dict[str, Any]) -> None:
             float(values["threshold"]),
             int(values["for_seconds"]),
             values["severity"],
+            values.get("log_contains"),
+            values.get("route"),
         )
     except ValueError as error:
         raise RuleError("invalid_rule", str(error)) from error
@@ -313,13 +335,14 @@ async def create_rule(
                 """
                 INSERT INTO alert_rules
                     (project_id, environment_id, service_id, name, signal, operator, threshold,
-                     for_seconds, severity, created_by, updated_by)
+                     for_seconds, severity, log_contains, route, created_by, updated_by)
                 VALUES (:project_id, :environment_id, :service_id, :name, :signal, :operator,
-                        :threshold, :for_seconds, :severity, :actor, :actor)
+                        :threshold, :for_seconds, :severity, :log_contains, :route,
+                        :actor, :actor)
                 RETURNING id, version
                 """
             ),
-            {**values, "actor": actor},
+            {"log_contains": None, "route": None, **values, "actor": actor},
         )
     ).first()
     assert row is not None
@@ -364,6 +387,7 @@ async def update_rule(
                 UPDATE alert_rules
                 SET name = :name, signal = :signal, operator = :operator,
                     threshold = :threshold, for_seconds = :for_seconds, severity = :severity,
+                    log_contains = :log_contains, route = :route,
                     enabled = :enabled, version = version + 1, updated_by = :actor,
                     updated_at = now()
                 WHERE id = :id AND version = :version
@@ -384,6 +408,8 @@ async def update_rule(
                         "for_seconds",
                         "severity",
                         "enabled",
+                        "log_contains",
+                        "route",
                     )
                 },
             },
@@ -393,7 +419,8 @@ async def update_rule(
         raise RuleError("version_conflict", "the rule changed since it was read")
     # A changed condition starts from a clean slate: a half-held breach of
     # the old threshold says nothing about the new one.
-    if any(merged[k] != current[k] for k in ("signal", "operator", "threshold", "for_seconds")):
+    condition_keys = ("signal", "operator", "threshold", "for_seconds", "log_contains", "route")
+    if any(merged[k] != current[k] for k in condition_keys):
         await connection.execute(
             text(
                 "UPDATE alert_rule_states SET state = 'ok', breach_since = NULL "
@@ -436,7 +463,7 @@ async def delete_rule(
 async def _samples(
     connection: AsyncConnection, binding_ids: list[uuid.UUID], signal: str, since: datetime
 ) -> dict[str, list[tuple[datetime, float | None]]]:
-    if signal not in RULE_SIGNALS:
+    if signal not in STORED_SIGNALS:
         raise RuleError("invalid_rule", "unknown signal")
     rows = (
         await connection.execute(
@@ -453,12 +480,77 @@ async def _samples(
     return out
 
 
-def _series(points: list[tuple[datetime, float | None]]) -> list[dict[str, Any]]:
-    return [{"at": at.isoformat(), "value": value} for at, value in points]
+def _is_filtered(values: dict[str, Any]) -> bool:
+    return values.get("log_contains") is not None or values.get("route") is not None
+
+
+async def _rule_series(
+    connection: AsyncConnection,
+    values: dict[str, Any],
+    bindings: list[dict[str, Any]],
+    now: datetime,
+    sampler: TelemetrySampler | None,
+    redis: Any,
+) -> tuple[
+    dict[str, list[tuple[datetime, float | None]]],
+    dict[str, list[tuple[float, float] | None]] | None,
+    bool,
+]:
+    """(the last day's values per binding, each point's normal for an
+    anomaly rule, whether the series could be read). A filtered rule's
+    values come from the store in five-minute buckets (ADR-0035); every
+    other rule's from the samples the runner stored."""
+    ids = [uuid.UUID(b["binding_id"]) for b in bindings]
+    if _is_filtered(values):
+        if sampler is None:
+            return {}, None, False
+        rule = RuleFilter(
+            "draft", values["signal"], values.get("log_contains"), values.get("route")
+        )
+        series = await sampler.series(connection, ids, rule, now, redis)
+        return (series or {}), None, series is not None
+    if values["operator"] in ANOMALY_OPERATORS:
+        since = now - HISTORY - timedelta(days=BASELINE_DAYS, hours=1)
+        full = await _samples(connection, ids[:MAX_SERIES_BINDINGS], values["signal"], since)
+        recent: dict[str, list[tuple[datetime, float | None]]] = {}
+        parts: dict[str, list[tuple[float, float] | None]] = {}
+        for binding_id, points in full.items():
+            times = [at for at, _ in points]
+            vals = [v for _, v in points]
+            last = [(at, v) for at, v in points if at >= now - HISTORY]
+            recent[binding_id] = last
+            parts[binding_id] = [
+                normal_parts(baseline_values(times, vals, at), values["signal"]) for at, _ in last
+            ]
+        return recent, parts, True
+    return await _samples(connection, ids, values["signal"], now - HISTORY), None, True
+
+
+def _thresholds(
+    operator: str, parts: list[tuple[float, float] | None], sensitivity: float
+) -> list[float | None]:
+    return [anomaly_threshold(operator, band_of(p, sensitivity)) for p in parts]
+
+
+def _series(
+    points: list[tuple[datetime, float | None]],
+    thresholds: list[float | None] | None = None,
+) -> list[dict[str, Any]]:
+    if thresholds is None:
+        return [{"at": at.isoformat(), "value": value} for at, value in points]
+    return [
+        {"at": at.isoformat(), "value": value, "threshold": bound}
+        for (at, value), bound in zip(points, thresholds, strict=True)
+    ]
 
 
 async def rule_history(
-    connection: AsyncConnection, principal: Principal, rule_id: uuid.UUID, now: datetime
+    connection: AsyncConnection,
+    principal: Principal,
+    rule_id: uuid.UUID,
+    now: datetime,
+    sampler: TelemetrySampler | None = None,
+    redis: Any = None,
 ) -> dict[str, Any]:
     rule = await get_rule(connection, principal, rule_id, VIEW_PERMISSION)
     bindings = await _covered_bindings(
@@ -467,22 +559,41 @@ async def rule_history(
         uuid.UUID(rule["environment_id"]) if rule["environment_id"] else None,
         uuid.UUID(rule["service_id"]) if rule["service_id"] else None,
     )
-    samples = await _samples(
-        connection, [uuid.UUID(b["binding_id"]) for b in bindings], rule["signal"], now - HISTORY
-    )
+    samples, parts, readable = await _rule_series(connection, rule, bindings, now, sampler, redis)
+
+    def thresholds_for(binding_id: str) -> list[float | None] | None:
+        if parts is None:
+            return None
+        return _thresholds(rule["operator"], parts.get(binding_id, []), float(rule["threshold"]))
+
     return {
         "rule_id": rule["id"],
         "signal": rule["signal"],
         "since": (now - HISTORY).isoformat(),
-        "bindings": [{**b, "series": _series(samples.get(b["binding_id"], []))} for b in bindings],
+        "readable": readable,
+        "bindings": [
+            {
+                **b,
+                "series": _series(
+                    samples.get(b["binding_id"], []), thresholds_for(b["binding_id"])
+                ),
+            }
+            for b in bindings
+        ],
     }
 
 
 async def preview(
-    connection: AsyncConnection, principal: Principal, values: dict[str, Any], now: datetime
+    connection: AsyncConnection,
+    principal: Principal,
+    values: dict[str, Any],
+    now: datetime,
+    sampler: TelemetrySampler | None = None,
+    redis: Any = None,
 ) -> dict[str, Any]:
     """How often a draft rule would have fired over the last day, judged by
-    the same `step` the runner uses, on the same samples."""
+    the same `step` the runner uses, on the same values: stored samples, or
+    the store's five-minute buckets for a rule that filters."""
     _check(values)
     await _require(connection, principal, values["project_id"], VIEW_PERMISSION)
     await _validate_target(
@@ -491,17 +602,26 @@ async def preview(
     bindings = await _covered_bindings(
         connection, values["project_id"], values["environment_id"], values["service_id"]
     )
-    samples = await _samples(
-        connection, [uuid.UUID(b["binding_id"]) for b in bindings], values["signal"], now - HISTORY
-    )
+    samples, parts, readable = await _rule_series(connection, values, bindings, now, sampler, redis)
+    anomaly = values["operator"] in ANOMALY_OPERATORS
+
+    def thresholds_at(binding_id: str, threshold: float) -> list[float | None] | None:
+        if parts is None:
+            return None
+        return _thresholds(values["operator"], parts.get(binding_id, []), threshold)
 
     def episodes_at(threshold: float) -> list[dict[str, Any]]:
         condition = RuleCondition(
-            values["signal"], values["operator"], threshold, int(values["for_seconds"])
+            values["signal"],
+            effective_operator(values["operator"]),
+            threshold,
+            int(values["for_seconds"]),
         )
         found = []
         for binding in bindings:
-            for ep in replay(condition, samples.get(binding["binding_id"], [])):
+            points = samples.get(binding["binding_id"], [])
+            bounds = thresholds_at(binding["binding_id"], threshold)
+            for ep in replay(condition, points, bounds):
                 end = ep.resolved_at or now
                 found.append(
                     {
@@ -521,7 +641,9 @@ async def preview(
     suggestion = None
     for factor in (1.25, 1.5, 0.75):
         candidate = threshold * factor
-        if values["signal"] in RATIO_SIGNALS:
+        if anomaly:
+            candidate = min(max(candidate, MIN_SENSITIVITY), MAX_SENSITIVITY)
+        elif values["signal"] in RATIO_SIGNALS:
             candidate = min(candidate, 1.0)
         count = len(episodes_at(candidate))
         if count != len(found):
@@ -531,9 +653,9 @@ async def preview(
         bindings, key=lambda b: sum(e["binding_id"] == b["binding_id"] for e in found), default=None
     )
     covered_hours = 0.0
-    if samples:
-        first = min(points[0][0] for points in samples.values() if points)
-        covered_hours = round((now - first).total_seconds() / 3600, 1)
+    firsts = [points[0][0] for points in samples.values() if points]
+    if firsts:
+        covered_hours = round((now - min(firsts)).total_seconds() / 3600, 1)
     return {
         "count": len(found),
         "minutes": sum(e["minutes"] for e in found),
@@ -541,12 +663,40 @@ async def preview(
         "suggestion": suggestion,
         "bindings": len(bindings),
         "history_hours": min(covered_hours, 24.0),
+        "readable": readable,
         "series": (
-            {**busiest, "series": _series(samples.get(busiest["binding_id"], []))}
+            {
+                **busiest,
+                "series": _series(
+                    samples.get(busiest["binding_id"], []),
+                    thresholds_at(busiest["binding_id"], threshold),
+                ),
+            }
             if busiest
             else None
         ),
     }
+
+
+async def routes(
+    connection: AsyncConnection,
+    principal: Principal,
+    target: dict[str, Any],
+    sampler: TelemetrySampler | None,
+    now: datetime,
+) -> list[str]:
+    """The endpoints the target's services served in the last day, busiest
+    first: what a single-endpoint rule can name."""
+    await _require(connection, principal, target["project_id"], VIEW_PERMISSION)
+    await _validate_target(
+        connection, target["project_id"], target["environment_id"], target["service_id"]
+    )
+    if sampler is None:
+        return []
+    bindings = await _covered_bindings(
+        connection, target["project_id"], target["environment_id"], target["service_id"]
+    )
+    return await sampler.routes(connection, [uuid.UUID(b["binding_id"]) for b in bindings], now)
 
 
 async def options(connection: AsyncConnection, principal: Principal) -> dict[str, Any]:
