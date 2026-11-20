@@ -24,6 +24,7 @@ import {
   type ServiceLine,
 } from "@/lib/dashboards";
 import { useFormat, useT } from "@/lib/i18n";
+import type { DeploymentRow } from "@/lib/deployments";
 import type { NamespaceSnapshot } from "@/lib/infrastructure";
 import { traceDetailPath, tracesPath, type TraceDetail, type TracePage } from "@/lib/traces";
 
@@ -98,9 +99,104 @@ export function HourTicks({ buckets, every = 3 }: { buckets: number[]; every?: n
   );
 }
 
+
+/* ================= deploy markers ================= */
+
+/** Where in [first bucket, end of the last bucket) an instant falls, 0..1, or
+ * null when it is outside the window the charts draw. */
+export function windowShare(at: number, buckets: number[], bucketSeconds: number): number | null {
+  if (!buckets.length) return null;
+  const start = buckets[0] * 1000;
+  const end = (buckets[buckets.length - 1] + bucketSeconds) * 1000;
+  if (at < start || at >= end) return null;
+  return (at - start) / (end - start);
+}
+
+export function useDeployTip() {
+  const tip = useTip();
+  const dt = useT("deployments");
+  const t = useT("dashboards");
+  const fmt = useFormat();
+  return {
+    tip,
+    show: (e: React.MouseEvent, d: DeploymentRow) => {
+      const lines: TipLine[] = [
+        [t("deploys.tipTitle", { service: d.service_key ?? d.workload_name })],
+        [t("deploys.tipAt"), new Date(d.rollout_started_at).toLocaleString(fmt.tag, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })],
+        [t("deploys.tipCommit"), d.short_commit ?? d.short_digest ?? "—"],
+        [t("deploys.tipRollout"), dt.dyn("rollout", d.rollout_state)],
+      ];
+      if (d.health_comparison) lines.push([t("deploys.tipHealth"), dt.dyn("verdict", d.health_comparison.verdict)]);
+      tip.show(e, lines);
+    },
+  };
+}
+
+/** Thin lines through a chart where something was deployed. Pointer events
+ * pass through, so the chart under them keeps its own tooltip. */
+export function DeployLines({ deploys, buckets, bucketSeconds }: { deploys: DeploymentRow[]; buckets: number[]; bucketSeconds: number }) {
+  return (
+    <div className={s.dlines} aria-hidden="true">
+      {deploys.map((d) => {
+        const x = windowShare(Date.parse(d.rollout_started_at), buckets, bucketSeconds);
+        return x === null ? null : <i key={d.id} className={d.health_comparison?.verdict === "regressed" ? s.dlBad : ""} style={{ left: `${x * 100}%` }} />;
+      })}
+    </div>
+  );
+}
+
+/** One pin per deploy in the window. A pin opens that service's details in
+ * the dashboard, never another page. */
+export function DeployRail({
+  deploys,
+  buckets,
+  bucketSeconds,
+  onOpen,
+  t,
+}: {
+  deploys: DeploymentRow[];
+  buckets: number[];
+  bucketSeconds: number;
+  onOpen?: (bindingId: string) => void;
+  t: T;
+}) {
+  const { tip, show } = useDeployTip();
+  const placed = deploys.flatMap((d) => {
+    const x = windowShare(Date.parse(d.rollout_started_at), buckets, bucketSeconds);
+    return x === null ? [] : [{ d, x }];
+  });
+  return (
+    <div className={s.rail}>
+      {placed.length === 0 ? <em className={s.railNone}>{t("deploys.none")}</em> : null}
+      {placed.map(({ d, x }) => (
+        <button
+          key={d.id}
+          type="button"
+          className={`${s.pin} ${d.health_comparison?.verdict === "regressed" ? s.pinBad : ""}`}
+          style={{ left: `${x * 100}%` }}
+          aria-label={t("deploys.pinLabel", { service: d.service_key ?? d.workload_name, commit: d.short_commit ?? d.short_digest ?? "—" })}
+          onMouseMove={(e) => show(e, d)}
+          onMouseLeave={tip.hide}
+          onClick={() => d.binding_id && onOpen?.(d.binding_id)}
+        />
+      ))}
+    </div>
+  );
+}
+
 /* ================= overview ================= */
 
-export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
+export function OverviewWidget({
+  overview,
+  deploys = [],
+  onOpen,
+  t,
+}: {
+  overview: Overview;
+  deploys?: DeploymentRow[];
+  onOpen?: (bindingId: string) => void;
+  t: T;
+}) {
   const { n, ms } = useN();
   const traffic = answered(overview.traffic);
   const latency = answered(overview.latency);
@@ -130,6 +226,8 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
         <Kpi label={t("overview.apdex")} value={ap.score === null ? "—" : n(Math.floor(ap.score * 100) / 100, 2)} note={t("overview.apdexNote")} tone="ok" />
       </div>
       <div className={s.lanes}>
+        <div className={s.laneStack}>
+        <DeployLines deploys={deploys} buckets={overview.buckets} bucketSeconds={overview.bucket_seconds ?? 3600} />
         <div className={s.lane}>
           <span className={s.laneLabel}>
             {t("overview.laneRequests")}
@@ -163,6 +261,14 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
             ))}
           </div>
         </div>
+        </div>
+        <div className={s.lane}>
+          <span className={s.laneLabel}>
+            {t("deploys.lane")}
+            <small>{t("deploys.count", { count: deploys.length })}</small>
+          </span>
+          <DeployRail deploys={deploys} buckets={overview.buckets} bucketSeconds={overview.bucket_seconds ?? 3600} onOpen={onOpen} t={t} />
+        </div>
         <div className={s.lane}>
           <span />
           <HourTicks buckets={overview.buckets} />
@@ -173,6 +279,7 @@ export function OverviewWidget({ overview, t }: { overview: Overview; t: T }) {
           <span><i className={s["c-slow"]} />{t("overview.keySlow")}</span>
           <span><i className={s["c-ok"]} />{t("overview.keyClean")}</span>
           <span><i className={s["c-none"]} />{t("overview.noRequests")}</span>
+          <span><i className={s.keyPin} />{t("deploys.key")}</span>
         </div>
       </div>
     </>

@@ -32,6 +32,7 @@ import {
   type WidgetKey,
   type WidgetSlot,
 } from "@/lib/dashboards";
+import { fetchDeployments, type DeploymentRow } from "@/lib/deployments";
 import { useFormat, useT } from "@/lib/i18n";
 import { fetchSnapshot, type NamespaceSnapshot } from "@/lib/infrastructure";
 import { fetchServiceHealthList, type ServiceHealthRow } from "@/lib/serviceHealth";
@@ -69,6 +70,7 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
   const [range, setRange] = useState<OverviewRange>("24h");
   const [epMode, setEpMode] = useState<"busy" | "slow">("busy");
   const [opened, setOpened] = useState<string | null>(null);
+  const [deploys, setDeploys] = useState<DeploymentRow[]>([]);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<WidgetSlot[]>([]);
@@ -87,6 +89,19 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
         setRows(list.items);
       })
       .catch((e: { status?: number }) => !cancelled && setError(e?.status === 404 ? "not_found" : "failed"));
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentId]);
+
+  // Deploys in this environment, marked on the charts (ADR-0034). The
+  // charts draw at most a day, so a day of rollouts is all they can show.
+  // Without them the charts still draw; the rail says there were none.
+  useEffect(() => {
+    let cancelled = false;
+    fetchDeployments({ environmentId, startedWithin: "24h", limit: 50 })
+      .then((page) => !cancelled && setDeploys(page.items))
+      .catch(() => !cancelled && setDeploys([]));
     return () => {
       cancelled = true;
     };
@@ -177,7 +192,7 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
     if (!overview && key !== "services") return { title: t(`widget.${key}`), body: <DataState kind="loading" /> };
     switch (key) {
       case "overview":
-        return { title: t("widget.overview"), sub: t("rangeNote", { range: t(`range.${range}`) }), body: <OverviewWidget overview={overview!} t={t} /> };
+        return { title: t("widget.overview"), sub: t("rangeNote", { range: t(`range.${range}`) }), body: <OverviewWidget overview={overview!} deploys={deploys} onOpen={setOpened} t={t} /> };
       case "services":
         return { title: t("widget.services"), body: <ServicesWidget lines={lines} buckets={overview?.buckets ?? []} onOpen={setOpened} t={t} /> };
       case "traffic_graph":
@@ -316,7 +331,7 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
         </div>
         {editing && hidden.length === 0 && <p className={s.sub} style={{ marginTop: 14 }}><Eye size={12} /> {t("edit.allShown")}</p>}
         {openedIndex >= 0 && (
-          <ServiceDrawer line={lines[openedIndex]} lines={lines} overview={overview} colour={colourOf(openedIndex)} onClose={() => setOpened(null)} t={t} />
+          <ServiceDrawer line={lines[openedIndex]} lines={lines} overview={overview} deploys={deploys.filter((d) => d.binding_id === lines[openedIndex].bindingId)} colour={colourOf(openedIndex)} onClose={() => setOpened(null)} t={t} />
         )}
       </div>
       </TipProvider>

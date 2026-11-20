@@ -39,3 +39,4 @@ or operational details.
 | [ADR-0031](ADR-0031-alert-rules-on-stored-health-samples.md) | Alert rules judged on the runner's stored health samples, no new provider queries |
 | [ADR-0032](ADR-0032-infrastructure-screen.md) | The infrastructure screen, read through the broker with a fixed query set |
 | [ADR-0033](ADR-0033-custom-dashboards.md) | Custom dashboards, built from fixed reads; the environment overview read |
+| [ADR-0034](ADR-0034-alert-rules-on-logs-and-traces-and-deploy-markers.md) | Alert rules on logs and traces; deploy markers on the dashboard charts |

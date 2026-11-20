@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
 from drake_api.alert_rules.router import router as alert_rules_router
+from drake_api.alert_rules.telemetry import TelemetrySampler
 from drake_api.alerting.router import router as alerting_router
 from drake_api.alerting.router_webhook import router as alertmanager_webhook_router
 from drake_api.alerting.silences import SilenceWorker
@@ -230,6 +231,11 @@ def create_app(
             batch_size=settings.incident_runner_batch_size,
             concurrency=settings.incident_runner_concurrency,
             lease_seconds=settings.incident_runner_lease_seconds,
+            sampler=TelemetrySampler(
+                app.state.observability_store,
+                logs_enabled=settings.observability_logs_enabled,
+                traces_enabled=settings.observability_traces_enabled,
+            ),
         )
         if settings.incident_runner_enabled
         else None

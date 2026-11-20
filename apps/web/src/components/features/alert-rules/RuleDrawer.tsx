@@ -12,6 +12,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   RATIO_SIGNALS,
   SIGNALS,
+  SIGNAL_SOURCE,
+  SIGNAL_SOURCES,
   createRule,
   formatSignal,
   previewRule,
@@ -30,7 +32,16 @@ import { useFormat, useT } from "@/lib/i18n";
 import s from "./alertRules.module.css";
 import { SignalChart, hhmm, severityTone } from "./instruments";
 
-type TemplateKey = "errors" | "latency" | "cpu" | "memory" | "restarts" | "traffic";
+type TemplateKey =
+  | "errors"
+  | "latency"
+  | "cpu"
+  | "memory"
+  | "restarts"
+  | "traffic"
+  | "fatalLogs"
+  | "errorLogs"
+  | "slowRoute";
 
 const TEMPLATES: Record<
   TemplateKey,
@@ -42,6 +53,9 @@ const TEMPLATES: Record<
   memory: { signal: "memory_utilization", operator: ">", threshold: 0.85, for_seconds: 600, severity: "warning" },
   restarts: { signal: "restarts", operator: ">", threshold: 3, for_seconds: 0, severity: "critical" },
   traffic: { signal: "request_rate", operator: "<", threshold: 0.2, for_seconds: 600, severity: "warning" },
+  fatalLogs: { signal: "fatal_logs", operator: ">", threshold: 0, for_seconds: 0, severity: "critical" },
+  errorLogs: { signal: "error_logs", operator: ">", threshold: 20, for_seconds: 300, severity: "warning" },
+  slowRoute: { signal: "slowest_route_p95_seconds", operator: ">", threshold: 1, for_seconds: 300, severity: "warning" },
 };
 const TEMPLATE_KEYS = Object.keys(TEMPLATES) as TemplateKey[];
 
@@ -54,6 +68,10 @@ const RANGES: Record<Signal, { min: number; max: number; step: number }> = {
   cpu_utilization: { min: 0.05, max: 1, step: 0.01 },
   memory_utilization: { min: 0.05, max: 1, step: 0.01 },
   unavailable_replicas: { min: 0, max: 10, step: 1 },
+  error_logs: { min: 0, max: 500, step: 1 },
+  fatal_logs: { min: 0, max: 50, step: 1 },
+  slow_requests: { min: 0, max: 500, step: 1 },
+  slowest_route_p95_seconds: { min: 0.1, max: 10, step: 0.1 },
 };
 
 const DURATIONS = [0, 60, 120, 300, 600, 900, 1800, 3600];
@@ -421,10 +439,14 @@ export function RuleDrawer({
                   value={signal}
                   onChange={(event) => changeSignal(event.target.value as Signal)}
                 >
-                  {SIGNALS.map((key) => (
-                    <option key={key} value={key}>
-                      {t.dyn("signal", key)}
-                    </option>
+                  {SIGNAL_SOURCES.map((source) => (
+                    <optgroup key={source} label={t(`sources.${source}`)}>
+                      {SIGNALS.filter((key) => SIGNAL_SOURCE[key] === source).map((key) => (
+                        <option key={key} value={key}>
+                          {t.dyn("signal", key)}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>

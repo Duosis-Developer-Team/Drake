@@ -230,6 +230,40 @@ describe("alert rules screen", () => {
       severity: "critical",
     });
   });
+
+  it("offers log and trace signals, and a template that watches fatal logs", async () => {
+    const calls = routes();
+    render(
+      <SessionProvider>
+        <AlertRulesPage />
+      </SessionProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Create rule/ }));
+    const dialog = await screen.findByRole("dialog");
+    const picker = within(dialog).getByLabelText("Signal");
+    const groups = Array.from(picker.querySelectorAll("optgroup")).map((g) => g.getAttribute("label"));
+    expect(groups).toEqual(["Metrics", "Logs", "Traces"]);
+    expect(within(picker).getByRole("option", { name: "Fatal log lines (5 min)" })).toBeInTheDocument();
+    expect(within(picker).getByRole("option", { name: "Slowest endpoint p95" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /A fatal log line/ }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.path === "/v1/alert-rules/preview" &&
+            JSON.parse(String(call.init?.body)).signal === "fatal_logs",
+        ),
+      ).toBe(true),
+    );
+    const last = calls.filter((call) => call.path === "/v1/alert-rules/preview").at(-1);
+    expect(JSON.parse(String(last?.init?.body))).toMatchObject({
+      signal: "fatal_logs",
+      operator: ">",
+      threshold: 0,
+      for_seconds: 0,
+      severity: "critical",
+    });
+  });
 });
 
 describe("alert rules screen in Turkish", () => {

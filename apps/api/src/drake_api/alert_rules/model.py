@@ -26,6 +26,14 @@ SIGNALS: dict[str, tuple[str, str]] = {
     "memory_utilization": ("resources", "memory_utilization"),
     "unavailable_replicas": ("availability", "unavailable_replicas"),
 }
+# Read from the logs and traces store over the last five minutes, not from
+# the health verdict (alert_rules.telemetry, ADR-0034). Counts, and seconds.
+LOG_SIGNALS = ("error_logs", "fatal_logs")
+TRACE_SIGNALS = ("slow_requests", "slowest_route_p95_seconds")
+TELEMETRY_SIGNALS = (*LOG_SIGNALS, *TRACE_SIGNALS)
+# Every signal a rule may watch, and a column of service_health_samples.
+RULE_SIGNALS = (*SIGNALS, *TELEMETRY_SIGNALS)
+RATIO_SIGNALS = ("error_ratio", "cpu_utilization", "memory_utilization")
 OPERATORS = (">", "<")
 SEVERITIES = ("critical", "warning")
 MAX_FOR_SECONDS = 86400
@@ -130,7 +138,7 @@ def replay(condition: RuleCondition, samples: list[tuple[datetime, float | None]
 
 def validate(signal: str, operator: str, threshold: float, for_seconds: int, severity: str) -> None:
     """Refuse a rule the evaluator could not judge honestly."""
-    if signal not in SIGNALS:
+    if signal not in RULE_SIGNALS:
         raise ValueError("unknown signal")
     if operator not in OPERATORS:
         raise ValueError("unknown operator")
@@ -140,10 +148,7 @@ def validate(signal: str, operator: str, threshold: float, for_seconds: int, sev
         raise ValueError("for_seconds out of range")
     if threshold != threshold or threshold in (float("inf"), float("-inf")):
         raise ValueError("threshold must be a number")
-    if (
-        signal in ("error_ratio", "cpu_utilization", "memory_utilization")
-        and not 0 <= threshold <= 1
-    ):
+    if signal in RATIO_SIGNALS and not 0 <= threshold <= 1:
         raise ValueError("a ratio threshold is between 0 and 1")
     if threshold < 0:
         raise ValueError("threshold must not be negative")

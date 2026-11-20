@@ -71,6 +71,15 @@ export const alertRules = defineMessages({
       cpu_utilization: "CPU",
       memory_utilization: "Memory",
       unavailable_replicas: "Unavailable replicas",
+      error_logs: "Error log lines (5 min)",
+      fatal_logs: "Fatal log lines (5 min)",
+      slow_requests: "Requests over 1 s (5 min)",
+      slowest_route_p95_seconds: "Slowest endpoint p95",
+    },
+    sources: {
+      metrics: "Metrics",
+      logs: "Logs",
+      traces: "Traces",
     },
     sentence: {
       above: "If {signal} stays above {threshold}",
@@ -161,6 +170,9 @@ export const alertRules = defineMessages({
       memory: { name: "Memory almost full", detail: "> 85% · 10 min" },
       restarts: { name: "Pods restarting", detail: "> 3 in window" },
       traffic: { name: "Traffic dropped", detail: "< 0.2/s · 10 min" },
+      fatalLogs: { name: "A fatal log line", detail: "logs · > 0 · at once" },
+      errorLogs: { name: "Error logs piling up", detail: "logs · > 20 in 5 min" },
+      slowRoute: { name: "A slow endpoint", detail: "traces · p95 > 1 s · 5 min" },
     },
     empty: {
       title: "No alert rules yet",
@@ -230,6 +242,15 @@ export const alertRules = defineMessages({
       cpu_utilization: "CPU",
       memory_utilization: "Bellek",
       unavailable_replicas: "Hazır olmayan replika",
+      error_logs: "Hata log satırı (5 dk)",
+      fatal_logs: "Fatal log satırı (5 dk)",
+      slow_requests: "1 sn üstü istek (5 dk)",
+      slowest_route_p95_seconds: "En yavaş ucun p95'i",
+    },
+    sources: {
+      metrics: "Metrikler",
+      logs: "Loglar",
+      traces: "Trace'ler",
     },
     sentence: {
       above: "{signal} {threshold} üstüne çıkarsa",
@@ -320,6 +341,9 @@ export const alertRules = defineMessages({
       memory: { name: "Bellek dolmak üzere", detail: "> %85 · 10 dk" },
       restarts: { name: "Pod yeniden başlıyor", detail: "pencerede > 3" },
       traffic: { name: "Trafik düştü", detail: "< 0,2/s · 10 dk" },
+      fatalLogs: { name: "Fatal log düştü", detail: "log · > 0 · hemen" },
+      errorLogs: { name: "Hata logları birikiyor", detail: "log · 5 dk'da > 20" },
+      slowRoute: { name: "Yavaş bir uç", detail: "trace · p95 > 1 sn · 5 dk" },
     },
     empty: {
       title: "Henüz alarm kuralı yok",

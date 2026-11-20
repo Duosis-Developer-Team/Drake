@@ -13,11 +13,12 @@ import Link from "next/link";
 import { useEffect } from "react";
 
 import { SLOW_MS, answered, type Overview, type ServiceLine } from "@/lib/dashboards";
+import type { DeploymentRow } from "@/lib/deployments";
 import type { useT } from "@/lib/i18n";
 
 import s from "./dashboards.module.css";
 import { useTip } from "./tip";
-import { HourTicks, useN } from "./widgets";
+import { DeployLines, DeployRail, HourTicks, useN } from "./widgets";
 
 type T = ReturnType<typeof useT<"dashboards">>;
 
@@ -25,6 +26,7 @@ export function ServiceDrawer({
   line,
   lines,
   overview,
+  deploys = [],
   colour,
   onClose,
   t,
@@ -32,6 +34,7 @@ export function ServiceDrawer({
   line: ServiceLine;
   lines: ServiceLine[];
   overview: Overview | null;
+  deploys?: DeploymentRow[];
   colour: string;
   onClose: () => void;
   t: T;
@@ -58,6 +61,7 @@ export function ServiceDrawer({
   const minutes = (overview?.bucket_seconds ?? 3600) / 60;
   const peak = Math.max(1e-9, ...traffic.map((b) => b.requests / minutes));
   const buckets = traffic.map((b) => b.t);
+  const bucketSeconds = overview?.bucket_seconds ?? 3600;
   const lx = (v: number) => (Math.log10(Math.max(1, v)) / Math.log10(10_000)) * 100;
   const bucketTip = (e: React.MouseEvent, i: number) => {
     const b = traffic[i];
@@ -90,10 +94,13 @@ export function ServiceDrawer({
 
         <section className={s.dSec}>
           <h3>{t("detail.trafficTitle")}<small>{t("detail.peak", { value: n(peak, 1) })}</small></h3>
-          <div className={s.dBars}>
-            {traffic.map((b, i) => (
-              <i key={b.t} style={{ height: `${Math.max(3, (b.requests / minutes / peak) * 100)}%` }} onMouseMove={(e) => bucketTip(e, i)} onMouseLeave={tip.hide} />
-            ))}
+          <div className={s.dBox}>
+            <DeployLines deploys={deploys} buckets={buckets} bucketSeconds={bucketSeconds} />
+            <div className={s.dBars}>
+              {traffic.map((b, i) => (
+                <i key={b.t} style={{ height: `${Math.max(3, (b.requests / minutes / peak) * 100)}%` }} onMouseMove={(e) => bucketTip(e, i)} onMouseLeave={tip.hide} />
+              ))}
+            </div>
           </div>
           <HourTicks buckets={buckets} every={6} />
         </section>
@@ -101,6 +108,7 @@ export function ServiceDrawer({
         <section className={s.dSec}>
           <h3>{t("detail.latencyTitle")}<small>{t("detail.latencyNote")}</small></h3>
           <div className={s.dLat}>
+            <DeployLines deploys={deploys} buckets={buckets} bucketSeconds={bucketSeconds} />
             <u style={{ bottom: `${lx(1000)}%` }}><span>1 {t("detail.second")}</span></u>
             {traffic.map((b, i) => (
               <i
@@ -112,6 +120,12 @@ export function ServiceDrawer({
               />
             ))}
           </div>
+          <HourTicks buckets={buckets} every={6} />
+        </section>
+
+        <section className={s.dSec}>
+          <h3>{t("deploys.lane")}<small>{t("deploys.count", { count: deploys.length })}</small></h3>
+          <DeployRail deploys={deploys} buckets={buckets} bucketSeconds={bucketSeconds} t={t} />
           <HourTicks buckets={buckets} every={6} />
         </section>
 
