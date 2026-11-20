@@ -40,9 +40,9 @@ long-lived connections are left out (observability.health_checks).
 
 A page takes two statements in all, one on logs and one on traces, whatever its
 size. They narrow in SQL to the exact (cluster, namespace, kind, workload) of
-those bindings, the same way the overview read does (ADR-0033). At the
-runner's default page of 25 bindings and a 60 s interval, that is about two
-small, five-minute-wide statements a minute. Prometheus gets no new query.
+those bindings, the same way the overview read does (ADR-0033). In prod the
+runner judges 21 bindings, one page, every 120 s, so this adds two small,
+five-minute-wide statements every two minutes. Prometheus gets no new query.
 
 The values are stored in four new nullable columns on `service_health_samples`
 (migration 0028), next to the metric signals. Live judgement, the rule
@@ -67,11 +67,13 @@ signals. If the store answered this cycle, the runner records a sample at the
 current time that holds only the log and trace values. Rules on those signals
 move; rules on metrics do not.
 
-### Why five minutes, sampled every minute
+### Why five minutes
 
-Every line is seen in five consecutive samples, so ingestion delay cannot hide
-it. A rule such as "fatal lines above 0, at once" fires within a minute and
-goes back to normal five minutes after the last such line. Each signal is
+The window is wider than the runner interval (60 s by default, 120 s in
+prod), so every line is seen in at least two consecutive samples and
+ingestion delay cannot hide it. A rule such as "fatal lines above 0, at once"
+fires within one runner interval and goes back to normal about five minutes
+after the last such line. Each signal is
 labelled with its window ("Fatal log lines (5 min)"), so the threshold reads
 the way it is judged.
 
@@ -94,7 +96,7 @@ read fails, the charts draw without markers.
 
 - Log and trace rules use the screens, severities, mutes, incidents and
   notification routing that already exist.
-- A rule on logs cannot react faster than the runner interval (60 s in prod).
+- A rule on logs cannot react faster than the runner interval (120 s in prod).
   It cannot match text yet: it counts by severity. Text-pattern rules are a
   later decision, and they need per-rule statements.
 - `slowest_route_p95_seconds` is judged per service, not per named route:
