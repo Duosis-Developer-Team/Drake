@@ -212,11 +212,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit cfac3e80b1f8301d9bdef3938c0345381eaaba89
+    # Source commit a8ffcc0309fdbe2987cee33ac0fc925d7e88d279
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:7d1e2e199a4e91ca1f183e34afd2f206bffba9f94c6ed86931ce6256e180351d"
+    digest: "sha256:5fa7574da50a717eaa2817c77ab7e119ffbf69571105b092c5c5a9524223111a"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -239,8 +239,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit cfac3e80b1f8301d9bdef3938c0345381eaaba89
-    digest: "sha256:32cf349156a288738b893f4d2e30b4dd0224349a9218eaf826c0c1d3dc15a1a7"
+    # Source commit a8ffcc0309fdbe2987cee33ac0fc925d7e88d279
+    digest: "sha256:64db950b48745c617e1ff38199afb82448776571ab5fe94c949d357fb4e7b10e"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -262,7 +262,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:7d1e2e199a4e91ca1f183e34afd2f206bffba9f94c6ed86931ce6256e180351d"
+    digest: "sha256:5fa7574da50a717eaa2817c77ab7e119ffbf69571105b092c5c5a9524223111a"
   backoffLimit: 0
 
 networkPolicy:
