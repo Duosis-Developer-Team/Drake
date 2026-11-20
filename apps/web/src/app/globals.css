@@ -582,3 +582,11 @@ table,
     scroll-behavior: auto !important;
   }
 }
+
+/* The service map's moving dashes. Speed is set per edge (`--flow`), from
+   its traffic; under reduced motion the kill switch above stops it. */
+@keyframes trace-flow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
