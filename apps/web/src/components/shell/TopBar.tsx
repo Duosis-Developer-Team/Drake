@@ -42,22 +42,24 @@ export function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const t = useT("shell");
 
   return (
-    <header className="sticky top-0 z-30 flex h-[4.5rem] shrink-0 items-center gap-3 rounded-t-[1.5rem] bg-canvas/85 px-3 backdrop-blur-md lg:rounded-t-[2rem] lg:px-10">
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-canvas/90 px-3 backdrop-blur-md lg:px-7">
       <button
         type="button"
         onClick={onOpenSidebar}
         aria-label={t("sidebar.openNavigation")}
-        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover lg:hidden"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover lg:hidden"
       >
         <Menu className="h-4 w-4" aria-hidden />
       </button>
 
-      <div className="flex shrink-0 items-center">
-        <CatalogSearch />
+      {/* Where you are first, then how to go elsewhere: the breadcrumb leads
+          the bar and search sits with the other controls on the right. */}
+      <div className="hidden min-w-0 flex-1 sm:block">
+        <Breadcrumbs />
       </div>
 
-      <div className="hidden min-w-0 flex-1 px-2 sm:block">
-        <Breadcrumbs />
+      <div className="flex shrink-0 items-center max-sm:flex-1">
+        <CatalogSearch />
       </div>
 
       {/*

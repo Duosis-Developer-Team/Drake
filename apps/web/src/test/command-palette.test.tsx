@@ -34,7 +34,7 @@ function renderSearch(permissions: string[] = []) {
 }
 
 async function open() {
-  fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
+  fireEvent.click(screen.getAllByRole("button", { name: /search tracery/i })[0]);
   return screen.findByLabelText("Search query");
 }
 
@@ -100,15 +100,15 @@ describe("command palette: page results", () => {
   });
 
   it("never offers a page the sidebar would also hide for this session", async () => {
-    // No permissions at all: only the ungated Command Center entry survives.
+    // No permissions at all: only the ungated Overview entry survives.
     renderSearch([]);
     const input = await open();
     fireEvent.change(input, { target: { value: "Incidents" } });
     expect(screen.queryByTestId("palette-group-pages")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/no authorized results/i)).toBeInTheDocument());
 
-    fireEvent.change(input, { target: { value: "Command" } });
-    expect(await screen.findByTestId("palette-group-pages")).toHaveTextContent("Command Center");
+    fireEvent.change(input, { target: { value: "Overview" } });
+    expect(await screen.findByTestId("palette-group-pages")).toHaveTextContent("Overview");
   });
 });
 

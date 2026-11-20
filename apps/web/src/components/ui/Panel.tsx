@@ -28,8 +28,8 @@ const RAIL: Partial<Record<PanelTone, string>> = {
 };
 
 const RADIUS = {
-  panel: "rounded-[1.5rem]",
-  canvas: "rounded-[1.75rem]",
+  panel: "rounded-panel",
+  canvas: "rounded-panel",
 } as const;
 
 export type PanelSurface = "default" | "hero";

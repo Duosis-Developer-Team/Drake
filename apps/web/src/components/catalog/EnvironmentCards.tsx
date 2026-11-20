@@ -137,7 +137,7 @@ export function ServiceTile({ service }: { service: ServiceLaneModel }) {
     <li className="min-w-0">
       <Link
         href={service.href}
-        className="group flex h-full min-w-0 flex-col rounded-[1.125rem] border border-border bg-surface-2/40 p-4 transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="group flex h-full min-w-0 flex-col rounded-[0.625rem] border border-border bg-surface-2/40 p-4 transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <span className="flex min-w-0 items-start gap-3">
           <ToneAvatar status={service.tone} />
@@ -195,7 +195,7 @@ export function EnvironmentCard({
   return (
     <section
       data-testid={`environment-lane-${lane.id}`}
-      className="flex h-full min-w-0 flex-col rounded-[1.5rem] border border-border bg-surface shadow-panel"
+      className="flex h-full min-w-0 flex-col rounded-panel border border-border bg-surface shadow-panel"
     >
       <div className="flex items-start gap-4 px-6 pt-6">
         <IconBubble icon={external ? Globe : Layers} tone={lane.tone} size="large" />
@@ -245,7 +245,7 @@ export function EnvironmentCard({
 
       <div className="flex-1 px-6 pt-5">
         {lane.services.length === 0 ? (
-          <div className="rounded-[1.125rem] border border-dashed border-border px-4 py-4">
+          <div className="rounded-[0.625rem] border border-dashed border-border px-4 py-4">
             <TileState icon={Boxes} title={t("card.emptyTitle")} description={t("card.emptyBody")} />
           </div>
         ) : (

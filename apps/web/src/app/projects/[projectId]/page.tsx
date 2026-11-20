@@ -632,7 +632,7 @@ export default function ProjectOverviewPage() {
 
             <Panel>
               <PanelHeader title={t("record.title")} level={3} />
-              <div className="flex items-center gap-4 rounded-[1.125rem] border border-border bg-surface-2/40 p-4">
+              <div className="flex items-center gap-4 rounded-[0.625rem] border border-border bg-surface-2/40 p-4">
                 <IconBubble icon={FolderGit2} size="large" />
                 <div className="min-w-0 flex-1">
                   <span className="block truncate text-body font-semibold text-ink">

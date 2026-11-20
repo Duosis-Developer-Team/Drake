@@ -172,7 +172,7 @@ function Grid({
                   >
                     {cellItems.length > 0 ? (
                       <div
-                        className={`flex min-h-[4.5rem] flex-col gap-2 rounded-[1rem] p-2.5 ${bg}`}
+                        className={`flex min-h-[4.5rem] flex-col gap-2 rounded-[0.625rem] p-2.5 ${bg}`}
                       >
                         <span className="flex items-baseline gap-2 px-1">
                           <span
@@ -195,7 +195,7 @@ function Grid({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex min-h-[4.5rem] items-center justify-center rounded-[1rem] border border-dashed border-border text-micro text-ink-muted">
+                      <div className="flex min-h-[4.5rem] items-center justify-center rounded-[0.625rem] border border-dashed border-border text-micro text-ink-muted">
                         —
                       </div>
                     )}
@@ -229,7 +229,7 @@ function Disclosure({
           <li key={criticality}>
             <details
               open
-              className="rounded-[1rem] border border-border px-3 py-2"
+              className="rounded-[0.625rem] border border-border px-3 py-2"
             >
               <summary className="cursor-pointer text-micro font-medium tracking-[0.08em] text-ink-muted uppercase">
                 {common(`severity.${criticality}`)}

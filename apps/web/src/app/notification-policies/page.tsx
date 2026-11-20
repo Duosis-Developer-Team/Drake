@@ -228,7 +228,7 @@ function PolicyForm({
         }
       />
       {!canManage ? (
-        <div className="rounded-[1.25rem] bg-surface-2 p-4">
+        <div className="rounded-panel bg-surface-2 p-4">
           <DataState
             kind="permission-denied"
             description={t("policies.form.forbidden")}
@@ -352,7 +352,7 @@ function PolicyForm({
           </Step>
         ) : null}
 
-        <div className="flex items-center gap-3 rounded-[1.25rem] bg-surface-2 px-4 py-3">
+        <div className="flex items-center gap-3 rounded-panel bg-surface-2 px-4 py-3">
           <IconBubble icon={Webhook} size="sm" />
           <p className="min-w-0 text-micro text-ink-secondary">
             <span data-tabular className="font-semibold text-ink">
@@ -417,7 +417,7 @@ function RuleCard({
   return (
     <li
       data-testid={`policy-${policy.id}`}
-      className={`rounded-[1.5rem] border bg-surface shadow-panel transition-colors ${
+      className={`rounded-panel border bg-surface shadow-panel transition-colors ${
         editing ? "border-accent" : "border-border"
       }`}
     >

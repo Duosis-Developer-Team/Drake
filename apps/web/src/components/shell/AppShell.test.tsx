@@ -62,7 +62,7 @@ describe("AppShell (authenticated)", () => {
 
   it("marks the active entry by more than colour", async () => {
     await renderAuthenticated();
-    const active = screen.getByRole("link", { name: /command center/i });
+    const active = screen.getByRole("link", { name: /^overview$/i });
     expect(active).toHaveAttribute("aria-current", "page");
     // Weight and surface change too, so the state survives greyscale.
     expect(active.className).toMatch(/font-semibold/);
@@ -86,7 +86,7 @@ describe("AppShell (authenticated)", () => {
     const nav = screen.getByRole("navigation", { name: "Primary" });
     // Command Center is ungated; everything else in the rail is not.
     expect(within(nav).getAllByRole("link")).toHaveLength(1);
-    expect(within(nav).getByRole("link", { name: /command center/i })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: /^overview$/i })).toBeInTheDocument();
   });
 
   it("theme control offers system, light and dark, and persists a choice", async () => {
@@ -127,7 +127,7 @@ describe("AppShell (authenticated)", () => {
     // the Command Center:
     expect(screen.queryByRole("group", { name: /time range/i })).not.toBeInTheDocument();
     // Catalog search is a real, enabled control:
-    const searchButtons = screen.getAllByRole("button", { name: /search drake/i });
+    const searchButtons = screen.getAllByRole("button", { name: /search tracery/i });
     expect(searchButtons.length).toBeGreaterThan(0);
     expect(searchButtons[0]).toBeEnabled();
   });

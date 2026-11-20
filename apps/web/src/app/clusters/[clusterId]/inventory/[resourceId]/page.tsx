@@ -55,7 +55,7 @@ function BoundedMap({
   const pairs = Object.entries(entries);
   if (pairs.length === 0) {
     return (
-      <p className="rounded-[1rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
+      <p className="rounded-[0.625rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
         {empty}
       </p>
     );
@@ -105,7 +105,7 @@ function SummaryPanel({
         <PanelHeader title={title} description={t("resource.summary.bounded")} />
       </div>
       {pairs.length === 0 ? (
-        <p className="rounded-[1rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
+        <p className="rounded-[0.625rem] bg-surface-2 px-5 py-4 text-caption text-ink-muted">
           {empty}
         </p>
       ) : (
@@ -272,7 +272,7 @@ export default function InventoryResourcePage() {
                     {data.health_reasons.map((reason) => (
                       <li
                         key={reason}
-                        className="flex items-center gap-3 rounded-[1rem] bg-surface-2 px-4 py-3"
+                        className="flex items-center gap-3 rounded-[0.625rem] bg-surface-2 px-4 py-3"
                       >
                         <IconBubble
                           icon={Activity}
@@ -286,7 +286,7 @@ export default function InventoryResourcePage() {
                     ))}
                   </ul>
                 ) : (
-                  <div className="flex items-center gap-3 rounded-[1rem] bg-surface-2 px-4 py-3">
+                  <div className="flex items-center gap-3 rounded-[0.625rem] bg-surface-2 px-4 py-3">
                     <IconBubble icon={Activity} tone="success" size="small" />
                     <p className="text-caption text-ink-secondary">
                       {t("resource.health.noSignals")}

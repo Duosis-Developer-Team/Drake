@@ -498,7 +498,7 @@ export default function NotificationDeliveriesPage() {
                         </p>
                       ) : null}
                       {expanded === row.id ? (
-                        <div className="mt-4 ml-14 rounded-[1.25rem] bg-surface-2 p-5">
+                        <div className="mt-4 ml-14 rounded-panel bg-surface-2 p-5">
                           <AttemptTimeline deliveryId={row.id} />
                         </div>
                       ) : null}

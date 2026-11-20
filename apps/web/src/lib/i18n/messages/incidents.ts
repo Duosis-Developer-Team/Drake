@@ -47,7 +47,7 @@ export const incidents = defineMessages({
     list: {
       title: "Incidents",
       description:
-        "Opened and closed by Drake from trustworthy health evaluations — never by a datasource outage.",
+        "Opened and closed by Tracery from trustworthy health evaluations — never by a datasource outage.",
       shown: "{shown} of {total} shown",
       filter: {
         state: "State",
@@ -121,7 +121,7 @@ export const incidents = defineMessages({
       lifecycle: {
         title: "Lifecycle",
         description:
-          "Opened, acknowledged, resolved — as Drake recorded it, one honest timestamp at a time.",
+          "Opened, acknowledged, resolved — as Tracery recorded it, one honest timestamp at a time.",
         activeNote:
           "Acknowledging does not close the incident. It resolves on its own after two consecutive healthy evaluations.",
         resolvedNote: "Resolved — see below for how.",
@@ -181,7 +181,7 @@ export const incidents = defineMessages({
         title: "Recent health changes",
         emptyTitle: "No recorded changes",
         emptyDescription:
-          "Drake records a row when the status or its reasons change, not on every evaluation.",
+          "Tracery records a row when the status or its reasons change, not on every evaluation.",
         first: "first observation",
       },
     },
@@ -222,7 +222,7 @@ export const incidents = defineMessages({
     list: {
       title: "Olaylar",
       description:
-        "Drake tarafından güvenilir sağlık değerlendirmelerine göre açılır ve kapatılır; bir veri kaynağı kesintisi asla olay açmaz.",
+        "Tracery tarafından güvenilir sağlık değerlendirmelerine göre açılır ve kapatılır; bir veri kaynağı kesintisi asla olay açmaz.",
       shown: "{total} kayıttan {shown} tanesi gösteriliyor",
       filter: {
         state: "Durum",
@@ -295,7 +295,7 @@ export const incidents = defineMessages({
       lifecycle: {
         title: "Yaşam döngüsü",
         description:
-          "Açıldı, onaylandı, çözüldü; Drake'in kaydettiği gibi, her seferinde dürüst bir zaman damgasıyla.",
+          "Açıldı, onaylandı, çözüldü; Tracery'nin kaydettiği gibi, her seferinde dürüst bir zaman damgasıyla.",
         activeNote:
           "Onaylamak olayı kapatmaz. Art arda iki sağlıklı değerlendirmeden sonra kendiliğinden çözülür.",
         resolvedNote: "Çözüldü; nasıl olduğu aşağıda.",
@@ -356,7 +356,7 @@ export const incidents = defineMessages({
         title: "Son sağlık değişiklikleri",
         emptyTitle: "Kayıtlı değişiklik yok",
         emptyDescription:
-          "Drake her değerlendirmede değil, durum veya nedenleri değiştiğinde bir satır kaydeder.",
+          "Tracery her değerlendirmede değil, durum veya nedenleri değiştiğinde bir satır kaydeder.",
         first: "ilk gözlem",
       },
     },

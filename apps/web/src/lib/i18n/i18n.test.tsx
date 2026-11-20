@@ -52,7 +52,7 @@ describe("catalogue completeness", () => {
   it("no Turkish leaf is left identical to English unless it is a proper noun or symbol", () => {
     // Proper nouns, units and symbols are legitimately shared. Anything else
     // identical in both trees is almost certainly an untranslated string.
-    const allowed = /^(UTC|USD|%|SLO|SLI|GitHub|Helm|Drake|Kubernetes|GiB|English|Türkçe|Namespace|Pod|OK|ID|—|-|\d[\d.,: ]*|[A-Z]{2,5}|\{[a-z]+\}(\s?ms)?)$/;
+    const allowed = /^(UTC|USD|%|SLO|SLI|GitHub|Helm|Tracery|Kubernetes|GiB|English|Türkçe|Namespace|Pod|OK|ID|—|-|\d[\d.,: ]*|[A-Z]{2,5}|\{[a-z]+\}(\s?ms)?)$/;
     const violations: string[] = [];
     const walk = (en: object, tr: object, prefix: string) => {
       for (const [k, v] of Object.entries(en)) {

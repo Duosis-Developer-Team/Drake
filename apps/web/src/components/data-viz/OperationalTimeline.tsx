@@ -133,7 +133,7 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
           return (
             <div
               key={lane.key}
-              className="flex flex-col gap-2 rounded-[1rem] bg-surface-2 p-3 sm:flex-row sm:items-center sm:gap-4"
+              className="flex flex-col gap-2 rounded-[0.625rem] bg-surface-2 p-3 sm:flex-row sm:items-center sm:gap-4"
             >
               <span className="flex items-center gap-3 sm:w-40 sm:shrink-0 xl:w-44">
                 <span

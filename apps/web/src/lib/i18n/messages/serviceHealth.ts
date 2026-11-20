@@ -88,7 +88,7 @@ export const serviceHealth = defineMessages({
     },
     list: {
       title: "Service health",
-      description: "Computed by Drake from curated queries against each service's bound workload.",
+      description: "Computed by Tracery from curated queries against each service's bound workload.",
       kpi: {
         inScope: "Services in scope",
         services: "services",
@@ -183,7 +183,7 @@ export const serviceHealth = defineMessages({
           events: "Events",
         },
         laneState: {
-          not_configured: "Not enabled on this Drake",
+          not_configured: "Not enabled on this Tracery",
           denied: "You can't read this signal for this service",
           unavailable: "The store did not answer",
         },
@@ -226,7 +226,7 @@ export const serviceHealth = defineMessages({
         latencyP95: "Latency (p95)",
         noMetrics: "No application metrics",
         noMetricsNote: "No request metrics are published — not counted against its health.",
-        fromTraces: "From Drake's traces of this workload (no application metrics published)",
+        fromTraces: "From Tracery's traces of this workload (no application metrics published)",
       },
       why: {
         title: "Why",
@@ -414,7 +414,7 @@ export const serviceHealth = defineMessages({
     list: {
       title: "Servis sağlığı",
       description:
-        "Drake tarafından, her servisin bağlı iş yüküne yönelik seçilmiş sorgularla hesaplanır.",
+        "Tracery tarafından, her servisin bağlı iş yüküne yönelik seçilmiş sorgularla hesaplanır.",
       kpi: {
         inScope: "Kapsamdaki servisler",
         services: "servis",
@@ -508,7 +508,7 @@ export const serviceHealth = defineMessages({
           events: "Olaylar",
         },
         laneState: {
-          not_configured: "Bu Drake'te açık değil",
+          not_configured: "Bu Tracery'de açık değil",
           denied: "Bu servis için bu sinyali okuma yetkin yok",
           unavailable: "Depo yanıt vermedi",
         },
@@ -551,7 +551,7 @@ export const serviceHealth = defineMessages({
         latencyP95: "Gecikme (p95)",
         noMetrics: "Uygulama metriği yok",
         noMetricsNote: "İstek metriği yayımlanmıyor; bu, sağlığına karşı sayılmaz.",
-        fromTraces: "Drake'in bu iş yükünden topladığı trace'lerden (uygulama metrik yayınlamıyor)",
+        fromTraces: "Tracery'nin bu iş yükünden topladığı trace'lerden (uygulama metrik yayınlamıyor)",
       },
       why: {
         title: "Neden",

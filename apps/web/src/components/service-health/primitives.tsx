@@ -307,7 +307,7 @@ export function ReasonList({
   return (
     <ul className="space-y-2.5" data-testid="reason-list">
       {reasons.map((reason, index) => (
-        <li key={reason} className="flex items-start gap-3 rounded-[1rem] bg-surface-2 px-4 py-3">
+        <li key={reason} className="flex items-start gap-3 rounded-[0.625rem] bg-surface-2 px-4 py-3">
           <span
             aria-hidden
             className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${spec.chip}`}
@@ -374,7 +374,7 @@ export function FreshnessNotice({
     <div
       role="status"
       data-testid="freshness-notice"
-      className={`flex items-start gap-4 rounded-[1.25rem] px-5 py-4 text-caption ${toneSpec(tone).chip}`}
+      className={`flex items-start gap-4 rounded-panel px-5 py-4 text-caption ${toneSpec(tone).chip}`}
     >
       <span aria-hidden className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface/60">
         <Icon className="h-4 w-4" />

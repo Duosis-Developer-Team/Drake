@@ -274,7 +274,7 @@ export function TraceExplorer({
             ) : null}
 
             {page.routes.length > 0 ? (
-              <div className="overflow-x-auto rounded-[1rem] border border-border">
+              <div className="overflow-x-auto rounded-[0.625rem] border border-border">
                 <table className="w-full text-caption" data-testid="trace-routes">
                   <caption className="sr-only">{t("routes.title")}</caption>
                   <thead className="bg-surface-2 text-micro text-ink-muted">
@@ -372,7 +372,7 @@ export function TraceExplorer({
             ) : view === "byRoute" ? (
               <>
                 <ol
-                  className="-mx-2 divide-y divide-border overflow-hidden rounded-[1rem] border border-border"
+                  className="-mx-2 divide-y divide-border overflow-hidden rounded-[0.625rem] border border-border"
                   data-testid="trace-request-groups"
                   aria-busy={refreshing}
                 >
@@ -437,7 +437,7 @@ export function TraceExplorer({
               </>
             ) : (
               <ol
-                className="-mx-2 divide-y divide-border overflow-hidden rounded-[1rem] border border-border"
+                className="-mx-2 divide-y divide-border overflow-hidden rounded-[0.625rem] border border-border"
                 data-testid="trace-requests"
                 aria-busy={refreshing}
               >
@@ -489,7 +489,7 @@ export function TraceExplorer({
 
 function Tile({ label, value, critical = false }: { label: string; value: string; critical?: boolean }) {
   return (
-    <div className="rounded-[1rem] bg-surface-2 px-4 py-3">
+    <div className="rounded-[0.625rem] bg-surface-2 px-4 py-3">
       <dt className="text-micro text-ink-muted">{label}</dt>
       <dd data-tabular className={`mt-1 text-[1.5rem] leading-none font-semibold ${critical ? "text-critical" : "text-ink"}`}>
         {value}

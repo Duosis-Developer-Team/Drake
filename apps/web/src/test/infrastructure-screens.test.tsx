@@ -141,7 +141,7 @@ describe("infrastructure screen", () => {
         <InfrastructurePage />
       </SessionProvider>,
     );
-    const drake = await screen.findByRole("button", { name: /Drake.*Uses more than requested/s });
+    const drake = await screen.findByRole("button", { name: /Tracery.*Uses more than requested/s });
     expect(screen.getByRole("button", { name: /Hermes.*Requested too much/s })).toHaveTextContent("Problem in 1 environment");
     fireEvent.click(drake);
     fireEvent.click(await screen.findByRole("button", { name: /drake-otel/ }));
@@ -190,7 +190,7 @@ describe("infrastructure screen in Turkish", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Altyapı" })).toBeInTheDocument();
     expect(screen.getByText("Duosis Production · 2 makine · 78 pod")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Drake.*İsteğini aşıyor/s })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Tracery.*İsteğini aşıyor/s })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Hangi makineler" })).toBeInTheDocument();
   });
 });

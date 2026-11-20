@@ -511,7 +511,7 @@ export function LogExplorer({
             )
           ) : (
             <ol
-              className="-mx-2 max-h-[40rem] divide-y divide-border overflow-y-auto overscroll-contain rounded-[1rem] border border-border"
+              className="-mx-2 max-h-[40rem] divide-y divide-border overflow-y-auto overscroll-contain rounded-[0.625rem] border border-border"
               data-testid="log-lines"
               aria-busy={refreshing}
             >

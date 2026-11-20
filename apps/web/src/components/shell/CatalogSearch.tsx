@@ -292,18 +292,18 @@ export function CatalogSearch() {
         ref={openerRef}
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden h-11 w-72 items-center gap-2.5 rounded-full border border-border bg-surface pr-1.5 pl-4 text-sm text-ink-muted transition-colors hover:text-ink md:flex"
+        className="hidden h-9 w-64 items-center gap-2 rounded-control border border-border bg-surface pr-1.5 pl-3 text-[0.8125rem] text-ink-muted transition-colors hover:text-ink md:flex"
         aria-label={t("search.open")}
       >
         <Search className="h-4 w-4" aria-hidden />
         <span className="flex-1 text-left">{t("search.placeholderShort")}</span>
-        <kbd className="rounded-full bg-surface-3 px-2.5 py-1 text-[11px] font-medium text-ink-secondary">⌘K</kbd>
+        <kbd className="rounded-[0.3125rem] border border-border px-1.5 py-0.5 font-mono text-[0.6875rem] text-ink-muted">⌘K</kbd>
       </button>
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-label={t("search.open")}
-        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary hover:bg-surface-hover md:hidden"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-surface text-ink-secondary hover:bg-surface-hover md:hidden"
       >
         <Search className="h-4 w-4" aria-hidden />
       </button>

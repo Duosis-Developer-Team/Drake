@@ -52,7 +52,7 @@ export const integrations = defineMessages({
     },
     health: {
       title: "Observed health",
-      description: "Every connector, by what Drake last saw",
+      description: "Every connector, by what Tracery last saw",
       donutLabel: "Observed connector state",
       ok: "OK",
       notReporting: "Not reporting",
@@ -63,7 +63,7 @@ export const integrations = defineMessages({
       title: "GitHub App integration",
       crumb: "Integrations",
       descriptionTail:
-        "/ GitHub — read-only repository governance; Drake never changes a repository setting.",
+        "/ GitHub — read-only repository governance; Tracery never changes a repository setting.",
       repositories: {
         heading: "Repositories",
         visible: "{count} visible to you",
@@ -98,7 +98,7 @@ export const integrations = defineMessages({
         notConnected: {
           title: "GitHub App is not connected yet",
           description:
-            "Drake shows nothing here until an operator supplies the app identity and its secret references.",
+            "Tracery shows nothing here until an operator supplies the app identity and its secret references.",
         },
         secretsNote: "Secrets are supplied out of band and referenced by name; never shown here.",
       },
@@ -116,7 +116,7 @@ export const integrations = defineMessages({
         gate: {
           title: "Blocked by a manual security gate",
           description:
-            "An operator must review and close this security gate before Drake may onboard this repository.",
+            "An operator must review and close this security gate before Tracery may onboard this repository.",
         },
         lastReconciliation: "Last reconciliation",
         lastPolicyEvaluation: "Last policy evaluation",
@@ -220,7 +220,7 @@ export const integrations = defineMessages({
     },
     health: {
       title: "Gözlemlenen sağlık",
-      description: "Drake'in son gördüğü haliyle her bağlayıcı",
+      description: "Tracery'nin son gördüğü haliyle her bağlayıcı",
       donutLabel: "Gözlemlenen bağlayıcı durumu",
       ok: "OK",
       notReporting: "Raporlamıyor",
@@ -231,7 +231,7 @@ export const integrations = defineMessages({
       title: "GitHub App entegrasyonu",
       crumb: "Entegrasyonlar",
       descriptionTail:
-        "/ GitHub — salt okunur depo yönetişimi; Drake bir depo ayarını asla değiştirmez.",
+        "/ GitHub — salt okunur depo yönetişimi; Tracery bir depo ayarını asla değiştirmez.",
       repositories: {
         heading: "Depolar",
         visible: "size görünen: {count}",
@@ -265,10 +265,10 @@ export const integrations = defineMessages({
         notConnected: {
           title: "GitHub App henüz bağlı değil",
           description:
-            "Bir operatör uygulama kimliğini ve gizli anahtar referanslarını sağlayana kadar Drake burada hiçbir şey göstermez.",
+            "Bir operatör uygulama kimliğini ve gizli anahtar referanslarını sağlayana kadar Tracery burada hiçbir şey göstermez.",
         },
         secretsNote:
-          "Gizli anahtarlar Drake dışında sağlanır ve adla referanslanır; burada asla gösterilmez.",
+          "Gizli anahtarlar Tracery dışında sağlanır ve adla referanslanır; burada asla gösterilmez.",
       },
       repository: {
         defaultBranch: "varsayılan dal: {branch}",
@@ -284,7 +284,7 @@ export const integrations = defineMessages({
         gate: {
           title: "Manuel güvenlik kapısıyla engellendi",
           description:
-            "Drake'in bu depo için katılım başlatabilmesi için önce bir operatörün bu güvenlik kapısını inceleyip kaldırması gerekir.",
+            "Tracery'nin bu depo için katılım başlatabilmesi için önce bir operatörün bu güvenlik kapısını inceleyip kaldırması gerekir.",
         },
         lastReconciliation: "Son uzlaştırma",
         lastPolicyEvaluation: "Son politika değerlendirmesi",

@@ -101,7 +101,7 @@ export function DataState({
       return (
         <p
           data-testid="state-estimated"
-          className="flex items-start gap-3 rounded-[1.125rem] border border-warning/30 bg-warning-soft px-4 py-3 text-caption text-warning"
+          className="flex items-start gap-3 rounded-[0.625rem] border border-warning/30 bg-warning-soft px-4 py-3 text-caption text-warning"
         >
           <span
             aria-hidden

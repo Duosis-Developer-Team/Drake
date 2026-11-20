@@ -73,7 +73,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   useScrollLock(drawerOpen);
 
   return (
-    <div className="flex min-h-screen gap-3 bg-frame p-2 sm:p-3 lg:gap-4 lg:p-4">
+    <div className="flex min-h-screen bg-canvas">
       <a
         href="#main"
         className="sr-only rounded-control bg-brand px-3 py-2 text-body font-medium text-ink-inverse focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
@@ -81,10 +81,10 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
         {common("a11y.skipToContent")}
       </a>
 
-      {/* PayFlow frame: the rail is its own rounded slab floating on the
-          bezel, and the page is a second, larger slab beside it. */}
+      {/* The rail runs the full height beside the page, flat: navigation is
+          furniture, and the page is where attention goes. */}
       <aside
-        className={`sticky top-4 hidden h-[calc(100vh-2rem)] shrink-0 self-start transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
+        className={`sticky top-0 hidden h-screen shrink-0 self-start transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
           collapsed ? "w-[var(--sidebar-width-collapsed)]" : "w-[var(--sidebar-width-expanded)]"
         }`}
       >
@@ -103,14 +103,14 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             role="dialog"
             aria-modal="true"
             aria-label={t("sidebar.navigation")}
-            className="absolute inset-y-2 left-2 flex w-72 max-w-[85vw] flex-col shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
+            className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col shadow-overlay motion-safe:animate-[slide-in-left_240ms_var(--ease-entrance)]"
           >
             <Sidebar onNavigate={closeDrawer} footer={<ShellFooter />} />
           </div>
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col rounded-[1.5rem] border border-border bg-canvas lg:rounded-[2rem] shadow-panel">
+      <div className="flex min-w-0 flex-1 flex-col">
         <TopBar onOpenSidebar={openDrawer} />
         {/* The sideways-scroll backstop lives on `html` in globals.css; this
             keeps a wide panel from stretching the column it sits in. */}
@@ -133,12 +133,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
  * hides its copy below md, so narrow screens would have had no way to
  * change theme at all. An e2e case records that placement as deliberate:
  * on mobile the control belongs in the drawer with the other settings.
- *
- * The wrapping `dark` class is a local scope, not a real theme toggle: it
- * resolves every `dark:`-aware utility underneath (the segmented control's
- * own surface/border/text, `text-ink-muted`) to their dark values, so a
- * light-theme session does not float a white control on the obsidian rail.
- * `--sidebar-*` tokens are already theme-invariant and need no such scope.
+
  */
 function ShellFooter() {
   const { state } = useSession();
@@ -157,15 +152,15 @@ function ShellFooter() {
           <LanguageControl />
         </div>
       </div>
-      <div className="flex items-center gap-3 rounded-[1.25rem] border border-sidebar-border bg-sidebar-nav p-2.5">
+      <div className="flex items-center gap-2.5 border-t border-sidebar-border px-1.5 pt-2.5">
         <span
           aria-hidden
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sidebar-bubble-active text-body font-semibold text-sidebar-bubble-active-ink"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-caption font-semibold text-brand"
         >
           {initial}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-body font-medium text-sidebar-ink">{identity.display_name}</p>
+          <p className="truncate text-caption font-medium text-sidebar-ink">{identity.display_name}</p>
           <p className="truncate text-micro text-sidebar-ink-muted">
             {t("sidebar.scopes", { count: scopeCount })}
           </p>
@@ -193,7 +188,7 @@ export function PageFrame({
     width === "wide" ? "max-w-none" : width === "narrow" ? "max-w-3xl" : "max-w-[110rem]";
   // `@container/page` drives the shared column system in globals.css.
   return (
-    <div className={`@container/page mx-auto w-full px-4 pt-4 pb-12 lg:px-10 ${max}`}>
+    <div className={`@container/page mx-auto w-full px-4 pt-5 pb-12 lg:px-7 ${max}`}>
       {children}
     </div>
   );
@@ -223,15 +218,15 @@ export function PageHeader({
   tabs?: React.ReactNode;
 }) {
   return (
-    <div className="mb-8">
+    <div className="mb-6">
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="min-w-0 truncate text-[1.75rem] leading-9 font-semibold tracking-[-0.02em] text-ink">{title}</h1>
+            <h1 className="min-w-0 truncate text-[1.625rem] leading-9 font-bold tracking-[-0.025em] text-ink">{title}</h1>
             {status}
           </div>
           {description ? (
-            <p className="mt-1 max-w-3xl text-body text-ink-muted">{description}</p>
+            <p className="mt-1 max-w-3xl text-[0.84375rem] text-ink-muted">{description}</p>
           ) : null}
           {meta ? (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">

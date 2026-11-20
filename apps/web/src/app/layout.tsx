@@ -36,25 +36,25 @@ const inter = localFont({
 
 export const metadata: Metadata = {
   title: {
-    default: "Drake",
-    template: "%s · Drake",
+    default: "Tracery",
+    template: "%s · Tracery",
   },
   description: "Observability and operations control plane",
-  // Two favicons from the same authoritative crop, selected by the browser's
-  // own theme: the light lockup is deep green and vanishes on a dark tab
-  // strip; the dark one is near-white and vanishes on a light one.
+  // One icon: the mark on its own dark tile reads on light and dark tab
+  // strips alike, so no per-scheme pair is needed.
   icons: {
     icon: [
-      { url: "/brand/drake-favicon-light.png", media: "(prefers-color-scheme: light)" },
-      { url: "/brand/drake-favicon-dark.png", media: "(prefers-color-scheme: dark)" },
+      { url: "/brand/tracery-icon.svg", type: "image/svg+xml" },
+      { url: "/brand/tracery-favicon-32.png", sizes: "32x32", type: "image/png" },
     ],
+    apple: [{ url: "/brand/tracery-apple-touch.png", sizes: "180x180" }],
   },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ececec" },
-    { media: "(prefers-color-scheme: dark)", color: "#101010" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f4ef" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0a10" },
   ],
 };
 

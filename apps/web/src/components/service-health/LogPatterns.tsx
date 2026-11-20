@@ -167,7 +167,7 @@ export function LogPatterns({
           title={health.length > 0 ? t("state.allHidden.title") : t("state.empty.title")}
         />
       ) : (
-        <ol className="-mx-2 max-h-[40rem] divide-y divide-border overflow-y-auto overscroll-contain rounded-[1rem] border border-border">
+        <ol className="-mx-2 max-h-[40rem] divide-y divide-border overflow-y-auto overscroll-contain rounded-[0.625rem] border border-border">
           {shown.map((p) => {
             const key = p.pattern;
             const expanded = open.has(key);

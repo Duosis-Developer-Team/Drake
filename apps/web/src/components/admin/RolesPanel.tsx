@@ -367,7 +367,7 @@ export function RolesPanel() {
                   </div>
 
                   {selected.is_system ? (
-                    <p className="flex items-center gap-3 rounded-[1.25rem] bg-surface-2 px-4 py-3 text-caption text-ink-secondary">
+                    <p className="flex items-center gap-3 rounded-panel bg-surface-2 px-4 py-3 text-caption text-ink-secondary">
                       <Lock
                         aria-hidden
                         className="h-4 w-4 shrink-0 text-ink-muted"

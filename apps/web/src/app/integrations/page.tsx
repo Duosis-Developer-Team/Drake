@@ -154,7 +154,7 @@ function ProviderTile({
   return (
     <article
       aria-label={spec.name}
-      className="flex h-full flex-col rounded-[1.5rem] border border-border bg-surface shadow-panel"
+      className="flex h-full flex-col rounded-panel border border-border bg-surface shadow-panel"
     >
       <div className="flex items-center gap-4 px-6 pt-6">
         <span

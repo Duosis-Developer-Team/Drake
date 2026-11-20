@@ -86,7 +86,7 @@ export function EvidenceCoverage({
             <li
               key={row.key}
               title={row.detail}
-              className="flex flex-col gap-4 rounded-[1.125rem] bg-surface-2 p-4"
+              className="flex flex-col gap-4 rounded-[0.625rem] bg-surface-2 p-4"
             >
               <span className="flex items-center justify-between">
                 <span aria-hidden className={`flex h-10 w-10 items-center justify-center rounded-full ${spec.chip}`}>

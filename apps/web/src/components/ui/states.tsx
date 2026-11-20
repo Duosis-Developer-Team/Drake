@@ -385,7 +385,7 @@ export function StaleBanner({
     <div
       role="status"
       data-testid="state-stale"
-      className="flex items-start gap-3 rounded-[1.125rem] border border-stale/30 bg-stale-soft px-4 py-3 text-caption text-stale"
+      className="flex items-start gap-3 rounded-[0.625rem] border border-stale/30 bg-stale-soft px-4 py-3 text-caption text-stale"
     >
       <span
         aria-hidden
@@ -423,7 +423,7 @@ export function PartialBanner({ description }: { description?: React.ReactNode }
     <div
       role="status"
       data-testid="state-partial"
-      className="flex items-start gap-3 rounded-[1.125rem] border border-warning/30 bg-warning-soft px-4 py-3 text-caption text-warning"
+      className="flex items-start gap-3 rounded-[0.625rem] border border-warning/30 bg-warning-soft px-4 py-3 text-caption text-warning"
     >
       <span
         aria-hidden
@@ -469,7 +469,7 @@ export function LoadingSkeleton({
       {variant === "chart" ? (
         <div
           aria-hidden
-          className="relative flex w-full flex-col justify-between overflow-hidden rounded-[1.125rem] bg-surface-2/60 px-5 pt-5 pb-4"
+          className="relative flex w-full flex-col justify-between overflow-hidden rounded-[0.625rem] bg-surface-2/60 px-5 pt-5 pb-4"
           style={{ height: height ?? 192 }}
         >
           {/* Faint grid, then a row of bars: the silhouette of a plot. */}
@@ -489,7 +489,7 @@ export function LoadingSkeleton({
       ) : variant === "tiles" ? (
         <div aria-hidden className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {Array.from({ length: rows }).map((_, index) => (
-            <div key={index} className="rounded-[1.125rem] border border-border bg-surface p-5">
+            <div key={index} className="rounded-[0.625rem] border border-border bg-surface p-5">
               <div className="flex items-center gap-3">
                 <span className={`${SHIMMER} h-9 w-9 rounded-full`} />
                 <span className={`${SHIMMER} h-3 w-20 rounded-full`} />

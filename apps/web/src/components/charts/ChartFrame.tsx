@@ -213,7 +213,7 @@ export function ChartFrame({
      sentences. */
   const placeholder = (node: React.ReactNode) => (
     <div
-      className="flex items-center justify-center rounded-[1.125rem] border border-dashed border-border bg-surface-2/60 px-6 py-6"
+      className="flex items-center justify-center rounded-[0.625rem] border border-dashed border-border bg-surface-2/60 px-6 py-6"
       style={{ minHeight: Math.min(height, 200) }}
     >
       {node}

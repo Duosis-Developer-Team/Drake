@@ -144,7 +144,7 @@ function RollupCard({
               slices={healthSlices(t, rollup)}
             />
           ) : (
-            <div className="flex items-center gap-4 rounded-[1rem] bg-surface-2 px-5 py-4">
+            <div className="flex items-center gap-4 rounded-[0.625rem] bg-surface-2 px-5 py-4">
               <span
                 aria-hidden
                 className="h-10 w-10 shrink-0 rounded-full border-[5px] border-surface-3"
@@ -434,7 +434,7 @@ export default function ClusterDetailPage() {
                                 the near end rather than filling toward a limit.
                                 The server owns the warning; this only draws how
                                 much runway is left. */}
-                            <div className="mt-auto flex items-center gap-4 rounded-[1rem] bg-surface-2 px-5 py-4">
+                            <div className="mt-auto flex items-center gap-4 rounded-[0.625rem] bg-surface-2 px-5 py-4">
                               <IconBubble icon={ShieldCheck} size="small" />
                               <div className="min-w-0 flex-1">
                                 <Countdown
@@ -483,7 +483,7 @@ export default function ClusterDetailPage() {
                               ]}
                             />
                             <div className="mt-auto grid grid-cols-2 gap-3">
-                              <div className="rounded-[1rem] bg-surface-2 px-5 py-4">
+                              <div className="rounded-[0.625rem] bg-surface-2 px-5 py-4">
                                 <span className="text-micro tracking-[0.08em] text-ink-muted uppercase">
                                   {t("detail.freshness.activeResources")}
                                 </span>
@@ -494,7 +494,7 @@ export default function ClusterDetailPage() {
                                   {inventory.inventory.active_resources ?? 0}
                                 </span>
                               </div>
-                              <div className="rounded-[1rem] bg-surface-2 px-5 py-4">
+                              <div className="rounded-[0.625rem] bg-surface-2 px-5 py-4">
                                 <span className="text-micro tracking-[0.08em] text-ink-muted uppercase">
                                   {t("detail.freshness.missingResources")}
                                 </span>
@@ -529,7 +529,7 @@ export default function ClusterDetailPage() {
                                   data-testid={
                                     key === "pods" ? "pods-card" : undefined
                                   }
-                                  className="flex min-w-0 flex-col gap-3 rounded-[1rem] bg-surface-2 px-5 py-4"
+                                  className="flex min-w-0 flex-col gap-3 rounded-[0.625rem] bg-surface-2 px-5 py-4"
                                 >
                                   <span className="flex items-center gap-2.5">
                                     <IconBubble icon={icon} size="small" />
@@ -604,7 +604,7 @@ export default function ClusterDetailPage() {
                               {/* Failure modes, not a composition: these do not
                                   add up to the pod total, so they are counters
                                   rather than wedges. */}
-                              <div className="min-w-[12rem] rounded-[1rem] bg-surface-2 px-5 py-4">
+                              <div className="min-w-[12rem] rounded-[0.625rem] bg-surface-2 px-5 py-4">
                                 <p className="mb-3 text-micro tracking-[0.08em] text-ink-muted uppercase">
                                   {t("shared.podInstability")}
                                 </p>
@@ -773,7 +773,7 @@ export default function ClusterDetailPage() {
                       },
                     ]}
                   />
-                  <div className="mt-auto rounded-[1rem] bg-surface-2 px-5 py-4">
+                  <div className="mt-auto rounded-[0.625rem] bg-surface-2 px-5 py-4">
                     <Provenance {...provenanceProps(data.source, data.as_of)} />
                   </div>
                 </Panel>
