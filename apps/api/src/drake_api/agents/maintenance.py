@@ -6,10 +6,14 @@ Enforces, in small batches under a per-cluster advisory lock:
 - staging rows of non-pending snapshots are removed;
 - completed/discarded snapshot METADATA keeps a bounded history
   (the applied snapshot is always retained);
-- change events respect both an age and a per-cluster row bound.
+- change events respect both an age and a per-cluster row bound;
+- resources that left the cluster (`lifecycle = 'missing'`) leave the
+  projection after a retention window, a bounded number per pass.
 
-The CURRENT projection (`inventory_resources`) is never touched here —
-cleanup failures degrade housekeeping only, never what users see. Every
+Active rows of the projection (`inventory_resources`) are never touched
+here; only rows already marked missing are, and only once they are older
+than the retention. Cleanup failures degrade housekeeping only, never
+what users see. Every
 step commits separately and is idempotent, so overlapping runs and
 retries are safe; the advisory lock keeps concurrent runs from racing.
 """
@@ -38,6 +42,7 @@ async def run_inventory_maintenance(
         "staging_rows_removed": 0,
         "snapshots_pruned": 0,
         "change_events_removed": 0,
+        "missing_pruned": 0,
     }
     steps = (
         ("expired_snapshots", _discard_expired_pending),
@@ -45,6 +50,7 @@ async def run_inventory_maintenance(
         ("staging_rows_removed", _drain_dead_staging),
         ("snapshots_pruned", _prune_snapshot_history),
         ("change_events_removed", _bound_change_events),
+        ("missing_pruned", _prune_missing_resources),
     )
     for key, step in steps:
         try:
@@ -243,3 +249,78 @@ async def _bound_change_events(
         removed += len(over)
         if len(over) < settings.agent_cleanup_batch_rows:
             return removed
+
+
+async def _prune_missing_resources(
+    engine: AsyncEngine, settings: Settings, cluster_id: uuid.UUID
+) -> int:
+    """The maintenance step: one bounded pass of `prune_missing_resources`."""
+    return await prune_missing_resources(
+        engine, settings, cluster_id, max_rows=settings.agent_missing_prune_rows_per_pass
+    )
+
+
+async def prune_missing_resources(
+    engine: AsyncEngine, settings: Settings, cluster_id: uuid.UUID, *, max_rows: int
+) -> int:
+    """Remove projection rows that left the cluster longer ago than the
+    retention: events after a day, everything else after a week. Returns how
+    many rows went, at most `max_rows`.
+
+    What is never removed:
+    - an active row: only rows already marked missing qualify;
+    - a row a service binding resolves to. A bound workload that was
+      deleted stays visible as missing for as long as the binding exists,
+      so the binding keeps saying "your workload is gone" instead of
+      falling back to "not reported yet".
+
+    The outer WHERE repeats the qualifying conditions. A row the agent
+    reports again between the sub-select and the delete is re-checked on
+    its new version (Postgres re-evaluates the outer predicate after
+    waiting on the row lock) and survives.
+
+    Each batch is its own short transaction under the maintenance lock, so
+    a long drain never holds a lock or a snapshot open for long."""
+    removed = 0
+    while removed < max_rows:
+        batch_size = min(settings.agent_cleanup_batch_rows, max_rows - removed)
+        async with engine.begin() as connection:
+            await _locked(connection, cluster_id)
+            batch = (
+                await connection.execute(
+                    text(
+                        """
+                        DELETE FROM inventory_resources r
+                        WHERE r.id IN (
+                            SELECT c.id FROM inventory_resources c
+                            WHERE c.cluster_id = :cluster_id
+                              AND c.lifecycle = 'missing'
+                              AND c.last_seen_at < now() - make_interval(hours => CASE
+                                  WHEN c.kind = 'Event' THEN :event_hours
+                                  ELSE :retention_hours END)
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM service_workload_bindings b
+                                  WHERE b.cluster_id = c.cluster_id
+                                    AND b.resolved_resource_uid = c.uid
+                              )
+                            LIMIT :batch
+                        )
+                          AND r.lifecycle = 'missing'
+                          AND r.last_seen_at < now() - make_interval(hours => CASE
+                              WHEN r.kind = 'Event' THEN :event_hours
+                              ELSE :retention_hours END)
+                        RETURNING r.id
+                        """
+                    ),
+                    {
+                        "cluster_id": cluster_id,
+                        "event_hours": settings.agent_missing_event_retention_hours,
+                        "retention_hours": settings.agent_missing_retention_hours,
+                        "batch": batch_size,
+                    },
+                )
+            ).all()
+        removed += len(batch)
+        if len(batch) < batch_size:
+            break
+    return removed

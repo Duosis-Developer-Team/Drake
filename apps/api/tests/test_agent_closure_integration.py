@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from alembic import command
 from alembic.config import Config
-from drake_api.agents.maintenance import run_inventory_maintenance
+from drake_api.agents.maintenance import prune_missing_resources, run_inventory_maintenance
 from drake_api.db import dispose_engines
 from harness_s1 import require_it_settings
 from sqlalchemy import text
@@ -473,3 +473,106 @@ async def test_snapshot_ttl_and_bounded_cleanup(engine: AsyncEngine, tmp_path: P
         # The projection itself is NEVER touched by cleanup.
         final = await _counts(engine, cluster_a)
         assert final["projection"] >= 3
+
+
+async def test_missing_resources_leave_after_retention(engine: AsyncEngine, tmp_path: Path) -> None:
+    """Rows that left the cluster leave the projection after their window:
+    events after a day, other kinds after a week. Active rows, recent
+    missing rows and other clusters are never touched, and one pass is
+    bounded."""
+    world = await seed_catalog_world(engine)
+    settings = ca_settings(tmp_path).model_copy(
+        update={"agent_cleanup_batch_rows": 2, "agent_missing_prune_rows_per_pass": 5}
+    )
+    cluster_a = str(world["cluster_a"].id)
+    cluster_b = str(world["cluster_b"].id)
+
+    async def put(
+        cluster: str, kind: str, lifecycle: str, hours_ago: int, uid: str | None = None
+    ) -> None:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO inventory_resources (cluster_id, api_group, api_version,
+                        kind, namespace, name, uid, resource_version, lifecycle,
+                        last_seen_at, observed_at)
+                    VALUES (:cluster, '', 'v1', :kind, 'ns', :name, :uid, '1', :lifecycle,
+                        now() - make_interval(hours => :hours), now())
+                    """
+                ),
+                {
+                    "cluster": cluster,
+                    "kind": kind,
+                    "name": f"{kind.lower()}-{uuidlib.uuid4().hex[:8]}",
+                    "uid": uid or str(uuidlib.uuid4()),
+                    "lifecycle": lifecycle,
+                    "hours": hours_ago,
+                },
+            )
+
+    for _ in range(4):
+        await put(cluster_a, "Event", "missing", 30)  # past the 24 h event window
+    await put(cluster_a, "Event", "missing", 2)  # still inside it
+    for _ in range(3):
+        await put(cluster_a, "Pod", "missing", 200)  # past the 168 h window
+    await put(cluster_a, "Pod", "missing", 30)  # a day old: an event would go, a pod stays
+    await put(cluster_a, "Pod", "active", 500)  # present, however old its last change
+    await put(cluster_b, "Event", "missing", 30)  # another cluster
+    # A bound workload that was deleted long ago: the binding still points
+    # at it, so it stays and the binding keeps reporting it as missing.
+    await put(cluster_a, "Deployment", "missing", 500, uid="bound-uid")
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO service_workload_bindings
+                    (environment_service_id, project_id, environment_id, service_id,
+                     cluster_id, namespace, workload_kind, workload_name,
+                     resolved_resource_uid, resolved_at, preset_key, health_policy_key)
+                SELECT es.id, es.project_id, es.environment_id, es.service_id,
+                       :cluster, 'ns', 'Deployment', 'gone-api',
+                       'bound-uid', now(), 'kubernetes.baseline.v1', 'default.v1'
+                FROM environment_services es WHERE es.id = :es
+                """
+            ),
+            {"cluster": cluster_a, "es": world["dev_api"].id},
+        )
+
+    async def count(cluster: str, kind: str, lifecycle: str) -> int:
+        async with engine.connect() as connection:
+            return int(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM inventory_resources WHERE cluster_id = :c "
+                            "AND kind = :k AND lifecycle = :l AND namespace = 'ns'"
+                        ),
+                        {"c": cluster, "k": kind, "l": lifecycle},
+                    )
+                ).scalar_one()
+            )
+
+    first = await run_inventory_maintenance(engine, settings, uuidlib.UUID(cluster_a))
+    assert first["missing_pruned"] == 5, "one pass is bounded by the per-pass limit"
+    second = await run_inventory_maintenance(engine, settings, uuidlib.UUID(cluster_a))
+    assert second["missing_pruned"] == 2, "the rest drains on the next pass"
+    third = await run_inventory_maintenance(engine, settings, uuidlib.UUID(cluster_a))
+    assert third["missing_pruned"] == 0, "nothing past retention is left"
+
+    assert await count(cluster_a, "Event", "missing") == 1
+    assert await count(cluster_a, "Pod", "missing") == 1
+    assert await count(cluster_a, "Pod", "active") == 1
+    assert await count(cluster_b, "Event", "missing") == 1
+    assert await count(cluster_a, "Deployment", "missing") == 1, "a bound workload stays"
+
+    # The operator drain (prune_inventory_cli) is the same function with a
+    # wider bound: it empties a backlog in one call and keeps the same rules.
+    for _ in range(7):
+        await put(cluster_a, "Job", "missing", 200)
+    drained = await prune_missing_resources(
+        engine, settings, uuidlib.UUID(cluster_a), max_rows=1_000
+    )
+    assert drained == 7
+    assert await count(cluster_a, "Job", "missing") == 0
+    assert await count(cluster_a, "Deployment", "missing") == 1
