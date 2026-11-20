@@ -168,7 +168,7 @@ export function AttentionQueue({
             ...tally.map((entry) => ({ key: entry.tone, label: t(`tone.${entry.tone}`), count: entry.count, spec: toneSpec(entry.tone) })),
             { key: "other", label: t("attention.cannotSee"), count: otherCount, spec: toneSpec("unknown") },
           ].map((entry) => (
-            <div key={entry.key} className="rounded-[1rem] bg-surface-2 px-4 py-3">
+            <div key={entry.key} className="rounded-[0.625rem] bg-surface-2 px-4 py-3">
               <span className="flex items-center gap-2 text-micro text-ink-muted">
                 <span aria-hidden className={`h-2 w-2 rounded-full ${entry.spec.dot}`} />
                 {entry.label}

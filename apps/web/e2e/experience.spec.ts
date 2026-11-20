@@ -71,28 +71,23 @@ async function horizontalOverflow(page: Page): Promise<number> {
   );
 }
 
-test("brand: the sidebar wordmark follows the theme of the rail it sits on", async ({
-  page,
-}) => {
-  // The rail is no longer obsidian in both themes — it follows the app's
-  // theme (--sidebar-canvas is #fafafa light, #121212 dark). So the lockup
-  // has to swap with it: the dark-ground derivative carries light ink, and
-  // on a near-white rail it would be all but invisible. Each derivative is
-  // asserted against the ground it was built for.
+test("brand: the sidebar logo is drawn from the theme it sits on", async ({ page }) => {
+  // The mark is inline SVG filled from --brand and --gold, so it follows the
+  // theme without a second asset. Each theme must resolve its own cobalt.
   await signIn(page);
-  const wordmark = page.getByTestId("drake-wordmark");
+  const wordmark = page.getByTestId("brand-wordmark");
   await expect(wordmark).toBeVisible();
+  await expect(wordmark).toContainText("tracery");
 
-  const backgroundFor = async () =>
-    wordmark.evaluate((node) => getComputedStyle(node).backgroundImage);
+  const rootBar = wordmark.locator("svg rect").first();
+  const fillFor = async () => rootBar.evaluate((node) => getComputedStyle(node).fill);
 
   await setTheme(page, "light");
-  expect(await backgroundFor()).toContain("drake-wordmark-light.webp");
-
+  const light = await fillFor();
   await setTheme(page, "dark");
-  expect(await backgroundFor()).toContain("drake-wordmark-dark.webp");
+  const dark = await fillFor();
+  expect(light).not.toEqual(dark);
 
-  // The box is sized before the asset loads, so the shell cannot reflow.
   const box = await wordmark.boundingBox();
   expect(box?.width).toBeGreaterThan(0);
   expect(box?.height).toBeGreaterThan(0);
@@ -261,17 +256,17 @@ test("the sidebar collapses, stays collapsed across a reload, and keeps its labe
   await signIn(page);
   await page.getByRole("button", { name: /collapse navigation/i }).click();
 
-  // Collapsed shows the D-and-serpent lockup rather than the full wordmark.
-  await expect(page.getByTestId("drake-mark")).toBeVisible();
-  await expect(page.getByTestId("drake-wordmark")).toBeHidden();
+  // Collapsed shows the trace mark rather than the full wordmark.
+  await expect(page.getByTestId("brand-mark")).toBeVisible();
+  await expect(page.getByTestId("brand-wordmark")).toBeHidden();
   // Icon-only entries keep their accessible names.
   await expect(page.getByRole("link", { name: "Projects", exact: true })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByTestId("drake-mark")).toBeVisible();
+  await expect(page.getByTestId("brand-mark")).toBeVisible();
 
   await page.getByRole("button", { name: /expand navigation/i }).click();
-  await expect(page.getByTestId("drake-wordmark")).toBeVisible();
+  await expect(page.getByTestId("brand-wordmark")).toBeVisible();
 });
 
 test("axe: no critical or serious violation on the screens people live on", async ({ page }) => {

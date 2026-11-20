@@ -92,13 +92,13 @@ export const commandCenter = defineMessages({
     },
     attention: {
       title: "Needs attention",
-      description: "Critical first, then warnings, then anything Drake cannot currently see.",
+      description: "Critical first, then warnings, then anything Tracery cannot currently see.",
       allIncidents: "All incidents",
       cannotSee: "Can't see",
       loading: "Loading attention list",
       emptyTitle: "Nothing is currently flagged.",
       emptyBody:
-        "This is not a statement that the platform is healthy — it is the result of the checks below. Anything Drake has no source for cannot appear here. See Evidence coverage for exactly what was checked.",
+        "This is not a statement that the platform is healthy — it is the result of the checks below. Anything Tracery has no source for cannot appear here. See Evidence coverage for exactly what was checked.",
       group:
         "{count, plural, one {# related signal} other {# related signals}} about {subject} — shown together, not asserted as one cause",
       state: {
@@ -148,7 +148,7 @@ export const commandCenter = defineMessages({
     evidence: {
       title: "Evidence coverage",
       description:
-        "What Drake checked, and whether each answer is current — not a statement that anything is healthy.",
+        "What Tracery checked, and whether each answer is current — not a statement that anything is healthy.",
       answered: "sources answered with current data",
       state: {
         loading: "Checking…",
@@ -180,7 +180,7 @@ export const commandCenter = defineMessages({
       eventAt: "{event}, {time}",
       eventTooltip: "{event} — {time}",
       axisPoint: "{day}, {time}",
-      historyUnavailable: "History unavailable — Drake has no state-transition source for this lane yet.",
+      historyUnavailable: "History unavailable — Tracery has no state-transition source for this lane yet.",
       emptyWindow: "No events in the selected window.",
       viewAsTable: "View as table ({count, plural, one {# event} other {# events}})",
       column: {
@@ -355,13 +355,13 @@ export const commandCenter = defineMessages({
     },
     attention: {
       title: "Dikkat kuyruğu",
-      description: "Önce kritik olanlar, sonra uyarılar, sonra Drake'in şu anda göremedikleri.",
+      description: "Önce kritik olanlar, sonra uyarılar, sonra Tracery'nin şu anda göremedikleri.",
       allIncidents: "Tüm olaylar",
       cannotSee: "Görülemiyor",
       loading: "Dikkat listesi yükleniyor",
       emptyTitle: "Şu anda işaretli bir şey yok.",
       emptyBody:
-        "Bu, platformun sağlıklı olduğu anlamına gelmez; aşağıdaki denetimlerin sonucudur. Drake'in kaynağı olmayan hiçbir şey burada görünemez. Tam olarak neyin denetlendiğini görmek için Kanıt kapsamına bakın.",
+        "Bu, platformun sağlıklı olduğu anlamına gelmez; aşağıdaki denetimlerin sonucudur. Tracery'nin kaynağı olmayan hiçbir şey burada görünemez. Tam olarak neyin denetlendiğini görmek için Kanıt kapsamına bakın.",
       group:
         "{subject} hakkında {count} ilişkili sinyal — birlikte gösteriliyor, tek bir neden olduğu iddia edilmiyor",
       state: {
@@ -411,7 +411,7 @@ export const commandCenter = defineMessages({
     evidence: {
       title: "Kanıt kapsamı",
       description:
-        "Drake'in neyi denetlediği ve her yanıtın güncel olup olmadığı — herhangi bir şeyin sağlıklı olduğu iddiası değildir.",
+        "Tracery'nin neyi denetlediği ve her yanıtın güncel olup olmadığı — herhangi bir şeyin sağlıklı olduğu iddiası değildir.",
       answered: "kaynak güncel veriyle yanıt verdi",
       state: {
         loading: "Denetleniyor…",
@@ -443,7 +443,7 @@ export const commandCenter = defineMessages({
       eventAt: "{event}, {time}",
       eventTooltip: "{event} — {time}",
       axisPoint: "{day}, {time}",
-      historyUnavailable: "Geçmiş kullanılamıyor — Drake'in bu şerit için henüz bir durum geçişi kaynağı yok.",
+      historyUnavailable: "Geçmiş kullanılamıyor — Tracery'nin bu şerit için henüz bir durum geçişi kaynağı yok.",
       emptyWindow: "Seçili pencerede kayıt yok.",
       viewAsTable: "Tablo olarak gör ({count} kayıt)",
       column: {

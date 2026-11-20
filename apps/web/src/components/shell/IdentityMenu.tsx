@@ -23,11 +23,11 @@ export function IdentityMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("identity.accountMenu")}
-        className="flex h-11 items-center gap-2 rounded-full border border-border bg-surface pr-1.5 pl-1.5 transition-colors hover:bg-surface-hover xl:pr-4"
+        className="flex h-9 items-center gap-2 rounded-control border border-border bg-surface pr-1 pl-1 transition-colors hover:bg-surface-hover xl:pr-3"
       >
         <span
           aria-hidden
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-xs font-semibold text-ink-inverse"
+          className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-xs font-semibold text-ink-inverse"
         >
           {initial}
         </span>
@@ -42,7 +42,7 @@ export function IdentityMenu() {
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-30 mt-2 w-64 rounded-[1.25rem] border border-border bg-surface-2 p-2 shadow-overlay"
+          className="absolute right-0 z-30 mt-2 w-64 rounded-panel border border-border bg-surface-2 p-2 shadow-overlay"
         >
           <div className="border-b border-border px-3 py-2">
             <p className="truncate text-sm font-medium text-ink">{identity.display_name}</p>

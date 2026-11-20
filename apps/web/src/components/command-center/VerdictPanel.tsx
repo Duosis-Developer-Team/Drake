@@ -84,7 +84,7 @@ export function VerdictPanel({
       {/* The inset: same theme family, one step up — depth from the surface
           ladder, with a faint glow in the verdict's own status colour. */}
       <div
-        className="relative mx-2.5 overflow-hidden rounded-[1.25rem] border border-border bg-surface-2"
+        className="relative mx-2.5 overflow-hidden rounded-panel border border-border bg-surface-2"
         style={{
           backgroundImage: `radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(${spec.token}) 26%, transparent) 0%, transparent 70%)`,
         }}

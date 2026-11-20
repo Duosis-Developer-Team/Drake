@@ -113,7 +113,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-surface p-1"
+      className="inline-flex shrink-0 items-center gap-0.5 rounded-control border border-border bg-surface p-0.5"
     >
       {options.map((option) => {
         const selected = option.value === value;
@@ -126,7 +126,7 @@ export function SegmentedControl<T extends string>({
             aria-checked={selected}
             title={iconOnly ? option.label : undefined}
             onClick={() => onChange(option.value)}
-            className={`inline-flex items-center gap-1.5 rounded-full font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-[0.375rem] font-medium transition-colors ${
               iconOnly
                 ? size === "compact"
                   ? "h-7 w-7 justify-center"

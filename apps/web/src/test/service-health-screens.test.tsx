@@ -409,7 +409,7 @@ describe("service health detail", () => {
     expect(within(application).queryByTestId("status-critical")).not.toBeInTheDocument();
   });
 
-  it("says when the application numbers come from Drake's traces", async () => {
+  it("says when the application numbers come from Tracery's traces", async () => {
     renderDetail({
       application: {
         ...SECTION,
@@ -424,7 +424,7 @@ describe("service health detail", () => {
 
     const application = await screen.findByTestId("section-application");
     expect(within(application).getByTestId("application-source")).toHaveTextContent(
-      "From Drake's traces of this workload",
+      "From Tracery's traces of this workload",
     );
   });
 

@@ -52,7 +52,7 @@ export const notifications = defineMessages({
     },
     inbox: {
       title: "Notifications",
-      description: "Incidents a notification policy routed to you. Drake writes every one of these.",
+      description: "Incidents a notification policy routed to you. Tracery writes every one of these.",
       routingPolicies: "Routing policies",
       row: {
         read: "read",
@@ -81,7 +81,7 @@ export const notifications = defineMessages({
       errorTitle: "Could not load notifications",
       emptyUnread: "Nothing unread",
       empty: "No notifications",
-      emptyDescription: "Drake sends these when an incident matches a policy you are a destination for.",
+      emptyDescription: "Tracery sends these when an incident matches a policy you are a destination for.",
       reviewPolicies: "Review routing policies",
       list: {
         title: "Inbox",
@@ -254,7 +254,7 @@ export const notifications = defineMessages({
     },
     inbox: {
       title: "Bildirimler",
-      description: "Bir bildirim politikasının size yönlendirdiği olaylar. Bunların her birini Drake yazar.",
+      description: "Bir bildirim politikasının size yönlendirdiği olaylar. Bunların her birini Tracery yazar.",
       routingPolicies: "Yönlendirme politikaları",
       row: {
         read: "okundu",
@@ -284,7 +284,7 @@ export const notifications = defineMessages({
       emptyUnread: "Okunmamış bildirim yok",
       empty: "Bildirim yok",
       emptyDescription:
-        "Drake bunları, bir olay hedefi olduğunuz bir politikayla eşleştiğinde gönderir.",
+        "Tracery bunları, bir olay hedefi olduğunuz bir politikayla eşleştiğinde gönderir.",
       reviewPolicies: "Yönlendirme politikalarını incele",
       list: {
         title: "Gelen kutusu",

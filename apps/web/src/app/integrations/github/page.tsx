@@ -243,7 +243,7 @@ function StatTile({
   detail?: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full flex-col rounded-[1.25rem] bg-surface-2 p-5">
+    <div className="flex h-full flex-col rounded-panel bg-surface-2 p-5">
       <IconBubble icon={icon} tone={tone ?? "neutral"} />
       <span
         data-tabular
@@ -346,7 +346,7 @@ function ConfigurationCard({ status }: { status: GitHubStatus }) {
           </div>
         ) : (
           <div
-            className="rounded-[1.25rem] bg-surface-2 p-6"
+            className="rounded-panel bg-surface-2 p-6"
             data-testid="github-not-configured"
           >
             <StateCard
@@ -484,7 +484,7 @@ function RepositoryCard({
       {repository.pending_reconciliation && !blocked ? (
         <div
           data-testid="reconciliation-required"
-          className="rounded-[1.25rem] bg-surface-2 p-5"
+          className="rounded-panel bg-surface-2 p-5"
         >
           <StateCard
             inline
@@ -499,7 +499,7 @@ function RepositoryCard({
       {blocked ? (
         <div
           data-testid="security-gate-warning"
-          className="rounded-[1.25rem] bg-critical-soft p-5"
+          className="rounded-panel bg-critical-soft p-5"
         >
           <StateCard
             inline
@@ -549,7 +549,7 @@ function RepositoryCard({
       />
 
       {actionError ? (
-        <div className="rounded-[1.25rem] bg-critical-soft p-4">
+        <div className="rounded-panel bg-critical-soft p-4">
           <DataState
             kind="error"
             description={actionError}
@@ -702,7 +702,7 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
     return (
       <div
         data-testid="policy-never-evaluated"
-        className="rounded-[1.25rem] bg-surface-2 p-5"
+        className="rounded-panel bg-surface-2 p-5"
       >
         <StateCard
           inline
@@ -727,7 +727,7 @@ function PolicyResult({ snapshot }: { snapshot: PolicySnapshot }) {
   ).length;
   return (
     <div
-      className="space-y-4 rounded-[1.25rem] border border-border p-5"
+      className="space-y-4 rounded-panel border border-border p-5"
       data-testid="policy-result"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">

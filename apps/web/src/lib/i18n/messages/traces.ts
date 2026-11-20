@@ -81,7 +81,7 @@ export const traces = defineMessages({
       notConfigured: {
         title: "Tracing not enabled",
         description:
-          "No traces are collected for this Drake yet, so nothing was read. That is not the same as no requests.",
+          "No traces are collected for this Tracery yet, so nothing was read. That is not the same as no requests.",
       },
       unavailable: {
         title: "Traces could not be read",
@@ -172,7 +172,7 @@ export const traces = defineMessages({
       notConfigured: {
         title: "Trace toplama açık değil",
         description:
-          "Bu Drake için henüz trace toplanmıyor, hiçbir şey okunmadı. Bu, istek olmadığı anlamına gelmez.",
+          "Bu Tracery için henüz trace toplanmıyor, hiçbir şey okunmadı. Bu, istek olmadığı anlamına gelmez.",
       },
       unavailable: {
         title: "Trace'ler okunamadı",

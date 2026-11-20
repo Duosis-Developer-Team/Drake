@@ -494,7 +494,7 @@ function CreateGrantForm({
         </div>
 
         {options.directory_scope === "subtree" ? (
-          <p className="rounded-[1.25rem] bg-surface-2 px-4 py-3 text-micro text-ink-secondary @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1">
+          <p className="rounded-panel bg-surface-2 px-4 py-3 text-micro text-ink-secondary @min-[36rem]/page:col-span-2 @min-[60rem]/page:col-span-1">
             {t("grants.form.subtreeNote")}
           </p>
         ) : null}

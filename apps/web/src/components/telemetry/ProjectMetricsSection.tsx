@@ -34,7 +34,7 @@ export function ProjectMetricsSection({ environments }: { environments: Environm
     return (
       <section aria-label={t("signals.title")}>
         <SignalsHeading description={t("signals.descriptionNone")} />
-        <div className="rounded-[1.5rem] border border-border bg-surface p-7 shadow-panel">
+        <div className="rounded-panel border border-border bg-surface p-7 shadow-panel">
           <TileState
             icon={Activity}
             testId="state-not-configured"

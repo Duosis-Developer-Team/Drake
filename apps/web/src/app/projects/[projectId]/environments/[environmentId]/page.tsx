@@ -323,7 +323,7 @@ export default function EnvironmentDetailPage() {
                     <li key={service.id} className="min-w-0">
                       <Link
                         href={`/projects/${projectId}/environments/${environmentId}/services/${service.id}`}
-                        className="group flex h-full min-w-0 flex-col gap-4 rounded-[1.25rem] border border-border bg-surface-2/40 p-5 transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        className="group flex h-full min-w-0 flex-col gap-4 rounded-panel border border-border bg-surface-2/40 p-5 transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                       >
                         <span className="flex min-w-0 items-start gap-3">
                           <IconBubble icon={Box} />

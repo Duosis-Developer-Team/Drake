@@ -673,7 +673,7 @@ export default function ServiceHealthDetailPage() {
                         </div>
                       </>
                     ) : (
-                      <div className="rounded-[1rem] border border-dashed border-border px-4 py-3.5">
+                      <div className="rounded-[0.625rem] border border-dashed border-border px-4 py-3.5">
                         <p className="text-body font-semibold text-ink">
                           {t("detail.application.noMetrics")}
                         </p>
@@ -719,7 +719,7 @@ export default function ServiceHealthDetailPage() {
                       </div>
                     </div>
                     {data.reasons.length === 0 ? (
-                      <div className="flex items-center gap-3 rounded-[1rem] bg-surface-2 px-4 py-3">
+                      <div className="flex items-center gap-3 rounded-[0.625rem] bg-surface-2 px-4 py-3">
                         <ShieldCheck
                           className="h-4 w-4 text-healthy"
                           aria-hidden
@@ -763,7 +763,7 @@ export default function ServiceHealthDetailPage() {
                         for: bounded, and the distance to the limit is the
                         point. Bands only appear when limits are configured. */}
                     <div className="my-auto grid grid-cols-1 gap-4 sm:grid-cols-3">
-                      <div className="flex justify-center rounded-[1.125rem] bg-surface-2 px-2 py-4">
+                      <div className="flex justify-center rounded-[0.625rem] bg-surface-2 px-2 py-4">
                         <Gauge
                           size="compact"
                           label={t("detail.pressure.cpu")}
@@ -781,7 +781,7 @@ export default function ServiceHealthDetailPage() {
                           }
                         />
                       </div>
-                      <div className="flex justify-center rounded-[1.125rem] bg-surface-2 px-2 py-4">
+                      <div className="flex justify-center rounded-[0.625rem] bg-surface-2 px-2 py-4">
                         <Gauge
                           size="compact"
                           label={t("detail.pressure.memory")}
@@ -799,7 +799,7 @@ export default function ServiceHealthDetailPage() {
                           }
                         />
                       </div>
-                      <div className="flex justify-center rounded-[1.125rem] bg-surface-2 px-2 py-4">
+                      <div className="flex justify-center rounded-[0.625rem] bg-surface-2 px-2 py-4">
                         <Gauge
                           size="compact"
                           label={t("detail.pressure.throttling")}

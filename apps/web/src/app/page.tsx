@@ -428,7 +428,7 @@ function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
             return (
               <li key={label}>
                 {href ? (
-                  <Link href={href} className="group block rounded-[1rem] py-1 transition-colors hover:bg-surface-hover">
+                  <Link href={href} className="group block rounded-[0.625rem] py-1 transition-colors hover:bg-surface-hover">
                     {body}
                   </Link>
                 ) : (

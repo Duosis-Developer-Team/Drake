@@ -52,7 +52,7 @@ export function SectionNav({ items, label }: { items: SectionNavItem[]; label: s
     <nav
       aria-label={label}
       data-testid="section-nav"
-      className="sticky top-3 z-20 -mx-1 flex max-w-full flex-wrap gap-1.5 self-start rounded-[1rem] bg-surface p-1.5 shadow-panel"
+      className="sticky top-3 z-20 -mx-1 flex max-w-full flex-wrap gap-1.5 self-start rounded-[0.625rem] bg-surface p-1.5 shadow-panel"
     >
       {items.map((item) => {
         const current = active === item.id;

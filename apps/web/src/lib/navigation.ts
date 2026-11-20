@@ -1,28 +1,28 @@
 /**
- * Primary navigation.
+ * Primary navigation (Tracery information architecture, 2026-11-21).
  *
- * Grouped by what an operator is doing, not by which sprint shipped the
- * screen: Overview is where you start, Estate is what you look at (the
- * platform's own inventory), Operations is where you act on what estate
- * surfaces, and Configuration is governance and setup.
+ * Grouped by the question an operator is asking, in the order they ask it:
  *
- * Every entry points at a route that exists. The "coming in a later sprint"
- * placeholders that used to sit here — Tenants, Catalog & Templates — are
- * gone: a permanently disabled menu item teaches people the nav is unreliable
- * and does nothing else.
+ *   (top)          what is happening — overview, services, projects, boards
+ *   Respond        what needs action — incidents, rules, incoming alerts,
+ *                  what changed
+ *   Infrastructure what it runs on — clusters, resource usage, objectives,
+ *                  backups
+ *   Settings       how Tracery is set up — onboarding, integrations,
+ *                  notification routing, access
  *
- * `anyPermission` shapes the menu; it is not a security boundary. The API
- * remains the authority, and hiding a link never stands in for an
- * authorization check.
+ * Every entry points at a route that exists; no module was dropped in the
+ * regrouping. `anyPermission` shapes the menu; it is not a security
+ * boundary. The API remains the authority, and hiding a link never stands in
+ * for an authorization check.
  */
 import {
-  Bell,
   BellRing,
-  Boxes,
+  Cpu,
   FolderKanban,
-  Gauge,
-  HeartPulse,
-  LayoutDashboard,
+  House,
+  Inbox,
+  Layers,
   PackagePlus,
   PanelsTopLeft,
   Puzzle,
@@ -32,6 +32,7 @@ import {
   Shield,
   ShieldCheck,
   Siren,
+  Target,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,6 +51,8 @@ export interface NavItem {
 export interface NavGroup {
   key: string;
   label: string;
+  /** The first group sits under the logo without a heading. */
+  untitled?: boolean;
   items: NavItem[];
 }
 
@@ -57,8 +60,25 @@ export const NAVIGATION: NavGroup[] = [
   {
     key: "overview",
     label: "Overview",
+    untitled: true,
     items: [
-      { key: "commandCenter", label: "Command Center", href: "/", icon: LayoutDashboard },
+      { key: "commandCenter", label: "Overview", href: "/", icon: House },
+      {
+        key: "serviceHealth",
+        label: "Services",
+        href: "/service-health",
+        icon: Layers,
+        matchPrefix: "/service-health",
+        anyPermission: ["environment.view"],
+      },
+      {
+        key: "projects",
+        label: "Projects",
+        href: "/projects",
+        icon: FolderKanban,
+        matchPrefix: "/projects",
+        anyPermission: ["project.view", "environment.view"],
+      },
       {
         key: "dashboards",
         label: "Dashboards",
@@ -70,54 +90,8 @@ export const NAVIGATION: NavGroup[] = [
     ],
   },
   {
-    key: "estate",
-    label: "Estate",
-    items: [
-      {
-        key: "projects",
-        label: "Projects",
-        href: "/projects",
-        icon: FolderKanban,
-        matchPrefix: "/projects",
-        anyPermission: ["project.view", "environment.view"],
-      },
-      {
-        key: "serviceHealth",
-        label: "Service health",
-        href: "/service-health",
-        icon: HeartPulse,
-        matchPrefix: "/service-health",
-        anyPermission: ["environment.view"],
-      },
-      {
-        key: "clusters",
-        label: "Clusters",
-        href: "/clusters",
-        icon: Boxes,
-        matchPrefix: "/clusters",
-        anyPermission: ["cluster.view"],
-      },
-      {
-        key: "infrastructure",
-        label: "Infrastructure",
-        href: "/infrastructure",
-        icon: Server,
-        matchPrefix: "/infrastructure",
-        anyPermission: ["cluster.view"],
-      },
-      {
-        key: "slo",
-        label: "Objectives",
-        href: "/slo",
-        icon: Gauge,
-        matchPrefix: "/slo",
-        anyPermission: ["slo.view"],
-      },
-    ],
-  },
-  {
     key: "operations",
-    label: "Operations",
+    label: "Respond",
     items: [
       {
         key: "incidents",
@@ -128,19 +102,19 @@ export const NAVIGATION: NavGroup[] = [
         anyPermission: ["environment.view"],
       },
       {
-        key: "alerts",
-        label: "Alerts",
-        href: "/alerts",
-        icon: Bell,
-        matchPrefix: "/alerts",
-        anyPermission: ["alert.view"],
-      },
-      {
         key: "alertRules",
         label: "Alert rules",
         href: "/alert-rules",
         icon: BellRing,
         matchPrefix: "/alert-rules",
+        anyPermission: ["alert.view"],
+      },
+      {
+        key: "alerts",
+        label: "Incoming alerts",
+        href: "/alerts",
+        icon: Inbox,
+        matchPrefix: "/alerts",
         anyPermission: ["alert.view"],
       },
       {
@@ -150,6 +124,36 @@ export const NAVIGATION: NavGroup[] = [
         icon: Rocket,
         matchPrefix: "/deployments",
         anyPermission: ["environment.view", "cluster.view"],
+      },
+    ],
+  },
+  {
+    key: "estate",
+    label: "Infrastructure",
+    items: [
+      {
+        key: "clusters",
+        label: "Clusters",
+        href: "/clusters",
+        icon: Server,
+        matchPrefix: "/clusters",
+        anyPermission: ["cluster.view"],
+      },
+      {
+        key: "infrastructure",
+        label: "Resource usage",
+        href: "/infrastructure",
+        icon: Cpu,
+        matchPrefix: "/infrastructure",
+        anyPermission: ["cluster.view"],
+      },
+      {
+        key: "slo",
+        label: "Objectives",
+        href: "/slo",
+        icon: Target,
+        matchPrefix: "/slo",
+        anyPermission: ["slo.view"],
       },
       {
         key: "protection",
@@ -163,7 +167,7 @@ export const NAVIGATION: NavGroup[] = [
   },
   {
     key: "configuration",
-    label: "Configuration",
+    label: "Settings",
     items: [
       {
         key: "onboarding",
@@ -207,7 +211,7 @@ export const NAV_ITEMS: NavItem[] = NAVIGATION.flatMap((group) => group.items);
  * Which entry a path belongs to.
  *
  * Longest prefix wins so `/projects/p1/environments/e1` highlights Projects,
- * while `/` only ever matches Command Center exactly — a prefix match on "/"
+ * while `/` only ever matches Overview exactly — a prefix match on "/"
  * would light up every entry at once.
  */
 export function activeNavHref(pathname: string): string | null {

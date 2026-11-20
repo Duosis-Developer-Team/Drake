@@ -4,17 +4,12 @@
  * The primary navigation rail.
  *
  * Collapsible, and the collapsed state persists — an operator who works at
- * 1280px keeps the extra 168px across reloads. Collapsed, the rail shows the
- * D-and-serpent lockup and icon-only entries whose accessible names and
- * tooltips still carry the full label.
+ * 1280px keeps the extra width across reloads. Collapsed, the rail shows the
+ * trace mark and icon-only entries whose accessible names and tooltips still
+ * carry the full label.
  *
- * The active entry is marked three ways — a rail, a surface and a weight
- * change — because on a dense screen an active state carried by colour alone
- * is easy to miss and impossible to see in greyscale.
- *
- * The rail is obsidian in both themes (`bg-sidebar` and its siblings, from
- * `--sidebar-*` in globals.css) — the one deliberate exception to "every
- * surface flips with the theme" (remake brief §6.2). It is not `bg-surface`.
+ * A flat rail beside the page, not a floating card: the rail is navigation,
+ * and the page is where attention goes.
  */
 
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
@@ -22,7 +17,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { DrakeMark, DrakeWordmark } from "@/components/shell/Brand";
+import { TraceryMark, TraceryWordmark } from "@/components/shell/Brand";
 import { useT } from "@/lib/i18n";
 import { NAVIGATION, activeNavHref } from "@/lib/navigation";
 import { useSession } from "@/lib/session";
@@ -75,23 +70,19 @@ export function Sidebar({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col gap-3 rounded-[1.75rem] border border-sidebar-border bg-sidebar p-2.5"
+      className="flex h-full min-h-0 flex-col gap-2 border-r border-sidebar-border bg-sidebar px-2.5 pt-3 pb-2.5"
       data-testid="sidebar"
     >
       <div
-        className={`flex h-14 shrink-0 items-center ${collapsed ? "justify-center" : "gap-2 pr-1 pl-3"}`}
+        className={`flex h-10 shrink-0 items-center ${collapsed ? "justify-center" : "gap-2 pr-0.5 pl-2"}`}
       >
         <Link
           href="/"
           onClick={onNavigate}
           aria-label={t("sidebar.home")}
-          className="flex min-w-0 items-center rounded"
+          className="flex min-w-0 items-center rounded-control"
         >
-          {collapsed ? (
-            <DrakeMark height={22} />
-          ) : (
-            <DrakeWordmark height={22} />
-          )}
+          {collapsed ? <TraceryMark height={13} /> : <TraceryWordmark size={19} />}
         </Link>
         {onToggleCollapse && !collapsed ? (
           <button
@@ -100,7 +91,7 @@ export function Sidebar({
             aria-label={t("sidebar.collapse")}
             title={t("sidebar.collapse")}
             aria-expanded
-            className="ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+            className="ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
           >
             <PanelLeftClose className="h-4 w-4" aria-hidden />
           </button>
@@ -114,17 +105,15 @@ export function Sidebar({
           aria-label={t("sidebar.expand")}
           title={t("sidebar.expand")}
           aria-expanded={false}
-          className="mx-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
+          className="mx-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-sidebar-ink-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-ink"
         >
           <PanelLeftOpen className="h-4 w-4" aria-hidden />
         </button>
       ) : null}
 
-      {/* The nav sits on its own inset slab, the way the reference groups its
-          menu — the rail reads as layered, not as a flat list on black. */}
       <nav
         aria-label={t("sidebar.primary")}
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-[1.375rem] border border-sidebar-border bg-sidebar-nav p-2 [scrollbar-width:none]"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-width:none]"
       >
         {NAVIGATION.map((group) => {
           const items = group.items.filter(
@@ -135,20 +124,20 @@ export function Sidebar({
           if (items.length === 0) return null;
           const groupLabel = t.dyn("nav.group", group.key, group.label);
           return (
-            <div key={group.key} className="mb-3 last:mb-0">
-              {collapsed ? (
-                <div aria-hidden className="mx-3 my-2 border-t border-sidebar-border" />
+            <div key={group.key} className="pb-3">
+              {group.untitled ? null : collapsed ? (
+                <div aria-hidden className="mx-2 mt-1 mb-2 border-t border-sidebar-border" />
               ) : (
                 <p
                   aria-hidden
-                  className="px-3 pt-2 pb-1.5 text-[0.625rem] font-semibold tracking-[0.12em] text-sidebar-ink-muted uppercase"
+                  className="px-2.5 pt-2 pb-1 font-mono text-[0.65625rem] font-medium tracking-[0.1em] text-sidebar-ink-muted uppercase"
                 >
                   {groupLabel}
                 </p>
               )}
               {/* The group name lives on the list, not on a heading: these sit
                   above the page's h1 and would put the outline out of order. */}
-              <ul className="space-y-1" aria-label={groupLabel}>
+              <ul className="space-y-px" aria-label={groupLabel}>
                 {items.map((item) => {
                   const isActive = active === item.href;
                   const Icon = item.icon;
@@ -160,24 +149,23 @@ export function Sidebar({
                         onClick={onNavigate}
                         aria-current={isActive ? "page" : undefined}
                         title={collapsed ? label : undefined}
-                        className={`group relative flex h-11 items-center rounded-full text-body transition-colors duration-[var(--duration-micro)] ${
-                          collapsed ? "justify-center" : "gap-3 pr-3 pl-1.5"
+                        className={`group relative flex h-9 items-center rounded-control text-[0.84375rem] transition-colors duration-[var(--duration-micro)] ${
+                          collapsed ? "justify-center" : "gap-2.5 px-2.5"
                         } ${
                           isActive
                             ? "bg-sidebar-selected font-semibold text-sidebar-ink"
-                            : "text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink"
+                            : "font-medium text-sidebar-ink-muted hover:bg-sidebar-hover hover:text-sidebar-ink"
                         }`}
                       >
-                        <span
-                          aria-hidden
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
-                            isActive
-                              ? "bg-sidebar-bubble-active text-sidebar-bubble-active-ink"
-                              : "bg-sidebar-bubble"
+                        {/* The active entry is marked three ways — surface,
+                            weight and a cobalt icon — so it survives greyscale. */}
+                        <Icon
+                          className={`h-[1.0625rem] w-[1.0625rem] shrink-0 ${
+                            isActive ? "text-sidebar-active-rail" : ""
                           }`}
-                        >
-                          <Icon className="h-4 w-4" aria-hidden />
-                        </span>
+                          strokeWidth={1.8}
+                          aria-hidden
+                        />
                         {collapsed ? (
                           <span className="sr-only">{label}</span>
                         ) : (

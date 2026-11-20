@@ -14,7 +14,7 @@
  *    success, and no two states collapse onto one colour.
  */
 import { readFileSync } from "node:fs";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -318,18 +318,5 @@ describe("thresholds", () => {
   it("treats a measured zero as a value", () => {
     expect(toneForThreshold(0, above)).toBe("success");
     expect(toneForThreshold(0, below)).toBe("critical");
-  });
-});
-
-describe("brand assets", () => {
-  it("the wordmark and mark derivatives exist for both themes", () => {
-    for (const file of [
-      "drake-wordmark-light.webp",
-      "drake-wordmark-dark.webp",
-      "drake-mark-light.webp",
-      "drake-mark-dark.webp",
-    ]) {
-      expect(() => statSync(join(WEB_ROOT, "public", "brand", file))).not.toThrow();
-    }
   });
 });

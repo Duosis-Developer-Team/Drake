@@ -3,222 +3,218 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Drake design tokens.
+ * Tracery design tokens.
  *
- * 2026-09-14 obsidian/neutral/solar remake (docs/superpowers/plans/
- * new-plan-visual-remake.md §4) retires every green in the system — brand,
- * focus ring, active rail, chart series, "healthy" status — in favour of:
+ * Two themes from one vocabulary (2026-11-21 Tracery redesign, product
+ * canvas "Tracery — Ürün Tasarımı"):
  *
- *   light canvas #ECECEC   light ink #161616   dark canvas #101010   ink #F1F1F1
- *   cool accent   #2A78D6 light / #5998E5 dark  obsidian rail #181818
+ *   Cathedral (dark)  canvas #0B0A10  panel #13111A  ink bone #F2EEE6
+ *   Vellum   (light)  canvas #F6F4EF  panel #FFFFFF  ink #17151C
  *
- * Every neutral above is true grey (R=G=B) rather than the brief's own warm
- * bone/obsidian cast — an explicit correction over the brief's literal hexes:
- * neutral means neutral, not tinted.
+ * Brand is cobalt (#8197FF dark, #3F57E0 light), the colour of the logo's
+ * trace bars, and it is a real fill: primary buttons are cobalt with
+ * `--text-inverse` on top. Gold (`--gold`) is the logo's last bar and is kept
+ * for one meaning only — the critical path / the slowest thing on screen. It
+ * is never a status colour.
  *
- * `--brand` is the one token that inverts by role rather than by hue: it is
- * the dominant monochrome fill for primary actions, so it is near-black ink
- * in light mode (paired with `--text-inverse`) and near-white bone in dark
- * mode — never a saturated colour, which cannot pass 4.5:1 as body-sized text
- * or a large fill on either theme's own surfaces. The brief's original solar
- * yellow accent read as cheap against a true neutral grey, not premium — a
- * direct correction: the accent is a cool blue instead, the same hue already
- * used for `--series-1`, reserved for `--brand-accent`/`--focus-ring` (small
- * marks, ≥3:1 only) and the sidebar's active-item rail, exactly as the brief
- * scopes it ("small brand detail", never a dominant fill). Every hex below was solved with the same
- * WCAG relative-luminance formula `design-system.test.ts` checks against, so
- * the ratios these comments claim are the ones the test enforces.
- *
- * "Healthy" is reassigned to a cool blue and "Information" to cobalt (brief
- * §4.3) — status colour is now fully independent of brand colour, so nothing
- * about "no green" ever implies "no blue for healthy is available".
- *
- * The sidebar is a deliberate exception: `--sidebar-*` below is declared with
- * the SAME values in both `:root` and `.dark`. Every other surface flips with
- * the theme; the rail stays a constant obsidian anchor in both themes, so an
- * operator's sense of "where am I" never resets on a theme change.
+ * Status colours are reserved and conventional: green healthy, amber warning,
+ * red critical. `--status-critical` is the only red in the system and never
+ * doubles as a selection, a brand accent or a chart series.
  *
  * Two layers, deliberately separate:
  *
  *   1. The `--*` custom properties are the semantic vocabulary. They are the
  *      only place a hex literal appears, and they are what src/lib/design
  *      mirrors for the chart engine (which needs real values, not class
- *      names). A unit test parses this file and fails if the two drift.
+ *      names). A unit test parses this file and fails if the two drift, and
+ *      checks every text/surface pair against WCAG 2.x contrast.
  *   2. `@theme inline` names those properties as Tailwind utilities. Nothing
  *      here invents a colour; it only gives the semantic layer class names.
- *
- * Status colours are reserved. `--status-critical` is the only red in the
- * system and never doubles as a selection, a brand accent or a chart series.
  */
+
+/* Plus Jakarta Sans (headings, wordmark) and JetBrains Mono (identifiers,
+   numbers in tables), self-hosted. Latin and Latin Extended are split by
+   unicode-range, so the Turkish glyphs (ğ ş İ) are only fetched when a page
+   uses them. Both SIL OFL 1.1; licences beside the files. */
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(/fonts/plus-jakarta-sans-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(/fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url(/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url(/fonts/jetbrains-mono-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 :root {
   color-scheme: light;
 
-  /* Surfaces, canvas outward. True neutral grey (R=G=B) — not the brief's
-     warm bone cast, overridden per direction. */
-  --canvas: #ebebeb;
+  --canvas: #f6f4ef;
   --surface-1: #ffffff;
-  --surface-2: #f1f1f1;
-  --surface-3: #e4e4e4;
+  --surface-2: #f3f0ea;
+  --surface-3: #ebe7df;
   --surface-elevated: #ffffff;
-  --surface-hover: #f3f3f3;
-  --surface-selected: #e6e6e6;
+  --surface-hover: #f5f2ec;
+  --surface-selected: #ebe7e0;
 
-  --border-subtle: #d6d6d6;
-  --border-strong: #767676;
+  --border-subtle: #e2ddd3;
+  --border-strong: #7a7484;
 
-  --text-primary: #161616;
-  --text-secondary: #555555;
-  --text-muted: #626262;
-  --text-inverse: #f1f1f1;
+  --text-primary: #17151c;
+  --text-secondary: #46414f;
+  --text-muted: #5f5969;
+  --text-inverse: #ffffff;
 
-  /* Brand. `--brand` is the monochrome obsidian ink used for primary fills
-     and emphasis text — never a saturated accent, which fails 4.5:1 at this
-     size (see file header). `--brand-accent`/`--focus-ring` carry the cool
-     blue hue instead (same family as `--series-1`), comfortably clearing
-     3:1 as a mark on this theme's own neutral surfaces. */
-  --brand: #161616;
-  --brand-hover: #2a2a2a;
-  --brand-active: #000000;
-  --brand-soft: #f1f1f1;
-  --brand-accent: #2a78d6;
-  --focus-ring: #2a78d6;
+  --brand: #3f57e0;
+  --brand-hover: #3249cc;
+  --brand-active: #2a3fb8;
+  --brand-soft: #e9ecfc;
+  --brand-accent: #3f57e0;
+  --focus-ring: #3f57e0;
 
-  --chart-grid: #e4e4e4;
-  --chart-axis: #646464;
-  --chart-tooltip: #181818;
-  --chart-tooltip-text: #f1f1f1;
+  --chart-grid: #ebe7df;
+  --chart-axis: #6b6575;
+  --chart-tooltip: #17151c;
+  --chart-tooltip-text: #f6f4ef;
 
-  --status-success: #1d62c0;
-  --status-info: #4556d4;
-  --status-warning: #86560f;
-  --status-critical: #c41c1c;
-  --status-neutral: #606060;
-  --status-unknown: #5d6168;
+  --status-success: #1b7446;
+  --status-info: #3f57e0;
+  --status-warning: #93580a;
+  --status-critical: #c0352b;
+  --status-neutral: #5f5969;
+  --status-unknown: #5d5a66;
   --status-stale: #7646c0;
 
-  --status-success-soft: #e6effb;
-  --status-info-soft: #eceefd;
-  --status-warning-soft: #f9eedd;
-  --status-critical-soft: #fbe7e7;
-  --status-neutral-soft: #eeeeee;
-  --status-unknown-soft: #edeef0;
+  --status-success-soft: #e4f3ea;
+  --status-info-soft: #e9ecfc;
+  --status-warning-soft: #faefdc;
+  --status-critical-soft: #fbe9e7;
+  --status-neutral-soft: #efece6;
+  --status-unknown-soft: #eeecef;
   --status-stale-soft: #f1eafb;
 
-  /* The obsidian rail. Same values in `.dark` below — see the header note. */
-  --sidebar-canvas: #fafafa;
-  --sidebar-surface-hover: #efefef;
-  --sidebar-surface-selected: #e8e8e8;
-  --sidebar-border: #dedede;
-  --sidebar-text: #161616;
-  --sidebar-text-muted: #666666;
-  --sidebar-active-rail: #2a78d6;
+  --sidebar-canvas: #efece5;
+  --sidebar-surface-hover: #e6e2da;
+  --sidebar-surface-selected: #e1ddd4;
+  --sidebar-border: #e0dbd1;
+  --sidebar-text: #17151c;
+  --sidebar-text-muted: #57525f;
+  --sidebar-active-rail: #3f57e0;
 
-  /* Categorical chart series. Fixed order, never cycled. The old green slot
-     (series-3) is retired to a sky blue, distinct in hue from series-1. */
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1c8fd6;
-  --series-4: #4a3aa7;
-  --series-5: #e87ba4;
-  --series-6: #b58100;
+  --series-1: #3f57e0;
+  --series-2: #b4842a;
+  --series-3: #1c8c9e;
+  --series-4: #c4467e;
+  --series-5: #7a5ae0;
+  --series-6: #d06a2c;
 
-  /* A soft, wide-blur elevation rather than a hairline — the difference
-     between a bordered box and a surface that visibly lifts off the canvas
-     (remake brief: PayFlow-grade depth, not a flat admin panel). */
-  --shadow-panel: 0 1px 2px rgb(23 22 20 / 0.04), 0 10px 28px -8px rgb(23 22 20 / 0.10);
-  --shadow-overlay: 0 20px 48px -12px rgb(23 22 20 / 0.22), 0 8px 16px -6px rgb(23 22 20 / 0.10);
-  --scrim: rgb(23 22 20 / 0.45);
-  /* PayFlow frame: the bezel the rail and the content surface sit inside. */
-  --frame: #d4d4d4;
-  --sidebar-nav: #ffffff;
-  --sidebar-bubble: #efefef;
-  --sidebar-bubble-active: #161616;
+  --shadow-panel: 0 1px 2px rgb(23 21 28 / 0.04);
+  --shadow-overlay: 0 16px 40px -12px rgb(23 21 28 / 0.20), 0 4px 12px -4px rgb(23 21 28 / 0.08);
+  --scrim: rgb(23 21 28 / 0.40);
+  --frame: #efece5;
+  --sidebar-nav: #efece5;
+  --sidebar-bubble: transparent;
+  --sidebar-bubble-active: #3f57e0;
   --sidebar-bubble-active-ink: #ffffff;
+  --gold: #b4842a;
+  --gold-soft: #f6eddb;
 }
 
 .dark {
   color-scheme: dark;
 
-  /* 2026-09-14 PayFlow-reference pass: the panel/canvas gap was only 2.5
-     points of L* (#101010 vs #161616) — too close for a panel to visibly
-     lift off the page the way the reference's cards do. Every surface below
-     is re-stepped for a real gap, and `surface-elevated` is corrected to
-     actually be the lightest of the family (it was, bug, darker than
-     surface-2/3) — the topmost surface reads as topmost. */
-  --canvas: #080808;
-  --surface-1: #1c1c1c;
-  --surface-2: #2a2a2a;
-  --surface-3: #363636;
-  --surface-elevated: #404040;
-  --surface-hover: #2e2e2e;
-  --surface-selected: #3c3c3c;
+  --canvas: #0b0a10;
+  --surface-1: #13111a;
+  --surface-2: #1a1722;
+  --surface-3: #221e2b;
+  --surface-elevated: #2a2534;
+  --surface-hover: #1c1925;
+  --surface-selected: #272231;
 
-  --border-subtle: #3a3a3a;
-  --border-strong: #808080;
+  --border-subtle: #2a2633;
+  --border-strong: #7a7386;
 
-  --text-primary: #f1f1f1;
-  --text-secondary: #c2c2c2;
-  --text-muted: #a3a3a3;
-  --text-inverse: #161616;
+  --text-primary: #f2eee6;
+  --text-secondary: #cbc5d3;
+  --text-muted: #a8a2b3;
+  --text-inverse: #0b0a10;
 
-  --brand: #f1f1f1;
-  --brand-hover: #ffffff;
-  --brand-active: #d7d7d7;
-  --brand-soft: #242424;
-  --brand-accent: #5998e5;
-  --focus-ring: #5998e5;
+  --brand: #8197ff;
+  --brand-hover: #98aaff;
+  --brand-active: #6d84f2;
+  --brand-soft: #1c1f3b;
+  --brand-accent: #8197ff;
+  --focus-ring: #8197ff;
 
-  --chart-grid: #303030;
-  --chart-axis: #b9b9b9;
-  --chart-tooltip: #0c0c0c;
-  --chart-tooltip-text: #f1f1f1;
+  --chart-grid: #24202d;
+  --chart-axis: #a8a2b3;
+  --chart-tooltip: #211d2a;
+  --chart-tooltip-text: #f2eee6;
 
-  /* success/info/unknown/stale nudged a touch lighter (same hue) so they
-     still clear 4.5:1 against the brighter `surface-1` above — verified
-     against design-system.test.ts's WCAG formula before landing here. */
-  --status-success: #5b98ea;
-  --status-info: #8391f1;
-  --status-warning: #d9922e;
-  --status-critical: #f07272;
-  --status-neutral: #a0a0a0;
-  --status-unknown: #9ba0a7;
-  --status-stale: #af89e6;
+  --status-success: #4cc38a;
+  --status-info: #8fa1ff;
+  --status-warning: #f2b04b;
+  --status-critical: #f26d63;
+  --status-neutral: #a8a2b3;
+  --status-unknown: #a29dab;
+  --status-stale: #b996ec;
 
-  --status-success-soft: #13233a;
-  --status-info-soft: #191c3d;
-  --status-warning-soft: #3b2c16;
-  --status-critical-soft: #3f1a1a;
-  --status-neutral-soft: #2c2c2c;
-  --status-unknown-soft: #2a2d31;
-  --status-stale-soft: #2a1a40;
+  --status-success-soft: #11281d;
+  --status-info-soft: #1b1e3a;
+  --status-warning-soft: #31240f;
+  --status-critical-soft: #371614;
+  --status-neutral-soft: #211e28;
+  --status-unknown-soft: #211f27;
+  --status-stale-soft: #261b38;
 
-  /* The obsidian rail, unchanged from `:root` — see the file header note. */
-  --sidebar-canvas: #121212;
-  --sidebar-surface-hover: #262626;
-  --sidebar-surface-selected: #303030;
-  --sidebar-border: #2a2a2a;
-  --sidebar-text: #f1f1f1;
-  --sidebar-text-muted: #8f8f8f;
-  --sidebar-active-rail: #5998e5;
+  --sidebar-canvas: #0e0c14;
+  --sidebar-surface-hover: #1a1722;
+  --sidebar-surface-selected: #221e2b;
+  --sidebar-border: #1f1c27;
+  --sidebar-text: #f2eee6;
+  --sidebar-text-muted: #a8a2b3;
+  --sidebar-active-rail: #8197ff;
 
-  /* Not a flip of the light row: the same six hues, re-stepped for the dark
-     surface and re-validated there. */
-  --series-1: #5998e5;
-  --series-2: #f59068;
-  --series-3: #43acec;
-  --series-4: #6553cb;
-  --series-5: #ef8fb3;
-  --series-6: #f2ad00;
+  --series-1: #8197ff;
+  --series-2: #e9c46a;
+  --series-3: #4fc1d3;
+  --series-4: #e57fb0;
+  --series-5: #a58cf7;
+  --series-6: #f59068;
 
-  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 16px 40px -20px rgb(0 0 0 / 0.7);
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.02) inset;
   --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.65), 0 8px 16px -6px rgb(0 0 0 / 0.4);
-  --scrim: rgb(3 3 2 / 0.6);
-  --frame: #000000;
-  --sidebar-nav: #1c1c1c;
-  --sidebar-bubble: #2a2a2a;
-  --sidebar-bubble-active: #f1f1f1;
-  --sidebar-bubble-active-ink: #161616;
+  --scrim: rgb(5 4 8 / 0.65);
+  --frame: #0e0c14;
+  --sidebar-nav: #0e0c14;
+  --sidebar-bubble: transparent;
+  --sidebar-bubble-active: #8197ff;
+  --sidebar-bubble-active-ink: #0b0a10;
+  --gold: #e9c46a;
+  --gold-soft: #2c2414;
 }
 
 @theme inline {
@@ -264,7 +260,6 @@
   --color-chart-grid: var(--chart-grid);
   --color-chart-axis: var(--chart-axis);
 
-  /* The obsidian rail. Theme-invariant on purpose — see the file header. */
   --color-sidebar: var(--sidebar-canvas);
   --color-sidebar-hover: var(--sidebar-surface-hover);
   --color-sidebar-selected: var(--sidebar-surface-selected);
@@ -292,6 +287,9 @@
   --color-stale-soft: var(--status-stale-soft);
   --color-maintenance-soft: var(--status-info-soft);
 
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+
   --color-series-1: var(--series-1);
   --color-series-2: var(--series-2);
   --color-series-3: var(--series-3);
@@ -301,7 +299,8 @@
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+  --font-display: "Plus Jakarta Sans", var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
   /* Type scale. Monitoring density: the steps stay close together, and the
@@ -332,18 +331,18 @@
      Stepped up again the same day against the PayFlow reference itself:
      its cards and controls round far past a standard "rounded corner" —
      buttons and badges read as true pills, not just softened rectangles. */
-  --radius-control: 0.875rem;
-  --radius-panel: 1.375rem;
+  --radius-control: 0.5rem;
+  --radius-panel: 0.75rem;
   /* The one dominant surface per screen — the Command Center verdict panel,
      for instance — reads a step rounder than a standard panel (brief §7.3). */
-  --radius-canvas: 1.75rem;
-  --radius-overlay: 1.375rem;
+  --radius-canvas: 0.875rem;
+  --radius-overlay: 0.75rem;
 
   /* Sidebar rail width. 248px expanded keeps room for a full label at the
      new type scale; 72px collapsed still fits an icon, its focus ring and
      the collapse control without clipping (brief §7.4). */
-  --sidebar-width-expanded: 15.5rem;
-  --sidebar-width-collapsed: 4.5rem;
+  --sidebar-width-expanded: 14.5rem;
+  --sidebar-width-collapsed: 4rem;
 
   --shadow-panel: var(--shadow-panel);
   --shadow-overlay: var(--shadow-overlay);
@@ -403,6 +402,13 @@ table,
    focus on its own wrapper (`focus-within:ring`) can opt out, and the ring
    follows the element's own shape. */
 @layer base {
+  /* Headings carry the display face; body copy stays Inter. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+  }
+
   :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;

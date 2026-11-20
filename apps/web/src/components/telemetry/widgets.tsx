@@ -135,7 +135,7 @@ function WidgetShell({
     <section
       data-testid={`widget-${widget.key}`}
       aria-label={widget.title}
-      className="flex h-full min-w-0 flex-col gap-4 rounded-[1.5rem] border border-border bg-surface p-6 shadow-panel"
+      className="flex h-full min-w-0 flex-col gap-4 rounded-panel border border-border bg-surface p-6 shadow-panel"
     >
       <div className="min-w-0">
         <h3 className="truncate text-body font-semibold text-ink" title={widget.title}>

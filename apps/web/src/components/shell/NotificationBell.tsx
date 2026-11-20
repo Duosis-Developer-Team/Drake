@@ -43,7 +43,7 @@ export function NotificationBell() {
       href="/notifications"
       aria-label={label}
       data-testid="notification-bell"
-      className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+      className="relative inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
     >
       <Bell className="h-4 w-4" aria-hidden />
       {unread && unread > 0 ? (

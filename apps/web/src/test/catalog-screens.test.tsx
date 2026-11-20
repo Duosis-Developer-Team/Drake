@@ -475,7 +475,7 @@ describe("catalog screens", () => {
       },
     });
     renderSearch();
-    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /search tracery/i })[0]);
     const input = await screen.findByLabelText("Search query");
     fireEvent.change(input, { target: { value: "alp" } });
     await vi.advanceTimersByTimeAsync(300);
@@ -484,7 +484,7 @@ describe("catalog screens", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
     expect(routerPush).toHaveBeenCalledWith("/projects/p1");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /search tracery/i })[0]);
     fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
@@ -499,7 +499,7 @@ describe("catalog screens", () => {
       "/v1/catalog/search": { status: 200, body: { results: [] } },
     });
     renderSearch();
-    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /search tracery/i })[0]);
     fireEvent.change(await screen.findByLabelText("Search query"), {
       target: { value: "ghost" },
     });
@@ -520,7 +520,7 @@ describe("catalog screens", () => {
       },
     });
     renderSearch();
-    fireEvent.click(screen.getAllByRole("button", { name: /search drake/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /search tracery/i })[0]);
     fireEvent.change(await screen.findByLabelText("Search query"), {
       target: { value: "alpha" },
     });

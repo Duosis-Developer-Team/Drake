@@ -435,7 +435,7 @@ function InventoryInner() {
             {summary.data.pods.crashloop > 0 ||
             summary.data.pods.oom_killed > 0 ||
             summary.data.pods.restarts > 0 ? (
-              <div className="mt-auto rounded-[1rem] bg-surface-2 px-5 py-4">
+              <div className="mt-auto rounded-[0.625rem] bg-surface-2 px-5 py-4">
                 <p className="mb-3 text-micro tracking-[0.08em] text-ink-muted uppercase">
                   {t("shared.podInstability")}
                 </p>

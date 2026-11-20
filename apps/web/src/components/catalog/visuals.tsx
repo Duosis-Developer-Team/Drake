@@ -114,7 +114,7 @@ export function StatTile({
   return (
     <div
       data-testid={testId}
-      className="flex h-full min-w-0 flex-col gap-5 rounded-[1.5rem] border border-border bg-surface p-6 shadow-panel"
+      className="flex h-full min-w-0 flex-col gap-5 rounded-panel border border-border bg-surface p-6 shadow-panel"
     >
       <div className="flex items-center justify-between gap-3">
         <span className="flex min-w-0 items-center gap-3">
@@ -299,7 +299,7 @@ export function CapabilityTile({
     </>
   );
   const className =
-    "flex h-full min-w-0 items-center gap-3 rounded-[1.125rem] border border-border bg-surface-2/40 px-4 py-3.5";
+    "flex h-full min-w-0 items-center gap-3 rounded-[0.625rem] border border-border bg-surface-2/40 px-4 py-3.5";
   return href ? (
     <Link
       href={href}

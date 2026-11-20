@@ -102,7 +102,7 @@ export const infrastructure = defineMessages({
     group: {
       kubernetes: "Kubernetes",
       monitoring: "Monitoring",
-      drake: "Drake",
+      drake: "Tracery",
     },
     verdict: {
       over: "Uses more than requested",
@@ -129,8 +129,8 @@ export const infrastructure = defineMessages({
     panel: {
       close: "Close",
       health: "Service health",
-      unclaimed: "Not linked to a Drake project",
-      linked: "In Drake: {project} / {environment}",
+      unclaimed: "Not linked to a Tracery project",
+      linked: "In Tracery: {project} / {environment}",
       cpu: "CPU",
       memory: "Memory",
       request: "Against its request",
@@ -288,7 +288,7 @@ export const infrastructure = defineMessages({
     group: {
       kubernetes: "Kubernetes",
       monitoring: "İzleme",
-      drake: "Drake",
+      drake: "Tracery",
     },
     verdict: {
       over: "İsteğini aşıyor",
@@ -315,8 +315,8 @@ export const infrastructure = defineMessages({
     panel: {
       close: "Kapat",
       health: "Servis sağlığı",
-      unclaimed: "Drake'te bir projeye bağlı değil",
-      linked: "Drake'te {project} / {environment}",
+      unclaimed: "Tracery'de bir projeye bağlı değil",
+      linked: "Tracery'de {project} / {environment}",
       cpu: "CPU",
       memory: "Bellek",
       request: "İsteğine göre",
