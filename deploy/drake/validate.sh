@@ -308,10 +308,27 @@ for svc in kinds.get("Service", []):
     if svc["metadata"]["name"] in ("drake-api", "drake-web") and svc["spec"]["type"] != "ClusterIP":
         die(f"{svc['metadata']['name']} must stay ClusterIP")
 
+# The application Ingress, plus — when agentIngest is on — the agents' OTLP
+# door: same host, class and certificate, one path, nothing else.
 ingresses = kinds.get("Ingress", [])
-if len(ingresses) != 1:
-    die(f"expected exactly one Ingress, found {len(ingresses)}")
-ing = ingresses[0]
+app = [i for i in ingresses if i["metadata"]["name"] != "drake-otlp"]
+otlp = [i for i in ingresses if i["metadata"]["name"] == "drake-otlp"]
+if len(app) != 1:
+    die(f"expected exactly one application Ingress, found {len(app)}")
+ing = app[0]
+for door in otlp:
+    rule = door["spec"]["rules"][0]
+    if rule["host"] != ing["spec"]["rules"][0]["host"]:
+        die("the OTLP door must share the application host")
+    if door["spec"].get("ingressClassName") != "drake-nginx":
+        die("the OTLP door must use Drake's own class")
+    if (door["spec"].get("tls") or [{}])[0].get("secretName") != (ing["spec"].get("tls") or [{}])[0].get("secretName"):
+        die("the OTLP door must use the application certificate")
+    door_paths = [(p["path"], p["backend"]["service"]["name"]) for p in rule["http"]["paths"]]
+    if door_paths != [("/otlp", "drake-otlp-external")]:
+        die(f"the OTLP door must route only /otlp to drake-otlp-external, found {door_paths}")
+    if "nginx.ingress.kubernetes.io/rewrite-target" in (door["metadata"].get("annotations") or {}):
+        die("the OTLP door must not rewrite paths")
 host = ing["spec"]["rules"][0]["host"]
 if ":" in host:
     die(f"the Ingress host must carry no port, found {host}")
@@ -338,6 +355,12 @@ if "Secret" in kinds:
 # that is asserted precisely above.
 for svc in kinds.get("Service", []):
     if svc["metadata"]["name"] == "drake-edge":
+        continue
+    # The OTLP door is a cluster-internal DNS alias for the telemetry
+    # gateway: it publishes nothing and must point inside the cluster.
+    if svc["metadata"]["name"] == "drake-otlp-external":
+        if svc["spec"]["type"] != "ExternalName" or not svc["spec"]["externalName"].endswith(".svc.cluster.local"):
+            die("drake-otlp-external must be an ExternalName to an in-cluster Service")
         continue
     if svc["spec"]["type"] != "ClusterIP":
         die(f"{svc['metadata']['name']} must stay ClusterIP")

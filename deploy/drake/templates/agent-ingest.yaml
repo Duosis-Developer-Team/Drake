@@ -1,0 +1,59 @@
+{{- if and .Values.agentIngest.enabled .Values.ingress.enabled (eq (include "drake.ingressMode" .) "true") }}
+{{- $host := include "drake.publicHost" . }}
+{{/*
+The door for agent-running systems outside the cluster (Tracesis Agent
+Visibility). `/otlp` on the public origin goes to the OTel gateway's
+external receiver in the telemetry namespace, which serves OTLP/HTTP traces
+at `/otlp/v1/traces` and refuses anything without its bearer token. No
+rewrite: the receiver listens on the very path the edge forwards, so a
+client sets OTEL_EXPORTER_OTLP_ENDPOINT=https://<host>/otlp and nothing
+else. The API keeps `/v1`; the longest prefix still wins.
+
+An Ingress may only name a Service in its own namespace, so an ExternalName
+Service here points at the gateway's own Service over there.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "drake.name" . }}-otlp-external
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+spec:
+  type: ExternalName
+  externalName: {{ required "agentIngest.gatewayHost is required when agentIngest.enabled" .Values.agentIngest.gatewayHost | quote }}
+  ports:
+    - name: otlp-external
+      port: {{ .Values.agentIngest.port }}
+      targetPort: {{ .Values.agentIngest.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "drake.name" . }}-otlp
+  namespace: {{ include "drake.namespace" . }}
+  labels:
+    {{- include "drake.labels" . | nindent 4 }}
+  annotations:
+    # OTLP batches are larger than the controller's 1m default.
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.agentIngest.maxBodySize | quote }}
+spec:
+  ingressClassName: {{ if .Values.edge.dedicatedController.enabled }}{{ .Values.edge.dedicatedController.ingressClassName | quote }}{{ else }}{{ .Values.ingress.className | quote }}{{ end }}
+  {{- if and .Values.ingress.tls.enabled (eq .Values.ingress.tls.mode "secret") }}
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /otlp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "drake.name" . }}-otlp-external
+                port:
+                  number: {{ .Values.agentIngest.port }}
+{{- end }}

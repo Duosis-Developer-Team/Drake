@@ -425,6 +425,11 @@ incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
 
+# Agent Visibility (2026-11-21): `/otlp` on this origin reaches the OTel
+# gateway's external receiver (bearer token required, see deploy/otel).
+agentIngest:
+  enabled: true
+
 # Agent Visibility (2026-11-21): the inventory fills itself from GenAI spans.
 agents:
   discoveryEnabled: true
