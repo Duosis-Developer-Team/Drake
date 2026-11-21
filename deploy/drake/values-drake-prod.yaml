@@ -212,11 +212,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 9aee6a22b39f95735dd0b8cd56be9debc8a7c411
+    # Source commit d9815fb1ad62042e853aa9e1dabe13e757796ffa
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:df96a0453e59d2b80c8775c9211c3f5c78628b0d932dbbf193090a0de9633aa6"
+    digest: "sha256:d1cd28ed4f7ffbdb531e240d06b8bdd40c57d50ddfc6bd8ac51d75b8d3090823"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -239,8 +239,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 9aee6a22b39f95735dd0b8cd56be9debc8a7c411
-    digest: "sha256:2b0412fbfcf3c3aec1b030dc633b3f930726d22aa829ca501adc2861ed37ba5d"
+    # Source commit d9815fb1ad62042e853aa9e1dabe13e757796ffa
+    digest: "sha256:364651211ddd5d20fc45190c9dd66a40d50c4fd0d70a427b54297ab2aba3c0b0"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -262,7 +262,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:df96a0453e59d2b80c8775c9211c3f5c78628b0d932dbbf193090a0de9633aa6"
+    digest: "sha256:d1cd28ed4f7ffbdb531e240d06b8bdd40c57d50ddfc6bd8ac51d75b8d3090823"
   backoffLimit: 0
 
 networkPolicy:
@@ -424,6 +424,11 @@ telemetry:
 incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
+
+# Agent Visibility (2026-11-21): `/otlp` on this origin reaches the OTel
+# gateway's external receiver (bearer token required, see deploy/otel).
+agentIngest:
+  enabled: true
 
 # Agent Visibility (2026-11-21): the inventory fills itself from GenAI spans.
 agents:

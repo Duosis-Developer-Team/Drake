@@ -58,6 +58,13 @@ gateway:
   # Bounded export queue: when ClickHouse is down, data is dropped rather
   # than growing memory without limit (ADR-0029 §3).
   queueSize: 200
+  # The door for agent-running systems OUTSIDE the cluster: OTLP/HTTP traces
+  # on port 4319 at /otlp/v1/traces, bearer token required. The token is a
+  # Secret with key `token`, created out of band; Tracesis's edge routes
+  # `/otlp` here (deploy/drake: agentIngest).
+  externalIngest:
+    enabled: false
+    existingSecret: ""
 
 # --- OBI: eBPF traces (DaemonSet) ----------------------------------------
 # OpenTelemetry eBPF Instrumentation observes HTTP/gRPC/SQL at the kernel

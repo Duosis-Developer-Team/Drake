@@ -60,6 +60,12 @@ def by_kind(docs: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
 # --- the route contract ---------------------------------------------------
 
 
+def app_ingress(docs: list[dict[str, Any]]) -> dict[str, Any]:
+    """The application's Ingress; the agents' `/otlp` door is a separate one."""
+    (ingress,) = [i for i in by_kind(docs, "Ingress") if i["metadata"]["name"] != "drake-otlp"]
+    return ingress
+
+
 def test_production_renders_one_tls_ingress_on_an_exact_host() -> None:
     ingress = by_kind(render(), "Ingress")
     assert len(ingress) == 1
@@ -620,6 +626,7 @@ def test_the_expected_production_workloads_and_nothing_else() -> None:
         "drake-agent-gateway",
         "drake-api",
         "drake-edge",
+        "drake-otlp-external",
         "drake-web",
     ]
 
@@ -1311,11 +1318,20 @@ def test_the_render_owns_exactly_the_application_resources() -> None:
         "drake-agent-gateway",
         "drake-api",
         "drake-edge",
+        "drake-otlp-external",
         "drake-web",
     ]
     assert {
-        s["spec"]["type"] for s in by_kind(docs, "Service") if s["metadata"]["name"] != "drake-edge"
+        s["spec"]["type"]
+        for s in by_kind(docs, "Service")
+        if s["metadata"]["name"] not in ("drake-edge", "drake-otlp-external")
     } == {"ClusterIP"}
+    # The agents' OTLP door is only a DNS alias for the in-cluster gateway.
+    (door,) = [
+        s for s in by_kind(docs, "Service") if s["metadata"]["name"] == "drake-otlp-external"
+    ]
+    assert door["spec"]["type"] == "ExternalName"
+    assert door["spec"]["externalName"].endswith(".svc.cluster.local")
 
 
 def test_the_datastores_are_referenced_only_by_label_and_secret_name() -> None:
@@ -1480,7 +1496,13 @@ def test_the_setting_that_collided_is_still_named_api_port() -> None:
 
     assert "api_port" in Settings.model_fields
     services = {s["metadata"]["name"] for s in by_kind(render_prod(), "Service")}
-    assert services == {"drake-api", "drake-web", "drake-edge", "drake-agent-gateway"}
+    assert services == {
+        "drake-api",
+        "drake-web",
+        "drake-edge",
+        "drake-agent-gateway",
+        "drake-otlp-external",
+    }
 
 
 def test_the_fix_did_not_disturb_ownership_or_images() -> None:
@@ -1494,8 +1516,16 @@ def test_the_fix_did_not_disturb_ownership_or_images() -> None:
         if doc["kind"] in ("Deployment", "Service", "Job"):
             assert not doc["metadata"]["name"].startswith(("drake-postgres", "drake-redis"))
     assert {
-        s["spec"]["type"] for s in by_kind(docs, "Service") if s["metadata"]["name"] != "drake-edge"
+        s["spec"]["type"]
+        for s in by_kind(docs, "Service")
+        if s["metadata"]["name"] not in ("drake-edge", "drake-otlp-external")
     } == {"ClusterIP"}
+    # The agents' OTLP door is only a DNS alias for the in-cluster gateway.
+    (door,) = [
+        s for s in by_kind(docs, "Service") if s["metadata"]["name"] == "drake-otlp-external"
+    ]
+    assert door["spec"]["type"] == "ExternalName"
+    assert door["spec"]["externalName"].endswith(".svc.cluster.local")
 
     values = yaml.safe_load(PROD_VALUES.read_text())
     images = {
@@ -1537,7 +1567,7 @@ def test_the_edge_publishes_no_plaintext_port() -> None:
 
 def test_the_ingress_host_carries_no_port() -> None:
     """A Kubernetes Ingress host is a hostname; the port lives in the origin."""
-    ingress = by_kind(render_prod(), "Ingress")[0]
+    ingress = app_ingress(render_prod())
     host = ingress["spec"]["rules"][0]["host"]
     assert ":" not in host
     assert host == "drake-84-247-180-173.sslip.io"
@@ -1553,7 +1583,7 @@ def test_production_serves_a_real_certificate_for_the_host_it_answers_on() -> No
     rule serves, or the controller falls back to its own certificate and
     the deployment looks fine while proving nothing.
     """
-    ingress = by_kind(render_prod(), "Ingress")[0]
+    ingress = app_ingress(render_prod())
     tls = ingress["spec"]["tls"]
     assert len(tls) == 1
     assert tls[0]["secretName"] == "drake-edge-tls"
@@ -1576,7 +1606,9 @@ def test_the_public_origin_keeps_its_port() -> None:
 
 
 def test_one_origin_routes_v1_to_the_api_and_everything_else_to_the_web() -> None:
-    ingress = by_kind(render_prod(), "Ingress")[0]
+    (ingress,) = [
+        i for i in by_kind(render_prod(), "Ingress") if i["metadata"]["name"] != "drake-otlp"
+    ]
     paths = {
         p["path"]: (p["pathType"], p["backend"]["service"]["name"])
         for p in ingress["spec"]["rules"][0]["http"]["paths"]
@@ -1598,7 +1630,7 @@ def test_drake_runs_its_own_controller_and_claims_nothing_shared() -> None:
         != "true"
     ), "claiming the default class would serve other teams' Ingresses"
 
-    ingress = by_kind(docs, "Ingress")[0]
+    ingress = app_ingress(docs)
     assert ingress["spec"]["ingressClassName"] == "drake-nginx"
 
     controller = next(
@@ -2377,3 +2409,32 @@ def test_production_mails_nobody_until_a_sender_is_configured() -> None:
     assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "false"
     assert "DRAKE_NOTIFICATION_EMAIL_SENDER" not in env
     assert env.get("DRAKE_NOTIFICATION_EMAILS", "{}") in ("", "{}")
+
+
+# --- the agent door (Tracesis Agent Visibility) ----------------------------
+
+
+def test_the_agent_door_is_closed_by_default() -> None:
+    docs = render()
+    assert not any(doc["metadata"]["name"].endswith("-otlp") for doc in by_kind(docs, "Ingress"))
+    assert not any(doc["spec"].get("type") == "ExternalName" for doc in by_kind(docs, "Service"))
+
+
+def test_the_agent_door_routes_otlp_to_the_gateway_unrewritten() -> None:
+    docs = render("--set", "agentIngest.enabled=true")
+    [door] = [doc for doc in by_kind(docs, "Ingress") if doc["metadata"]["name"] == "drake-otlp"]
+    [path] = door["spec"]["rules"][0]["http"]["paths"]
+    assert path["path"] == "/otlp" and path["pathType"] == "Prefix"
+    assert door["spec"]["rules"][0]["host"] == "drake.example.test"
+    assert door["spec"]["tls"][0]["secretName"] == "drake-tls"
+    annotations = door["metadata"].get("annotations") or {}
+    assert not any("rewrite" in key or "snippet" in key for key in annotations)
+    [target] = [
+        doc for doc in by_kind(docs, "Service") if doc["metadata"]["name"] == "drake-otlp-external"
+    ]
+    assert target["spec"]["type"] == "ExternalName"
+    assert target["spec"]["externalName"] == "drake-otel-gateway.drake-otel.svc.cluster.local"
+    assert path["backend"]["service"]["port"]["number"] == 4319
+    # The API's own route is untouched.
+    main = next(doc for doc in by_kind(docs, "Ingress") if doc["metadata"]["name"] == "drake")
+    assert {p["path"] for p in main["spec"]["rules"][0]["http"]["paths"]} == {"/v1", "/"}

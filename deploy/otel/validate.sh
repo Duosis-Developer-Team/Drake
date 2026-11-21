@@ -99,6 +99,24 @@ def check(docs, by_kind, label, expect_obi):
     if retention != {"whenDeleted": "Retain", "whenScaled": "Retain"}:
         fail(f"{label}: StatefulSet claims must be retained on delete and scale")
 
+    # Agent content (prompts, answers, tool arguments) never reaches the
+    # store: every gateway traces pipeline normalises GenAI telemetry and
+    # removes content, and the logs pipeline drops GenAI content events.
+    [gw_cm] = [cm for cm in by_kind["ConfigMap"] if cm["metadata"]["name"] == "drake-otel-gateway"]
+    gw = yaml.safe_load(gw_cm["data"]["collector.yaml"])
+    for pname, pipe in gw["service"]["pipelines"].items():
+        procs = pipe.get("processors", [])
+        if pname.startswith("traces"):
+            for required in ("gen_ai_normalizer", "transform/genai-content", "filter/genai-content"):
+                if required not in procs:
+                    fail(f"{label}: gateway {pname} must run {required}")
+        if pname.startswith("logs") and "filter/genai-content" not in procs:
+            fail(f"{label}: gateway {pname} must drop GenAI content events")
+    external = [r for r in gw["receivers"] if r.startswith("otlp/external")]
+    for r in external:
+        if not gw["receivers"][r]["protocols"]["http"].get("auth"):
+            fail(f"{label}: gateway {r} must require authentication")
+
     workloads = by_kind["StatefulSet"] + by_kind["Deployment"] + by_kind["DaemonSet"]
     names = {w["metadata"]["name"] for w in workloads}
     if (OBI_NAME in names) != expect_obi:
