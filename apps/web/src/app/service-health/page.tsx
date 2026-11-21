@@ -52,6 +52,7 @@ import {
   type SignalVerdict,
 } from "@/lib/signals";
 import { useResource } from "@/lib/useResource";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 
 /** The pressure bands the platform already judges utilisation by. */
 const UTILISATION = { warn: 0.8, critical: 0.9, direction: "above" as const };
@@ -267,6 +268,7 @@ function ServiceRow({
 
 interface Group {
   key: string;
+  projectId: string;
   projectKey: string;
   environmentKey: string;
   environmentId: string;
@@ -279,7 +281,7 @@ function groupRows(rows: ServiceHealthRow[]): Group[] {
     const key = `${row.project_key}/${row.environment_key}`;
     const group =
       groups.get(key) ??
-      { key, projectKey: row.project_key, environmentKey: row.environment_key, environmentId: row.environment_id, rows: [] };
+      { key, projectId: row.project_id, projectKey: row.project_key, environmentKey: row.environment_key, environmentId: row.environment_id, rows: [] };
     group.rows.push(row);
     groups.set(key, group);
   }
@@ -296,8 +298,11 @@ function GroupHeader({ group, onMap }: { group: Group; onMap: () => void }) {
   const first = group.rows.find((r) => r.binding)?.binding;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface-2 px-5 py-2.5">
-      <h3 className="text-[0.84375rem] font-semibold text-ink">
-        {group.projectKey} <span className="text-ink-muted">/</span> {group.environmentKey}
+      <h3 className="flex items-center gap-2.5 text-[0.84375rem] font-semibold text-ink">
+        <ProjectLogo projectId={group.projectId} name={group.projectKey} size="sm" />
+        <span>
+          {group.projectKey} <span className="text-ink-muted">/</span> {group.environmentKey}
+        </span>
       </h3>
       <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-secondary">
         {STATUS_ORDER.filter((s) => counts.get(s)).map((status) => (

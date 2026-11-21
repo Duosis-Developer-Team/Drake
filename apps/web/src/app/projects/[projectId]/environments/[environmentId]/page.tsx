@@ -43,6 +43,7 @@ import {
   useWhen,
 } from "@/components/catalog/visuals";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { ScheduledJobs } from "@/components/catalog/ScheduledJobs";
 import { ServiceMapPanel } from "@/components/service-map/ServiceMapPanel";
 import { Provenance } from "@/components/provenance/Provenance";
@@ -161,6 +162,7 @@ export default function EnvironmentDetailPage() {
   return (
     <PageFrame width="wide">
       <PageHeader
+        leading={<ProjectLogo projectId={projectId} name={projectKey ?? data.environment_key} size="lg" variant="mark" />}
         title={data.environment_key}
         status={
           <>

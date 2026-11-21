@@ -63,6 +63,7 @@ import {
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { ProjectMetricsSection } from "@/components/telemetry/ProjectMetricsSection";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { InlineCode, RelativeTime } from "@/components/ui/identifiers";
 import {
@@ -316,6 +317,7 @@ export default function ProjectOverviewPage() {
   return (
     <PageFrame width="wide">
       <PageHeader
+        leading={<ProjectLogo projectId={data.id} name={data.display_name} size="lg" variant="mark" />}
         title={data.display_name}
         status={
           <>

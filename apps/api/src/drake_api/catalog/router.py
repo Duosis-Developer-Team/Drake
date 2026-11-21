@@ -13,12 +13,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from drake_api.agents.observation import agent_observations
 from drake_api.auth.dependencies import AuthContext, require_auth
+from drake_api.catalog import logos
 from drake_api.catalog.authz import escape_like, visible_scope_ids
 from drake_api.catalog.external_runtime import (
     EXTERNAL_NOT_APPLICABLE,
@@ -432,6 +433,73 @@ async def get_project(
         return await _project_payload(
             connection, auth, row, include_details=True, settings=settings
         )
+
+
+@router.get("/projects/{project_id}/logo")
+async def get_project_logo(
+    request: Request,
+    project_id: uuid.UUID,
+    theme: str = Query("dark", pattern="^(dark|light)$"),
+    auth: AuthContext = Depends(require_auth),
+) -> Response:
+    """The project's own logo, from `.duosis/media/` in its repository.
+
+    Visible to anyone who can see the project at all, breadcrumb included:
+    the name is already on their screen, and the logo says nothing more.
+    404 means "draw the monogram" — no repository, a gated or inaccessible
+    one, no file, or a file that is not a small raster image.
+    """
+    settings: Settings = request.app.state.settings
+    engine = get_engine(settings)
+    async with engine.connect() as connection:
+        full, breadcrumb = await _visible_project_ids(connection, auth)
+        if project_id not in full and project_id not in breadcrumb:
+            raise HTTPException(status_code=404, detail="not found")
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT i.external_id, r.external_id, r.owner_login, r.name, "
+                    "r.default_branch "
+                    "FROM github_repository_projects b "
+                    "JOIN github_repositories r ON r.id = b.repository_id "
+                    "JOIN github_installations i ON i.id = r.installation_id "
+                    "WHERE b.project_id = :id AND r.security_gate IS NULL "
+                    "AND r.access_state = 'accessible' AND NOT r.archived "
+                    "AND NOT r.disabled AND i.state = 'active' "
+                    "AND i.suspended_at IS NULL"
+                ),
+                {"id": project_id},
+            )
+        ).first()
+    repository = (
+        logos.LogoRepository(
+            installation_external_id=int(row[0]),
+            repository_external_id=int(row[1]),
+            owner=str(row[2]),
+            name=str(row[3]),
+            default_branch=str(row[4] or "main"),
+        )
+        if row is not None
+        else None
+    )
+    logo = await logos.project_logo(
+        request.app.state.github_client,
+        request.app.state.telemetry_redis,
+        str(project_id),
+        repository,
+        theme,
+    )
+    if logo is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return Response(
+        content=logo.content,
+        media_type=logo.media_type,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
+    )
 
 
 # NOTE: callers append `p.project_key` AFTER this list, so read it as

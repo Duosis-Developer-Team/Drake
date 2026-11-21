@@ -57,7 +57,8 @@ function SessionGate({ children }: { children: React.ReactNode }) {
   }
   if (state.status === "signed-out") return <SignedOut variant="signed-out" />;
   if (state.status === "expired") return <SignedOut variant="expired" />;
-  if (state.status === "unavailable") return <SignedOut variant="unavailable" />;
+  if (state.status === "unavailable")
+    return <SignedOut variant="unavailable" />;
 
   return <AuthenticatedShell>{children}</AuthenticatedShell>;
 }
@@ -69,7 +70,10 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const [collapsed, toggleCollapse] = useSidebarCollapse();
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
-  const drawerRef = useDismissable<HTMLDivElement>({ open: drawerOpen, onClose: closeDrawer });
+  const drawerRef = useDismissable<HTMLDivElement>({
+    open: drawerOpen,
+    onClose: closeDrawer,
+  });
   useScrollLock(drawerOpen);
 
   return (
@@ -85,7 +89,9 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
           furniture, and the page is where attention goes. */}
       <aside
         className={`sticky top-0 hidden h-screen shrink-0 self-start transition-[width] duration-[var(--duration-surface)] ease-[var(--ease-standard)] lg:block ${
-          collapsed ? "w-[var(--sidebar-width-collapsed)]" : "w-[var(--sidebar-width-expanded)]"
+          collapsed
+            ? "w-[var(--sidebar-width-collapsed)]"
+            : "w-[var(--sidebar-width-expanded)]"
         }`}
       >
         <Sidebar
@@ -160,7 +166,9 @@ function ShellFooter() {
           {initial}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-caption font-medium text-sidebar-ink">{identity.display_name}</p>
+          <p className="truncate text-caption font-medium text-sidebar-ink">
+            {identity.display_name}
+          </p>
           <p className="truncate text-micro text-sidebar-ink-muted">
             {t("sidebar.scopes", { count: scopeCount })}
           </p>
@@ -185,10 +193,16 @@ export function PageFrame({
   width?: "default" | "wide" | "narrow";
 }) {
   const max =
-    width === "wide" ? "max-w-none" : width === "narrow" ? "max-w-3xl" : "max-w-[110rem]";
+    width === "wide"
+      ? "max-w-none"
+      : width === "narrow"
+        ? "max-w-3xl"
+        : "max-w-[110rem]";
   // `@container/page` drives the shared column system in globals.css.
   return (
-    <div className={`@container/page mx-auto w-full px-4 pt-5 pb-12 lg:px-7 ${max}`}>
+    <div
+      className={`@container/page mx-auto w-full px-4 pt-5 pb-12 lg:px-7 ${max}`}
+    >
       {children}
     </div>
   );
@@ -203,6 +217,7 @@ export function PageFrame({
  * to find it in the third panel down.
  */
 export function PageHeader({
+  leading,
   title,
   description,
   status,
@@ -210,6 +225,8 @@ export function PageHeader({
   actions,
   tabs,
 }: {
+  /** Drawn left of the title block: a project's logo, for instance. */
+  leading?: React.ReactNode;
   title: React.ReactNode;
   description?: React.ReactNode;
   status?: React.ReactNode;
@@ -220,21 +237,32 @@ export function PageHeader({
   return (
     <div className="mb-6">
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="min-w-0 truncate text-[1.625rem] leading-9 font-bold tracking-[-0.025em] text-ink">{title}</h1>
-            {status}
-          </div>
-          {description ? (
-            <p className="mt-1 max-w-3xl text-[0.84375rem] text-ink-muted">{description}</p>
-          ) : null}
-          {meta ? (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">
-              {meta}
+        <div className="flex min-w-0 items-center gap-4">
+          {leading ? <div className="shrink-0">{leading}</div> : null}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="min-w-0 truncate text-[1.625rem] leading-9 font-bold tracking-[-0.025em] text-ink">
+                {title}
+              </h1>
+              {status}
             </div>
-          ) : null}
+            {description ? (
+              <p className="mt-1 max-w-3xl text-[0.84375rem] text-ink-muted">
+                {description}
+              </p>
+            ) : null}
+            {meta ? (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">
+                {meta}
+              </div>
+            ) : null}
+          </div>
         </div>
-        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {actions}
+          </div>
+        ) : null}
       </div>
       {tabs ? <div className="mt-4">{tabs}</div> : null}
     </div>

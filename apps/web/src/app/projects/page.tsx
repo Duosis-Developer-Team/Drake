@@ -37,7 +37,6 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { toneCounts } from "@/components/catalog/EnvironmentCards";
 import {
-  IconBubble,
   MiniBars,
   StatTile,
   TileState,
@@ -47,6 +46,7 @@ import {
 import { ProjectRiskMap } from "@/components/data-viz/ProjectRiskMap";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   Button,
@@ -176,7 +176,7 @@ function ProjectRow({
         role="cell"
         className="flex min-w-0 basis-full items-center gap-4 lg:basis-auto"
       >
-        <IconBubble icon={FolderKanban} tone={risk?.tone} />
+        <ProjectLogo projectId={project.id} name={project.display_name} size="lg" variant="mark" />
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <Link

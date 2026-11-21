@@ -28,6 +28,7 @@ import { toneSpec } from "@/lib/design/status";
 import { DeniedState, ErrorState, LoadingSkeleton, NotConfiguredState } from "@/components/ui/states";
 import { useT } from "@/lib/i18n";
 import { worstToneOf, type HealthMatrixCell } from "@/lib/view-models/health-matrix";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 
 type ResourceStatus = "loading" | "denied" | "not-found" | "error" | "ready";
 
@@ -77,6 +78,10 @@ function Swatch({
   );
 }
 
+function idOf(cells: HealthMatrixCell[], projectKey: string): string {
+  return cells.find((cell) => cell.projectKey === projectKey)?.projectId ?? projectKey;
+}
+
 function Grid({ cells }: { cells: HealthMatrixCell[] }) {
   const t = useT("commandCenter");
   const projects = [...new Set(cells.map((cell) => cell.projectKey))];
@@ -96,7 +101,10 @@ function Grid({ cells }: { cells: HealthMatrixCell[] }) {
                 scope="col"
                 className="px-2 pb-2 text-left text-micro font-semibold tracking-[0.08em] text-ink-muted uppercase"
               >
-                {project}
+                <span className="flex flex-col items-start gap-1.5">
+                  <ProjectLogo projectId={idOf(cells, project)} name={project} size="md" />
+                  {project}
+                </span>
               </th>
             ))}
           </tr>
@@ -133,7 +141,10 @@ function Disclosure({ cells, compact }: { cells: HealthMatrixCell[]; compact: bo
           <li key={project}>
             <details open>
               <summary className="cursor-pointer px-1 py-2 text-caption font-medium text-ink">
-                {project}
+                <span className="inline-flex items-center gap-2 align-middle">
+                  <ProjectLogo projectId={idOf(cells, project)} name={project} size="sm" variant="mark" />
+                  {project}
+                </span>
               </summary>
               <ul className="space-y-1.5 py-1.5 pl-3">
                 {cells
