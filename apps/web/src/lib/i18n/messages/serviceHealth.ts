@@ -251,6 +251,21 @@ export const serviceHealth = defineMessages({
         title: "Signal history",
         description: "Only the signals this binding's preset reads.",
         last: "last {range}",
+        none: "This binding's preset charts no signal over time.",
+      },
+      tabs: {
+        overview: "Overview",
+        requests: "Requests",
+        logs: "Logs",
+        metrics: "Metrics",
+        incidents: "Incidents",
+        setup: "Configuration",
+      },
+      slice: {
+        picked: "{from}–{to} UTC selected on the timeline",
+        requests: "See its requests",
+        logs: "See its logs",
+        clear: "Clear",
       },
       binding: {
         title: "Binding",
@@ -577,6 +592,21 @@ export const serviceHealth = defineMessages({
         title: "Sinyal geçmişi",
         description: "Yalnızca bu bağlamanın ön ayarının okuduğu sinyaller.",
         last: "son {range}",
+        none: "Bu bağlamanın ön ayarı zaman içinde bir sinyal çizmiyor.",
+      },
+      tabs: {
+        overview: "Genel bakış",
+        requests: "İstekler",
+        logs: "Loglar",
+        metrics: "Metrikler",
+        incidents: "Olaylar",
+        setup: "Yapılandırma",
+      },
+      slice: {
+        picked: "Zaman çizelgesinde {from}–{to} UTC seçili",
+        requests: "İsteklerini gör",
+        logs: "Loglarını gör",
+        clear: "Temizle",
       },
       binding: {
         title: "Bağlama",

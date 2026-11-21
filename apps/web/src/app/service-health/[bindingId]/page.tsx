@@ -9,19 +9,18 @@
  */
 
 import {
-  Activity,
   ArrowLeft,
-  Cpu,
-  Gauge as GaugeIcon,
-  Globe,
+  ArrowRight,
   Pencil,
   RotateCcw,
+  Route,
+  ScrollText,
   SearchX,
-  ServerCog,
   ShieldCheck,
+  Siren,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
@@ -31,7 +30,6 @@ import {
   ServiceIncidents,
 } from "@/components/incidents/ServiceIncidents";
 import { LogExplorer } from "@/components/service-health/LogExplorer";
-import { SectionNav, type SectionNavItem } from "@/components/service-health/SectionNav";
 import { TimelineStrip } from "@/components/service-health/TimelineStrip";
 import { ServiceMapPanel } from "@/components/service-map/ServiceMapPanel";
 import { useBindingEnvironment } from "@/lib/serviceMap";
@@ -44,7 +42,6 @@ import {
   BindingStateBadge,
   FreshnessNotice,
   HealthBadge,
-  IconBubble,
   Measure,
   MiniMeter,
   MissingSignals,
@@ -57,7 +54,7 @@ import {
   useAge,
   useSignalFormat,
 } from "@/components/service-health/primitives";
-import { Gauge, RingProgress } from "@/components/charts/visuals";
+import { Gauge } from "@/components/charts/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import {
@@ -65,7 +62,9 @@ import {
   toneSpec,
   type StatusTone,
 } from "@/lib/design/status";
-import { useT, type Translator } from "@/lib/i18n";
+import { useFormat, useT, type Translator } from "@/lib/i18n";
+import { useCrumbLabel } from "@/lib/crumbs";
+import { durationSeconds, type IncidentSummary } from "@/lib/incidents";
 import { percent, signalsPath, type SignalPage } from "@/lib/signals";
 import { formatDuration } from "@/lib/traces";
 import type { TimelineWindow } from "@/lib/timeline";
@@ -88,21 +87,20 @@ const CHARTABLE: { signal: string; unit: string }[] = [
 ];
 
 const BIG_NUMBER =
-  "text-[2.25rem] leading-none font-semibold tracking-[-0.03em] text-ink";
+  "font-[family-name:var(--font-display)] text-[1.75rem] leading-none font-bold tracking-[-0.03em] text-ink";
 
 function signalLabel(t: Translator<"serviceHealth">, name: string): string {
   return t.dyn("signal", name, SIGNAL_LABELS[name] ?? name);
 }
 
 /**
- * One of the four sections behind the verdict, as a hero stat card: icon,
- * title and the section's own status chip; a big number and its visual;
- * the section's reasons as quiet pills underneath.
+ * One of the four sections behind the verdict, as a compact tile: the
+ * section's name and its own status, one big number, its context, and the
+ * section's reasons underneath when there are any.
  */
 function SectionCard({
   id,
   title,
-  icon,
   status,
   reasons,
   children,
@@ -110,27 +108,23 @@ function SectionCard({
   /** The section's stable name — the test id, whatever language the title is in. */
   id: "availability" | "stability" | "resources" | "application";
   title: string;
-  icon: React.ComponentType<{ className?: string }>;
   status: ServiceHealth["availability"]["status"];
   reasons: string[];
   children: React.ReactNode;
 }) {
   const tone = toneForServiceStatus(status);
   return (
-    <Panel data-testid={`section-${id}`} className="h-full">
-      <div className="flex items-start justify-between gap-3">
-        <IconBubble
-          icon={icon}
-          tone={tone === "not-applicable" ? undefined : tone}
-        />
+    <Panel
+      data-testid={`section-${id}`}
+      className={`h-full !gap-3 !p-4 ${tone === "critical" ? "!border-critical" : ""}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="truncate text-caption font-medium text-ink-secondary">{title}</h2>
         <HealthBadge status={status} />
       </div>
-      <h2 className="-mb-2 text-caption font-medium text-ink-secondary">
-        {title}
-      </h2>
-      <div className="flex flex-1 flex-col gap-4">{children}</div>
+      <div className="flex flex-1 flex-col gap-2.5">{children}</div>
       {reasons.length > 0 ? (
-        <div className="border-t border-border pt-4">
+        <div className="border-t border-border pt-3">
           <ReasonList reasons={reasons} tone={tone} />
         </div>
       ) : null}
@@ -146,6 +140,7 @@ function UsageLine({
   unit,
   ratio,
   thresholds,
+  caption,
 }: {
   label: string;
   used: number | null;
@@ -153,6 +148,8 @@ function UsageLine({
   unit: string;
   ratio: number | null;
   thresholds: { warn: number; critical: number; direction: "above" } | null;
+  /** Replaces the used-of-limit line for a share that has no limit. */
+  caption?: string;
 }) {
   const t = useT("serviceHealth");
   const formatSignal = useSignalFormat();
@@ -172,7 +169,9 @@ function UsageLine({
       </div>
       <MiniMeter fraction={ratio} tone={tone} className="mt-1.5" />
       <span className="mt-1 block truncate text-micro text-ink-muted">
-        {limit !== null
+        {caption
+          ? caption
+          : limit !== null
           ? t("detail.resources.ofLimit", {
               used: formatSignal(used, unit),
               limit: formatSignal(limit, unit),
@@ -322,29 +321,86 @@ function Gate<T>({
   return <>{children(value.data)}</>;
 }
 
-/** The table of contents. Request and log counts appear only when there is
- *  something to count; "Signal history" only when the preset charts any. */
-function sectionItems(
-  t: Translator<"serviceHealth">,
-  facts: { history: boolean; requestErrors: number; errorLines: number },
-): SectionNavItem[] {
-  const count = (n: number) => (n > 0 ? t("detail.nav.errors", { count: n }) : undefined);
-  return [
-    { id: "sh-overview", label: t("detail.nav.overview") },
-    { id: "sh-timeline", label: t("detail.nav.timeline") },
-    { id: "sh-map", label: t("detail.nav.map") },
-    { id: "sh-why", label: t("detail.nav.why") },
-    ...(facts.history ? [{ id: "sh-history", label: t("detail.nav.history") }] : []),
-    { id: "sh-requests", label: t("detail.nav.requests"), badge: count(facts.requestErrors) },
-    {
-      id: "sh-logs",
-      label: t("detail.nav.logs"),
-      badge: count(facts.errorLines),
-      tone: "warning" as const,
-    },
-    { id: "sh-incidents", label: t("detail.nav.incidents") },
-    { id: "sh-setup", label: t("detail.nav.setup") },
-  ];
+const TABS = ["overview", "requests", "logs", "metrics", "incidents", "setup"] as const;
+type Tab = (typeof TABS)[number];
+
+/** The page's tabs. Error counts show only when there is something to count. */
+function DetailTabs({
+  value,
+  onChange,
+  requestErrors,
+  errorLines,
+  incidentOpen,
+}: {
+  value: Tab;
+  onChange: (tab: Tab) => void;
+  requestErrors: number;
+  errorLines: number;
+  incidentOpen: boolean;
+}) {
+  const t = useT("serviceHealth");
+  const badge = (tab: Tab): { text: string; tone: StatusTone } | null => {
+    if (tab === "requests" && requestErrors > 0)
+      return { text: t("detail.nav.errors", { count: requestErrors }), tone: "critical" };
+    if (tab === "logs" && errorLines > 0)
+      return { text: t("detail.nav.errors", { count: errorLines }), tone: "warning" };
+    if (tab === "incidents" && incidentOpen) return { text: "1", tone: "critical" };
+    return null;
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={t("detail.nav.label")}
+      className="flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]"
+    >
+      {TABS.map((tab) => {
+        const selected = tab === value;
+        const b = badge(tab);
+        return (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            id={`sh-tab-${tab}`}
+            aria-selected={selected}
+            aria-controls={`sh-panel-${tab}`}
+            onClick={() => onChange(tab)}
+            className={`-mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-[0.84375rem] whitespace-nowrap transition-colors ${
+              selected
+                ? "border-brand font-semibold text-ink"
+                : "border-transparent font-medium text-ink-muted hover:text-ink"
+            }`}
+          >
+            {t(`detail.tabs.${tab}`)}
+            {b ? (
+              <span className={`rounded-full px-1.5 py-px font-mono text-[0.6875rem] ${toneSpec(b.tone).chip}`}>{b.text}</span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The incident this service is in right now, above everything else. */
+function ActiveIncidentBanner({ active }: { active: IncidentSummary | null }) {
+  const t = useT("incidents");
+  const fmt = useFormat();
+  if (!active) return null;
+  return (
+    <Link
+      href={`/incidents/${active.id}`}
+      data-testid="active-incident-banner"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-panel border border-critical bg-critical-soft px-4 py-3 text-critical hover:brightness-105"
+    >
+      <Siren className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="text-body font-semibold">{t("service.openIncident", { title: active.title })}</span>
+      <span className="text-caption">
+        {t("service.runningFor", { duration: fmt.duration(durationSeconds(active.opened_at, null)) })}
+      </span>
+      <ArrowRight className="ml-auto h-4 w-4" aria-hidden />
+    </Link>
+  );
 }
 
 /**
@@ -404,6 +460,9 @@ export default function ServiceHealthDetailPage() {
   const formatSignal = useSignalFormat();
   const age = useAge();
   const { bindingId } = useParams<{ bindingId: string }>();
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname() || `/service-health/${bindingId}`;
   const [health, retryHealth] = useApi<ServiceHealth>(
     `/v1/service-health/bindings/${bindingId}/health`,
   );
@@ -412,11 +471,31 @@ export default function ServiceHealthDetailPage() {
   );
   const [range, setRange] = useState<SeriesRange>("1h");
   // This service's own telemetry over the last hour: what the header line
-  // and the section counts say. Absent or unreadable, they say nothing.
+  // and the tab counts say. Absent or unreadable, they say nothing.
   const signals = useResource<SignalPage>(signalsPath([bindingId]), { refreshMs: 60_000 });
   const signal = signals.data?.items[0] ?? null;
-  // A slice picked on the timeline narrows the request and log panels.
+  // A slice picked on the timeline narrows the request and log tabs.
   const [slice, setSlice] = useState<TimelineWindow | null>(null);
+  const [incidentsPage] = useApi<{ items: IncidentSummary[]; total: number }>(
+    `/v1/service-health/bindings/${bindingId}/incidents`,
+  );
+  const activeIncident =
+    incidentsPage.state === "ready" ? (incidentsPage.data.items.find((i) => i.state !== "resolved") ?? null) : null;
+  const requested = params.get("tab");
+  // The tab is local state, mirrored into the URL so a link opens the same
+  // view; the URL only seeds it.
+  const [tab, setTabState] = useState<Tab>(
+    (TABS as readonly string[]).includes(requested ?? "") ? (requested as Tab) : "overview",
+  );
+  const setTab = (next: Tab) => {
+    setTabState(next);
+    const query = new URLSearchParams(params.toString());
+    if (next === "overview") query.delete("tab");
+    else query.set("tab", next);
+    const qs = query.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+  useCrumbLabel(bindingId, health.state === "ready" ? health.data.binding.service_key : null);
 
   return (
     <PageFrame>
@@ -447,26 +526,14 @@ export default function ServiceHealthDetailPage() {
 
           return (
             <>
-              <p className="mb-3 flex items-center gap-1.5 text-micro text-ink-muted">
-                <Link href="/service-health" className="hover:text-ink">
-                  {t("detail.crumb")}
-                </Link>
-                <span>/</span>
-                <span className="font-mono text-ink-secondary">
-                  {binding.project_key}/{binding.environment_key}/
-                  {binding.service_key}
-                </span>
-              </p>
-
               <PageHeader
                 title={binding.service_key}
                 status={
                   <>
                     <HealthBadge status={data.status} />
-                    <BindingStateBadge
-                      lifecycle={binding.lifecycle}
-                      resolved={binding.resolved}
-                    />
+                    {binding.lifecycle !== "active" || !binding.resolved ? (
+                      <BindingStateBadge lifecycle={binding.lifecycle} resolved={binding.resolved} />
+                    ) : null}
                   </>
                 }
                 meta={
@@ -475,8 +542,7 @@ export default function ServiceHealthDetailPage() {
                       {binding.project_key}/{binding.environment_key}
                     </span>
                     <span className="font-mono">
-                      {binding.cluster_ref}/{binding.namespace}/
-                      {binding.workload_name}
+                      {binding.workload_kind} {binding.cluster_ref}/{binding.namespace}/{binding.workload_name}
                     </span>
                     <span>
                       {t("detail.newestSample", { age: age(data.freshness_age_seconds) })}
@@ -485,25 +551,28 @@ export default function ServiceHealthDetailPage() {
                   </>
                 }
                 actions={
-                  <Link
-                    href={`/service-health/bind?environment_service_id=${binding.environment_service_id}&binding_id=${binding.id}`}
-                    className={PILL_SECONDARY}
-                  >
-                    <Pencil className="h-3.5 w-3.5" aria-hidden />
-                    {t("detail.editBinding")}
-                  </Link>
+                  <>
+                    <button type="button" onClick={() => setTab("requests")} className={PILL_SECONDARY}>
+                      <Route className="h-3.5 w-3.5" aria-hidden />
+                      {t("detail.tabs.requests")}
+                    </button>
+                    <button type="button" onClick={() => setTab("logs")} className={PILL_SECONDARY}>
+                      <ScrollText className="h-3.5 w-3.5" aria-hidden />
+                      {t("detail.tabs.logs")}
+                    </button>
+                    <Link
+                      href={`/service-health/bind?environment_service_id=${binding.environment_service_id}&binding_id=${binding.id}`}
+                      className={PILL_SECONDARY}
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      {t("detail.editBinding")}
+                    </Link>
+                  </>
                 }
               />
 
-              <div className="space-y-6">
-                <SectionNav
-                  label={t("detail.nav.label")}
-                  items={sectionItems(t, {
-                    history: chartable.length > 0,
-                    requestErrors: signal?.traces?.errors ?? 0,
-                    errorLines: signal?.logs?.errors ?? 0,
-                  })}
-                />
+              <div className="space-y-5">
+                <ActiveIncidentBanner active={activeIncident} />
                 <FreshnessNotice
                   partial={data.partial}
                   servedFromLastGood={data.served_from_last_good}
@@ -512,16 +581,48 @@ export default function ServiceHealthDetailPage() {
                   newestSampleAt={data.newest_sample_at}
                 />
 
-                {/* Hero row: the four sections behind the verdict. */}
-                <div id="sh-overview" className="page-grid scroll-mt-24">
+                <DetailTabs
+                  value={tab}
+                  onChange={setTab}
+                  requestErrors={signal?.traces?.errors ?? 0}
+                  errorLines={signal?.logs?.errors ?? 0}
+                  incidentOpen={activeIncident !== null}
+                />
+
+                {slice && (tab === "overview" || tab === "metrics") ? (
+                  <div
+                    data-testid="slice-bar"
+                    className="flex flex-wrap items-center gap-3 rounded-panel border border-brand bg-brand-soft px-4 py-2.5 text-caption text-ink"
+                  >
+                    <span>
+                      {t("detail.slice.picked", {
+                        from: slice.start.slice(11, 16),
+                        to: slice.end.slice(11, 16),
+                      })}
+                    </span>
+                    <button type="button" onClick={() => setTab("requests")} className="font-semibold text-brand hover:underline">
+                      {t("detail.slice.requests")}
+                    </button>
+                    <button type="button" onClick={() => setTab("logs")} className="font-semibold text-brand hover:underline">
+                      {t("detail.slice.logs")}
+                    </button>
+                    <button type="button" onClick={() => setSlice(null)} className="ml-auto text-ink-muted hover:text-ink">
+                      {t("detail.slice.clear")}
+                    </button>
+                  </div>
+                ) : null}
+
+                <div role="tabpanel" id={`sh-panel-${tab}`} aria-labelledby={`sh-tab-${tab}`} className="space-y-5">
+                  {tab === "overview" ? (
+                    <>
+                      <div id="sh-overview" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <SectionCard
                     id="availability"
                     title={t("detail.section.availability")}
-                    icon={ServerCog}
                     status={availability.status}
                     reasons={availability.reasons}
                   >
-                    <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-end justify-between gap-4">
                       <span>
                         {/* Two exact numbers: a percentage alone would hide
                             the difference between 0/0 and an unmeasured pair. */}
@@ -535,21 +636,22 @@ export default function ServiceHealthDetailPage() {
                           {t("detail.availability.replicasReady")}
                         </span>
                       </span>
-                      <RingProgress
-                        size={60}
-                        label={t("detail.availability.ring")}
-                        value={
-                          availability.desired_replicas
-                            ? ((availability.ready_replicas ?? 0) /
-                                availability.desired_replicas) *
-                              100
-                            : null
-                        }
-                        tone={readyTone}
-                      />
+                      <span className="text-caption text-ink-muted">
+                        {availability.desired_replicas
+                          ? `${Math.round(((availability.ready_replicas ?? 0) / availability.desired_replicas) * 100)}%`
+                          : "—"}
+                      </span>
                     </div>
+                    <MiniMeter
+                      fraction={
+                        availability.desired_replicas
+                          ? (availability.ready_replicas ?? 0) / availability.desired_replicas
+                          : null
+                      }
+                      tone={readyTone}
+                    />
                     {availability.scaled_to_zero ? (
-                      <p className="rounded-full bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary">
+                      <p className="rounded-control bg-surface-2 px-2.5 py-1 text-micro text-ink-secondary">
                         {t("detail.availability.scaledToZero")}
                       </p>
                     ) : null}
@@ -558,7 +660,6 @@ export default function ServiceHealthDetailPage() {
                   <SectionCard
                     id="stability"
                     title={t("detail.section.stability")}
-                    icon={Activity}
                     status={stability.status}
                     reasons={stability.reasons}
                   >
@@ -579,7 +680,7 @@ export default function ServiceHealthDetailPage() {
                       ).map(([label, flagged]) => (
                         <span
                           key={label}
-                          className={`flex items-center justify-between gap-2 rounded-full px-3.5 py-1.5 text-caption ${
+                          className={`flex items-center justify-between gap-2 rounded-control px-2.5 py-1 text-caption ${
                             flagged
                               ? toneSpec("critical").chip
                               : "bg-surface-2 text-ink-secondary"
@@ -597,7 +698,6 @@ export default function ServiceHealthDetailPage() {
                   <SectionCard
                     id="resources"
                     title={t("detail.section.resources")}
-                    icon={Cpu}
                     status={resources.status}
                     reasons={resources.reasons}
                   >
@@ -626,13 +726,21 @@ export default function ServiceHealthDetailPage() {
                         ratio={resources.memory_utilization}
                         thresholds={utilisation}
                       />
+                      <UsageLine
+                        label={t("detail.pressure.throttling")}
+                        used={null}
+                        limit={null}
+                        unit="ratio"
+                        ratio={resources.cpu_throttled_ratio}
+                        thresholds={THROTTLE_THRESHOLDS}
+                        caption={t("detail.pressure.throttledPeriods")}
+                      />
                     </div>
                   </SectionCard>
 
                   <SectionCard
                     id="application"
                     title={t("detail.section.application")}
-                    icon={Globe}
                     status={application.status}
                     reasons={application.reasons}
                   >
@@ -655,7 +763,7 @@ export default function ServiceHealthDetailPage() {
                           ) : null}
                         </span>
                         <div className="grid grid-cols-1 gap-2">
-                          <span className="flex items-center justify-between gap-2 rounded-full bg-surface-2 px-3.5 py-1.5 text-caption">
+                          <span className="flex items-center justify-between gap-2 rounded-control bg-surface-2 px-2.5 py-1 text-caption">
                             <span className="text-ink-secondary">
                               {t("detail.application.requestRate")}
                             </span>
@@ -664,7 +772,7 @@ export default function ServiceHealthDetailPage() {
                               unit="requests_per_second"
                             />
                           </span>
-                          <span className="flex items-center justify-between gap-2 rounded-full bg-surface-2 px-3.5 py-1.5 text-caption">
+                          <span className="flex items-center justify-between gap-2 rounded-control bg-surface-2 px-2.5 py-1 text-caption">
                             <span className="text-ink-secondary">
                               {t("detail.application.latencyP95")}
                             </span>
@@ -686,23 +794,18 @@ export default function ServiceHealthDetailPage() {
                       </div>
                     )}
                   </SectionCard>
-                </div>
+                      </div>
 
-                <div id="sh-timeline" className="scroll-mt-24">
-                  <TimelineStrip
-                    bindingId={binding.id}
-                    environmentServiceId={binding.environment_service_id}
-                    selected={slice}
-                    onSelect={setSlice}
-                  />
-                </div>
+                      <div id="sh-timeline">
+                        <TimelineStrip
+                          bindingId={binding.id}
+                          environmentServiceId={binding.environment_service_id}
+                          selected={slice}
+                          onSelect={setSlice}
+                        />
+                      </div>
 
-                <div id="sh-map" className="scroll-mt-24">
-                  <BindingServiceMap bindingId={binding.id} fallbackLabel={binding.service_key} />
-                </div>
-
-                {/* Why + resource pressure. */}
-                <div id="sh-why" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
+                      <div id="sh-why">
                   <Panel className="h-full">
                     <div className="flex items-center gap-4">
                       <span
@@ -757,6 +860,36 @@ export default function ServiceHealthDetailPage() {
                     </div>
                   </Panel>
 
+                      </div>
+
+                      <div id="sh-map">
+                        <BindingServiceMap bindingId={binding.id} fallbackLabel={binding.service_key} />
+                      </div>
+                    </>
+                  ) : null}
+
+                  {tab === "requests" ? (
+                    <div id="sh-requests">
+                      <TraceExplorer
+                        bindingId={binding.id}
+                        slice={slice}
+                        onClearSlice={() => setSlice(null)}
+                      />
+                    </div>
+                  ) : null}
+
+                  {tab === "logs" ? (
+                    <div id="sh-logs">
+                      <LogExplorer
+                        bindingId={binding.id}
+                        slice={slice}
+                        onClearSlice={() => setSlice(null)}
+                      />
+                    </div>
+                  ) : null}
+
+                  {tab === "metrics" ? (
+                    <>
                   <Panel className="h-full">
                     <PanelHeader
                       title={t("detail.pressure.title")}
@@ -819,24 +952,17 @@ export default function ServiceHealthDetailPage() {
                       </div>
                     </div>
                   </Panel>
-                </div>
-
-                {chartable.length > 0 ? (
-                  <section id="sh-history" aria-label={t("detail.history.title")} className="scroll-mt-24 space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <IconBubble icon={GaugeIcon} />
+                    <section id="sh-history" aria-label={t("detail.history.title")} className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <h2 className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
+                          <h2 className="text-[1rem] leading-6 font-bold tracking-[-0.01em] text-ink">
                             {t("detail.history.title")}
                           </h2>
-                          <p className="text-caption text-ink-muted">
-                            {t("detail.history.description")}
-                          </p>
+                          <p className="text-caption text-ink-muted">{t("detail.history.description")}</p>
                         </div>
+                        {chartable.length > 0 ? <RangeSelector value={range} onChange={setRange} /> : null}
                       </div>
-                      <RangeSelector value={range} onChange={setRange} />
-                    </div>
+                      {chartable.length > 0 ? (
                     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
                       {chartable.map((entry) => (
                         <Panel key={entry.signal}>
@@ -853,34 +979,79 @@ export default function ServiceHealthDetailPage() {
                         </Panel>
                       ))}
                     </div>
-                  </section>
-                ) : null}
+                      ) : (
+                        <Panel>
+                          <DataState kind="no-data" title={t("detail.history.none")} />
+                        </Panel>
+                      )}
+                    </section>
+                  {summary.state === "ready" ? (
+                    <Panel flush className="h-full">
+                      <PanelHeader
+                        flush
+                        title={t("detail.signals.title")}
+                        description={t("detail.signals.description")}
+                      />
+                      <ul className="divide-y divide-border py-1">
+                        <SignalRow
+                          label={signalLabel(t, "desired_replicas")}
+                          signal={
+                            summary.data.metrics.availability.desired_replicas
+                          }
+                          unit="count"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "ready_replicas")}
+                          signal={
+                            summary.data.metrics.availability.ready_replicas
+                          }
+                          unit="count"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "restarts")}
+                          signal={summary.data.metrics.stability.restarts}
+                          unit="count"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "cpu_usage")}
+                          signal={summary.data.metrics.resources.cpu_usage}
+                          unit="cores"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "memory_usage")}
+                          signal={summary.data.metrics.resources.memory_usage}
+                          unit="bytes"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "request_rate")}
+                          signal={summary.data.metrics.application.request_rate}
+                          unit="requests_per_second"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "error_ratio")}
+                          signal={summary.data.metrics.application.error_ratio}
+                          unit="ratio"
+                        />
+                        <SignalRow
+                          label={signalLabel(t, "freshness")}
+                          signal={summary.data.metrics.freshness}
+                          unit="ratio"
+                        />
+                      </ul>
+                    </Panel>
+                  ) : null}
+                    </>
+                  ) : null}
 
-                {/* What the workload served, request by request. */}
-                <div id="sh-requests" className="scroll-mt-24">
-                  <TraceExplorer
-                    bindingId={binding.id}
-                    slice={slice}
-                    onClearSlice={() => setSlice(null)}
-                  />
-                </div>
+                  {tab === "incidents" ? (
+                    <div id="sh-incidents" className="grid grid-cols-1 items-stretch gap-5 lg:grid-cols-2">
+                      <ServiceIncidents bindingId={binding.id} />
+                      <HealthTransitions bindingId={binding.id} />
+                    </div>
+                  ) : null}
 
-                {/* What the workload wrote: the evidence behind the numbers above. */}
-                <div id="sh-logs" className="scroll-mt-24">
-                  <LogExplorer
-                    bindingId={binding.id}
-                    slice={slice}
-                    onClearSlice={() => setSlice(null)}
-                  />
-                </div>
-
-                <div id="sh-incidents" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
-                  <ServiceIncidents bindingId={binding.id} />
-                  <HealthTransitions bindingId={binding.id} />
-                </div>
-
-                {/* Metadata last. */}
-                <div id="sh-setup" className="grid scroll-mt-24 grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  {tab === "setup" ? (
+                    <div id="sh-setup">
                   <Panel className="h-full">
                     <PanelHeader
                       title={t("detail.binding.title")}
@@ -936,60 +1107,7 @@ export default function ServiceHealthDetailPage() {
                     />
                   </Panel>
 
-                  {summary.state === "ready" ? (
-                    <Panel flush className="h-full">
-                      <PanelHeader
-                        flush
-                        title={t("detail.signals.title")}
-                        description={t("detail.signals.description")}
-                      />
-                      <ul className="divide-y divide-border py-1">
-                        <SignalRow
-                          label={signalLabel(t, "desired_replicas")}
-                          signal={
-                            summary.data.metrics.availability.desired_replicas
-                          }
-                          unit="count"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "ready_replicas")}
-                          signal={
-                            summary.data.metrics.availability.ready_replicas
-                          }
-                          unit="count"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "restarts")}
-                          signal={summary.data.metrics.stability.restarts}
-                          unit="count"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "cpu_usage")}
-                          signal={summary.data.metrics.resources.cpu_usage}
-                          unit="cores"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "memory_usage")}
-                          signal={summary.data.metrics.resources.memory_usage}
-                          unit="bytes"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "request_rate")}
-                          signal={summary.data.metrics.application.request_rate}
-                          unit="requests_per_second"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "error_ratio")}
-                          signal={summary.data.metrics.application.error_ratio}
-                          unit="ratio"
-                        />
-                        <SignalRow
-                          label={signalLabel(t, "freshness")}
-                          signal={summary.data.metrics.freshness}
-                          unit="ratio"
-                        />
-                      </ul>
-                    </Panel>
+                    </div>
                   ) : null}
                 </div>
               </div>
