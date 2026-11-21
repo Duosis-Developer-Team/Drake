@@ -66,6 +66,8 @@ Thumbs.db
 # --- Logs & local artifacts ---
 *.log
 logs/
+# The web app's /logs route is source, not a log directory.
+!apps/web/src/app/logs/
 tmp/
 .cache/
 
