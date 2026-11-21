@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   callsOf,
   compact,
+  edgeWidth,
+  layoutTopology,
   errorRatio,
   providerColor,
   providerName,
@@ -11,6 +13,7 @@ import {
   stepLabel,
   timeShare,
   type RunSpan,
+  type Topology,
 } from "@/lib/agents";
 
 const totals = (over: Partial<Record<string, number>> = {}) => ({
@@ -144,5 +147,118 @@ describe("run helpers", () => {
       other: 400,
     });
     expect(timeShare([], 0)).toEqual({ model: 0, tool: 0, other: 0 });
+  });
+});
+
+describe("agent map layout", () => {
+  const topo: Topology = {
+    window: "24h",
+    nodes: [
+      { id: "agent:a", kind: "agent", label: "planner", calls: 50, errors: 0 },
+      { id: "agent:b", kind: "agent", label: "kb", calls: 20, errors: 0 },
+      { id: "agent:c", kind: "agent", label: "solo", calls: 5, errors: 0 },
+      {
+        id: "model:x",
+        kind: "model",
+        label: "gpt-5",
+        calls: 30,
+        errors: 0,
+        provider: "openai",
+      },
+      {
+        id: "tool:s/t1",
+        kind: "tool",
+        label: "t1",
+        calls: 9,
+        errors: 0,
+        server: "s",
+      },
+      {
+        id: "tool:/t2",
+        kind: "tool",
+        label: "t2",
+        calls: 2,
+        errors: 0,
+        server: null,
+      },
+    ],
+    edges: [
+      {
+        source: "agent:a",
+        target: "agent:b",
+        kind: "agent",
+        calls: 10,
+        errors: 0,
+      },
+      {
+        source: "agent:a",
+        target: "model:x",
+        kind: "model",
+        calls: 20,
+        errors: 0,
+      },
+      {
+        source: "agent:b",
+        target: "tool:s/t1",
+        kind: "tool",
+        calls: 9,
+        errors: 0,
+      },
+      {
+        source: "agent:c",
+        target: "tool:/t2",
+        kind: "tool",
+        calls: 2,
+        errors: 0,
+      },
+    ],
+  };
+
+  it("puts sub-agents right of their caller and resources last", () => {
+    const layout = layoutTopology(topo, 1200);
+    const x = (id: string) => layout.byId.get(id)!.x;
+    expect(x("agent:a")).toBe(x("agent:c"));
+    expect(x("agent:b")).toBeGreaterThan(x("agent:a"));
+    expect(x("model:x")).toBeGreaterThan(x("agent:b"));
+    expect(x("tool:s/t1")).toBe(x("model:x"));
+    expect(layout.headers.map((h) => h.kind)).toEqual([
+      "models",
+      "tools",
+      "server",
+      "server",
+    ]);
+    // Nothing overlaps within a column.
+    const cols = new Map<number, number[][]>();
+    for (const p of layout.nodes)
+      cols.set(p.x, [...(cols.get(p.x) ?? []), [p.y, p.y + p.h]]);
+    for (const spans of cols.values()) {
+      spans.sort((a, b) => a[0] - b[0]);
+      for (let i = 1; i < spans.length; i++)
+        expect(spans[i][0]).toBeGreaterThanOrEqual(spans[i - 1][1]);
+    }
+  });
+
+  it("survives a cycle between agents", () => {
+    const cyclic: Topology = {
+      ...topo,
+      edges: [
+        ...topo.edges,
+        {
+          source: "agent:b",
+          target: "agent:a",
+          kind: "agent",
+          calls: 1,
+          errors: 0,
+        },
+      ],
+    };
+    expect(layoutTopology(cyclic, 800).nodes).toHaveLength(6);
+  });
+
+  it("widens busier links, logarithmically", () => {
+    expect(edgeWidth(0, 100)).toBe(1.25);
+    expect(edgeWidth(100, 100)).toBeCloseTo(5);
+    expect(edgeWidth(10, 100)).toBeLessThan(edgeWidth(100, 100));
+    expect(edgeWidth(5, 0)).toBe(1.25);
   });
 });

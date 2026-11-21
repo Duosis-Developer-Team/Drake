@@ -368,6 +368,7 @@ async def get_agent(
     agent["tools"] = [
         {
             "tool": r[0],
+            "server": r[4] or None,
             "calls": int(r[1]),
             "errors": int(r[2]),
             "avg_ms": round(int(r[3]) / int(r[1])) if int(r[1]) else None,
@@ -376,9 +377,9 @@ async def get_agent(
             await connection.execute(
                 text(
                     """
-                    SELECT tool_name, sum(calls), sum(errors), sum(duration_ms)
+                    SELECT tool_name, sum(calls), sum(errors), sum(duration_ms), server
                     FROM agent_tool_rollups WHERE agent_id = :id AND hour >= :since
-                    GROUP BY tool_name ORDER BY 2 DESC LIMIT 50
+                    GROUP BY tool_name, server ORDER BY 2 DESC LIMIT 50
                     """
                 ),
                 {"id": agent_id, "since": since},
@@ -445,3 +446,209 @@ async def visible_agents_by_key(
         )
     ).all()
     return {str(r[0]): {"id": str(r[1]), "display_name": r[2]} for r in rows}
+
+
+MAX_TOPOLOGY_AGENTS = 60
+MAX_RESOURCES = 40
+
+
+async def topology(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    window: str = "24h",
+    focus: uuid.UUID | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Agents and what they reach — models, tools (by the server they run
+    on) and other agents — over a window, for the agents this caller may
+    see. With `focus`, one agent and its direct neighbours only; None when
+    that agent is not visible.
+
+    An agent → agent link is shown only when both ends are visible: a
+    caller never learns of an agent outside their scope through a link.
+    """
+    moment = now or datetime.now(UTC)
+    since = moment - WINDOWS.get(window, WINDOWS["24h"])
+    projects, unbound = await _visibility(connection, principal)
+    params: dict[str, Any] = {"projects": projects, "unbound": unbound, "since": since}
+
+    edge_rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT e.caller_id, e.callee_id, sum(e.calls), sum(e.errors)
+                FROM agent_edges e
+                JOIN agents g ON g.id = e.caller_id
+                JOIN agents c ON c.id = e.callee_id
+                WHERE e.hour >= :since AND {_clause("g")} AND {_clause("c")}
+                GROUP BY e.caller_id, e.callee_id
+                """  # noqa: S608 - fixed fragments
+            ),
+            params,
+        )
+    ).all()
+    agent_ids: set[uuid.UUID] | None = None
+    if focus is not None:
+        visible = (
+            await connection.execute(
+                text(f"SELECT 1 FROM agents g WHERE g.id = :id AND {_clause()}"),  # noqa: S608
+                {**params, "id": focus},
+            )
+        ).first()
+        if visible is None:
+            return None
+        agent_ids = {focus}
+        for caller, callee, *_ in edge_rows:
+            if focus in (caller, callee):
+                agent_ids |= {caller, callee}
+
+    usage = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT g.id, g.display_name, g.confidence, g.ingest, p.project_key,
+                       coalesce(sum(r.invocations), 0), coalesce(sum(r.inference_calls), 0),
+                       coalesce(sum(r.tool_calls), 0), coalesce(sum(r.errors), 0),
+                       max(g.last_seen_at)
+                FROM agents g
+                LEFT JOIN projects p ON p.id = g.project_id
+                LEFT JOIN agent_rollups r ON r.agent_id = g.id AND r.hour >= :since
+                WHERE {_clause()}
+                  AND (CAST(:ids AS uuid[]) IS NULL AND g.last_seen_at >= :since
+                       OR g.id = ANY(CAST(:ids AS uuid[])))
+                GROUP BY g.id, g.display_name, g.confidence, g.ingest, p.project_key
+                ORDER BY coalesce(sum(r.invocations), 0) + coalesce(sum(r.inference_calls), 0)
+                         + coalesce(sum(r.tool_calls), 0) DESC, g.display_name
+                LIMIT {MAX_TOPOLOGY_AGENTS}
+                """  # noqa: S608 - fixed fragments
+            ),
+            {**params, "ids": list(agent_ids) if agent_ids is not None else None},
+        )
+    ).all()
+    shown = {r[0] for r in usage}
+    nodes: list[dict[str, Any]] = [
+        {
+            "id": f"agent:{r[0]}",
+            "kind": "agent",
+            "agent_id": str(r[0]),
+            "label": r[1],
+            "confidence": r[2],
+            "ingest": r[3],
+            "project": r[4],
+            "calls": int(r[5]) + int(r[6]) + int(r[7]),
+            "errors": int(r[8]),
+        }
+        for r in usage
+    ]
+    edges: list[dict[str, Any]] = [
+        {
+            "source": f"agent:{caller}",
+            "target": f"agent:{callee}",
+            "kind": "agent",
+            "calls": int(calls),
+            "errors": int(errors),
+        }
+        for caller, callee, calls, errors in edge_rows
+        if caller in shown and callee in shown
+    ]
+    if not shown:
+        return {"window": window, "nodes": [], "edges": []}
+
+    ids = list(shown)
+    models = (
+        await connection.execute(
+            text(
+                """
+                SELECT agent_id, provider, model, sum(inference_calls), sum(errors),
+                       sum(input_tokens), sum(output_tokens)
+                FROM agent_rollups
+                WHERE agent_id = ANY(:ids) AND hour >= :since AND inference_calls > 0
+                GROUP BY agent_id, provider, model
+                """
+            ),
+            {"ids": ids, "since": since},
+        )
+    ).all()
+    tools = (
+        await connection.execute(
+            text(
+                """
+                SELECT agent_id, tool_name, server, sum(calls), sum(errors), sum(duration_ms)
+                FROM agent_tool_rollups
+                WHERE agent_id = ANY(:ids) AND hour >= :since
+                GROUP BY agent_id, tool_name, server
+                """
+            ),
+            {"ids": ids, "since": since},
+        )
+    ).all()
+
+    model_nodes: dict[str, dict[str, Any]] = {}
+    for agent, provider, model, calls, errors, tin, tout in models:
+        key = f"model:{provider}/{model}"
+        node = model_nodes.setdefault(
+            key,
+            {
+                "id": key,
+                "kind": "model",
+                "label": model or provider or "unknown",
+                "provider": provider or None,
+                "calls": 0,
+                "errors": 0,
+                "tokens": 0,
+            },
+        )
+        node["calls"] += int(calls)
+        node["errors"] += int(errors)
+        node["tokens"] += int(tin) + int(tout)
+        edges.append(
+            {
+                "source": f"agent:{agent}",
+                "target": key,
+                "kind": "model",
+                "calls": int(calls),
+                "errors": int(errors),
+                "tokens": int(tin) + int(tout),
+            }
+        )
+    tool_nodes: dict[str, dict[str, Any]] = {}
+    for agent, tool, server, calls, errors, duration in tools:
+        key = f"tool:{server}/{tool}"
+        node = tool_nodes.setdefault(
+            key,
+            {
+                "id": key,
+                "kind": "tool",
+                "label": tool,
+                "server": server or None,
+                "calls": 0,
+                "errors": 0,
+                "duration_ms": 0,
+            },
+        )
+        node["calls"] += int(calls)
+        node["errors"] += int(errors)
+        node["duration_ms"] += int(duration)
+        edges.append(
+            {
+                "source": f"agent:{agent}",
+                "target": key,
+                "kind": "tool",
+                "calls": int(calls),
+                "errors": int(errors),
+                "avg_ms": round(int(duration) / int(calls)) if int(calls) else None,
+            }
+        )
+    resources = sorted(model_nodes.values(), key=lambda n: -n["calls"])[:MAX_RESOURCES]
+    resources += sorted(tool_nodes.values(), key=lambda n: -n["calls"])[:MAX_RESOURCES]
+    kept = {n["id"] for n in nodes} | {n["id"] for n in resources}
+    for node in tool_nodes.values():
+        duration = node.pop("duration_ms")
+        node["avg_ms"] = round(duration / node["calls"]) if node["calls"] else None
+    return {
+        "window": window,
+        "focus": str(focus) if focus else None,
+        "nodes": nodes + resources,
+        "edges": [e for e in edges if e["source"] in kept and e["target"] in kept],
+    }

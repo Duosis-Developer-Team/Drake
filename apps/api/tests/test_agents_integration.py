@@ -35,8 +35,13 @@ class Result:
 
 
 class FakeStore:
-    def __init__(self, rollups: list[dict[str, Any]], tools: list[dict[str, Any]]) -> None:
-        self.rollups, self.tools = rollups, tools
+    def __init__(
+        self,
+        rollups: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        edges: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.rollups, self.tools, self.edges = rollups, tools, edges or []
         self.calls = 0
 
     async def query(self, statement: str, parameters: dict[str, str], **_: Any) -> Result:
@@ -44,7 +49,12 @@ class FakeStore:
         assert "otel_traces" in statement
         start = datetime.fromisoformat(parameters["start"].replace(" ", "T")).replace(tzinfo=UTC)
         end = datetime.fromisoformat(parameters["end"].replace(" ", "T")).replace(tzinfo=UTC)
-        source = self.tools if "gen_ai.tool.name'] AS tool" in statement else self.rollups
+        if "p_agent_name" in statement:
+            source = self.edges
+        elif "gen_ai.tool.name'] AS tool" in statement:
+            source = self.tools
+        else:
+            source = self.rollups
         return Result(
             [r for r in source if start <= datetime.fromtimestamp(r["hour"], tz=UTC) < end]
         )
@@ -72,6 +82,18 @@ async def binding_place(engine: AsyncEngine, world: dict[str, Any]) -> tuple[str
             )
         ).one()
     return str(row[0]), str(row[1]), str(row[2])
+
+
+IDENTITY = {
+    "svc": "",
+    "cluster": "",
+    "ns": "",
+    "wk": "",
+    "agent_id": "",
+    "agent_name": "",
+    "ingest": "",
+    "ebpf": 0,
+}
 
 
 def usage(**over: Any) -> dict[str, Any]:
@@ -165,6 +187,7 @@ async def seed(engine: AsyncEngine, redis: Any) -> dict[str, Any]:
                 "ingest": "",
                 "ebpf": 0,
                 "tool": "get_ticket",
+                "server": "hermes-mcp.hermes-test.svc",
                 "hour": HOUR,
                 "calls": 4,
                 "errors": 1,
@@ -172,6 +195,19 @@ async def seed(engine: AsyncEngine, redis: Any) -> dict[str, Any]:
             },
         ],
     )
+    triager = {
+        f"p_{k}": v for k, v in {**IDENTITY, **in_catalog, "agent_name": "ticket-triager"}.items()
+    }
+    helper = {
+        f"c_{k}": v
+        for k, v in {
+            **IDENTITY,
+            "svc": "laptop-bot",
+            "agent_name": "research-helper",
+            "ingest": "external",
+        }.items()
+    }
+    store.edges = [{**triager, **helper, "hour": HOUR, "calls": 3, "errors": 1}]
     report = await discovery.run_once(engine, store, redis, database="otel", now=NOW)  # type: ignore[arg-type]
     assert report.lease_acquired and report.failed_reads == 0
     return {"world": world, "store": store}
@@ -270,7 +306,33 @@ async def test_the_inventory_is_scoped_like_the_catalog(engine: AsyncEngine, red
         assert len(triager["series"]) == 24
         assert body["summary"]["outside_catalog"] >= 2
         detail = (await client.get(f"/v1/agents/{triager['id']}")).json()
-        assert detail["tools"][0] == {"tool": "get_ticket", "calls": 4, "errors": 1, "avg_ms": 200}
+        assert detail["tools"][0] == {
+            "tool": "get_ticket",
+            "server": "hermes-mcp.hermes-test.svc",
+            "calls": 4,
+            "errors": 1,
+            "avg_ms": 200,
+        }
+        topo = (await client.get("/v1/agents/topology?window=24h")).json()
+        by_label = {n["label"]: n for n in topo["nodes"]}
+        assert by_label["ticket-triager"]["kind"] == "agent"
+        assert by_label["get_ticket"]["server"] == "hermes-mcp.hermes-test.svc"
+        assert by_label["claude-sonnet-5"]["provider"] == "anthropic"
+        delegation = [e for e in topo["edges"] if e["kind"] == "agent"]
+        assert delegation == [
+            {
+                "source": by_label["ticket-triager"]["id"],
+                "target": by_label["research-helper"]["id"],
+                "kind": "agent",
+                "calls": 3,
+                "errors": 1,
+            }
+        ]
+        focused = (await client.get(f"/v1/agents/topology?focus={triager['id']}")).json()
+        assert {n["label"] for n in focused["nodes"] if n["kind"] == "agent"} == {
+            "ticket-triager",
+            "research-helper",
+        }
         assert len(detail["series"]) == 168
         connect = (await client.get("/v1/agents/connect")).json()
         assert connect["cluster_endpoint"].endswith(":4318")
@@ -284,6 +346,12 @@ async def test_the_inventory_is_scoped_like_the_catalog(engine: AsyncEngine, red
         outside = await agents_by_name(engine)
         assert (await client.get(f"/v1/agents/{outside['batch'][5]}")).status_code == 404
         assert (await client.get(f"/v1/agents/{uuid.uuid4()}")).status_code == 404
+        topo = (await client.get("/v1/agents/topology")).json()
+        # The helper is outside this caller's scope: no node, and no link to it.
+        assert {n["label"] for n in topo["nodes"] if n["kind"] == "agent"} == {"ticket-triager"}
+        assert [e for e in topo["edges"] if e["kind"] == "agent"] == []
+        helper_id = outside["research-helper"][5]
+        assert (await client.get(f"/v1/agents/topology?focus={helper_id}")).status_code == 404
 
 
 async def test_a_failed_read_keeps_what_was_kept(engine: AsyncEngine, redis: Any) -> None:

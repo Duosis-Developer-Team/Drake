@@ -187,6 +187,7 @@ _TOOLS = (
     + _IDENTITY
     + f""",
     t.SpanAttributes['gen_ai.tool.name'] AS tool,
+    t.SpanAttributes['server.address'] AS server,
     toUnixTimestamp(toStartOfHour(t.Timestamp)) AS hour,
     count() AS calls,
     countIf(t.StatusCode = 'Error') AS errors,
@@ -195,14 +196,65 @@ FROM __DATABASE__.otel_traces AS t
 LEFT JOIN ({AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
 WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
   AND {OP} = 'execute_tool' AND t.SpanAttributes['gen_ai.tool.name'] != ''
-GROUP BY svc, cluster, ns, wk, agent_id, agent_name, ingest, tool, hour
+GROUP BY svc, cluster, ns, wk, agent_id, agent_name, ingest, tool, server, hour
 LIMIT {{max_rows:UInt16}}"""
 )
 
 
-def statements(database: str) -> tuple[str, str]:
+# Agent → agent: inside a trace with two or more agent runs, the caller of a
+# run is the agent run that encloses it in time (the latest-starting one
+# that started no later and ended no earlier). Sub-agents and
+# agents-as-tools run inside their caller's span, so this is the call tree
+# without walking parents span by span — and it stays one aggregated,
+# bounded answer: one row per caller, callee and hour.
+_EDGE_SPANS = f"""
+    SELECT t.TraceId AS trace_id, t.SpanId AS span_id,
+           toUnixTimestamp64Nano(t.Timestamp) AS s,
+           toUnixTimestamp64Nano(t.Timestamp) + t.Duration AS e,
+           toUnixTimestamp(toStartOfHour(t.Timestamp)) AS hour,
+           t.StatusCode = 'Error' AS failed,
+           {SVC} AS svc, {CLUSTER} AS cluster, {NAMESPACE} AS ns, {WORKLOAD} AS wk,
+           {AGENT_ID} AS agent_id, {AGENT_NAME} AS agent_name, {INGEST} AS ingest,
+           t.ScopeName = '' AS ebpf
+    FROM __DATABASE__.otel_traces AS t
+    LEFT JOIN ({AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
+    WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}}
+      AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
+      AND {OP} = 'invoke_agent'
+      AND t.TraceId IN (
+          SELECT TraceId FROM __DATABASE__.otel_traces
+          WHERE Timestamp >= {{start:DateTime64(9, 'UTC')}}
+            AND Timestamp < {{end:DateTime64(9, 'UTC')}}
+            AND SpanAttributes['gen_ai.operation.name'] = 'invoke_agent'
+          GROUP BY TraceId HAVING count() >= 2)"""  # noqa: S608 - fixed fragments
+
+_IDENTITY_FIELDS = ("svc", "cluster", "ns", "wk", "agent_id", "agent_name", "ingest", "ebpf")
+_CALLEE = ", ".join(f"any(c.{f}) AS c_{f}" for f in _IDENTITY_FIELDS)
+_CALLER = ", ".join(f"argMax(p.{f}, p.s) AS p_{f}" for f in _IDENTITY_FIELDS)
+_PAIR = ", ".join([f"c_{f}" for f in _IDENTITY_FIELDS] + [f"p_{f}" for f in _IDENTITY_FIELDS])
+
+EDGES = f"""
+WITH spans AS ({_EDGE_SPANS}),
+calls AS (
+    SELECT any(c.hour) AS hour, any(c.failed) AS failed, {_CALLEE}, {_CALLER}
+    FROM spans AS c
+    INNER JOIN spans AS p ON p.trace_id = c.trace_id
+    WHERE p.span_id != c.span_id AND p.s <= c.s AND p.e >= c.e AND (p.s < c.s OR p.e > c.e)
+    GROUP BY c.trace_id, c.span_id
+)
+SELECT {_PAIR}, hour, count() AS calls, countIf(failed) AS errors
+FROM calls
+GROUP BY {_PAIR}, hour
+LIMIT {{max_rows:UInt16}}"""  # noqa: S608 - fixed fragments; values are bound parameters
+
+
+def statements(database: str) -> tuple[str, str, str]:
     db = safe_identifier(database)
-    return _ROLLUPS.replace("__DATABASE__", db), _TOOLS.replace("__DATABASE__", db)
+    return (
+        _ROLLUPS.replace("__DATABASE__", db),
+        _TOOLS.replace("__DATABASE__", db),
+        EDGES.replace("__DATABASE__", db),
+    )
 
 
 def real_name(value: str) -> bool:
@@ -337,7 +389,8 @@ class Harvest:
     identities: dict[str, Identity] = field(default_factory=dict)
     seen: dict[str, tuple[datetime, datetime]] = field(default_factory=dict)
     rollups: dict[tuple[str, datetime, str, str], Bucket] = field(default_factory=dict)
-    tools: dict[tuple[str, datetime, str], list[int]] = field(default_factory=dict)
+    tools: dict[tuple[str, datetime, str, str], list[int]] = field(default_factory=dict)
+    edges: dict[tuple[str, str, datetime], list[int]] = field(default_factory=dict)
 
     def _see(self, ident: Identity, hour: datetime) -> None:
         self.identities.setdefault(ident.key, ident)
@@ -362,11 +415,29 @@ class Harvest:
             ident = identity_of(row)
             hour = datetime.fromtimestamp(_int(row.get("hour")), tz=UTC)
             self._see(ident, hour)
-            key = (ident.key, hour, str(row.get("tool") or "")[:128])
+            key = (
+                ident.key,
+                hour,
+                str(row.get("tool") or "")[:128],
+                str(row.get("server") or "")[:256],
+            )
             agg = self.tools.setdefault(key, [0, 0, 0])
             agg[0] += _int(row.get("calls"))
             agg[1] += _int(row.get("errors"))
             agg[2] += _int(row.get("duration_ms"))
+
+    def take_edges(self, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            callee = identity_of({f: row.get(f"c_{f}") for f in _IDENTITY_FIELDS})
+            caller = identity_of({f: row.get(f"p_{f}") for f in _IDENTITY_FIELDS})
+            if callee.key == caller.key:
+                continue
+            hour = datetime.fromtimestamp(_int(row.get("hour")), tz=UTC)
+            self._see(callee, hour)
+            self._see(caller, hour)
+            agg = self.edges.setdefault((caller.key, callee.key, hour), [0, 0])
+            agg[0] += _int(row.get("calls"))
+            agg[1] += _int(row.get("errors"))
 
 
 def floor_hour(moment: datetime) -> datetime:
@@ -481,10 +552,10 @@ async def store(engine: AsyncEngine, harvest: Harvest) -> int:
             await connection.execute(
                 text(
                     """
-                    INSERT INTO agent_tool_rollups (agent_id, hour, tool_name, calls, errors,
-                                                    duration_ms)
-                    VALUES (:agent, :hour, :tool, :calls, :errors, :duration)
-                    ON CONFLICT (agent_id, hour, tool_name) DO UPDATE SET
+                    INSERT INTO agent_tool_rollups (agent_id, hour, tool_name, server, calls,
+                                                    errors, duration_ms)
+                    VALUES (:agent, :hour, :tool, :server, :calls, :errors, :duration)
+                    ON CONFLICT (agent_id, hour, tool_name, server) DO UPDATE SET
                         calls = EXCLUDED.calls, errors = EXCLUDED.errors,
                         duration_ms = EXCLUDED.duration_ms
                     """
@@ -494,11 +565,33 @@ async def store(engine: AsyncEngine, harvest: Harvest) -> int:
                         "agent": ids[key],
                         "hour": hour,
                         "tool": tool,
+                        "server": server,
                         "calls": v[0],
                         "errors": v[1],
                         "duration": v[2],
                     }
-                    for (key, hour, tool), v in harvest.tools.items()
+                    for (key, hour, tool, server), v in harvest.tools.items()
+                ],
+            )
+        if harvest.edges:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO agent_edges (caller_id, callee_id, hour, calls, errors)
+                    VALUES (:caller, :callee, :hour, :calls, :errors)
+                    ON CONFLICT (caller_id, callee_id, hour) DO UPDATE SET
+                        calls = EXCLUDED.calls, errors = EXCLUDED.errors
+                    """
+                ),
+                [
+                    {
+                        "caller": ids[caller],
+                        "callee": ids[callee],
+                        "hour": hour,
+                        "calls": v[0],
+                        "errors": v[1],
+                    }
+                    for (caller, callee, hour), v in harvest.edges.items()
                 ],
             )
     return len(harvest.identities)
@@ -540,7 +633,7 @@ async def run_once(
         # Whole hours are re-read and replaced: the previous one (closing)
         # and the current one; on a first run, everything the store holds.
         start = floor_hour(end) - timedelta(hours=1) if known else floor_hour(end - BACKFILL)
-        rollups_sql, tools_sql = statements(database)
+        rollups_sql, tools_sql, edges_sql = statements(database)
         harvest = Harvest()
         chunk = start
         while chunk < end:
@@ -550,7 +643,11 @@ async def run_once(
                 "end": clickhouse_time(chunk_end),
                 "max_rows": str(MAX_ROWS),
             }
-            for sql, take in ((rollups_sql, harvest.take_rollups), (tools_sql, harvest.take_tools)):
+            for sql, take in (
+                (rollups_sql, harvest.take_rollups),
+                (tools_sql, harvest.take_tools),
+                (edges_sql, harvest.take_edges),
+            ):
                 report.reads += 1
                 try:
                     result = await store_.query(
