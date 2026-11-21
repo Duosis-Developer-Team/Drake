@@ -22,6 +22,7 @@ export const shell = defineMessages({
       traces: "Traces",
       logs: "Logs",
       serviceHealth: "Services",
+      agents: "Agents",
       clusters: "Clusters",
       infrastructure: "Resource usage",
       slo: "Objectives",
@@ -36,6 +37,7 @@ export const shell = defineMessages({
       admin: "Audit & access",
     },
     crumb: {
+      agents: "Agents",
       admin: "Audit & access",
       alerts: "Incoming alerts",
       "alert-rules": "Alert rules",
@@ -155,6 +157,7 @@ export const shell = defineMessages({
       traces: "Trace'ler",
       logs: "Loglar",
       serviceHealth: "Servisler",
+      agents: "Ajanlar",
       clusters: "Kümeler",
       infrastructure: "Kaynak kullanımı",
       slo: "Hedefler",
@@ -169,6 +172,7 @@ export const shell = defineMessages({
       admin: "Denetim ve erişim",
     },
     crumb: {
+      agents: "Ajanlar",
       admin: "Denetim ve erişim",
       alerts: "Gelen uyarılar",
       "alert-rules": "Alarm kuralları",
