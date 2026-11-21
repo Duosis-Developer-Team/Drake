@@ -42,6 +42,7 @@ import {
   fetchAgent,
   providerColor,
   providerName,
+  usd,
   type AgentDetail,
   type Window,
 } from "@/lib/agents";
@@ -234,9 +235,13 @@ export default function AgentPage() {
           <KpiTile
             icon={ratio !== null && ratio > 0.05 ? ShieldAlert : Coins}
             tone={ratio !== null && ratio > 0.05 ? "critical" : undefined}
-            label={t("detail.kpi.tokens")}
-            value={compact(tokens, locale)}
+            label={t("detail.kpi.cost")}
+            value={usd(a.cost_usd, locale)}
+            data-testid="agent-kpi-cost"
           >
+            <p className="text-micro text-ink-muted">
+              {t("kpi.costCaption", { tokens: compact(tokens, locale) })}
+            </p>
             <p
               className={`text-micro ${ratio !== null && ratio > 0.05 ? "font-medium text-critical" : "text-ink-muted"}`}
             >
@@ -326,9 +331,12 @@ export default function AgentPage() {
                         </div>
                         <span className="shrink-0 text-caption tabular-nums text-ink-secondary">
                           <span className="font-semibold text-ink">
-                            {compact(input + output, locale)}
+                            {m.cost_usd !== null && m.cost_usd !== undefined
+                              ? usd(m.cost_usd, locale)
+                              : t("detail.noPrice")}
                           </span>{" "}
-                          · {compact(m.calls, locale)} {t("card.calls")}
+                          · {compact(input + output, locale)} tok ·{" "}
+                          {compact(m.calls, locale)} {t("card.calls")}
                           {m.errors ? (
                             <span className="text-critical">
                               {" "}

@@ -27,6 +27,8 @@ export interface AgentModel {
   model: string | null;
   provider: string | null;
   calls: number;
+  cost_usd?: number | null;
+  priced?: boolean;
   tokens?: number;
   input_tokens?: number;
   output_tokens?: number;
@@ -44,6 +46,7 @@ export interface AgentPoint {
   tool_calls?: number;
   input_tokens?: number;
   output_tokens?: number;
+  cost_usd?: number;
 }
 
 export interface Agent {
@@ -64,6 +67,8 @@ export interface Agent {
   environment: { id: string; key: string } | null;
   binding_id: string | null;
   totals: AgentTotals;
+  cost_usd: number;
+  unpriced_tokens: number;
   providers: { provider: string; calls: number }[];
   models: AgentModel[];
   series: AgentPoint[];
@@ -100,7 +105,15 @@ export interface AgentInventory {
       | "input_tokens"
       | "output_tokens"
     >;
-    series: { t: string; calls: number; errors: number; tokens: number }[];
+    series: {
+      t: string;
+      calls: number;
+      errors: number;
+      tokens: number;
+      cost_usd: number;
+    }[];
+    cost_usd: number;
+    unpriced_tokens: number;
   };
 }
 
@@ -237,6 +250,7 @@ export interface RunSpan {
   error_type: string | null;
   http_status: string | null;
   http_route: string | null;
+  cost_usd?: number | null;
 }
 
 export interface AgentRunDetail {
@@ -248,6 +262,7 @@ export interface AgentRunDetail {
   hidden_spans?: number;
   truncated?: boolean;
   spans?: RunSpan[];
+  cost_usd?: number | null;
 }
 
 export const fetchRuns = (
@@ -613,3 +628,51 @@ export const fetchMcpServers = (window: Window) =>
   apiGet<{ window: Window; servers: McpServer[] }>(
     `/v1/agents/mcp-servers?window=${window}`,
   );
+
+// --- cost (phase 4) ----------------------------------------------------------
+
+export interface PriceFetch {
+  fetched_at: string;
+  status: "live" | "fallback" | "failed";
+  source: string;
+  models: number;
+  changed: number;
+}
+
+export interface PriceStatus {
+  enabled: boolean;
+  currency: "USD";
+  basis: string;
+  last_fetch: PriceFetch | null;
+  last_good_fetch: PriceFetch | null;
+  priced_models: number;
+  unpriced: { provider: string | null; model: string }[];
+}
+
+export const fetchPrices = () => apiGet<PriceStatus>("/v1/agents/prices");
+
+/** US dollars, readable at any size: $0, $0.0042, $3.20, $12.4K. */
+export function usd(value: number | null | undefined, locale: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === 0) return "$0";
+  const abs = Math.abs(value);
+  if (abs < 0.01) {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+      maximumSignificantDigits: 2,
+    }).format(value);
+  }
+  if (abs < 10_000) {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+    }).format(value);
+  }
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}

@@ -33,6 +33,7 @@ import {
   fetchRun,
   STEP_COLOR,
   timeShare,
+  usd,
   type AgentRunDetail,
   type RunSpan,
 } from "@/lib/agents";
@@ -240,8 +241,13 @@ export default function RunPage() {
           </KpiTile>
           <KpiTile
             icon={Coins}
-            label={t("run.kpi.tokens")}
-            value={compact(input + output, locale)}
+            label={t("run.kpi.cost")}
+            value={
+              run.cost_usd === null || run.cost_usd === undefined
+                ? "—"
+                : usd(run.cost_usd, locale)
+            }
+            data-testid="run-kpi-cost"
           >
             <p className="text-micro text-ink-muted">
               {t("kpi.tokensCaption", {

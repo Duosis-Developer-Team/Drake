@@ -26,6 +26,7 @@ import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
 import { ActivityBars, ProviderMix } from "@/components/agents/visuals";
 import { AgentMap } from "@/components/agents/AgentMap";
 import { McpServers } from "@/components/agents/McpServers";
+import { PriceNote } from "@/components/agents/PriceNote";
 import { KpiTile, PillTabs } from "@/components/features/configure/kit";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataState } from "@/components/state/DataState";
@@ -46,6 +47,7 @@ import {
   type AgentConnect,
   type AgentInventory,
   type Topology,
+  usd,
   type Confidence,
   type Window,
 } from "@/lib/agents";
@@ -62,6 +64,7 @@ export default function AgentsPage() {
   const { locale } = useLocale();
   const [span, setSpan] = useState<Window>("24h");
   const [view, setView] = useState<"inventory" | "map" | "mcp">("inventory");
+  const [metric, setMetric] = useState<"calls" | "cost">("calls");
   const [state, setState] = useState<State>({ kind: "loading" });
   const [connect, setConnect] = useState<AgentConnect | null>(null);
   const [drawer, setDrawer] = useState(false);
@@ -233,18 +236,25 @@ export default function AgentsPage() {
             </KpiTile>
             <KpiTile
               icon={Coins}
-              label={t("kpi.tokens")}
-              value={compact(
-                summary.totals.input_tokens + summary.totals.output_tokens,
-                locale,
-              )}
+              label={t("kpi.cost")}
+              value={usd(summary.cost_usd, locale)}
+              data-testid="agents-kpi-cost"
             >
               <p className="text-micro text-ink-muted">
-                {t("kpi.tokensCaption", {
-                  input: compact(summary.totals.input_tokens, locale),
-                  output: compact(summary.totals.output_tokens, locale),
+                {t("kpi.costCaption", {
+                  tokens: compact(
+                    summary.totals.input_tokens + summary.totals.output_tokens,
+                    locale,
+                  ),
                 })}
               </p>
+              {summary.unpriced_tokens ? (
+                <p className="text-micro text-warning">
+                  {t("kpi.unpriced", {
+                    tokens: compact(summary.unpriced_tokens, locale),
+                  })}
+                </p>
+              ) : null}
             </KpiTile>
             <KpiTile
               icon={ShieldAlert}
@@ -261,6 +271,7 @@ export default function AgentsPage() {
               </p>
             </KpiTile>
           </div>
+          <PriceNote />
 
           {view === "mcp" ? (
             <McpServers span={span} />
@@ -273,7 +284,25 @@ export default function AgentsPage() {
                   <Panel>
                     <PanelHeader
                       title={t("activity.title")}
-                      description={t("activity.description")}
+                      description={
+                        metric === "cost"
+                          ? t("costDescription")
+                          : t("activity.description")
+                      }
+                      actions={
+                        <SegmentedControl
+                          label={t("metric.label")}
+                          value={metric}
+                          onChange={setMetric}
+                          options={[
+                            {
+                              value: "calls",
+                              label: t("metric.calls"),
+                            },
+                            { value: "cost", label: t("metric.cost") },
+                          ]}
+                        />
+                      }
                     />
                     <ActivityBars
                       label={t("activity.title")}
@@ -281,16 +310,26 @@ export default function AgentsPage() {
                       tickAt={dayTicks(span)}
                       height={250}
                       errorLabel={t("activity.errors")}
+                      valueFormat={
+                        metric === "cost" ? (v) => usd(v, locale) : undefined
+                      }
                       points={summary.series.map((p) => ({
                         t: p.t,
                         errors: p.errors,
                         parts: [
-                          {
-                            key: "calls",
-                            label: t("activity.calls"),
-                            value: p.calls,
-                            color: "var(--series-1)",
-                          },
+                          metric === "cost"
+                            ? {
+                                key: "cost",
+                                label: t("metric.cost"),
+                                value: p.cost_usd ?? 0,
+                                color: "var(--gold)",
+                              }
+                            : {
+                                key: "calls",
+                                label: t("activity.calls"),
+                                value: p.calls,
+                                color: "var(--series-1)",
+                              },
                         ],
                       }))}
                     />
