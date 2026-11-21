@@ -585,6 +585,34 @@ table,
 
 /* The service map's moving dashes. Speed is set per edge (`--flow`), from
    its traffic; under reduced motion the kill switch above stops it. */
+/* Sign-in hero: spans grow in, chips drift, a scan line crosses the trace.
+   Decoration only; the reduced-motion kill switch stops all of it. */
+@keyframes signin-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes signin-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes signin-scan {
+  from {
+    left: 0%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
 @keyframes trace-flow {
   to {
     stroke-dashoffset: -32;
