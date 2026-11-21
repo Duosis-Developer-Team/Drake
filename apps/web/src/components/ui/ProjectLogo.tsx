@@ -3,11 +3,13 @@
 /**
  * A project's own logo, or its monogram.
  *
- * The image comes from the project's repository (`.duosis/media/logo-*.png`)
- * through `GET /v1/projects/{id}/logo`, which answers 404 whenever there is
- * nothing safe to show. The monogram is drawn first and stays until the
- * image has actually loaded, so a slow or missing logo never shifts the row
- * and never leaves a broken-image box.
+ * The image comes from the project's repository (`.duosis/media/logo-*.png`,
+ * or a site's `public/brand/<repo>-logo*.png`) through
+ * `GET /v1/projects/{id}/logo`, which answers 204 when there is nothing safe
+ * to show. One fetch per URL is shared by every logo on the page, and a 204
+ * is not an error, so a list of logo-less projects leaves the console
+ * clean. The monogram is drawn first and stays until the image is ready, so
+ * a slow or missing logo never shifts the row or leaves a broken image.
  *
  * Duosis logos are wordmarks with the symbol on the left. `wordmark` keeps
  * the image's height and takes the width it needs, up to a cap; `mark`
@@ -26,7 +28,7 @@
  * assistive technology.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useResolvedTheme } from "@/components/shell/ThemeControl";
 
@@ -34,23 +36,39 @@ type Size = "sm" | "md" | "lg";
 
 type Variant = "wordmark" | "mark";
 
-const SIZES: Record<Size, { box: string; pad: string; img: string; text: string }> = {
-  sm: { box: "h-5 w-5 rounded-[5px]", pad: "p-[2px]", img: "h-4 max-w-[6rem]", text: "text-[0.625rem]" },
-  md: { box: "h-7 w-7 rounded-[7px]", pad: "p-[3px]", img: "h-6 max-w-[8rem]", text: "text-[0.75rem]" },
-  lg: { box: "h-10 w-10 rounded-[10px]", pad: "p-[5px]", img: "h-8 max-w-[12rem]", text: "text-[0.9375rem]" },
+const SIZES: Record<
+  Size,
+  { box: string; pad: string; img: string; text: string }
+> = {
+  sm: {
+    box: "h-5 w-5 rounded-[5px]",
+    pad: "p-[2px]",
+    img: "h-4 max-w-[6rem]",
+    text: "text-[0.625rem]",
+  },
+  md: {
+    box: "h-7 w-7 rounded-[7px]",
+    pad: "p-[3px]",
+    img: "h-6 max-w-[8rem]",
+    text: "text-[0.75rem]",
+  },
+  lg: {
+    box: "h-10 w-10 rounded-[10px]",
+    pad: "p-[5px]",
+    img: "h-8 max-w-[12rem]",
+    text: "text-[0.9375rem]",
+  },
 };
-
-// A 404 is not cached by the browser; remembering it here stops every list
-// re-render from asking again in the same session.
-const missing = new Set<string>();
 
 interface Cut {
   wordmark: string;
   mark: string;
 }
 
-// Trimmed renditions, per source URL, shared by every logo on the page.
-const cuts = new Map<string, Cut | null>();
+// One load per URL, shared by every logo on the page and kept for the
+// session; `settled` lets a later mount draw synchronously.
+const loads = new Map<string, Promise<Cut | null>>();
+const settled = new Map<string, Cut | null>();
 
 const MAX_PIXELS = 4_000_000;
 const ALPHA_FLOOR = 12;
@@ -86,7 +104,12 @@ export function cut(image: HTMLImageElement): Cut | null {
     if (right < left || bottom < top) return null;
     const boxWidth = right - left + 1;
     const boxHeight = bottom - top + 1;
-    const render = (sx: number, sw: number, outWidth: number, outHeight: number) => {
+    const render = (
+      sx: number,
+      sw: number,
+      outWidth: number,
+      outHeight: number,
+    ) => {
       const out = document.createElement("canvas");
       out.width = outWidth;
       out.height = outHeight;
@@ -118,6 +141,49 @@ export function logoUrl(projectId: string, theme: "light" | "dark"): string {
   return `/v1/projects/${encodeURIComponent(projectId)}/logo?theme=${theme}`;
 }
 
+function decode(url: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = url;
+  });
+}
+
+/** The logo at *src*, trimmed, or null for "draw the monogram". */
+export function loadLogo(src: string): Promise<Cut | null> {
+  let pending = loads.get(src);
+  if (!pending) {
+    pending = (async (): Promise<Cut | null> => {
+      try {
+        const response = await fetch(src, { credentials: "include" });
+        if (response.status !== 200) return null;
+        const blob = await response.blob();
+        if (!blob.type.startsWith("image/")) return null;
+        const url = URL.createObjectURL(blob);
+        const image = await decode(url);
+        if (!image) {
+          URL.revokeObjectURL(url);
+          return null;
+        }
+        const trimmed = cut(image);
+        if (trimmed) {
+          URL.revokeObjectURL(url);
+          return trimmed;
+        }
+        return { wordmark: url, mark: url };
+      } catch {
+        return null;
+      }
+    })().then((result) => {
+      settled.set(src, result);
+      return result;
+    });
+    loads.set(src, pending);
+  }
+  return pending;
+}
+
 export function monogram(name: string): string {
   const words = name
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -144,13 +210,21 @@ export function ProjectLogo({
 }) {
   const theme = useResolvedTheme();
   const src = logoUrl(projectId, theme);
-  const [loaded, setLoaded] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  const [result, setResult] = useState<{ src: string; cut: Cut | null } | null>(
+    () => (settled.has(src) ? { src, cut: settled.get(src) ?? null } : null),
+  );
+  useEffect(() => {
+    let active = true;
+    void loadLogo(src).then((loaded) => {
+      if (active) setResult({ src, cut: loaded });
+    });
+    return () => {
+      active = false;
+    };
+  }, [src]);
   const spec = SIZES[size];
-  const absent = missing.has(src) || failed === src;
-  const ready = (loaded === src || cuts.has(src)) && !absent;
-  const rendition = cuts.get(src);
-  const shown = ready ? (rendition ? rendition[variant] : src) : null;
+  const rendition = result && result.src === src ? result.cut : null;
+  const shown = rendition ? rendition[variant] : null;
 
   return (
     <span
@@ -177,23 +251,6 @@ export function ProjectLogo({
         >
           {monogram(name)}
         </span>
-      )}
-      {shown || absent ? null : (
-        // The fetch: never shown itself, only read once it has loaded.
-        <img
-          src={src}
-          alt=""
-          decoding="async"
-          hidden
-          onLoad={(event) => {
-            if (!cuts.has(src)) cuts.set(src, cut(event.currentTarget));
-            setLoaded(src);
-          }}
-          onError={() => {
-            missing.add(src);
-            setFailed(src);
-          }}
-        />
       )}
     </span>
   );

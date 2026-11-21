@@ -1,7 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ProjectLogo, logoUrl, monogram } from "./ProjectLogo";
+import { ProjectLogo, loadLogo, logoUrl, monogram } from "./ProjectLogo";
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("ProjectLogo", () => {
   it("builds initials from keys and display names", () => {
@@ -16,27 +20,48 @@ describe("ProjectLogo", () => {
     expect(logoUrl("p 1", "dark")).toBe("/v1/projects/p%201/logo?theme=dark");
   });
 
-  it("shows the monogram until the image has loaded, then the image", () => {
-    const { container } = render(<ProjectLogo projectId="p-load" name="hermes" />);
-    const root = screen.getByTestId("project-logo");
-    expect(root).toHaveAttribute("data-state", "monogram");
-    expect(root).toHaveTextContent("HE");
-    const img = container.querySelector("img")!;
-    expect(img).toHaveAttribute("alt", "");
-    expect(img.getAttribute("src")).toMatch(/^\/v1\/projects\/p-load\/logo\?theme=(light|dark)$/);
-    fireEvent.load(img);
-    expect(root).toHaveAttribute("data-state", "image");
-    expect(root).not.toHaveTextContent("HE");
+  it("keeps the monogram when the project has no logo, asking once", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <>
+        <ProjectLogo projectId="p-none" name="LogiSlot" />
+        <ProjectLogo projectId="p-none" name="LogiSlot" variant="mark" />
+      </>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    for (const logo of screen.getAllByTestId("project-logo")) {
+      expect(logo).toHaveAttribute("data-state", "monogram");
+      expect(logo).toHaveTextContent("LS");
+    }
+    // One request for both logos on the page.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the monogram and drops the image when there is no logo", () => {
-    const { container, unmount } = render(<ProjectLogo projectId="p-missing" name="logislot" />);
-    fireEvent.error(container.querySelector("img")!);
-    expect(screen.getByTestId("project-logo")).toHaveAttribute("data-state", "monogram");
-    expect(container.querySelector("img")).toBeNull();
-    unmount();
-    // Remembered for the session: a second mount does not ask again.
-    const again = render(<ProjectLogo projectId="p-missing" name="logislot" />);
-    expect(again.container.querySelector("img")).toBeNull();
+  it("refuses a 200 that is not an image", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<svg/>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
+      ),
+    );
+    expect(await loadLogo("/v1/projects/p-html/logo?theme=dark")).toBeNull();
+  });
+
+  it("does not treat a failed request as a logo", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new Error("offline"))),
+    );
+    expect(await loadLogo("/v1/projects/p-off/logo?theme=dark")).toBeNull();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(PNG, { status: 404 })),
+    );
+    expect(await loadLogo("/v1/projects/p-404/logo?theme=dark")).toBeNull();
   });
 });

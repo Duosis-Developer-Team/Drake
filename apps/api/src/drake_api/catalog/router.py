@@ -446,8 +446,11 @@ async def get_project_logo(
 
     Visible to anyone who can see the project at all, breadcrumb included:
     the name is already on their screen, and the logo says nothing more.
-    404 means "draw the monogram" — no repository, a gated or inaccessible
-    one, no file, or a file that is not a small raster image.
+    204 means "draw the monogram" — no repository, a gated or inaccessible
+    one, no file, or a file that is not a small raster image. It is not an
+    error, so it is not a 404: a page of projects without logos would
+    otherwise fill the browser console with failed loads. 404 stays what it
+    is everywhere else: a project this caller cannot see.
     """
     settings: Settings = request.app.state.settings
     engine = get_engine(settings)
@@ -490,7 +493,7 @@ async def get_project_logo(
         theme,
     )
     if logo is None:
-        raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204, headers={"Cache-Control": "private, max-age=600"})
     return Response(
         content=logo.content,
         media_type=logo.media_type,

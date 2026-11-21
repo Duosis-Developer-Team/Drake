@@ -3,7 +3,7 @@
 The logo is read from the project's own repository, `.duosis/media/`, through
 the GitHub App: narrowed to one repository and `metadata`/`contents` read,
 pinned to the default branch's head commit, raster images only, cached in
-Redis. Anything else is a 404 the UI turns into a monogram.
+Redis. Anything else is a 204 the UI turns into a monogram; 404 is an invisible project.
 """
 
 import base64
@@ -153,7 +153,7 @@ async def test_logo_is_read_narrowly_pinned_and_cached(engine: AsyncEngine, tmp_
         assert bad_theme.status_code == 422
 
 
-async def test_non_raster_oversized_and_missing_logos_are_404(
+async def test_non_raster_oversized_and_missing_logos_are_no_content(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     harness, fake = github_harness(tmp_path)
@@ -164,7 +164,7 @@ async def test_non_raster_oversized_and_missing_logos_are_404(
 
     async with harness.api_client() as client:
         await harness.login(client, "user-owner")
-        assert (await client.get(f"/v1/projects/{disguised}/logo")).status_code == 404
+        assert (await client.get(f"/v1/projects/{disguised}/logo")).status_code == 204
 
     async with engine.begin() as connection:
         await connection.execute(
@@ -178,10 +178,10 @@ async def test_non_raster_oversized_and_missing_logos_are_404(
 
     async with harness.api_client() as client:
         await harness.login(client, "user-owner")
-        assert (await client.get(f"/v1/projects/{oversized}/logo")).status_code == 404
+        assert (await client.get(f"/v1/projects/{oversized}/logo")).status_code == 204
         fake.calls.clear()
         # No repository: no provider call at all.
-        assert (await client.get(f"/v1/projects/{unbound}/logo")).status_code == 404
+        assert (await client.get(f"/v1/projects/{unbound}/logo")).status_code == 204
         assert provider_calls(fake) == []
 
 
@@ -202,7 +202,7 @@ async def test_gated_repository_makes_no_provider_call(engine: AsyncEngine, tmp_
 
     async with harness.api_client() as client:
         await harness.login(client, "user-owner")
-        assert (await client.get(f"/v1/projects/{project}/logo")).status_code == 404
+        assert (await client.get(f"/v1/projects/{project}/logo")).status_code == 204
     assert provider_calls(fake) == [], fake.calls
 
 
@@ -234,9 +234,40 @@ async def test_provider_outage_is_not_cached(engine: AsyncEngine, tmp_path: Path
     async with harness.api_client() as client:
         await harness.login(client, "user-owner")
         fake.mode = "unavailable"
-        assert (await client.get(f"/v1/projects/{project}/logo")).status_code == 404
+        assert (await client.get(f"/v1/projects/{project}/logo")).status_code == 204
         # Recovery shows the logo at once: an outage is not remembered as "none".
         fake.mode = "ok"
         recovered = await client.get(f"/v1/projects/{project}/logo")
         assert recovered.status_code == 200
         assert recovered.content == PNG
+
+
+async def test_a_site_logo_under_public_brand_is_found(engine: AsyncEngine, tmp_path: Path) -> None:
+    """A web app keeps its brand with the site: `public/brand/<repo>-logo.png`
+    for dark backgrounds, `-logo-light.png` for light ones."""
+    harness, fake = github_harness(tmp_path)
+    await installed(harness, engine)
+    dark = PNG + b"dark"
+    light = PNG + b"light"
+    fake.trees["logislot"] = {
+        "public/brand/logislot-logo.png": file_entry(dark),
+        "public/brand/logislot-logo-light.png": file_entry(light),
+    }
+    project = await make_project(engine, LOGISLOT_ID)
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-owner")
+        on_dark = await client.get(f"/v1/projects/{project}/logo?theme=dark")
+        on_light = await client.get(f"/v1/projects/{project}/logo?theme=light")
+    assert on_dark.status_code == 200 and on_dark.content == dark
+    assert on_light.status_code == 200 and on_light.content == light
+
+
+def test_candidate_paths_are_fixed_and_derived() -> None:
+    assert logos.candidate_paths("dark", "Fikir-Sepeti") == (
+        ".duosis/media/logo-dark.png",
+        ".duosis/media/logo-light.png",
+        "public/brand/fikirsepeti-logo.png",
+        "public/brand/fikirsepeti-logo-light.png",
+    )
+    assert logos.candidate_paths("light", "../../etc")[2] == "public/brand/etc-logo-light.png"

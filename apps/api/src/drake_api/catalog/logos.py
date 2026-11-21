@@ -2,6 +2,10 @@
 
 Duosis repositories carry their brand under `.duosis/media/`:
 `logo-dark.png` for dark backgrounds and `logo-light.png` for light ones.
+Web apps that ship their brand with the site keep it under `public/brand/`
+as `<repo>-logo.png` (light-on-dark) and `<repo>-logo-light.png`
+(for light backgrounds), the repository name lower-cased with everything
+but letters and digits dropped — Fikir-Sepeti's `fikirsepeti-logo.png`.
 Tracesis shows that logo next to the project wherever the project appears,
 so a list of services reads as Hermes, LogiSlot, Fikir Sepeti rather than
 three grey keys.
@@ -11,7 +15,7 @@ Read-only and bounded, like every other repository read:
 - through the GitHub App installation token, narrowed to the one repository
   and to `metadata: read` + `contents: read`;
 - pinned to the default branch's head commit, never "the branch";
-- only the two fixed paths, never a listing or a search;
+- only fixed, derived paths (at most four), never a listing or a search;
 - only raster images (PNG, JPEG, WebP — recognised by their magic bytes, not
   the file name), at most `MAX_BYTES`. SVG is refused: it can carry script.
 - cached in Redis: an answer for `CACHE_SECONDS`, an absence for
@@ -29,6 +33,7 @@ import binascii
 import contextlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -41,6 +46,21 @@ LOGO_PATHS: dict[str, tuple[str, ...]] = {
     "dark": (".duosis/media/logo-dark.png", ".duosis/media/logo-light.png"),
     "light": (".duosis/media/logo-light.png", ".duosis/media/logo-dark.png"),
 }
+
+
+def candidate_paths(theme: str, repo_name: str) -> tuple[str, ...]:
+    """The files to try, in order: the theme's own first, then the other."""
+    slug = re.sub(r"[^a-z0-9]", "", repo_name.lower())
+    if not slug:
+        return LOGO_PATHS[theme]
+    site = {
+        "dark": f"public/brand/{slug}-logo.png",
+        "light": f"public/brand/{slug}-logo-light.png",
+    }
+    other = "light" if theme == "dark" else "dark"
+    return (*LOGO_PATHS[theme], site[theme], site[other])
+
+
 MAX_BYTES = 512 * 1024
 CACHE_SECONDS = 6 * 60 * 60
 MISS_SECONDS = 60 * 60
@@ -96,7 +116,8 @@ def sniff(content: bytes) -> str | None:
 
 
 def cache_key(project_id: str, theme: str) -> str:
-    return f"catalog:logo:v1:{project_id}:{theme}"
+    # v2: the candidate paths grew; a v1 "none" must not hide a site logo.
+    return f"catalog:logo:v2:{project_id}:{theme}"
 
 
 async def _cached(cache: _Cache, key: str) -> tuple[bool, Logo | None]:
@@ -132,7 +153,7 @@ async def read_logo(client: _Client, repository: LogoRepository, theme: str) -> 
     commit = await client.resolve_branch_head(
         token, repository.owner, repository.name, repository.default_branch
     )
-    for path in LOGO_PATHS[theme]:
+    for path in candidate_paths(theme, repository.name):
         try:
             entry = await client.get_content(token, repository.owner, repository.name, path, commit)
         except GitHubNotFoundError:
