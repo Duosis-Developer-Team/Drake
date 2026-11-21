@@ -6,6 +6,7 @@
  * is typed from this object.
  */
 import { admin } from "./admin";
+import { agents } from "./agents";
 import { alertRules } from "./alertRules";
 import { alerting } from "./alerting";
 import { catalog } from "./catalog";
@@ -45,6 +46,7 @@ export const MESSAGES = {
   explore,
   serviceHealth,
   serviceMap,
+  agents,
   scheduledJobs,
   logs,
   traces,

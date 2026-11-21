@@ -124,6 +124,14 @@ spec:
               value: {{ (.Values.incidents).runnerIntervalSeconds | default 120 | quote }}
             # Stated in both states. With traces on, it also keeps the
             # five-minute request counts objectives are judged on.
+            # Agent Visibility: the discovery loop (both states) and where an
+            # agent-running system sends traces, shown on the Agents screen.
+            - name: DRAKE_AGENT_DISCOVERY_ENABLED
+              value: {{ (.Values.agents).discoveryEnabled | default false | quote }}
+            - name: DRAKE_AGENT_CLUSTER_ENDPOINT
+              value: {{ (.Values.agents).clusterEndpoint | default "http://drake-otel-gateway.drake-otel.svc:4318" | quote }}
+            - name: DRAKE_AGENT_EXTERNAL_INGEST
+              value: {{ (.Values.agentIngest).enabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_ENABLED
               value: {{ (.Values.slo).evaluatorEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_INTERVAL_SECONDS

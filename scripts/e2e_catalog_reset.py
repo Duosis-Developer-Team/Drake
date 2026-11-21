@@ -41,6 +41,12 @@ async def main() -> None:
                 "cluster_agents",
                 "agent_enrollment_tokens",
                 "integrations",
+                # Agent Visibility rows and workload bindings an integration
+                # run may leave behind; bindings reference environment services.
+                "agent_tool_rollups",
+                "agent_rollups",
+                "agents",
+                "service_workload_bindings",
                 "environment_services",
                 "service_definitions",
                 "environments",

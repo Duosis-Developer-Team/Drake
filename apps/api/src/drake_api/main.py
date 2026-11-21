@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
+from drake_api.ai_agents.discovery import AgentDiscovery
+from drake_api.ai_agents.router import router as agents_router
 from drake_api.alert_rules.router import router as alert_rules_router
 from drake_api.alert_rules.telemetry import TelemetrySampler
 from drake_api.alerting.router import router as alerting_router
@@ -99,6 +101,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     sli_writer = getattr(app.state, "sli_rollup_writer", None)
     if sli_writer is not None:
         await sli_writer.start()
+    agent_discovery = getattr(app.state, "agent_discovery", None)
+    if agent_discovery is not None:
+        await agent_discovery.start()
     protection_evaluator = getattr(app.state, "protection_evaluator", None)
     if protection_evaluator is not None:
         await protection_evaluator.start()
@@ -115,6 +120,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await gitops_worker.stop()
         if silence_worker is not None:
             await silence_worker.stop()
+        if agent_discovery is not None:
+            await agent_discovery.stop()
         if sli_writer is not None:
             await sli_writer.stop()
         if protection_evaluator is not None:
@@ -296,6 +303,21 @@ def create_app(
         and store_connector is not None
         else None
     )
+    # AI agents appear the first time telemetry shows them: the discovery
+    # loop reads GenAI spans and keeps the inventory and hourly usage.
+    app.state.agent_discovery = (
+        AgentDiscovery(
+            get_engine(settings),
+            app.state.observability_store,
+            app.state.telemetry_redis,
+            database=store_connector.database,
+            interval_seconds=settings.agent_discovery_interval_seconds,
+        )
+        if settings.agent_discovery_enabled
+        and settings.observability_traces_enabled
+        and store_connector is not None
+        else None
+    )
     # Backup posture is judged on a timer too, so a reporter that falls
     # silent reads as overdue rather than as its last good report.
     app.state.protection_evaluator = (
@@ -362,6 +384,7 @@ def create_app(
     app.include_router(github_webhook_router)
     app.include_router(deployments_router)
     app.include_router(protection_router)
+    app.include_router(agents_router)
     app.include_router(protection_ingest_router)
     app.include_router(service_health_router)
     app.include_router(observability_router)

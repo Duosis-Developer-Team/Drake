@@ -45,6 +45,9 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         for table in (
             # Dashboards (ADR-0033) reference environments and projects with
             # RESTRICT, so their history clears before either.
+            "agent_tool_rollups",
+            "agent_rollups",
+            "agents",
             "dashboard_versions",
             "dashboards",
             # Sprint 11 onboarding tables reference github projections,
