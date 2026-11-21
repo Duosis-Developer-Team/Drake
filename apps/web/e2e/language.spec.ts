@@ -12,7 +12,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function signIn(page: Page) {
   await page.goto("/v1/auth/login?redirect=/&login_hint=user-owner");
-  await expect(page.getByRole("heading", { name: /Command Center|Komuta Merkezi/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^(Overview|Genel bakış)$/ })).toBeVisible();
 }
 
 async function resetLanguage(page: Page) {

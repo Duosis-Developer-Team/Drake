@@ -185,7 +185,7 @@ describe("incident detail", () => {
 
     const timeline = await screen.findByTestId("incident-timeline");
     expect(within(timeline).getByText("Incident opened")).toBeInTheDocument();
-    expect(within(timeline).getByText("2026-08-08T12:00:00Z")).toBeInTheDocument();
+    expect(within(timeline).getByText("2026-08-08 12:00:00 UTC")).toBeInTheDocument();
   });
 
   it("explains that acknowledging does not close the incident", async () => {

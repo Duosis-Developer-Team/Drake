@@ -5,9 +5,10 @@ import DeploymentDetailPage from "@/app/deployments/[deploymentId]/page";
 import DeploymentsPage from "@/app/deployments/page";
 import { errorBody, installFetchMock } from "@/test/mock-api";
 
+const replace = vi.fn();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/deployments",
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace }),
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({ deploymentId: "dep-1" }),
 }));
@@ -137,8 +138,9 @@ describe("deployment list", () => {
       "unverified",
       "conflict",
     ]);
+    // The choice goes to the URL, where the list reads it from.
     fireEvent.change(evidence, { target: { value: "conflict" } });
-    expect(evidence.value).toBe("conflict");
+    expect(replace).toHaveBeenCalledWith("/deployments?evidence_state=conflict", { scroll: false });
   });
 
   it("separates empty, permission denied and error", async () => {

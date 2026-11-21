@@ -22,7 +22,7 @@ import { defineMessages } from "../define";
 export const commandCenter = defineMessages({
   en: {
     page: {
-      title: "Command Center",
+      title: "Overview",
       description: "Everything that needs attention across your authorized scope, worst first.",
       sourcesAnswered: "{answered} of {total} sources answered",
       refreshing: "refreshing…",
@@ -234,6 +234,20 @@ export const commandCenter = defineMessages({
         incomplete: "Evidence incomplete",
       },
     },
+    kpi: {
+      label: "At a glance",
+      services: "Services",
+      openIncidents: "Open incidents",
+      firing: "Firing alerts",
+      deploys: "Deployments · 24h",
+      oldest: "oldest opened {age}",
+      noneOpen: "none open",
+      priorities: "{p1} P1 · {p2} P2",
+      silenced: "{count} silenced",
+      deploysBad: "{count, plural, one {# failed or degraded} other {# failed or degraded}}",
+      deploysOk: "none failed",
+      unreadable: "not readable",
+    },
     catalog: {
       title: "Your catalog",
       description: "Records you are authorized to see.",
@@ -286,7 +300,7 @@ export const commandCenter = defineMessages({
   },
   tr: {
     page: {
-      title: "Komuta Merkezi",
+      title: "Genel bakış",
       description: "Yetkili olduğunuz kapsamda dikkat gerektiren her şey, en kötüsü önce.",
       sourcesAnswered: "{total} kaynaktan {answered} tanesi yanıt verdi",
       refreshing: "yenileniyor…",
@@ -496,6 +510,20 @@ export const commandCenter = defineMessages({
         unassessed: "Değerlendirilmedi",
         incomplete: "Kanıt eksik",
       },
+    },
+    kpi: {
+      label: "Bir bakışta",
+      services: "Servisler",
+      openIncidents: "Açık olaylar",
+      firing: "Tetiklenen uyarılar",
+      deploys: "Dağıtımlar · 24 sa",
+      oldest: "en eskisi {age} açıldı",
+      noneOpen: "açık olay yok",
+      priorities: "P1: {p1} · P2: {p2}",
+      silenced: "{count} susturuldu",
+      deploysBad: "{count} başarısız ya da bozulmuş",
+      deploysOk: "başarısız yok",
+      unreadable: "okunamadı",
     },
     catalog: {
       title: "Kataloğunuz",

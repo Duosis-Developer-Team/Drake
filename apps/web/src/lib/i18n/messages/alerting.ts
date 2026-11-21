@@ -134,6 +134,9 @@ export const alerting = defineMessages({
         unmapped: "Unmapped",
         withIncident: "With incident",
       },
+      more: "Load more",
+      loadingMore: "Loading…",
+      moreError: "The next page could not be loaded.",
     },
     row: {
       noCatalogMatch: "no catalog match",
@@ -452,6 +455,9 @@ export const alerting = defineMessages({
         unmapped: "Eşlenmemiş",
         withIncident: "Olayı olan",
       },
+      more: "Daha fazla yükle",
+      loadingMore: "Yükleniyor…",
+      moreError: "Sonraki sayfa yüklenemedi.",
     },
     row: {
       noCatalogMatch: "katalog eşleşmesi yok",

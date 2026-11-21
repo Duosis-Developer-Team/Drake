@@ -45,7 +45,7 @@ export const common = defineMessages({
       signOut: "Sign out",
       tryAgain: "Try again",
       goBack: "Go back",
-      goHome: "Go to Command Center",
+      goHome: "Go to Overview",
     },
     state: {
       loading: "Loading",
@@ -246,7 +246,7 @@ export const common = defineMessages({
       signOut: "Çıkış yap",
       tryAgain: "Tekrar dene",
       goBack: "Geri dön",
-      goHome: "Komuta Merkezi'ne git",
+      goHome: "Genel bakışa git",
     },
     state: {
       loading: "Yükleniyor",
