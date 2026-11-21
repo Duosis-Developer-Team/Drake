@@ -9,7 +9,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, Eye, EyeOff, History, Pencil } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { PageFrame } from "@/components/shell/AppShell";
 import { ProjectLogo } from "@/components/ui/ProjectLogo";
@@ -114,17 +114,31 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
   const bindings = useMemo(() => (rows ?? []).flatMap((r) => (r.binding ? [r.binding] : [])), [rows]);
   const path = useMemo(() => overviewPath(bindings.map((b) => b.id), range), [bindings, range]);
 
-  const loadOverview = useCallback(() => {
-    if (!path) return;
-    fetchOverview(path)
-      .then(setOverview)
-      .catch(() => setOverview(null));
-  }, [path]);
+  // One read in flight at a time. A poll, a range change or leaving the
+  // page aborts the one before it: the server stops the store query, and a
+  // slow 6-hour answer can no longer land on top of the 24-hour one.
   useEffect(() => {
-    loadOverview();
-    const id = setInterval(loadOverview, POLL_MS);
-    return () => clearInterval(id);
-  }, [loadOverview]);
+    if (!path) return;
+    let current: AbortController | null = null;
+    const load = () => {
+      current?.abort();
+      const mine = new AbortController();
+      current = mine;
+      fetchOverview(path, mine.signal)
+        .then((data) => {
+          if (!mine.signal.aborted) setOverview(data);
+        })
+        .catch(() => {
+          if (!mine.signal.aborted) setOverview(null);
+        });
+    };
+    load();
+    const id = setInterval(load, POLL_MS);
+    return () => {
+      clearInterval(id);
+      current?.abort();
+    };
+  }, [path]);
 
   // Capacity comes from the infrastructure read of the environment's cluster.
   useEffect(() => {

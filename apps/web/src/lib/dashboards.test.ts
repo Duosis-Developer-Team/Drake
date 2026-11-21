@@ -71,6 +71,20 @@ describe("layout edits", () => {
     expect(moveWidget(layout, "overview", -1)).toBe(layout);
     expect(new Set(moved.map((w) => w.key))).toEqual(new Set(WIDGETS));
   });
+  it("moves past hidden widgets to the next visible one", () => {
+    // findings is hidden between traffic_graph and latency_heatmap.
+    const withHidden = setWidget(layout, "findings", { hidden: true });
+    const visible = (l: WidgetSlot[]) => l.filter((w) => !w.hidden).map((w) => w.key);
+    const up = moveWidget(withHidden, "latency_heatmap", -1);
+    expect(visible(up).slice(2, 4)).toEqual(["latency_heatmap", "traffic_graph"]);
+    const down = moveWidget(withHidden, "traffic_graph", 1);
+    expect(visible(down).slice(2, 4)).toEqual(["latency_heatmap", "traffic_graph"]);
+    // Every visible move changes what the page shows.
+    expect(visible(up)).not.toEqual(visible(withHidden));
+    // Hidden ones at the very end: nothing visible below the last one.
+    const tail = setWidget(layout, "logs", { hidden: true });
+    expect(moveWidget(tail, "databases", 1)).toBe(tail);
+  });
   it("never hides the last visible widget", () => {
     let all = layout;
     for (const key of WIDGETS) all = setWidget(all, key, { hidden: true });
