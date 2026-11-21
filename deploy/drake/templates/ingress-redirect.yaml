@@ -2,14 +2,17 @@
 {{- $origin := include "drake.publicOrigin" . }}
 {{- $class := ternary .Values.edge.dedicatedController.ingressClassName .Values.ingress.className .Values.edge.dedicatedController.enabled }}
 {{/*
-Former names of this deployment. A browser that still has one is sent,
-path and query kept, to the canonical origin with a permanent (308)
-redirect — bookmarks keep working and nothing is served twice.
+Former names of this deployment. A browser that still has one is sent to
+the canonical origin with a permanent (308) redirect, so nothing is served
+twice. To its root: ingress-nginx refuses a redirect target that carries
+`$request_uri` (annotation validation), and a configuration snippet to
+keep the path would need snippets enabled on the edge, which they are
+not — on purpose.
 
 `ingress.redirectKeepPaths` are the exception: paths still answered on the
 old name, unredirected, because their callers do not follow redirects.
 GitHub delivers webhooks to the URL in the App's settings and treats a 3xx
-as a failure, so `/v1/github/` keeps working on the old name until that
+as a failure, so `/v1/integrations/github/` keeps working on the old name until that
 setting points at the new one.
 */}}
 apiVersion: networking.k8s.io/v1
@@ -20,7 +23,7 @@ metadata:
   labels:
     {{- include "drake.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/permanent-redirect: {{ printf "%s$request_uri" $origin | quote }}
+    nginx.ingress.kubernetes.io/permanent-redirect: {{ printf "%s/" $origin | quote }}
     nginx.ingress.kubernetes.io/permanent-redirect-code: "308"
 spec:
   ingressClassName: {{ $class | quote }}

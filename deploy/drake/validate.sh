@@ -336,8 +336,8 @@ for name in ("drake-redirect", "drake-redirect-keep"):
         if "nginx.ingress.kubernetes.io/rewrite-target" in notes:
             die(f"{name} must not rewrite paths")
         if name == "drake-redirect":
-            if notes.get("nginx.ingress.kubernetes.io/permanent-redirect") != f"https://{canonical}:30773$request_uri":
-                die("drake-redirect must send former names to the public origin, path kept")
+            if notes.get("nginx.ingress.kubernetes.io/permanent-redirect") != f"https://{canonical}:30773/":
+                die("drake-redirect must send former names to the public origin")
             if notes.get("nginx.ingress.kubernetes.io/permanent-redirect-code") != "308":
                 die("drake-redirect must be a permanent 308")
         else:
