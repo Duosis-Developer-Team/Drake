@@ -498,6 +498,22 @@ describe("service objectives", () => {
 });
 
 describe("SLO detail", () => {
+  it("reads the remaining budget as the share it already is", async () => {
+    // 30 bad events allowed, 40% of them used: 60% left. The old screen
+    // divided 0.6 by 30 and drew a nearly empty budget.
+    renderSloDetail({
+      "/v1/slo/slo-1": {
+        status: 200,
+        body: {
+          ...slo({}),
+          evaluation: { ...slo().evaluation, status: "meeting", error_budget_total: 30, error_budget_consumed: 0.4, error_budget_remaining: 0.6 },
+          context: { deployments: [], incidents: [], alerts: [], correlation_note: "" },
+        },
+      },
+    });
+    expect(await screen.findByRole("img", { name: /^Budget remaining: 60/ })).toBeInTheDocument();
+  });
+
   it("shows both windows for every burn level, active or not", async () => {
     renderSloDetail();
     const table = await screen.findByTestId("burn-table");
