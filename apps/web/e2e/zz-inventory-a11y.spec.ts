@@ -221,11 +221,10 @@ test("honesty gates: stale is never healthy-colored, unknown stays visible", asy
   // Stale/disconnected land in their OWN visual states, never healthy.
   await expect(freshness.getByTestId("status-stale")).toBeVisible();
   await expect(freshness.getByTestId("status-healthy")).toHaveCount(0);
-  // Unknown buckets are rendered as data, not hidden. The rollups are donuts
-  // now, and the claim is stronger than it was: the Unknown slice is in the
-  // legend with its count even when it is zero, so the bucket cannot vanish
-  // just because nothing landed in it this sweep.
-  const rollup = page.getByTestId("donut").first();
+  // Unknown buckets are rendered as data, not hidden: each rollup's bar
+  // lists every bucket in its legend with its count, zero included, so the
+  // Unknown bucket cannot vanish just because nothing landed in it.
+  const rollup = page.getByTestId("rollup-card").first();
   await expect(rollup).toContainText(/unknown/i);
 });
 

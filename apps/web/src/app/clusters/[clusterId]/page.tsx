@@ -119,7 +119,7 @@ function RollupCard({
 }) {
   const t = useT("clusters");
   return (
-    <Panel data-testid={testId} className={`h-full ${className}`}>
+    <Panel data-testid={testId ?? "rollup-card"} className={`h-full ${className}`}>
       <div className="flex items-center gap-3">
         <IconBubble icon={icon} />
         <h3 className="min-w-0 flex-1 text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
