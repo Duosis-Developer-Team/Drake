@@ -1,326 +1,155 @@
 "use client";
 
 /**
- * The left half of the sign-in screen: what Tracesis is, at a glance.
+ * The sign-in page's story and its backdrop.
  *
- * It is always the deep night panel of the brand, in light and dark alike,
- * so the cobalt-and-gold mark sits on the background it was drawn for. The
- * product preview is illustrative — a synthetic trace and synthetic numbers,
- * labelled as such — because nothing about a tenant may be shown before
- * someone has signed in.
+ * Deliberately quiet: one surface for the whole page in either theme, the
+ * brand's own motif — the stacked spans of the mark, the slow one in gold —
+ * drawn faintly behind both halves so they read as one page, a headline in
+ * plain ink with a single gold cut under the words that matter, and the
+ * capabilities as an editorial list. No glow, no gradient type, no mock data.
  */
 
-import {
-  Activity,
-  Bot,
-  DatabaseBackup,
-  Lock,
-  Radar,
-  ShieldCheck,
-  Sparkles,
-  Target,
-  Waypoints,
-} from "lucide-react";
+import { Lock, Radar, Server } from "lucide-react";
 
-import { TracesisWordmark } from "@/components/shell/Brand";
 import { useT } from "@/lib/i18n";
 
-/** Brand tokens for the night panel, whatever the page theme is. */
-const NIGHT = {
-  "--brand": "#8197ff",
-  "--gold": "#e9c46a",
-  "--color-ink": "#f4f2ff",
-  "--text-primary": "#f4f2ff",
-} as React.CSSProperties;
+/**
+ * Spans of a trace, kept clear of the story column: a waterfall that runs
+ * down the right edge, behind and past the form, and settles along the foot
+ * of the page. The one gold span is the slow call, beside the card's edge.
+ */
+const BARS: { x: number; y: number; w: number; gold?: boolean }[] = [
+  { x: 56, y: 12, w: 40 },
+  { x: 62, y: 17, w: 24 },
+  { x: 66, y: 22, w: 33 },
+  { x: 71, y: 28, w: 18 },
+  { x: 74, y: 34, w: 26 },
+  { x: 86, y: 40, w: 11, gold: true },
+  { x: 78, y: 46, w: 22 },
+  { x: 81, y: 52, w: 15 },
+  { x: 84, y: 58, w: 16 },
+  { x: 76, y: 66, w: 24 },
+  { x: 88, y: 73, w: 12 },
+  { x: 52, y: 88, w: 30 },
+  { x: 64, y: 93, w: 36 },
+];
 
-const SPANS = [
-  { label: "api-gateway", start: 0, width: 100, tone: "brand" },
-  { label: "checkout", start: 4, width: 82, tone: "brand" },
-  { label: "inventory.reserve", start: 9, width: 18, tone: "soft" },
-  { label: "payments.charge", start: 30, width: 34, tone: "soft" },
-  { label: "postgres SELECT", start: 33, width: 9, tone: "muted" },
-  { label: "claude · plan", start: 66, width: 22, tone: "gold" },
-] as const;
-
-function TracePreview() {
-  const t = useT("shell");
-  return (
-    <div className="relative rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/40 backdrop-blur-md">
-      <div className="mb-3 flex items-center justify-between text-[11px] text-white/60">
-        <span className="flex items-center gap-2">
-          <span className="flex gap-1">
-            <span className="h-2 w-2 rounded-full bg-white/15" />
-            <span className="h-2 w-2 rounded-full bg-white/15" />
-            <span className="h-2 w-2 rounded-full bg-white/15" />
-          </span>
-          <span className="font-mono">{t("hero.preview.trace")} 4bf92f35</span>
-        </span>
-        <span className="flex items-center gap-3">
-          <span className="text-[10px] tracking-wide text-white/30 uppercase">
-            {t("hero.preview.illustrative")}
-          </span>
-          <span className="flex items-center gap-1.5 font-medium text-emerald-300">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-70" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-300" />
-            </span>
-            {t("hero.preview.live")}
-          </span>
-        </span>
-      </div>
-      <div className="relative space-y-2 overflow-hidden">
-        {SPANS.map((span, i) => (
-          <div
-            key={span.label}
-            className="grid grid-cols-[9rem_minmax(0,1fr)] items-center gap-3"
-          >
-            <span
-              className="truncate font-mono text-[11px] text-white/55"
-              style={{ paddingLeft: Math.min(i, 3) * 8 }}
-            >
-              {span.label}
-            </span>
-            <span className="relative h-3.5">
-              <span
-                className="absolute inset-y-0 origin-left rounded-[4px] motion-safe:animate-[signin-grow_900ms_cubic-bezier(.2,.8,.2,1)_both]"
-                style={{
-                  left: `${span.start}%`,
-                  width: `${span.width}%`,
-                  animationDelay: `${150 + i * 120}ms`,
-                  background:
-                    span.tone === "gold"
-                      ? "linear-gradient(90deg, #e9c46a, #f3d58c)"
-                      : span.tone === "brand"
-                        ? "linear-gradient(90deg, #5b72f2, #8197ff)"
-                        : span.tone === "soft"
-                          ? "rgba(129,151,255,0.55)"
-                          : "rgba(255,255,255,0.22)",
-                  boxShadow:
-                    span.tone === "gold"
-                      ? "0 0 18px rgba(233,196,106,0.45)"
-                      : undefined,
-                }}
-              />
-            </span>
-          </div>
-        ))}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/10 to-transparent motion-safe:animate-[signin-scan_4.5s_linear_infinite]"
-        />
-      </div>
-    </div>
-  );
-}
-
-function Chip({
-  icon: Icon,
-  label,
-  value,
-  accent,
-  className,
-  delay,
-  children,
-}: {
-  icon: typeof Activity;
-  label: string;
-  value: string;
-  accent: string;
-  className: string;
-  delay: string;
-  children?: React.ReactNode;
-}) {
+export function SignInBackdrop() {
   return (
     <div
-      className={`absolute hidden rounded-xl border border-white/10 bg-[#0e1430]/85 px-3 py-2.5 shadow-xl shadow-black/40 backdrop-blur-md xl:block motion-safe:animate-[signin-float_7s_ease-in-out_infinite] ${className}`}
-      style={{ animationDelay: delay }}
+      aria-hidden
+      className="pointer-events-none absolute inset-0 overflow-hidden"
     >
-      <div className="flex items-center gap-2.5">
-        <span
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-          style={{ background: `${accent}22`, color: accent }}
-        >
-          <Icon aria-hidden className="h-3.5 w-3.5" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[10px] font-medium tracking-wide text-white/50 uppercase">
-            {label}
-          </p>
-          <p className="text-[13px] font-semibold whitespace-nowrap text-white/90 tabular-nums">
-            {value}
-          </p>
-        </div>
-        {children}
-      </div>
+      {/* A hint of colour where the eye starts, nothing more. */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(60rem 36rem at 12% -8%, color-mix(in srgb, var(--brand) 9%, transparent), transparent 70%)",
+        }}
+      />
+      {/* Fine dots, fading toward the edges. */}
+      <div
+        className="absolute inset-0 opacity-[0.55]"
+        style={{
+          backgroundImage:
+            "radial-gradient(color-mix(in srgb, var(--text-muted) 26%, transparent) 1px, transparent 1px)",
+          backgroundSize: "22px 22px",
+          maskImage:
+            "radial-gradient(ellipse 70% 60% at 40% 40%, black 30%, transparent 85%)",
+          WebkitMaskImage:
+            "radial-gradient(ellipse 70% 60% at 40% 40%, black 30%, transparent 85%)",
+        }}
+      />
+      <svg
+        className="absolute inset-0 h-full w-full"
+        preserveAspectRatio="none"
+        viewBox="0 0 100 100"
+      >
+        {BARS.map((bar, i) => (
+          <rect
+            key={i}
+            x={bar.x}
+            y={bar.y}
+            width={bar.w}
+            height={1.15}
+            rx={0.55}
+            fill={bar.gold ? "var(--gold)" : "var(--brand)"}
+            opacity={bar.gold ? 0.32 : 0.05 + (i % 4) * 0.012}
+          />
+        ))}
+      </svg>
     </div>
   );
 }
 
-function Sparkline() {
-  const points = [14, 12, 13, 9, 11, 7, 9, 6, 8, 5];
-  const d = points
-    .map((y, i) => `${i === 0 ? "M" : "L"}${i * 7} ${y}`)
-    .join(" ");
-  return (
-    <svg
-      width="64"
-      height="18"
-      viewBox="0 0 63 18"
-      aria-hidden
-      className="ml-1"
-    >
-      <path
-        d={d}
-        fill="none"
-        stroke="#8197ff"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+const FEATURES = ["health", "traces", "objectives", "agents"] as const;
 
-const FEATURES = [
-  { key: "health", icon: Activity },
-  { key: "traces", icon: Waypoints },
-  { key: "objectives", icon: Target },
-  { key: "agents", icon: Bot },
-] as const;
-
-export function SignInHero() {
+export function SignInStory() {
   const t = useT("shell");
   return (
-    <section
-      aria-label="Tracesis" // i18n-ignore: the product name is a proper noun
-      className="relative isolate hidden overflow-hidden bg-[#070a17] text-white lg:flex lg:flex-col"
-      style={NIGHT}
-      data-testid="signin-hero"
-    >
-      {/* Light: a cobalt glow top left, a faint gold one low right, and a
-          grid that fades out — depth without a picture to load. */}
-      <div aria-hidden className="absolute inset-0 -z-10">
-        <div className="absolute -top-40 -left-40 h-[36rem] w-[36rem] rounded-full bg-[#3f57e0]/30 blur-[120px]" />
-        <div className="absolute right-[-10rem] bottom-[-12rem] h-[30rem] w-[30rem] rounded-full bg-[#e9c46a]/12 blur-[120px]" />
-        <svg
-          className="absolute inset-0 h-full w-full opacity-[0.07]"
-          aria-hidden
-        >
-          <defs>
-            <pattern
-              id="signin-grid"
-              width="44"
-              height="44"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M44 0H0V44"
-                fill="none"
-                stroke="white"
-                strokeWidth="0.6"
-              />
-            </pattern>
-            <radialGradient id="signin-fade" cx="35%" cy="40%" r="75%">
-              <stop offset="0%" stopColor="white" />
-              <stop offset="100%" stopColor="black" />
-            </radialGradient>
-            <mask id="signin-mask">
-              <rect width="100%" height="100%" fill="url(#signin-fade)" />
-            </mask>
-          </defs>
-          <rect
-            width="100%"
-            height="100%"
-            fill="url(#signin-grid)"
-            mask="url(#signin-mask)"
-          />
-        </svg>
-      </div>
+    <section data-testid="signin-hero" className="max-w-[44rem]">
+      <p className="flex items-center gap-2.5 font-mono text-[11px] font-medium tracking-[0.18em] text-ink-muted uppercase">
+        <span aria-hidden className="h-2 w-2 rounded-[2px] bg-gold" />
+        {t("hero.eyebrow")}
+      </p>
 
-      <div className="flex flex-1 flex-col px-12 pt-10 pb-8 xl:px-16">
-        <TracesisWordmark size={26} />
-
-        <div className="mt-auto max-w-2xl pt-12">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1 text-[12px] font-medium text-white/75">
-            <Sparkles aria-hidden className="h-3.5 w-3.5 text-[#e9c46a]" />
-            {t("hero.eyebrow")}
+      <h2 className="mt-6 font-[family-name:var(--font-display)] text-[clamp(2.3rem,3.3vw,3.4rem)] leading-[1.05] font-extrabold tracking-[-0.04em] text-ink">
+        {t("hero.titleLead")}
+        <br />
+        {/* The dash stays with the marked phrase, never opening a line. */}
+        <span className="whitespace-nowrap">
+          <span className="relative inline-block">
+            {t("hero.titleMark")}
+            {/* The brand's gold cut, under the one phrase that matters. */}
+            <span
+              aria-hidden
+              className="absolute -bottom-[0.06em] left-0 h-[0.12em] w-full bg-gold"
+              style={{ clipPath: "polygon(0 35%, 100% 0, 100% 100%, 0 100%)" }}
+            />
           </span>
-          <h2 className="mt-5 font-[family-name:var(--font-display)] text-[clamp(2.1rem,3.2vw,3.25rem)] leading-[1.08] font-extrabold tracking-[-0.035em]">
-            {t("hero.title")}
-            <br />
-            <span className="bg-gradient-to-r from-[#a8b6ff] via-[#8197ff] to-[#e9c46a] bg-clip-text text-transparent">
-              {t("hero.titleAccent")}
-            </span>
-          </h2>
-          <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-white/65">
-            {t("hero.body")}
-          </p>
-        </div>
+          <span className="font-bold text-ink-muted"> —</span>
+        </span>{" "}
+        <span className="font-bold text-ink-muted">{t("hero.titleTail")}</span>
+      </h2>
 
-        <div className="relative mt-10 mr-6 max-w-2xl xl:mr-24">
-          <TracePreview />
-          <Chip
-            icon={ShieldCheck}
-            label={t("hero.preview.slo")}
-            value={t("hero.preview.sloValue")}
-            accent="#5fd4a0"
-            className="-top-9 right-[-4.5rem]"
-            delay="0s"
-          />
-          <Chip
-            icon={Activity}
-            label={t("hero.preview.latency")}
-            value="182 ms"
-            accent="#8197ff"
-            className="-bottom-7 left-[-1.5rem]"
-            delay="1.2s"
-          >
-            <Sparkline />
-          </Chip>
-          <Chip
-            icon={Bot}
-            label={t("hero.preview.agents")}
-            value={t("hero.preview.agentsValue")}
-            accent="#e9c46a"
-            className="right-[-5.5rem] -bottom-10"
-            delay="2.4s"
-          />
-        </div>
+      <p className="mt-7 max-w-[34rem] text-[1.0625rem] leading-relaxed text-ink-secondary">
+        {t("hero.body")}
+      </p>
 
-        <ul className="mt-12 grid max-w-2xl grid-cols-2 gap-x-8 gap-y-5">
-          {FEATURES.map(({ key, icon: Icon }) => (
-            <li key={key} className="flex gap-3">
-              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05] text-[#a8b6ff]">
-                <Icon aria-hidden className="h-4 w-4" />
+      <ol className="mt-12 grid gap-x-10 gap-y-7 sm:grid-cols-2">
+        {FEATURES.map((key, i) => (
+          <li key={key} className="border-t border-border pt-4">
+            <p className="flex items-baseline gap-3">
+              <span className="font-mono text-[11px] font-semibold text-brand tabular-nums">
+                {String(i + 1).padStart(2, "0")}
               </span>
-              <span>
-                <span className="block text-[14px] font-semibold text-white/90">
-                  {t(`hero.features.${key}.title`)}
-                </span>
-                <span className="mt-0.5 block text-[13px] leading-snug text-white/55">
-                  {t(`hero.features.${key}.body`)}
-                </span>
+              <span className="text-[0.9375rem] font-semibold text-ink">
+                {t(`hero.features.${key}.title`)}
               </span>
-            </li>
-          ))}
-        </ul>
+            </p>
+            <p className="mt-1.5 pl-[1.85rem] text-[0.875rem] leading-snug text-ink-secondary">
+              {t(`hero.features.${key}.body`)}
+            </p>
+          </li>
+        ))}
+      </ol>
 
-        <div className="mt-auto flex flex-wrap items-center gap-x-6 gap-y-2 pt-10 text-[12px] text-white/45">
-          <span className="inline-flex items-center gap-1.5">
-            <DatabaseBackup aria-hidden className="h-3.5 w-3.5" />
-            {t("hero.trust.selfHosted")}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Lock aria-hidden className="h-3.5 w-3.5" />
-            {t("hero.trust.noContent")}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Radar aria-hidden className="h-3.5 w-3.5" />
-            {t("hero.trust.otel")}
-          </span>
-          <span className="ml-auto">{t("hero.footer")}</span>
-        </div>
-      </div>
+      <ul className="mt-12 flex flex-wrap gap-x-6 gap-y-2 text-[0.8125rem] text-ink-muted">
+        <li className="inline-flex items-center gap-1.5">
+          <Server aria-hidden className="h-3.5 w-3.5" />
+          {t("hero.trust.selfHosted")}
+        </li>
+        <li className="inline-flex items-center gap-1.5">
+          <Lock aria-hidden className="h-3.5 w-3.5" />
+          {t("hero.trust.noContent")}
+        </li>
+        <li className="inline-flex items-center gap-1.5">
+          <Radar aria-hidden className="h-3.5 w-3.5" />
+          {t("hero.trust.otel")}
+        </li>
+      </ul>
     </section>
   );
 }

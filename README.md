@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/tracesis-signin.png" alt="The Tracesis sign-in screen: the brand panel with an illustrative trace waterfall beside the sign-in form" width="900">
+  <img src="docs/assets/readme/tracesis-signin.png" alt="The Tracesis sign-in screen: what Tracesis does on the left, the sign-in form on the right" width="900">
 </p>
 
 ---
