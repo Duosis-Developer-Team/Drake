@@ -17,7 +17,9 @@ function Snippet({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="group relative">
-      <pre className="whitespace-pre-wrap break-all rounded-control border border-border bg-surface-2 px-3.5 py-3 pr-20 font-mono text-micro leading-relaxed text-ink">{text}</pre>
+      <pre className="whitespace-pre-wrap break-all rounded-control border border-border bg-surface-2 px-3.5 py-3 pr-20 font-mono text-micro leading-relaxed text-ink">
+        {text}
+      </pre>
       <button
         type="button"
         onClick={() => {
@@ -28,14 +30,28 @@ function Snippet({ text }: { text: string }) {
         }}
         className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-control border border-border bg-surface px-2 py-1 text-micro font-medium text-ink-secondary hover:text-ink"
       >
-        {copied ? <Check aria-hidden className="h-3 w-3" /> : <Copy aria-hidden className="h-3 w-3" />}
+        {copied ? (
+          <Check aria-hidden className="h-3 w-3" />
+        ) : (
+          <Copy aria-hidden className="h-3 w-3" />
+        )}
         {copied ? t("connectPanel.copied") : t("connectPanel.copy")}
       </button>
     </div>
   );
 }
 
-function Way({ icon: Icon, title, hint, children }: { icon: typeof Server; title: string; hint: string; children?: React.ReactNode }) {
+function Way({
+  icon: Icon,
+  title,
+  hint,
+  children,
+}: {
+  icon: typeof Server;
+  title: string;
+  hint: string;
+  children?: React.ReactNode;
+}) {
   return (
     <section className="space-y-2.5">
       <div className="flex items-start gap-3">
@@ -62,16 +78,35 @@ export function ConnectPanel({ connect }: { connect: AgentConnect | null }) {
     : null;
   return (
     <div className="space-y-6" data-testid="connect-panel">
-      <p className="text-caption text-ink-secondary">{t("connectPanel.lead")}</p>
-      <Way icon={Server} title={t("connectPanel.inside")} hint={t("connectPanel.insideHint")}>
+      <p className="text-caption text-ink-secondary">
+        {t("connectPanel.lead")}
+      </p>
+      <Way
+        icon={Server}
+        title={t("connectPanel.inside")}
+        hint={t("connectPanel.insideHint")}
+      >
         <Snippet text={inside} />
       </Way>
-      <Way icon={Globe} title={t("connectPanel.outside")} hint={outside ? t("connectPanel.outsideHint") : t("connectPanel.outsideOff")}>
+      <Way
+        icon={Globe}
+        title={t("connectPanel.outside")}
+        hint={
+          outside ? t("connectPanel.outsideHint") : t("connectPanel.outsideOff")
+        }
+      >
         {outside ? <Snippet text={outside} /> : null}
       </Way>
-      <Way icon={Radar} title={t("connectPanel.ebpf")} hint={t("connectPanel.ebpfHint")} />
+      <Way
+        icon={Radar}
+        title={t("connectPanel.ebpf")}
+        hint={t("connectPanel.ebpfHint")}
+      />
       <p className="flex items-start gap-2 rounded-control bg-healthy-soft px-3.5 py-3 text-caption text-ink">
-        <ShieldCheck aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-healthy" />
+        <ShieldCheck
+          aria-hidden
+          className="mt-0.5 h-4 w-4 shrink-0 text-healthy"
+        />
         {t("connectPanel.privacy")}
       </p>
     </div>

@@ -806,7 +806,12 @@ def test_datastores_are_never_reached_by_address() -> None:
     for name in ("drake-api-egress", "drake-migration-egress"):
         for rule in policies[name]["spec"].get("egress", []):
             for peer in rule.get("to", []):
-                assert "ipBlock" not in peer, f"{name} addresses a peer instead of selecting it"
+                if "ipBlock" not in peer:
+                    continue
+                # The only addressed peers are declared outbound HTTPS
+                # (apiExternalEgress), never a datastore.
+                assert name == "drake-api-egress", f"{name} addresses a peer"
+                assert [p["port"] for p in rule["ports"]] == [443], f"{name} addresses a peer"
 
 
 def test_default_deny_still_covers_both_directions() -> None:
@@ -869,13 +874,20 @@ def test_the_web_app_is_granted_no_egress() -> None:
 
 
 def test_external_egress_is_empty_by_default_and_narrow_when_set() -> None:
-    policy = _policies(render_prod())["drake-api-egress"]
     assert not [
         peer
+        for rule in _policies(render())["drake-api-egress"]["spec"]["egress"]
+        for peer in rule.get("to", [])
+        if "ipBlock" in peer
+    ], "a default production Drake calls no third party"
+    policy = _policies(render_prod())["drake-api-egress"]
+    # drake-prod declares one third party: the model price list (GitHub's CDN).
+    assert [
+        peer["ipBlock"]["cidr"]
         for rule in policy["spec"]["egress"]
         for peer in rule.get("to", [])
         if "ipBlock" in peer
-    ], "a default Drake calls no third party"
+    ] == ["185.199.108.0/22"]
 
     docs = render_prod(
         "--set",
@@ -1034,8 +1046,8 @@ def test_a_narrow_https_egress_entry_renders() -> None:
             ],
             "all of IPv6 defeats the policy",
         ),
-        (["networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32"], "an entry needs a port"),
-        (["networkPolicy.apiExternalEgress[0].port=443"], "an entry needs a cidr"),
+        (["networkPolicy.apiExternalEgress[1].cidr=203.0.113.10/32"], "an entry needs a port"),
+        (["networkPolicy.apiExternalEgress[1].port=443"], "an entry needs a cidr"),
         (
             [
                 "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32",

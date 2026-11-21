@@ -299,7 +299,11 @@ networkPolicy:
   # GitHub is reached over the public internet, which needs no rule here
   # because this policy governs egress the cluster can express — and the
   # metrics backend it does need is in-cluster, so it belongs below.
-  apiExternalEgress: []
+  # Model prices for agent cost: raw.githubusercontent.com (GitHub's CDN
+  # range), HTTPS only, once a day.
+  apiExternalEgress:
+    - cidr: 185.199.108.0/22
+      port: 443
 
   # Prometheus, by namespace and pod labels rather than by the ClusterIP the
   # connector URL happens to name — the address is pinned for Drake's SSRF
@@ -433,6 +437,7 @@ agentIngest:
 # Agent Visibility (2026-11-21): the inventory fills itself from GenAI spans.
 agents:
   discoveryEnabled: true
+  pricesEnabled: true
 
 # Objectives (migration 0031, 2026-11-21). The evaluator judges enabled
 # objectives every five minutes and keeps the five-minute request counts

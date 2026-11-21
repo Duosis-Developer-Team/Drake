@@ -3,6 +3,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import httpx
 import redis.asyncio as aioredis
@@ -12,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
 from drake_api.ai_agents.discovery import AgentDiscovery
+from drake_api.ai_agents.pricing import PriceKeeper
 from drake_api.ai_agents.router import router as agents_router
 from drake_api.alert_rules.router import router as alert_rules_router
 from drake_api.alert_rules.telemetry import TelemetrySampler
@@ -104,6 +106,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     agent_discovery = getattr(app.state, "agent_discovery", None)
     if agent_discovery is not None:
         await agent_discovery.start()
+    agent_prices = getattr(app.state, "agent_prices", None)
+    if agent_prices is not None:
+        await agent_prices.start()
     protection_evaluator = getattr(app.state, "protection_evaluator", None)
     if protection_evaluator is not None:
         await protection_evaluator.start()
@@ -122,6 +127,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await silence_worker.stop()
         if agent_discovery is not None:
             await agent_discovery.stop()
+        if agent_prices is not None:
+            await agent_prices.stop()
         if sli_writer is not None:
             await sli_writer.stop()
         if protection_evaluator is not None:
@@ -316,6 +323,18 @@ def create_app(
         if settings.agent_discovery_enabled
         and settings.observability_traces_enabled
         and store_connector is not None
+        else None
+    )
+    # Model prices for agent cost: fetched daily, versioned, matched to the
+    # models agents use. Independent of the trace store.
+    app.state.agent_prices = (
+        PriceKeeper(
+            get_engine(settings),
+            app.state.telemetry_redis,
+            source=settings.agent_prices_source,
+            refresh=timedelta(hours=settings.agent_prices_refresh_hours),
+        )
+        if settings.agent_prices_enabled and app.state.telemetry_redis is not None
         else None
     )
     # Backup posture is judged on a timer too, so a reporter that falls

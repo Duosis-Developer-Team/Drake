@@ -26,6 +26,7 @@ import {
   runRows,
   STEP_COLOR,
   stepLabel,
+  usd,
   type RunSpan,
   type Step,
 } from "@/lib/agents";
@@ -227,6 +228,7 @@ export function RunWaterfall({
                   >
                     {fmt.latency(s.duration_ms)}
                     {tokens ? ` · ${compact(tokens, locale)} tok` : ""}
+                    {s.cost_usd ? ` · ${usd(s.cost_usd, locale)}` : ""}
                   </span>
                 </button>
               </li>
@@ -247,6 +249,7 @@ export function StepDetail({
 }) {
   const t = useT("agents");
   const fmt = useFormat();
+  const { locale } = useLocale();
   if (!span)
     return (
       <p className="py-6 text-center text-caption text-ink-muted">
@@ -285,6 +288,7 @@ export function StepDetail({
       [span.http_status, span.http_route].filter(Boolean).join(" ") || null,
       true,
     ],
+    [t("run.detail.cost"), span.cost_usd ? usd(span.cost_usd, locale) : null],
     [t("run.detail.start"), `+${fmt.latency(span.offset_ms)}`],
     [t("run.detail.duration"), fmt.latency(span.duration_ms)],
     [t("run.detail.span"), span.name, true],

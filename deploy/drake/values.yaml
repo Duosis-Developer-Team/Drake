@@ -294,6 +294,10 @@ agents:
   # in Postgres. Read-only against the store; needs observability traces.
   discoveryEnabled: false
   clusterEndpoint: http://drake-otel-gateway.drake-otel.svc:4318
+  # Agent cost: fetch a public model price list (LiteLLM's table on
+  # raw.githubusercontent.com) once a day. Needs outbound HTTPS — declare it
+  # in networkPolicy.apiExternalEgress. Off: costs show as "no price".
+  pricesEnabled: false
 
 slo:
   # Objectives (migration 0031): the evaluator judges every enabled

@@ -473,6 +473,11 @@ class Settings(BaseSettings):
     # when the deployment opens it (deploy/drake: agentIngest).
     agent_cluster_endpoint: str = "http://drake-otel-gateway.drake-otel.svc:4318"
     agent_external_ingest: bool = False
+    # Model prices for agent cost (phase 4): a public price list fetched
+    # once a day, versioned in Postgres; a bundled snapshot when unreachable.
+    agent_prices_enabled: bool = False
+    agent_prices_source: str = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+    agent_prices_refresh_hours: float = 24.0
 
     slo_evaluator_enabled: bool = False
     slo_evaluator_interval_seconds: float = 300.0
