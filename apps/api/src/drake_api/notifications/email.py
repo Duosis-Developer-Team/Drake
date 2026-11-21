@@ -33,6 +33,7 @@ from urllib.parse import quote
 
 import httpx
 
+from drake_api.notifications.model import event_sentence
 from drake_api.notifications.webhook import AttemptResult, parse_retry_after
 from drake_api.settings import EmailDestination, GraphMailSender, Settings
 
@@ -48,14 +49,6 @@ _EVENT_SUBJECT: dict[str, str] = {
     "opened": "Incident opened",
     "acknowledged": "Incident acknowledged",
     "auto_resolved": "Incident resolved",
-}
-
-_EVENT_LINE: dict[str, str] = {
-    "opened": "Drake opened an incident after consecutive trustworthy critical evaluations.",
-    "acknowledged": "A responder acknowledged this incident. Monitoring continues.",
-    "auto_resolved": (
-        "The service reported healthy again, so Drake resolved this incident automatically."
-    ),
 }
 
 
@@ -112,7 +105,7 @@ def compose_message(payload: dict[str, Any], *, public_origin: str = "") -> Emai
     lines = [
         f"{headline}: {title}" if title else headline,
         "",
-        _EVENT_LINE.get(event_type, "This incident changed state."),
+        event_sentence(event_type, str(incident.get("primary_reason") or "")),
         "",
     ]
     if severity:

@@ -177,3 +177,38 @@ def test_a_series_fills_every_bucket_of_the_day() -> None:
     points = series_from_rows(plan, rule, rows, start, end)["b1"]
     assert len(points) == 12
     assert [v for _, v in points][:4] == [0.0, 0.0, 2.0, 0.0]
+
+
+def test_an_endpoint_past_the_filter_cap_is_unknown_not_zero() -> None:
+    """More endpoints than one statement asks about: the rest have no row.
+
+    A slow-request rule on one of them used to read 0.0 — "nothing slow" —
+    and so could never fire, and resolved any incident it held.
+    """
+    from drake_api.alert_rules.telemetry import (
+        MAX_FILTERS,
+        RuleFilter,
+        build_filtered,
+        series_from_rows,
+        summarize_filtered,
+    )
+
+    filters = [
+        RuleFilter(f"r{i}", "slow_requests", None, f"GET /route/{i:02d}")
+        for i in range(MAX_FILTERS + 1)
+    ]
+    plan = build_filtered(
+        database="drake",
+        bindings=[binding(1)],
+        filters=filters,
+        start=NOW - WINDOW,
+        end=NOW,
+        bucket_seconds=None,
+    )
+    assert len(plan.routes) == MAX_FILTERS
+    out = summarize_filtered(plan, None, [])["b1"]
+    assert out["r0"] == 0.0  # asked, and quiet
+    assert out[f"r{MAX_FILTERS}"] is None  # never asked
+
+    series = series_from_rows(plan, filters[-1], [], NOW - WINDOW, NOW)
+    assert all(value is None for _, value in series["b1"])

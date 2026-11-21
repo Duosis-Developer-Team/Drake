@@ -49,14 +49,71 @@ _EVENT_HEADLINE: dict[str, str] = {
     "auto_resolved": "Incident resolved",
 }
 
-_EVENT_SENTENCE: dict[str, str] = {
-    "opened": ("Drake opened an incident after two consecutive trustworthy critical evaluations."),
-    "acknowledged": "A responder acknowledged this incident. Monitoring continues.",
-    "auto_resolved": (
-        "The service reported healthy twice in a row, so Drake resolved this "
-        "incident automatically."
-    ),
+# What happened, said for the kind of incident it is. Health incidents open
+# after two trustworthy critical evaluations; a rule, an external alert or a
+# backup policy has its own reason, and telling a rule's recipient about
+# "consecutive critical evaluations" described a mechanism that never ran.
+_EVENT_SENTENCES: dict[str, dict[str, str]] = {
+    "health": {
+        "opened": (
+            "Drake opened an incident after two consecutive trustworthy critical evaluations."
+        ),
+        "auto_resolved": (
+            "The service reported healthy twice in a row, so Drake resolved this "
+            "incident automatically."
+        ),
+    },
+    "rule": {
+        "opened": (
+            "An alert rule's condition held for the rule's whole window, so Drake "
+            "opened an incident."
+        ),
+        "auto_resolved": (
+            "The alert rule no longer holds — its condition cleared, or the rule was "
+            "disabled or deleted — so Drake resolved this incident."
+        ),
+    },
+    "alert": {
+        "opened": "An external alert fired for this service, so Drake opened an incident.",
+        "auto_resolved": "The external alert resolved, so Drake resolved this incident.",
+    },
+    "protection": {
+        "opened": "A backup protection check failed, so Drake opened an incident.",
+        "auto_resolved": (
+            "The backup protection check passes again, so Drake resolved this incident."
+        ),
+    },
 }
+_ACKNOWLEDGED = "A responder acknowledged this incident. Monitoring continues."
+_PROTECTION_REASONS = frozenset(
+    {
+        "backup_overdue",
+        "latest_run_failed",
+        "integrity_failed",
+        "offsite_missing",
+        "restore_failed",
+        "restore_verification_expired",
+    }
+)
+
+
+def incident_kind(primary_reason: str) -> str:
+    """`health`, `rule`, `alert` or `protection`, from the opening reason."""
+    if primary_reason == "rule_firing":
+        return "rule"
+    if primary_reason == "alert_firing":
+        return "alert"
+    if primary_reason in _PROTECTION_REASONS:
+        return "protection"
+    return "health"
+
+
+def event_sentence(event_type: str, primary_reason: str) -> str:
+    if event_type == "acknowledged":
+        return _ACKNOWLEDGED
+    return _EVENT_SENTENCES[incident_kind(primary_reason)].get(
+        event_type, "This incident changed state."
+    )
 
 
 @dataclass(frozen=True)
@@ -100,8 +157,10 @@ class NotifiableEvent:
             "",
         )
         where = f"{self.project_key}/{self.environment_key}/{self.service_key}"
-        body = _EVENT_SENTENCE.get(self.event_type, "This incident changed state.")
-        return f"{where} — {reason}. {body}"[:1000]
+        body = event_sentence(self.event_type, self.primary_reason)
+        # A reason this table does not name (a backup policy's, say) is left
+        # out rather than printed as an empty clause.
+        return (f"{where} — {reason}. {body}" if reason else f"{where} — {body}")[:1000]
 
     def target_path(self) -> str:
         """A relative in-app path, frozen when the notification is created."""

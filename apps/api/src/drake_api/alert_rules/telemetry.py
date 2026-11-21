@@ -430,6 +430,10 @@ class FilteredPlan:
     keys: dict[str, str]  # binding id -> workload key
     columns: dict[tuple[str, str], str]  # (signal, text) -> column
     filters: list[RuleFilter]
+    # The endpoints the trace statement actually asks about. One past the
+    # MAX_FILTERS cap is not in it, so it has no row — which must read as
+    # unknown, not as "no slow requests".
+    routes: tuple[str, ...] = ()
 
 
 def _series_key(rule: RuleFilter, binding_ids: list[uuid.UUID], now: datetime) -> str:
@@ -528,7 +532,7 @@ def build_filtered(
             " GROUP BY " + group + ", route LIMIT {max_rows:UInt16}",
             database,
         )
-    return FilteredPlan(logs, traces, parameters, keys, columns, list(filters))
+    return FilteredPlan(logs, traces, parameters, keys, columns, list(filters), tuple(routes))
 
 
 def _route_value(signal: str, row: dict[str, Any] | None) -> float | None:
@@ -561,7 +565,7 @@ def summarize_filtered(
                 row = logs_by_wk.get(wk)
                 values[f.rule_id] = _count(row.get(column)) if row else 0.0
             elif f.signal in TRACE_SIGNALS and f.route is not None:
-                if trace_rows is None:
+                if trace_rows is None or f.route not in plan.routes:
                     values[f.rule_id] = None
                     continue
                 values[f.rule_id] = _route_value(f.signal, traces_by.get((wk, f.route)))
@@ -592,7 +596,12 @@ def series_from_rows(
             hit = by.get((wk, t))
             at = datetime.fromtimestamp(t, start.tzinfo)
             if rule.signal in LOG_SIGNALS:
-                points.append((at, _count(hit.get(column)) if hit and column else 0.0))
+                if column is None:
+                    points.append((at, None))
+                else:
+                    points.append((at, _count(hit.get(column)) if hit else 0.0))
+            elif rule.route not in plan.routes:
+                points.append((at, None))
             else:
                 points.append((at, _route_value(rule.signal, hit)))
         out[binding_id] = points

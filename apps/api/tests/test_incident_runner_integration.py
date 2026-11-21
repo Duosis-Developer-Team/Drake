@@ -241,15 +241,35 @@ async def test_a_larger_requested_concurrency_is_held_to_the_budget(
     assert orchestrator.peak_in_flight == MAX_EVALUATION_CONCURRENCY
 
 
-async def test_the_batch_size_bounds_one_cycle(engine: AsyncEngine, redis: Any) -> None:
+async def test_the_batch_size_is_a_page_and_every_binding_is_evaluated(
+    engine: AsyncEngine, redis: Any
+) -> None:
+    """Five bindings in pages of two: all five, not the first page only.
+
+    The batch size used to bound the whole cycle, so with the default of 25
+    the 26th binding was never evaluated — no incident and no rule, ever.
+    """
     for _ in range(5):
         await make_world(engine)
     orchestrator = FakeOrchestrator()
 
     report = await run_cycle(engine, orchestrator, redis, batch_size=2)  # type: ignore[arg-type]
 
-    assert report.evaluated == 2
-    assert orchestrator.calls == 2
+    assert report.evaluated == 5
+    assert orchestrator.calls == 5
+
+
+async def test_a_cycle_stops_at_its_ceiling(engine: AsyncEngine, redis: Any) -> None:
+    for _ in range(5):
+        await make_world(engine)
+    orchestrator = FakeOrchestrator()
+
+    report = await run_cycle(  # type: ignore[arg-type]
+        engine, orchestrator, redis, batch_size=2, max_bindings=3
+    )
+
+    assert report.evaluated == 3
+    assert orchestrator.calls == 3
 
 
 async def test_only_active_resolved_bindings_are_evaluated(engine: AsyncEngine, redis: Any) -> None:
