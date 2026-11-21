@@ -25,7 +25,7 @@
 import { formatUnit, MISSING } from "@/lib/design/format";
 import type { StatusTone, Thresholds } from "@/lib/design/status";
 import { toneForThreshold, toneSpec } from "@/lib/design/status";
-import { useLocale, useT } from "@/lib/i18n";
+import { useFormat, useLocale, useT } from "@/lib/i18n";
 
 /** A point on a circle, in SVG coordinates, from an angle in degrees. */
 function polar(cx: number, cy: number, radius: number, degrees: number) {
@@ -846,6 +846,7 @@ export function Countdown({
   now?: Date;
 }) {
   const t = useT("ui");
+  const fmt = useFormat();
   if (!deadline) {
     return (
       <div data-testid="countdown">
@@ -855,6 +856,14 @@ export function Countdown({
     );
   }
   const days = (new Date(deadline).getTime() - now.getTime()) / 86_400_000;
+  // Under two days, whole days lie: a 6-hour RPO with 5 hours left is not
+  // "0 days left". Say the hours (and minutes) instead.
+  const left =
+    days <= 0
+      ? t("visual.expired")
+      : days < 2
+        ? t("visual.timeLeft", { time: fmt.duration(days * 86_400) })
+        : t("visual.daysLeft", { count: Math.floor(days) });
   const tone: StatusTone =
     days <= 0 ? "critical" : days <= criticalDays ? "critical" : days <= warnDays ? "warning" : "success";
   const spec = toneSpec(tone);
@@ -865,13 +874,13 @@ export function Countdown({
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-caption text-ink-secondary">{label}</span>
         <span data-tabular className={`shrink-0 text-caption font-medium ${spec.text}`}>
-          {days <= 0 ? t("visual.expired") : t("visual.daysLeft", { count: Math.floor(days) })}
+          {left}
         </span>
       </div>
       <div
         role="img"
         aria-label={`${label}: ${
-          days <= 0 ? t("visual.expired") : t("visual.daysRemaining", { count: Math.floor(days) })
+          days <= 0 || days < 2 ? left : t("visual.daysRemaining", { count: Math.floor(days) })
         }`}
         className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
       >

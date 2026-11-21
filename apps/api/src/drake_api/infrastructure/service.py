@@ -49,8 +49,13 @@ from drake_api.telemetry.broker import QueryInput, TelemetryBroker
 logger = logging.getLogger("drake_api.infrastructure")
 
 FRESH_SECONDS = 60
+# A cold build holds the shared refresh lock for at most this long; another
+# replica waits up to COLD_WAIT_SECONDS for its result before building itself.
+COLD_LOCK_SECONDS = 120
+COLD_WAIT_SECONDS = 90.0
+COLD_POLL_SECONDS = 1.0
 KEEP_SECONDS = 15 * 60
-QUERY_CONCURRENCY = 2
+QUERY_CONCURRENCY = 4
 # A namespace's pods are what a person waits for after a click: three at a
 # time still leaves a lease free under the broker's per-principal four.
 POD_QUERY_CONCURRENCY = 3
@@ -94,6 +99,8 @@ POD_TEMPLATES = {
 
 # Strong references to background refreshes, so they are not collected mid-run.
 _REFRESHING: set[asyncio.Task[None]] = set()
+# One cold build per cluster per process (see InfrastructureService._cold).
+_COLD_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _not_found() -> HTTPException:
@@ -475,8 +482,64 @@ class InfrastructureService:
             return await self._for_caller(
                 principal, snapshot, age=age, refreshing=age >= FRESH_SECONDS
             )
-        snapshot = await self._refresh(principal, cluster)
-        return await self._for_caller(principal, snapshot, age=0.0, refreshing=False)
+        return await self._cold(principal, cluster)
+
+    async def _cold(self, principal: Principal, cluster: Any) -> dict[str, Any]:
+        """The first read of a cluster: build once, not once per request.
+
+        A cold build is ~17 broker queries and can take most of a minute. It
+        used to run inline for every request that found no cache, so a page
+        polling while the first build ran started a second one, and every
+        replica raced its own. Now one build runs per cluster:
+
+        - inside this process, later readers wait on the first and then read
+          the cache it wrote;
+        - across replicas, the same Redis lock the background refresh uses
+          says someone is building; a reader waits for that build's result
+          while the lock is held, and builds itself only once it is gone.
+
+        A result that is not cached (denied, not configured, unavailable) is
+        not shared: the next reader builds its own answer, as before.
+        """
+        cluster_id = cluster[0]
+        local = _COLD_LOCKS.setdefault(str(cluster_id), asyncio.Lock())
+        async with local:
+            cached = await self._read(cluster_id)
+            if cached is not None:
+                age = time.time() - float(cached.get("stored_at", 0))
+                return await self._for_caller(
+                    principal, cached["snapshot"], age=age, refreshing=False
+                )
+
+            lock = f"infrastructure:refresh:v1:{cluster_id}"
+            try:
+                acquired = bool(await self._redis.set(lock, "1", nx=True, ex=COLD_LOCK_SECONDS))
+            except Exception:
+                acquired = True  # no Redis: nothing to coordinate with
+            if not acquired:
+                waited = 0.0
+                while waited < COLD_WAIT_SECONDS:
+                    await asyncio.sleep(COLD_POLL_SECONDS)
+                    waited += COLD_POLL_SECONDS
+                    cached = await self._read(cluster_id)
+                    if cached is not None:
+                        age = time.time() - float(cached.get("stored_at", 0))
+                        return await self._for_caller(
+                            principal, cached["snapshot"], age=age, refreshing=False
+                        )
+                    try:
+                        still_building = bool(await self._redis.exists(lock))
+                    except Exception:
+                        still_building = False
+                    if not still_building:
+                        break
+            try:
+                snapshot = await self._refresh(principal, cluster)
+            finally:
+                if acquired:
+                    with contextlib.suppress(Exception):
+                        await self._redis.delete(lock)
+            return await self._for_caller(principal, snapshot, age=0.0, refreshing=False)
 
     async def _for_caller(
         self, principal: Principal, snapshot: dict[str, Any], *, age: float, refreshing: bool

@@ -308,3 +308,15 @@ describe("TimeSeriesChart", () => {
     expect(summary).toHaveTextContent(/3 further series not drawn/i);
   });
 });
+
+describe("Countdown under two days", () => {
+  it("says the hours left instead of rounding down to zero days", async () => {
+    const { Countdown } = await import("@/components/charts/visuals");
+    const now = new Date("2026-11-21T12:00:00Z");
+    const { getByTestId } = render(
+      <Countdown deadline="2026-11-21T17:30:00Z" label="RPO" now={now} windowDays={1} />,
+    );
+    expect(getByTestId("countdown")).toHaveTextContent("5h 30m left");
+    expect(getByTestId("countdown")).not.toHaveTextContent("0d left");
+  });
+});

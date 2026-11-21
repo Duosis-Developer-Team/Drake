@@ -9,7 +9,7 @@
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PageFrame } from "@/components/shell/AppShell";
 import { DataState } from "@/components/state/DataState";
@@ -37,6 +37,7 @@ import { LineChart, Spark, StackedChart, ZoneChart, type Band } from "./charts";
 import s from "./infrastructure.module.css";
 
 const POLL_MS = 60_000;
+const SLOW_HINT_MS = 4_000;
 const HUES = ["--h1", "--h2", "--h3", "--h4", "--h5", "--h6", "--h7"];
 type Measure = "cpu" | "memory";
 type Level = "" | "warn" | "crit";
@@ -134,22 +135,37 @@ export function InfrastructureScreen() {
   const [clusterId, setClusterId] = useState<string | null>(null);
   const [snap, setSnap] = useState<InfraSnapshot | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [clustersNonce, setClustersNonce] = useState(0);
+  // A cold first read builds the snapshot and can take most of a minute;
+  // after a few seconds of waiting the screen says so instead of only
+  // showing skeletons.
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     fetchClusters()
       .then((list) => {
         setClusters(list);
+        setError(null);
         setClusterId((current) => current ?? list.find((c) => c.metrics_configured)?.id ?? list[0]?.id ?? null);
       })
       .catch(setError);
-  }, []);
+  }, [clustersNonce]);
 
+  const inFlight = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     if (!clusterId) return;
+    // A newer read (or a cluster switch) supersedes the one in flight, so a
+    // late answer can never land under the wrong cluster.
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
     try {
-      setSnap(await fetchSnapshot(clusterId));
+      const next = await fetchSnapshot(clusterId, controller.signal);
+      if (controller.signal.aborted) return;
+      setSnap(next);
       setError(null);
     } catch (e) {
+      if (controller.signal.aborted) return;
       setError(e);
     }
   }, [clusterId]);
@@ -157,8 +173,21 @@ export function InfrastructureScreen() {
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      inFlight.current?.abort();
+    };
   }, [load]);
+
+  useEffect(() => {
+    setSlow(false);
+    if (snap !== null) return;
+    const timer = window.setTimeout(() => setSlow(true), SLOW_HINT_MS);
+    return () => window.clearTimeout(timer);
+  }, [snap, clusterId]);
+
+  // Retry what actually failed: the cluster list, or the snapshot.
+  const retry = () => (clusters === null ? setClustersNonce((n) => n + 1) : void load());
 
   return (
     <PageFrame>
@@ -179,7 +208,18 @@ export function InfrastructureScreen() {
         {clusters && clusters.length === 0 ? (
           <p className={s.notice}>{t("state.noClusters")}</p>
         ) : snap === null ? (
-          error ? <DataState kind="error" description={t("loadError")} onRetry={() => void load()} /> : <DataState kind="loading" />
+          error ? (
+            <DataState kind="error" description={t("loadError")} onRetry={retry} />
+          ) : (
+            <>
+              {slow ? (
+                <p className={s.notice} role="status">
+                  {t("building")}
+                </p>
+              ) : null}
+              <DataState kind="loading" />
+            </>
+          )
         ) : snap.state === "denied" || snap.state === "not_configured" || snap.state === "unavailable" ? (
           <>
             <h1 className={s.h1}><b>{snap.cluster.name}</b></h1>
@@ -195,6 +235,7 @@ export function InfrastructureScreen() {
 
 function Loaded({ snap }: { snap: InfraSnapshot }) {
   const t = useT("infrastructure");
+  const fmt = useFormat();
   const { n, pct } = useNum();
   const facts = (node: NodeSnapshot) => {
     const days =
@@ -210,6 +251,12 @@ function Loaded({ snap }: { snap: InfraSnapshot }) {
       <header className={s.head}>
         <h1 className={s.h1}>{t("title")}</h1>
         <p>{t("summary", { cluster: snap.cluster.name, machines: t("headline.machines", { count: snap.nodes.length }), pods: t("headline.pods", { count: Math.round(pods) }) })}</p>
+        {snap.age_seconds !== undefined ? (
+          <p className={s.age} data-testid="snapshot-age">
+            {t("age", { age: fmt.duration(snap.age_seconds, { compact: true }) })}
+            {snap.refreshing ? ` · ${t("refreshing")}` : ""}
+          </p>
+        ) : null}
       </header>
       {snap.state === "partial" ? <p className={s.partial}>{t("state.partial")}</p> : null}
       <Ledger snap={snap} facts={facts} n={n} pct={pct} />

@@ -113,8 +113,10 @@ export default function SloDetailPage() {
                         unit="ratio"
                         value={data.evaluation.compliance_ratio}
                         thresholds={{
+                          // One line only: the objective. Below it is a
+                          // breach; there is no second, invented band.
                           warn: data.evaluation.objective_ratio,
-                          critical: data.evaluation.objective_ratio * 0.99,
+                          critical: data.evaluation.objective_ratio,
                           direction: "below",
                         }}
                         caption={t("sloDetail.measured.objectiveCaption", {
@@ -126,13 +128,14 @@ export default function SloDetailPage() {
                         label={t("sloDetail.measured.budgetRemaining")}
                         unit="ratio"
                         value={
-                          data.evaluation.error_budget_total
-                            ? Math.max(
-                                0,
-                                (data.evaluation.error_budget_remaining ?? 0) /
-                                  data.evaluation.error_budget_total,
-                              )
-                            : null
+                          // `error_budget_remaining` is already the share of
+                          // the budget left (1 − consumed); `error_budget_total`
+                          // is a count of allowed bad events and must not
+                          // divide it. Overspent shows as an empty gauge plus
+                          // the "overspent" caption, never a negative arc.
+                          data.evaluation.error_budget_remaining === null
+                            ? null
+                            : Math.min(1, Math.max(0, data.evaluation.error_budget_remaining))
                         }
                         thresholds={{ warn: 0.25, critical: 0.05, direction: "below" }}
                         caption={
