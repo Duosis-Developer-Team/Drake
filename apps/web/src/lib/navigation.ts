@@ -18,6 +18,7 @@
  * for an authorization check.
  */
 import {
+  Bot,
   BellRing,
   Cpu,
   FolderKanban,
@@ -73,6 +74,14 @@ export const NAVIGATION: NavGroup[] = [
         icon: Layers,
         matchPrefix: "/service-health",
         anyPermission: ["environment.view"],
+      },
+      {
+        key: "agents",
+        label: "Agents",
+        href: "/agents",
+        icon: Bot,
+        matchPrefix: "/agents",
+        anyPermission: ["agent.view"],
       },
       {
         key: "projects",

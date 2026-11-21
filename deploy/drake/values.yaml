@@ -278,6 +278,13 @@ incidents:
   # Floor of 30 s is enforced by the API's own settings validation.
   runnerIntervalSeconds: 120
 
+agents:
+  # AI agents appear the first time telemetry shows them: a loop reads the
+  # GenAI spans in the trace store and keeps the inventory and hourly usage
+  # in Postgres. Read-only against the store; needs observability traces.
+  discoveryEnabled: false
+  clusterEndpoint: http://drake-otel-gateway.drake-otel.svc:4318
+
 slo:
   # Objectives (migration 0031): the evaluator judges every enabled
   # objective on a timer and opens an incident while its error budget burns
