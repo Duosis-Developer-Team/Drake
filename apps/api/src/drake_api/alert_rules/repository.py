@@ -24,11 +24,13 @@ from drake_api.alert_rules.evaluator import close_rule_incidents
 from drake_api.alert_rules.model import (
     ANOMALY_OPERATORS,
     BASELINE_DAYS,
+    LOG_SIGNALS,
     MAX_SENSITIVITY,
     MIN_SENSITIVITY,
     RATIO_SIGNALS,
     RULE_SIGNALS,
     STORED_SIGNALS,
+    TRACE_SIGNALS,
     RuleCondition,
     anomaly_threshold,
     band_of,
@@ -41,6 +43,7 @@ from drake_api.alert_rules.model import (
 from drake_api.alert_rules.telemetry import MAX_SERIES_BINDINGS, RuleFilter, TelemetrySampler
 from drake_api.catalog.authz import visible_scope_ids
 from drake_api.rbac.service import Principal
+from drake_api.service_health.bindings import get_bindings
 
 VIEW_PERMISSION = "alert.view"
 MANAGE_PERMISSION = "alert_rule.manage"
@@ -556,6 +559,36 @@ def _series(
     ]
 
 
+# A rule on logs or traces reads what those permissions guard: its series
+# is a count of log lines matching chosen text, or of one endpoint's slow
+# requests. `alert.view` alone let a viewer replay any text against any
+# service's logs, five minutes at a time. Bindings the caller may not read
+# with the signal's own permission are left out, exactly as if absent.
+SIGNAL_PERMISSION: dict[str, str] = {
+    **dict.fromkeys(LOG_SIGNALS, "logs.view"),
+    **dict.fromkeys(TRACE_SIGNALS, "traces.view"),
+}
+
+
+async def _readable(
+    connection: AsyncConnection,
+    principal: Principal,
+    bindings: list[dict[str, Any]],
+    signal: str,
+) -> list[dict[str, Any]]:
+    permission = SIGNAL_PERMISSION.get(signal)
+    if permission is None or not bindings:
+        return bindings
+    allowed = await get_bindings(
+        connection,
+        principal,
+        [uuid.UUID(b["binding_id"]) for b in bindings],
+        permission=permission,
+    )
+    ids = {str(b["id"]) for b in allowed}
+    return [b for b in bindings if b["binding_id"] in ids]
+
+
 async def rule_history(
     connection: AsyncConnection,
     principal: Principal,
@@ -571,6 +604,7 @@ async def rule_history(
         uuid.UUID(rule["environment_id"]) if rule["environment_id"] else None,
         uuid.UUID(rule["service_id"]) if rule["service_id"] else None,
     )
+    bindings = await _readable(connection, principal, bindings, rule["signal"])
     samples, parts, readable = await _rule_series(connection, rule, bindings, now, sampler, redis)
 
     def thresholds_for(binding_id: str) -> list[float | None] | None:
@@ -614,6 +648,7 @@ async def preview(
     bindings = await _covered_bindings(
         connection, values["project_id"], values["environment_id"], values["service_id"]
     )
+    bindings = await _readable(connection, principal, bindings, values["signal"])
     samples, parts, readable = await _rule_series(connection, values, bindings, now, sampler, redis)
     anomaly = values["operator"] in ANOMALY_OPERATORS
 
@@ -708,6 +743,10 @@ async def routes(
     bindings = await _covered_bindings(
         connection, target["project_id"], target["environment_id"], target["service_id"]
     )
+    # Endpoint names are span names: trace data, behind traces.view.
+    bindings = await _readable(connection, principal, bindings, "slow_requests")
+    if not bindings:
+        return []
     return await sampler.routes(connection, [uuid.UUID(b["binding_id"]) for b in bindings], now)
 
 

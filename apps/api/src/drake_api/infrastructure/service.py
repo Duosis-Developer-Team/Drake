@@ -162,6 +162,24 @@ async def _authorized_cluster(
     return row
 
 
+async def _may_query(engine: AsyncEngine, principal: Principal, scope_id: uuid.UUID) -> bool:
+    async with engine.connect() as connection:
+        return scope_id in await visible_scope_ids(connection, principal, "telemetry.query")
+
+
+def _denied(cluster: Any) -> dict[str, Any]:
+    return {
+        "cluster": {"id": str(cluster[0]), "ref": cluster[1], "name": cluster[2] or cluster[1]},
+        "state": "denied",
+        "built_at": datetime.now(UTC).isoformat(),
+        "nodes": [],
+        "namespaces": [],
+        "times": [],
+        "step_seconds": 0,
+        "missing": [],
+    }
+
+
 async def _query(
     broker: TelemetryBroker,
     principal: Principal,
@@ -470,9 +488,14 @@ class InfrastructureService:
 
     async def snapshot(self, principal: Principal, cluster_id: uuid.UUID) -> dict[str, Any]:
         cluster = await _authorized_cluster(self._engine, principal, cluster_id)
-        # The cluster grant is checked above for every caller; the stored
-        # snapshot holds nothing a cluster viewer may not see except project
-        # names, which are re-filtered per caller below.
+        # The cluster grant is checked above for every caller. The stored
+        # snapshot is telemetry, so a cached read asks what a live one would
+        # (ADR-0032): telemetry.query on the cluster. Without it the caller
+        # gets the same `denied` a cold build would have given them — not
+        # someone else's measurements. Project names are re-filtered per
+        # caller below.
+        if not await _may_query(self._engine, principal, cluster[3]):
+            return _denied(cluster)
         cached = await self._read(cluster_id)
         if cached is not None:
             age = time.time() - float(cached.get("stored_at", 0))

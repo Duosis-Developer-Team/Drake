@@ -667,3 +667,65 @@ async def test_disabling_or_deleting_a_firing_rule_closes_its_incident(
             )
         ).one()
     assert tuple(state) == ("ok", None)
+
+
+async def test_alert_view_alone_cannot_replay_logs_or_traces(engine: AsyncEngine) -> None:
+    """A log or trace rule's series is log and trace data.
+
+    With `alert.view` alone a viewer could preview `matching_logs` for any
+    text and read, five minutes at a time, how often it appeared in any
+    service's logs. The series now needs the signal's own permission;
+    without it the service is simply not covered.
+    """
+    from test_catalog_api_integration import grant, login_all, make_role
+
+    harness = harness_with_users()
+    world = await make_world(engine)
+    await login_all(harness, ["user-nobody"])
+    await make_role(
+        harness, engine, "Alert viewer", ["alert.view", "project.view", "environment.view"]
+    )
+    await grant(engine, harness, "user-nobody", "Alert viewer", "organization", "root")
+    log_rule = await make_rule(engine, world, signal="error_logs", threshold=0)
+    metric_rule = await make_rule(engine, world)
+    draft = {
+        "project_id": str(world["project_id"]),
+        "environment_id": None,
+        "service_id": None,
+        "signal": "matching_logs",
+        "log_contains": "password",
+        "operator": ">",
+        "threshold": 0,
+        "for_seconds": 0,
+        "severity": "warning",
+    }
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-owner")
+        owner = await client.post(
+            "/v1/alert-rules/preview", json=draft, headers=await _csrf(client)
+        )
+        assert owner.status_code == 200, owner.text
+        assert owner.json()["bindings"] == 1
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-nobody")
+        viewer = await client.post(
+            "/v1/alert-rules/preview", json=draft, headers=await _csrf(client)
+        )
+        assert viewer.status_code == 200, viewer.text
+        assert viewer.json()["bindings"] == 0
+        assert viewer.json()["episodes"] == []
+
+        history = await client.get(f"/v1/alert-rules/{log_rule}/history")
+        assert history.status_code == 200
+        assert history.json()["bindings"] == []
+        # A metric rule's history is what alert.view is for.
+        metric = await client.get(f"/v1/alert-rules/{metric_rule}/history")
+        assert len(metric.json()["bindings"]) == 1
+
+        routes = await client.get(
+            "/v1/alert-rules/routes", params={"project_id": str(world["project_id"])}
+        )
+        assert routes.status_code == 200
+        assert routes.json()["routes"] == []
