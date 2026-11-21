@@ -463,6 +463,17 @@ class Settings(BaseSettings):
     silence_max_attempts: int = 5
     # SLO evaluation runs through the Sprint 5 broker, so it is a query
     # load against someone's Prometheus. Off unless deliberately enabled.
+    # --- Agent Visibility --------------------------------------------
+    # Reads GenAI spans from the trace store and keeps the agent inventory
+    # and its hourly usage. Read-only against the store; off by default.
+    agent_discovery_enabled: bool = False
+    agent_discovery_interval_seconds: float = 120.0
+    # Where an agent-running system sends traces, shown on the Agents screen
+    # so connecting one is a copy and paste. The external door exists only
+    # when the deployment opens it (deploy/drake: agentIngest).
+    agent_cluster_endpoint: str = "http://drake-otel-gateway.drake-otel.svc:4318"
+    agent_external_ingest: bool = False
+
     slo_evaluator_enabled: bool = False
     slo_evaluator_interval_seconds: float = 300.0
     slo_evaluator_batch_size: int = 25
