@@ -67,6 +67,7 @@ _GENERIC_NAMES = frozenset(
         "default",
     }
 )
+GENERIC_NAMES = _GENERIC_NAMES
 _UUIDISH = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$", re.I)
 _HEXISH = re.compile(r"^[0-9a-f]{16,}$", re.I)
 
@@ -92,26 +93,35 @@ def _first(*pairs: str, last: str) -> str:
     return f"multiIf({arms}, {last})"
 
 
-_IDENTITY = f"""
-    t.ServiceName AS svc,
-    {_r("k8s.cluster.name")} AS cluster,
-    {_r("k8s.namespace.name")} AS ns,
-    {
-    _first(
-        _r("k8s.deployment.name"), _r("k8s.statefulset.name"), _r("k8s.daemonset.name"), last="''"
-    )
-} AS wk,
-    multiIf({_s("gen_ai.agent.id")} != '', {_s("gen_ai.agent.id")},
+# Per-span identity, as expressions: discovery groups by them, the run
+# views filter by them — one definition, so a run belongs to exactly the
+# agent its rollups were counted for.
+SVC = "t.ServiceName"
+CLUSTER = _r("k8s.cluster.name")
+NAMESPACE = _r("k8s.namespace.name")
+WORKLOAD = _first(
+    _r("k8s.deployment.name"), _r("k8s.statefulset.name"), _r("k8s.daemonset.name"), last="''"
+)
+AGENT_ID = f"""multiIf({_s("gen_ai.agent.id")} != '', {_s("gen_ai.agent.id")},
             {_s("gen_ai.agent.name")} != '', '',
             {_r("gen_ai.main_agent.id")} != '', {_r("gen_ai.main_agent.id")},
-            a.trace_agent_id) AS agent_id,
-    {
-    _first(_s("gen_ai.agent.name"), _r("gen_ai.main_agent.name"), last="a.trace_agent_name")
-} AS agent_name,
-    {_r("tracesis.ingest")} AS ingest,
+            a.trace_agent_id)"""
+AGENT_NAME = _first(
+    _s("gen_ai.agent.name"), _r("gen_ai.main_agent.name"), last="a.trace_agent_name"
+)
+INGEST = _r("tracesis.ingest")
+
+_IDENTITY = f"""
+    {SVC} AS svc,
+    {CLUSTER} AS cluster,
+    {NAMESPACE} AS ns,
+    {WORKLOAD} AS wk,
+    {AGENT_ID} AS agent_id,
+    {AGENT_NAME} AS agent_name,
+    {INGEST} AS ingest,
     max(t.ScopeName = '') AS ebpf"""
 
-_AGENT_OF_TRACE = """
+AGENT_OF_TRACE = """
     SELECT TraceId,
            argMin(SpanAttributes['gen_ai.agent.id'], Timestamp) AS trace_agent_id,
            argMin(SpanAttributes['gen_ai.agent.name'], Timestamp) AS trace_agent_name
@@ -120,25 +130,25 @@ _AGENT_OF_TRACE = """
       AND SpanAttributes['gen_ai.operation.name'] = 'invoke_agent'
     GROUP BY TraceId"""
 
-_GENAI = """(t.SpanAttributes['gen_ai.operation.name'] != ''
+GENAI = """(t.SpanAttributes['gen_ai.operation.name'] != ''
          OR t.SpanAttributes['gen_ai.provider.name'] != ''
          OR t.SpanAttributes['gen_ai.system'] != ''
          OR t.SpanAttributes['gen_ai.request.model'] != '')"""
 
-_OP = "t.SpanAttributes['gen_ai.operation.name']"
-_PROVIDER = (
+OP = "t.SpanAttributes['gen_ai.operation.name']"
+PROVIDER = (
     "if(t.SpanAttributes['gen_ai.provider.name'] != '', t.SpanAttributes['gen_ai.provider.name'], "
     "t.SpanAttributes['gen_ai.system'])"
 )
 # A span with no operation name but a provider or a model is a model call
 # (eBPF sees calls, not operations; some SDKs set only the model).
-_INFERENCE = (
-    f"({_OP} IN ('chat', 'text_completion', 'generate_content', 'embeddings') "
-    f"OR ({_OP} = '' AND ({_PROVIDER} != '' OR t.SpanAttributes['gen_ai.request.model'] != '')))"
+INFERENCE = (
+    f"({OP} IN ('chat', 'text_completion', 'generate_content', 'embeddings') "
+    f"OR ({OP} = '' AND ({PROVIDER} != '' OR t.SpanAttributes['gen_ai.request.model'] != '')))"
 )
 
 
-def _tokens(key: str) -> str:
+def tokens(key: str) -> str:
     return f"toUInt64OrZero(t.SpanAttributes['{key}'])"
 
 
@@ -146,28 +156,28 @@ _ROLLUPS = (
     "SELECT"
     + _IDENTITY
     + f""",
-    {_PROVIDER} AS provider,
+    {PROVIDER} AS provider,
     if(t.SpanAttributes['gen_ai.response.model'] != '', t.SpanAttributes['gen_ai.response.model'],
        t.SpanAttributes['gen_ai.request.model']) AS model,
     toUnixTimestamp(toStartOfHour(t.Timestamp)) AS hour,
-    countIf({_OP} = 'invoke_agent') AS invocations,
-    countIf({_INFERENCE}) AS inference_calls,
-    countIf({_OP} = 'execute_tool') AS tool_calls,
+    countIf({OP} = 'invoke_agent') AS invocations,
+    countIf({INFERENCE}) AS inference_calls,
+    countIf({OP} = 'execute_tool') AS tool_calls,
     countIf(t.StatusCode = 'Error') AS errors,
-    sumIf({_tokens("gen_ai.usage.input_tokens")}, {_INFERENCE}) AS in_inf,
-    sumIf({_tokens("gen_ai.usage.output_tokens")}, {_INFERENCE}) AS out_inf,
-    sumIf({_tokens("gen_ai.usage.input_tokens")}, {_OP} = 'invoke_agent') AS in_agent,
-    sumIf({_tokens("gen_ai.usage.output_tokens")}, {_OP} = 'invoke_agent') AS out_agent,
-    sumIf({_tokens("gen_ai.usage.cache_read.input_tokens")}, {_INFERENCE}) AS cache_read,
-    sumIf(greatest({_tokens("gen_ai.usage.cache_write.input_tokens")},
-                   {_tokens("gen_ai.usage.cache_creation.input_tokens")}),
-          {_INFERENCE}) AS cache_write,
-    sumIf({_tokens("gen_ai.usage.reasoning.output_tokens")}, {_INFERENCE}) AS reasoning,
-    toUInt64(sumIf(t.Duration, {_OP} = 'invoke_agent') / 1000000) AS duration_ms
+    sumIf({tokens("gen_ai.usage.input_tokens")}, {INFERENCE}) AS in_inf,
+    sumIf({tokens("gen_ai.usage.output_tokens")}, {INFERENCE}) AS out_inf,
+    sumIf({tokens("gen_ai.usage.input_tokens")}, {OP} = 'invoke_agent') AS in_agent,
+    sumIf({tokens("gen_ai.usage.output_tokens")}, {OP} = 'invoke_agent') AS out_agent,
+    sumIf({tokens("gen_ai.usage.cache_read.input_tokens")}, {INFERENCE}) AS cache_read,
+    sumIf(greatest({tokens("gen_ai.usage.cache_write.input_tokens")},
+                   {tokens("gen_ai.usage.cache_creation.input_tokens")}),
+          {INFERENCE}) AS cache_write,
+    sumIf({tokens("gen_ai.usage.reasoning.output_tokens")}, {INFERENCE}) AS reasoning,
+    toUInt64(sumIf(t.Duration, {OP} = 'invoke_agent') / 1000000) AS duration_ms
 FROM __DATABASE__.otel_traces AS t
-LEFT JOIN ({_AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
+LEFT JOIN ({AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
 WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
-  AND {_GENAI}
+  AND {GENAI}
 GROUP BY svc, cluster, ns, wk, agent_id, agent_name, ingest, provider, model, hour
 LIMIT {{max_rows:UInt16}}"""
 )
@@ -182,9 +192,9 @@ _TOOLS = (
     countIf(t.StatusCode = 'Error') AS errors,
     toUInt64(sum(t.Duration) / 1000000) AS duration_ms
 FROM __DATABASE__.otel_traces AS t
-LEFT JOIN ({_AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
+LEFT JOIN ({AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
 WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
-  AND {_OP} = 'execute_tool' AND t.SpanAttributes['gen_ai.tool.name'] != ''
+  AND {OP} = 'execute_tool' AND t.SpanAttributes['gen_ai.tool.name'] != ''
 GROUP BY svc, cluster, ns, wk, agent_id, agent_name, ingest, tool, hour
 LIMIT {{max_rows:UInt16}}"""
 )

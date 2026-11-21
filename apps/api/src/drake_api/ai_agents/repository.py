@@ -387,3 +387,61 @@ async def get_agent(
     ]
     agent["window"] = window if window in WINDOWS else "7d"
     return agent
+
+
+async def agent_for_runs(
+    connection: AsyncConnection, principal: Principal, agent_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """What the run views need to find an agent's spans — if the caller may
+    see the agent at all."""
+    projects, unbound = await _visibility(connection, principal)
+    row = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT g.id, g.display_name, g.confidence, g.identity_key, g.agent_external_id,
+                       g.agent_name, g.service_name, g.cluster_ref, g.namespace, g.workload
+                FROM agents g
+                WHERE g.id = :id AND {_clause()}
+                """  # noqa: S608 - fixed fragments
+            ),
+            {"id": agent_id, "projects": projects, "unbound": unbound},
+        )
+    ).first()
+    if row is None:
+        return None
+    keys = (
+        "id",
+        "display_name",
+        "confidence",
+        "identity_key",
+        "agent_external_id",
+        "agent_name",
+        "service_name",
+        "cluster_ref",
+        "namespace",
+        "workload",
+    )
+    agent = dict(zip(keys, row, strict=True))
+    agent["id"] = str(agent["id"])
+    return agent
+
+
+async def visible_agents_by_key(
+    connection: AsyncConnection, principal: Principal, keys: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Identity key → {id, display_name} for the agents among `keys` this
+    caller may see; the others stay anonymous in a run."""
+    if not keys:
+        return {}
+    projects, unbound = await _visibility(connection, principal)
+    rows = (
+        await connection.execute(
+            text(
+                f"SELECT g.identity_key, g.id, g.display_name FROM agents g "  # noqa: S608
+                f"WHERE g.identity_key = ANY(:keys) AND {_clause()}"
+            ),
+            {"keys": keys, "projects": projects, "unbound": unbound},
+        )
+    ).all()
+    return {str(r[0]): {"id": str(r[1]), "display_name": r[2]} for r in rows}
