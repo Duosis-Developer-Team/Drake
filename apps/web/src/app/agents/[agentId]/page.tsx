@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 
 import { ConfidenceBadge } from "@/components/agents/AgentCard";
 import { AgentConnections } from "@/components/agents/AgentMap";
+import { GuardrailsPanel } from "@/components/agents/GuardrailsPanel";
 import { RunsPanel } from "@/components/agents/RunsPanel";
 import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
 import {
@@ -290,6 +291,8 @@ export default function AgentPage() {
             }))}
           />
         </Panel>
+
+        <GuardrailsPanel agentId={a.id} />
 
         <RunsPanel agentId={a.id} span={span} />
 

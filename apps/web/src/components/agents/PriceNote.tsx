@@ -20,7 +20,9 @@ export function PriceNote() {
   const [status, setStatus] = useState<PriceStatus | null>(null);
   useEffect(() => {
     fetchPrices()
-      .then((body) => setStatus(body && Array.isArray(body.unpriced) ? body : null))
+      .then((body) =>
+        setStatus(body && Array.isArray(body.unpriced) ? body : null),
+      )
       .catch(() => setStatus(null));
   }, []);
   if (!status) return null;

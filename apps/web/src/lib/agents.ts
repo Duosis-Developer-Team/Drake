@@ -5,7 +5,7 @@
  * nobody registered it. Counts and names only: prompts, answers and tool
  * arguments never reach Tracesis.
  */
-import { apiGet } from "@/lib/api";
+import { apiGet, apiMutate } from "@/lib/api";
 
 export type Confidence = "stable" | "named" | "service" | "observed";
 export type Window = "24h" | "7d";
@@ -69,6 +69,7 @@ export interface Agent {
   totals: AgentTotals;
   cost_usd: number;
   unpriced_tokens: number;
+  guardrails_firing?: number;
   providers: { provider: string; calls: number }[];
   models: AgentModel[];
   series: AgentPoint[];
@@ -114,6 +115,7 @@ export interface AgentInventory {
     }[];
     cost_usd: number;
     unpriced_tokens: number;
+    guardrails_firing?: number;
   };
 }
 
@@ -676,3 +678,78 @@ export function usd(value: number | null | undefined, locale: string): string {
     maximumFractionDigits: 1,
   }).format(value);
 }
+
+// --- guardrails (phase 5) ----------------------------------------------------
+
+export type GuardKind =
+  "failure_ratio" | "avg_run_seconds" | "cost_day" | "silence_hours";
+export const GUARD_KINDS: GuardKind[] = [
+  "failure_ratio",
+  "avg_run_seconds",
+  "cost_day",
+  "silence_hours",
+];
+export type GuardState = "ok" | "firing" | "no_data" | "pending";
+
+export interface Guardrail {
+  kind: GuardKind;
+  set: boolean;
+  threshold: number | null;
+  severity: "warning" | "critical" | null;
+  enabled: boolean;
+  version: number | null;
+  state: GuardState | null;
+  value: number | null;
+  since: string | null;
+  evaluated_at: string | null;
+  incident_id: string | null;
+}
+
+export interface Guardrails {
+  agent_id: string;
+  can_manage: boolean;
+  pages: boolean;
+  min_calls: number;
+  evaluating: boolean;
+  items: Guardrail[];
+}
+
+export const fetchGuardrails = (id: string) =>
+  apiGet<Guardrails>(`/v1/agents/${encodeURIComponent(id)}/guardrails`);
+
+export const setGuardrail = (
+  csrfToken: string,
+  id: string,
+  kind: GuardKind,
+  body: {
+    threshold: number;
+    severity: "warning" | "critical";
+    enabled: boolean;
+  },
+) =>
+  apiMutate<Guardrails>(
+    `/v1/agents/${encodeURIComponent(id)}/guardrails/${kind}`,
+    {
+      csrfToken,
+      body: { ...body, threshold: String(body.threshold) },
+    },
+  );
+
+export const removeGuardrail = (
+  csrfToken: string,
+  id: string,
+  kind: GuardKind,
+) =>
+  apiMutate<Guardrails>(
+    `/v1/agents/${encodeURIComponent(id)}/guardrails/${kind}`,
+    {
+      csrfToken,
+      method: "DELETE",
+    },
+  );
+
+/** A guardrail's threshold as people type it: a percentage for the failure rate. */
+export const toInput = (kind: GuardKind, threshold: number) =>
+  kind === "failure_ratio" ? Math.round(threshold * 10000) / 100 : threshold;
+export const fromInput = (kind: GuardKind, value: number) =>
+  kind === "failure_ratio" ? value / 100 : value;

@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from drake_api.agents.router_inventory import router as cluster_inventory_router
 from drake_api.agents.router_tokens import router as agent_tokens_router
 from drake_api.ai_agents.discovery import AgentDiscovery
+from drake_api.ai_agents.guardrails import GuardrailEvaluator
 from drake_api.ai_agents.pricing import PriceKeeper
 from drake_api.ai_agents.router import router as agents_router
 from drake_api.alert_rules.router import router as alert_rules_router
@@ -109,6 +110,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     agent_prices = getattr(app.state, "agent_prices", None)
     if agent_prices is not None:
         await agent_prices.start()
+    agent_guardrails = getattr(app.state, "agent_guardrails", None)
+    if agent_guardrails is not None:
+        await agent_guardrails.start()
     protection_evaluator = getattr(app.state, "protection_evaluator", None)
     if protection_evaluator is not None:
         await protection_evaluator.start()
@@ -129,6 +133,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await agent_discovery.stop()
         if agent_prices is not None:
             await agent_prices.stop()
+        if agent_guardrails is not None:
+            await agent_guardrails.stop()
         if sli_writer is not None:
             await sli_writer.stop()
         if protection_evaluator is not None:
@@ -335,6 +341,15 @@ def create_app(
             refresh=timedelta(hours=settings.agent_prices_refresh_hours),
         )
         if settings.agent_prices_enabled and app.state.telemetry_redis is not None
+        else None
+    )
+    app.state.agent_guardrails = (
+        GuardrailEvaluator(
+            get_engine(settings),
+            app.state.telemetry_redis,
+            interval_seconds=settings.agent_guardrails_interval_seconds,
+        )
+        if settings.agent_guardrails_enabled and app.state.telemetry_redis is not None
         else None
     )
     # Backup posture is judged on a timer too, so a reporter that falls

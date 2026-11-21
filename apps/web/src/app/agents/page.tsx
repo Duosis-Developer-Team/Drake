@@ -71,6 +71,7 @@ export default function AgentsPage() {
   const [query, setQuery] = useState("");
   const [confidence, setConfidence] = useState<Confidence | "">("");
   const [outside, setOutside] = useState(false);
+  const [firing, setFiring] = useState(false);
   const hourLabel = useHourLabel(span);
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export default function AgentsPage() {
       (a) =>
         (!confidence || a.confidence === confidence) &&
         (!outside || a.project === null) &&
+        (!firing || (a.guardrails_firing ?? 0) > 0) &&
         (!q ||
           [
             a.display_name,
@@ -117,7 +119,7 @@ export default function AgentsPage() {
             .filter(Boolean)
             .some((v) => String(v).toLowerCase().includes(q))),
     );
-  }, [data, query, confidence, outside]);
+  }, [data, query, confidence, outside, firing]);
 
   const summary = data?.summary;
   const calls = summary
@@ -396,6 +398,22 @@ export default function AgentsPage() {
                   >
                     {t("filter.outside")} · {summary.outside_catalog}
                   </button>
+                  {summary.guardrails_firing ? (
+                    <button
+                      type="button"
+                      aria-pressed={firing}
+                      onClick={() => setFiring(!firing)}
+                      data-testid="agents-filter-firing"
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-caption font-medium transition-colors ${
+                        firing
+                          ? "border-[var(--status-critical)] bg-critical-soft text-critical"
+                          : "border-[var(--status-critical)]/40 text-critical hover:bg-critical-soft"
+                      }`}
+                    >
+                      <ShieldAlert aria-hidden className="h-3.5 w-3.5" />
+                      {t("guard.filter")} · {summary.guardrails_firing}
+                    </button>
+                  ) : null}
                 </div>
               </div>
 

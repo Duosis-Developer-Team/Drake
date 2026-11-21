@@ -7,7 +7,7 @@ never checks a role NAME — authority always flows through role_permissions.
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-CATALOG_VERSION = 10
+CATALOG_VERSION = 11
 
 # Atomic permissions (from the product authority). ``auth.session`` powers
 # nothing by itself — every authenticated user can read their own /v1/me.
@@ -30,6 +30,8 @@ PERMISSIONS: dict[str, str] = {
     "slo.view": "View service SLOs and error budgets",
     "slo.manage": "Define, change and remove service objectives",
     "agent.view": "View AI agents, their activity, models, tools and usage",
+    # A guardrail decides when an agent pages someone: granted, not inherited.
+    "agent.manage": "Set and change guardrails on AI agents",
     "incident.ack": "Acknowledge incidents",
     "incident.assign": "Assign incidents",
     "alert.silence": "Create alert silences",

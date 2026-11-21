@@ -298,6 +298,10 @@ agents:
   # raw.githubusercontent.com) once a day. Needs outbound HTTPS — declare it
   # in networkPolicy.apiExternalEgress. Off: costs show as "no price".
   pricesEnabled: false
+  # Guardrails: measure agents against the lines set on them every few
+  # minutes; critical ones open incidents. Off: guardrails can be set but
+  # are not judged.
+  guardrailsEnabled: false
 
 slo:
   # Objectives (migration 0031): the evaluator judges every enabled
