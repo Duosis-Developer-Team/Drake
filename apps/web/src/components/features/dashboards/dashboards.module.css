@@ -12,7 +12,8 @@
   --ink-2: var(--text-secondary);
   --ink-3: var(--text-muted);
   --blue: var(--brand-accent);
-  --ok: var(--brand-accent);
+  /* Status, never brand: "healthy" is the success tone (brand ≠ status). */
+  --ok: var(--status-success);
   --amber: var(--status-warning);
   --red: var(--status-critical);
   --teal: var(--series-2);
@@ -37,7 +38,8 @@
 .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin: 4px 0 20px; }
 .back { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-3); }
 .back:hover { color: var(--ink); }
-.title { margin: 6px 0 0; font-size: 30px; line-height: 1.1; font-weight: 650; letter-spacing: -.03em; }
+.title { margin: 6px 0 0; font-size: 1.625rem; line-height: 2.25rem; font-weight: 700; letter-spacing: -.025em; }
+.headMain { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .sub { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-3); }
 .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pills { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--card-2); border: 1px solid var(--line); }
@@ -54,7 +56,7 @@
 @media (max-width: 1200px) { .s { grid-column: span 6; } .m { grid-column: span 12; } }
 @media (max-width: 760px) { .s, .m, .l { grid-column: span 12; } }
 
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; min-width: 0; animation: rise .6s cubic-bezier(.2, .8, .2, 1) both; display: flex; flex-direction: column; position: relative; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-panel); min-width: 0; animation: rise .6s cubic-bezier(.2, .8, .2, 1) both; display: flex; flex-direction: column; position: relative; }
 .card > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 22px 12px; }
 .card h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 .card h2 + p { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-3); }
@@ -65,23 +67,25 @@
 .editbar button { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink-2); display: grid; place-items: center; cursor: pointer; font-size: 12px; font-weight: 600; }
 .editbar button[aria-pressed="true"] { background: var(--ink); color: var(--card); border-color: var(--ink); }
 .editbar button:disabled { opacity: .35; cursor: default; }
-.banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 18px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--card); position: sticky; top: 8px; z-index: 10; }
+.banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 18px; border-radius: var(--radius-panel); border: 1px solid var(--line-2); background: var(--card); position: sticky; top: 8px; z-index: 10; }
 .banner b { font-size: 13.5px; }
 .banner span { font-size: 12.5px; color: var(--ink-3); flex: 1; }
 .banner input { height: 32px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card); color: var(--ink); padding: 0 10px; font-size: 13px; min-width: 220px; }
 .hiddenList { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 18px; }
 .hiddenList button { border: 1px dashed var(--line-2); background: none; color: var(--ink-2); border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
 .sec { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin: 14px 2px -6px; }
-.sec h3 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.02em; }
+.sec h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
 .sec span { font-size: 13px; color: var(--ink-3); }
 
 /* ---------- index ---------- */
 .list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-.tile { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; border-radius: 18px; border: 1px solid var(--line); background: var(--card); transition: border-color .15s, transform .15s; animation: rise .5s ease both; }
-.tile:hover { border-color: var(--line-2); transform: translateY(-2px); }
-.tile b { font-size: 15px; }
-.tile span { font-size: 12.5px; color: var(--ink-3); }
-.tile em { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--blue); }
+.tile { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; padding: 16px 18px; border-radius: var(--radius-panel); border: 1px solid var(--line); background: var(--card); transition: border-color .15s, background-color .15s; animation: rise .5s ease both; }
+.tile:hover { border-color: var(--line-2); background: var(--card-2); }
+.tile > .tileLogo { grid-column: 1; grid-row: 1 / span 2; }
+.tile > b { font-size: 15px; font-weight: 600; letter-spacing: -.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile > span:not(.tileLogo) { grid-column: 2; font-size: 12.5px; color: var(--ink-3); }
+.tile > b { grid-column: 2; }
+.tile > em { grid-column: 3; grid-row: 1 / span 2; font-style: normal; font-size: 11px; font-weight: 600; color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
 
 /* ---------- overview ---------- */
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
@@ -202,7 +206,7 @@
 .fValue small { font-size: 11.5px; color: var(--ink-3); }
 .fChart svg { display: block; overflow: visible; width: 100%; }
 .fChart .ax { font-size: 10.5px; fill: var(--ink-3); } .fChart .axb { font-size: 11.5px; font-weight: 600; fill: var(--ink-2); }
-.evidence { margin: 2px 0 10px; padding: 18px 22px; border-radius: 14px; background: var(--card-2); animation: rise .35s ease both; }
+.evidence { margin: 2px 0 10px; padding: 18px 22px; border-radius: var(--radius-panel); background: var(--card-2); animation: rise .35s ease both; }
 .calm { padding: 18px 14px; font-size: 13.5px; color: var(--ink-2); }
 .skipped { padding: 4px 14px 14px; font-size: 12px; color: var(--ink-3); }
 
@@ -263,7 +267,7 @@
 .capFoot i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .pods { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .pods > div { display: flex; flex-wrap: wrap; gap: 4px; }
-.pods path { fill: color-mix(in srgb, var(--ok) 80%, transparent); }
+.pods path { fill: color-mix(in srgb, var(--blue) 80%, transparent); }
 .pods svg { animation: pop .4s cubic-bezier(.3, 1.6, .5, 1) both; }
 .pods > span { font-size: 12px; color: var(--ink-3); } .pods b { color: var(--ink); font-size: 14px; }
 
@@ -320,7 +324,7 @@
 .dHead h2 { margin: 4px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
 .dHead h2 i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
 .dKind { font-size: 12px; color: var(--ink-3); }
-.dKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 14px; }
+.dKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-panel); }
 .dKpis div { padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; }
 .dKpis div + div { border-left: 1px solid var(--line); }
 .dKpis span { font-size: 11.5px; color: var(--ink-3); }
@@ -341,7 +345,7 @@
 .dRow b, .dRow em { text-align: right; font-style: normal; font-variant-numeric: tabular-nums; }
 .dRow em { color: var(--ink-3); }
 .dTrack { height: 8px; border-radius: 4px; background: var(--card-2); overflow: hidden; }
-.dTrack em { display: block; height: 100%; border-radius: 4px; background: var(--ok); }
+.dTrack em { display: block; height: 100%; border-radius: 4px; background: var(--blue); }
 .dTrack em.c4 { background: var(--violet); } .dTrack em.bad5 { background: var(--red); }
 .dTable { display: flex; flex-direction: column; font-size: 12.5px; }
 .dTh, .dTr { display: grid; grid-template-columns: minmax(0, 1fr) 64px 60px 60px 60px 44px; gap: 8px; align-items: center; padding: 7px 0; }

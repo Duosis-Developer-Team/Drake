@@ -133,12 +133,12 @@
 }
 .who h2 {
   margin: 0;
-  font: 500 23px/1 var(--font-sans);
-  letter-spacing: -0.03em;
+  font: 600 18px/1.2 var(--font-sans);
+  letter-spacing: -0.02em;
 }
 .who p {
-  margin: 8px 0 0;
-  font: 400 11.5px/1.6 var(--font-mono);
+  margin: 6px 0 0;
+  font: 400 12.5px/1.55 var(--font-sans);
   color: var(--ink-3);
 }
 .cell {
@@ -296,12 +296,12 @@
 
 /* who uses it */
 .occ {
-  margin-top: 64px;
+  margin-top: 44px;
 }
 .occ h2 {
   margin: 0 0 14px;
-  font: 300 30px/1.15 var(--font-sans);
-  letter-spacing: -0.035em;
+  font: 600 20px/1.2 var(--font-sans);
+  letter-spacing: -0.02em;
 }
 .occ h2 b {
   font-weight: 600;

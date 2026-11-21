@@ -6,7 +6,7 @@ import { defineMessages } from "../define";
 
 export const infrastructure = defineMessages({
   en: {
-    title: "Infrastructure",
+    title: "Resource usage",
     summary: "{cluster} · {machines} · {pods}",
     refresh: "refreshed every minute",
     updated: "updated {age}",
@@ -196,7 +196,7 @@ export const infrastructure = defineMessages({
     },
   },
   tr: {
-    title: "Altyapı",
+    title: "Kaynak kullanımı",
     summary: "{cluster} · {machines} · {pods}",
     refresh: "her dakika yenilenir",
     updated: "{age} güncellendi",

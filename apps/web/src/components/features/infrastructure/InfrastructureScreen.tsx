@@ -11,7 +11,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { PageFrame } from "@/components/shell/AppShell";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { DataState } from "@/components/state/DataState";
 import { useFormat, useT } from "@/lib/i18n";
 import {
@@ -116,6 +117,8 @@ function envTone(e: EnvRow): Level {
 interface Group {
   key: string;
   name: string;
+  /** The catalog project this group is, when it is one: for its logo. */
+  projectId: string | null;
   envs: EnvRow[];
   cpu: number;
   memory: number;
@@ -131,6 +134,7 @@ interface Group {
 /* ---------- the screen ---------- */
 export function InfrastructureScreen() {
   const t = useT("infrastructure");
+  const fmt = useFormat();
   const [clusters, setClusters] = useState<InfraCluster[] | null>(null);
   const [clusterId, setClusterId] = useState<string | null>(null);
   const [snap, setSnap] = useState<InfraSnapshot | null>(null);
@@ -192,19 +196,41 @@ export function InfrastructureScreen() {
   return (
     <PageFrame>
       <div className={s.root}>
-        <div className={s.eyebrow}>
-          <span className={s.live}>
-            <i />
-            {t("refresh")}
-          </span>
-          {clusters && clusters.length > 1 ? (
-            <select aria-label={t("cluster")} className={s.clusterPick} value={clusterId ?? ""} onChange={(e) => { setSnap(null); setClusterId(e.target.value); }}>
-              {clusters.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          ) : null}
-        </div>
+        <PageHeader
+          title={t("title")}
+          description={
+            snap && snap.nodes.length > 0
+              ? t("summary", {
+                  cluster: snap.cluster.name,
+                  machines: t("headline.machines", { count: snap.nodes.length }),
+                  pods: t("headline.pods", { count: Math.round(snap.nodes.reduce((sum, node) => sum + (node.pods.running ?? 0), 0)) }),
+                })
+              : snap?.cluster.name
+          }
+          meta={
+            <>
+              <span className={s.live}>
+                <i />
+                {t("refresh")}
+              </span>
+              {snap && snap.age_seconds !== undefined ? (
+                <span data-testid="snapshot-age">
+                  {t("age", { age: fmt.duration(snap.age_seconds, { compact: true }) })}
+                  {snap.refreshing ? ` · ${t("refreshing")}` : ""}
+                </span>
+              ) : null}
+            </>
+          }
+          actions={
+            clusters && clusters.length > 1 ? (
+              <select aria-label={t("cluster")} className={s.clusterPick} value={clusterId ?? ""} onChange={(e) => { setSnap(null); setClusterId(e.target.value); }}>
+                {clusters.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            ) : null
+          }
+        />
         {clusters && clusters.length === 0 ? (
           <p className={s.notice}>{t("state.noClusters")}</p>
         ) : snap === null ? (
@@ -221,10 +247,7 @@ export function InfrastructureScreen() {
             </>
           )
         ) : snap.state === "denied" || snap.state === "not_configured" || snap.state === "unavailable" ? (
-          <>
-            <h1 className={s.h1}><b>{snap.cluster.name}</b></h1>
-            <p className={s.notice}>{t(`state.${snap.state}`)}</p>
-          </>
+          <p className={s.notice}>{t(`state.${snap.state}`)}</p>
         ) : (
           <Loaded snap={snap} />
         )}
@@ -235,7 +258,6 @@ export function InfrastructureScreen() {
 
 function Loaded({ snap }: { snap: InfraSnapshot }) {
   const t = useT("infrastructure");
-  const fmt = useFormat();
   const { n, pct } = useNum();
   const facts = (node: NodeSnapshot) => {
     const days =
@@ -245,19 +267,8 @@ function Loaded({ snap }: { snap: InfraSnapshot }) {
     const perCore = node.load5.now !== null && node.cores ? node.load5.now / node.cores : null;
     return { days, perCore };
   };
-  const pods = snap.nodes.reduce((sum, node) => sum + (node.pods.running ?? 0), 0);
   return (
     <>
-      <header className={s.head}>
-        <h1 className={s.h1}>{t("title")}</h1>
-        <p>{t("summary", { cluster: snap.cluster.name, machines: t("headline.machines", { count: snap.nodes.length }), pods: t("headline.pods", { count: Math.round(pods) }) })}</p>
-        {snap.age_seconds !== undefined ? (
-          <p className={s.age} data-testid="snapshot-age">
-            {t("age", { age: fmt.duration(snap.age_seconds, { compact: true }) })}
-            {snap.refreshing ? ` · ${t("refreshing")}` : ""}
-          </p>
-        ) : null}
-      </header>
       {snap.state === "partial" ? <p className={s.partial}>{t("state.partial")}</p> : null}
       <Ledger snap={snap} facts={facts} n={n} pct={pct} />
       <WhoUses snap={snap} />
@@ -451,8 +462,9 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
     const m = new Map<string, Group>();
     const zero = () => new Array<SeriesValue>(snap.times.length).fill(null);
     for (const e of envs) {
-      const g = m.get(e.group.key) ?? { key: e.group.key, name: groupName(e.group), envs: [], cpu: 0, memory: 0, cpuRequested: 0, memoryRequested: 0, pods: 0, warn: 0, bad: 0, cpuSeries: zero(), memorySeries: zero() };
+      const g = m.get(e.group.key) ?? { key: e.group.key, name: groupName(e.group), projectId: null, envs: [], cpu: 0, memory: 0, cpuRequested: 0, memoryRequested: 0, pods: 0, warn: 0, bad: 0, cpuSeries: zero(), memorySeries: zero() };
       g.envs.push(e);
+      if (!g.projectId && e.group.kind === "project" && e.project) g.projectId = e.project.project_id;
       g.cpu += e.cpu ?? 0;
       g.memory += e.memory ?? 0;
       g.cpuRequested += e.cpuRequested ?? 0;
@@ -582,7 +594,7 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
                 if (!open) prefetchNamespacePods(snap.cluster.id, g.envs.map((x) => x.namespace));
               }} onMouseEnter={() => setFocus(focusKey)} onMouseLeave={() => setFocus(null)}>
               <span className={`${s.rk} ${s.d}`}>{groups.indexOf(g) + 1}</span>
-              <span className={s.nm}><i /><span><b>{g.name}</b><small>{t("who.environments", { count: g.envs.length })} · {t("who.podsCount", { count: Math.round(g.pods) })}</small></span></span>
+              <span className={s.nm}><i />{g.projectId ? <ProjectLogo projectId={g.projectId} name={g.name} size="md" variant="mark" /> : null}<span><b>{g.name}</b><small>{t("who.environments", { count: g.envs.length })} · {t("who.podsCount", { count: Math.round(g.pods) })}</small></span></span>
               <span className={s.us}>
                 <span className={s.shb}><i style={{ width: `${(val(g) / top) * 100}%` }} /></span>
                 <span className={s.ut}><b>{unit(val(g))}</b> · {t("who.ofScope", { share: pct(capacity ? val(g) / capacity : null), scope: scopeName })}</span>
