@@ -30,7 +30,7 @@ function flushRedis(port: number): Promise<void> {
 
 async function signInAs(page: Page, subject: string) {
   await page.goto(`/v1/auth/login?redirect=/&login_hint=${subject}`);
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 async function signOutIfNeeded(page: Page) {
@@ -52,7 +52,7 @@ test("signed-out → fake OIDC login → signed-in shell", async ({ page }) => {
   await expect(page.getByTestId("screen-signed-out")).toBeVisible();
 
   await page.getByRole("link", { name: /sign in/i }).click();
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /account menu/i }).click();
   await expect(page.getByRole("menu").getByText("Owner One")).toBeVisible();
   await expect(page.getByRole("menu").getByText("owner@example.test")).toBeVisible();
@@ -205,7 +205,7 @@ test("keyboard: sign-in is reachable and actionable", async ({ page }) => {
   await signInLink.focus();
   await expect(signInLink).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 });
 
 test("accessibility smoke: no critical violations incl. grant form", async ({ page }) => {

@@ -15,7 +15,7 @@ test.setTimeout(120_000);
 
 async function signIn(page: Page) {
   await page.goto("/v1/auth/login?redirect=/&login_hint=user-owner");
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 test("at 390px, the DOM order is exactly verdict, attention queue, timeline — nothing interposed", async ({
