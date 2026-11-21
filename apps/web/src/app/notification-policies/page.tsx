@@ -106,7 +106,8 @@ function PolicyForm({
   options: PolicyOptions;
   destinations: NotificationDestination[];
   existing: NotificationPolicy | null;
-  onSaved: () => void;
+  /** The parent shows the confirmation: this form remounts on save. */
+  onSaved: (message: string) => void;
   onCancel: () => void;
 }) {
   const t = useT("notifications");
@@ -183,7 +184,8 @@ function PolicyForm({
           enabled,
           expected_version: existing.version,
         });
-        setNotice({ kind: "saved", message: t("policies.form.saved") });
+        onSaved(t("policies.form.saved"));
+        return;
       } else {
         await createPolicy(csrfToken, {
           display_name: name,
@@ -191,9 +193,8 @@ function PolicyForm({
           environment_id: environmentId || null,
           event_types: events,
         });
-        setNotice({ kind: "saved", message: t("policies.form.created") });
+        onSaved(t("policies.form.created"));
       }
-      onSaved();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         setNotice({ kind: "conflict", message: t("policies.form.conflict") });
@@ -404,10 +405,13 @@ function RuleCard({
   policy,
   onEdit,
   editing,
+  canEdit,
 }: {
   policy: NotificationPolicy;
   onEdit: () => void;
   editing: boolean;
+  /** Without notification.manage the form is read-only, so no Edit. */
+  canEdit: boolean;
 }) {
   const t = useT("notifications");
   const c = useT("common");
@@ -438,10 +442,12 @@ function RuleCard({
           status={policy.enabled ? "healthy" : "unknown"}
           label={policy.enabled ? t("policies.card.enabled") : t("policies.card.disabled")}
         />
-        <button type="button" onClick={onEdit} className={PILL_BUTTON}>
-          <Pencil aria-hidden className="h-3.5 w-3.5" />
-          {c("action.edit")}
-        </button>
+        {canEdit ? (
+          <button type="button" onClick={onEdit} className={PILL_BUTTON}>
+            <Pencil aria-hidden className="h-3.5 w-3.5" />
+            {c("action.edit")}
+          </button>
+        ) : null}
       </div>
       <div className="grid grid-cols-1 items-stretch gap-2 border-t border-border px-6 py-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
         <div className="h-full rounded-2xl bg-surface-2 px-4 py-3">
@@ -493,6 +499,9 @@ export default function NotificationPoliciesPage() {
   const [options, setOptions] = useState<PolicyOptions | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [editing, setEditing] = useState<NotificationPolicy | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const { hasPermission: hasPerm } = useSession();
+  const canManagePolicies = hasPerm("notification.manage");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -667,7 +676,11 @@ export default function NotificationPoliciesPage() {
                       key={policy.id}
                       policy={policy}
                       editing={editing?.id === policy.id}
-                      onEdit={() => setEditing(policy)}
+                      onEdit={() => {
+                        setSaved(null);
+                        setEditing(policy);
+                      }}
+                      canEdit={canManagePolicies}
                     />
                   ))}
                 </ul>
@@ -676,14 +689,27 @@ export default function NotificationPoliciesPage() {
 
             {options ? (
               <div className="page-aside">
+                {saved ? (
+                  <p
+                    role="status"
+                    data-testid="policy-saved"
+                    className="mb-3 rounded-panel border border-healthy bg-healthy-soft px-4 py-3 text-caption font-medium text-healthy"
+                  >
+                    {saved}
+                  </p>
+                ) : null}
                 <PolicyForm
                   key={editing?.id ?? "new"}
                   projects={projects}
                   options={options}
                   destinations={destinations}
                   existing={editing}
-                  onCancel={() => setEditing(null)}
-                  onSaved={() => {
+                  onCancel={() => {
+                    setSaved(null);
+                    setEditing(null);
+                  }}
+                  onSaved={(message) => {
+                    setSaved(message);
                     setEditing(null);
                     load();
                   }}

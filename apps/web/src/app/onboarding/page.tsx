@@ -85,14 +85,21 @@ function HowItWorks({ status }: { status: GitHubStatus | null }) {
     const key = STEP_KEYS[step];
     return { label: t(`step.${key}`), status: state, hint: t(`stepHint.${key}`) };
   });
+  // Explanatory, not operational: folded away until asked for, except while
+  // the GitHub App is not configured yet — then step 1 is the news.
   return (
     <Panel>
-      <PanelHeader title={t("how.title")} description={t("how.description")} />
-      <div className="overflow-x-auto">
-        <div className="min-w-[44rem]">
-          <Stepper steps={steps} data-testid="wizard-steps" />
+      <details open={!configured}>
+        <summary className="cursor-pointer">
+          <span className="text-[1rem] font-bold text-ink">{t("how.title")}</span>
+          <span className="ml-2 text-caption text-ink-muted">{t("how.description")}</span>
+        </summary>
+        <div className="mt-4 overflow-x-auto">
+          <div className="min-w-[44rem]">
+            <Stepper steps={steps} data-testid="wizard-steps" />
+          </div>
         </div>
-      </div>
+      </details>
       <p className="flex items-center gap-3 rounded-full bg-surface-2 px-5 py-3 text-caption text-ink-secondary">
         <ShieldCheck aria-hidden className="h-4 w-4 shrink-0 text-healthy" />
         <span>{t("how.nothingExecuted")}</span>

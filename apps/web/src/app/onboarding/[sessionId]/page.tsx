@@ -237,6 +237,32 @@ export default function OnboardingSessionPage() {
                           />
                         </div>
                       ) : null}
+                      {findings.data.findings.length > 0 ? (
+                        <details className="mt-3" data-testid="analysis-findings">
+                          <summary className="cursor-pointer text-caption font-medium text-brand">
+                            {t("detail.discovery.findings", { count: findings.data.findings.length })}
+                          </summary>
+                          {/* Paths and what was read from them — never the
+                              file contents, which never leave the analyser. */}
+                          <ul className="mt-2 divide-y divide-border rounded-control border border-border">
+                            {findings.data.findings.map((finding, index) => (
+                              <li key={`${finding.safe_path}-${index}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-3 py-2 text-caption">
+                                <span className="font-mono text-micro text-ink">{finding.safe_path}</span>
+                                <span className="text-ink-muted">{finding.finding_type}</span>
+                                {finding.proposed_target ? (
+                                  <span className="font-mono text-micro text-ink-secondary">→ {finding.proposed_target}</span>
+                                ) : null}
+                                <span className={`ml-auto text-micro ${finding.confidence === "low" ? "text-warning" : "text-ink-muted"}`}>
+                                  {t.dyn("detail.discovery.confidence", finding.confidence, finding.confidence)}
+                                </span>
+                                {finding.review_reason ? (
+                                  <span className="basis-full text-micro text-ink-muted">{finding.review_reason}</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
                       <p className="mt-3 text-xs text-ink-muted">{t("detail.discovery.pathsOnly")}</p>
                     </div>
                   )}

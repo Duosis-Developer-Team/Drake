@@ -81,10 +81,11 @@ describe("integrations in Turkish", () => {
     expect(screen.getByText("Sağlayıcılar", { selector: "h2" })).toBeInTheDocument();
     expect(screen.getByText("Depo yönetişimi")).toBeInTheDocument();
     expect(screen.getByText("Gözlemlenen sağlık")).toBeInTheDocument();
-    // A connector that never synced says so in Turkish; the API's own state
-    // tokens stay as identifiers.
+    // A connector that never synced says so in Turkish, and its states are
+    // words, not the API's tokens.
     expect(screen.getByText("hiç")).toBeInTheDocument();
-    expect(screen.getByText("not_configured")).toBeInTheDocument();
+    expect(screen.getByText("yapılandırılmadı")).toBeInTheDocument();
+    expect(screen.queryByText("not_configured")).not.toBeInTheDocument();
     expect(screen.queryByText("Integration Health")).not.toBeInTheDocument();
   });
 

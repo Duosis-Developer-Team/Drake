@@ -51,6 +51,7 @@ export const notifications = defineMessages({
       refused: "refused",
     },
     inbox: {
+      markReadFailed: "Could not mark as read. Nothing changed; try again.",
       title: "Notifications",
       description: "Incidents a notification policy routed to you. Tracery writes every one of these.",
       routingPolicies: "Routing policies",
@@ -253,6 +254,7 @@ export const notifications = defineMessages({
       refused: "reddedildi",
     },
     inbox: {
+      markReadFailed: "Okundu olarak işaretlenemedi. Hiçbir şey değişmedi; yeniden deneyin.",
       title: "Bildirimler",
       description: "Bir bildirim politikasının size yönlendirdiği olaylar. Bunların her birini Tracery yazar.",
       routingPolicies: "Yönlendirme politikaları",

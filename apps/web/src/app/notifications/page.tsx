@@ -147,6 +147,7 @@ export default function NotificationsPage() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -174,9 +175,14 @@ export default function NotificationsPage() {
   const read = async (ids: string[]) => {
     if (!csrfToken || ids.length === 0) return;
     setBusy(true);
+    setReadFailed(false);
     try {
       await markRead(csrfToken, ids);
       load();
+    } catch {
+      // Said out loud: a silent failure left the dot lit and the reader
+      // wondering whether the click registered.
+      setReadFailed(true);
     } finally {
       setBusy(false);
     }
@@ -272,6 +278,11 @@ export default function NotificationsPage() {
             </button>
           ) : null}
         </div>
+        {readFailed ? (
+          <p role="alert" data-testid="mark-read-failed" className="text-caption text-critical">
+            {t("inbox.markReadFailed")}
+          </p>
+        ) : null}
 
         {state.kind === "loading" ? (
           <Panel>

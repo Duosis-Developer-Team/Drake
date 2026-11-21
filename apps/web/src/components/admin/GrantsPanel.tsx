@@ -93,6 +93,8 @@ export function GrantsPanel() {
     void load();
   }, [load]);
 
+  // Revoking takes access away from a person at once: one more click.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const revoke = async (grant: Grant) => {
     setActionError(null);
     try {
@@ -247,13 +249,32 @@ export function GrantsPanel() {
                           </td>
                           <td className="pr-7 pl-3 text-right">
                             {active ? (
-                              <button
-                                type="button"
-                                onClick={() => void revoke(grant)}
-                                className={PILL_BUTTON}
-                              >
-                                {t("grants.list.revoke")}
-                              </button>
+                              confirming === grant.id ? (
+                                <span className="inline-flex items-center gap-2" data-testid="revoke-confirm">
+                                  <span className="text-micro text-ink-muted">{t("grants.list.confirmRevoke")}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirming(null);
+                                      void revoke(grant);
+                                    }}
+                                    className={`${PILL_BUTTON} text-critical`}
+                                  >
+                                    {t("grants.list.revoke")}
+                                  </button>
+                                  <button type="button" onClick={() => setConfirming(null)} className={PILL_BUTTON}>
+                                    {t("grants.list.keep")}
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirming(grant.id)}
+                                  className={PILL_BUTTON}
+                                >
+                                  {t("grants.list.revoke")}
+                                </button>
+                              )
                             ) : null}
                           </td>
                         </tr>
