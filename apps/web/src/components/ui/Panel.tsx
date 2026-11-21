@@ -80,7 +80,7 @@ export function Panel({
       // sideways instead of the table's own scroller doing it.
       className={`flex min-w-0 flex-col ${RADIUS[radius]} ${SURFACE[surface]} [&>*]:min-w-0 ${
         surface === "default" ? RAIL[tone] ?? "" : ""
-      } ${flush ? "" : "gap-6 p-7"} ${className}`}
+      } ${flush ? "" : "gap-5 p-5"} ${className}`}
       {...rest}
     >
       {children}
@@ -120,11 +120,11 @@ export function PanelHeader({
          the actions drop to their own line rather than crushing the title
          into one word per line on a narrow screen. */
       className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-3 ${
-        flush ? "border-b border-border px-7 pt-6 pb-5" : ""
+        flush ? "border-b border-border px-5 pt-4 pb-4" : ""
       }`}
     >
       <div className="min-w-0 flex-1 basis-48">
-        <Heading id={id} className="text-[1.0625rem] leading-6 font-semibold tracking-[-0.01em] text-ink">
+        <Heading id={id} className="text-[1rem] leading-6 font-bold tracking-[-0.01em] text-ink">
           {title}
         </Heading>
         {description ? (
