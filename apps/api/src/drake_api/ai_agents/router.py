@@ -68,6 +68,18 @@ async def agent_topology(
     return body
 
 
+@router.get("/agents/mcp-servers")
+async def mcp_servers(
+    request: Request,
+    window: str = Query("24h", pattern="^(24h|7d)$"),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """The MCP servers agents call: tools served, calling clients, health."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        return await repo.list_mcp_servers(connection, auth.principal, window=window)
+
+
 @router.get("/agents/{agent_id}")
 async def get_agent(
     request: Request,

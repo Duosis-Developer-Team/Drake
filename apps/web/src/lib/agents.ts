@@ -580,3 +580,36 @@ export function edgeWidth(calls: number, max: number): number {
   if (max <= 0) return 1.25;
   return 1.25 + (3.75 * Math.log1p(calls)) / Math.log1p(max);
 }
+
+// --- MCP servers (phase 3c) --------------------------------------------------
+
+export interface McpUse {
+  name: string | null;
+  calls: number;
+  errors: number;
+  avg_ms: number | null;
+}
+
+export interface McpServer {
+  id: string;
+  service_name: string | null;
+  cluster_ref: string | null;
+  namespace: string | null;
+  workload: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  project: { id: string; key: string; name: string } | null;
+  environment: string | null;
+  calls: number;
+  errors: number;
+  avg_ms: number | null;
+  tools: McpUse[];
+  clients: McpUse[];
+  methods: McpUse[];
+  series: { t: string; calls: number; errors: number }[];
+}
+
+export const fetchMcpServers = (window: Window) =>
+  apiGet<{ window: Window; servers: McpServer[] }>(
+    `/v1/agents/mcp-servers?window=${window}`,
+  );

@@ -25,6 +25,7 @@ import { ConnectPanel } from "@/components/agents/ConnectPanel";
 import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
 import { ActivityBars, ProviderMix } from "@/components/agents/visuals";
 import { AgentMap } from "@/components/agents/AgentMap";
+import { McpServers } from "@/components/agents/McpServers";
 import { KpiTile, PillTabs } from "@/components/features/configure/kit";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataState } from "@/components/state/DataState";
@@ -60,7 +61,7 @@ export default function AgentsPage() {
   const fmt = useFormat();
   const { locale } = useLocale();
   const [span, setSpan] = useState<Window>("24h");
-  const [view, setView] = useState<"inventory" | "map">("inventory");
+  const [view, setView] = useState<"inventory" | "map" | "mcp">("inventory");
   const [state, setState] = useState<State>({ kind: "loading" });
   const [connect, setConnect] = useState<AgentConnect | null>(null);
   const [drawer, setDrawer] = useState(false);
@@ -140,6 +141,7 @@ export default function AgentsPage() {
                 icon: LayoutGrid,
               },
               { key: "map", label: t("view.map"), icon: Network },
+              { key: "mcp", label: t("view.mcp"), icon: Plug },
             ]}
           />
         }
@@ -260,7 +262,9 @@ export default function AgentsPage() {
             </KpiTile>
           </div>
 
-          {view === "map" ? (
+          {view === "mcp" ? (
+            <McpServers span={span} />
+          ) : view === "map" ? (
             <MapSection span={span} />
           ) : (
             <div className="space-y-6">

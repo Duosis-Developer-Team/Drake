@@ -43,6 +43,9 @@ async def main() -> None:
                 "integrations",
                 # Agent Visibility rows and workload bindings an integration
                 # run may leave behind; bindings reference environment services.
+                "mcp_server_rollups",
+                "mcp_servers",
+                "agent_edges",
                 "agent_tool_rollups",
                 "agent_rollups",
                 "agents",
