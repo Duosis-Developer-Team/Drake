@@ -1,86 +1,140 @@
-# Drake
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tracesis-mark-dark.svg">
+    <img src="docs/assets/readme/tracesis-mark-light.svg" alt="Tracesis" width="160">
+  </picture>
+</p>
 
-Drake is an internal observability and operations control plane. It unifies
-Kubernetes workload health, application golden signals, PostgreSQL health and
-capacity, tenant plan/entitlement/usage snapshots, backup & restore evidence,
-deployment correlation, and alert/incident projection into a single project
-catalog with a purpose-built UI.
+<h1 align="center">Tracesis</h1>
 
-Drake is **not** a Grafana clone and **not** a telemetry backend. It builds on
-mature data planes (Prometheus, Alertmanager, OpenTelemetry, and optionally
-Thanos/Loki/Tempo) and owns the business context layer on top of them.
+<p align="center">
+  <strong>See every service, every trace — and every AI agent.</strong><br>
+  An observability and operations control plane for Kubernetes platforms, built on the telemetry you already have.
+</p>
 
-## Architecture at a glance
+<p align="center">
+  <a href="https://github.com/Duosis-Developer-Team/Tracesis/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Duosis-Developer-Team/Tracesis/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <img alt="OpenTelemetry native" src="https://img.shields.io/badge/OpenTelemetry-native-3f57e0">
+  <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-your%20data%20stays%20home-b4842a">
+</p>
 
-| Component | Technology | Role |
-|---|---|---|
-| `apps/web` | Next.js (App Router), TypeScript, Tailwind | UI. Talks only to the Drake API |
-| `apps/api` | Python, FastAPI (modular monolith) | Control plane API, RBAC, audit, query broker |
-| `apps/worker` | Python, Redis | Idempotent background jobs (sync, snapshots, reconciliation) |
-| `apps/cluster-agent` | Go | Read-only Kubernetes inventory agent (outbound-only) |
-| `packages/contracts` | TypeScript, JSON Schema | Versioned machine-validated contracts (`.drake/project.yaml`, snapshots, events) |
+<p align="center">
+  <img src="docs/assets/readme/tracesis-signin.png" alt="The Tracesis sign-in screen: the brand panel with an illustrative trace waterfall beside the sign-in form" width="900">
+</p>
 
-Non-negotiable boundaries:
+---
 
-- The browser never connects to Prometheus, Thanos, Alertmanager, or the
-  Kubernetes API. The web app has exactly one data source: the Drake API.
-- The cluster agent is read-only (`get`/`list`/`watch` only), has no access to
-  Secrets, and never receives `exec`/`attach`/`portforward` permissions.
-- Tenant, plan, and entitlement facts come from authoritative application
-  snapshots — never guessed, never silently converted to zero/healthy.
-- Backup artifact existence is never presented as restore success.
+## What Tracesis does
 
-See [docs/adr/](docs/adr/) for the architecture decision records.
+Tracesis turns metrics, traces, logs and cluster inventory into one picture of a
+platform — organised by **project, environment and service**, not by dashboard.
+
+| | |
+|---|---|
+| **Service health and topology** | Golden signals per service, a live service map (who calls whom, how fast, how often it fails), deployments correlated with change. |
+| **Traces and logs** | OpenTelemetry and eBPF (OBI) feed a ClickHouse store: request waterfalls, log search and patterns — visibility without changing application code. |
+| **Objectives and incidents** | SLOs measured from traces with error budgets and burn rates, alert rules with anomaly bands, incidents with a lifecycle, and routed notifications. |
+| **Infrastructure and protection** | Cluster inventory from a read-only agent, resource usage, and backup posture that never mistakes "a backup exists" for "a restore works". |
+| **Agent Visibility** | Every AI agent found on first sight — no registration: its runs step by step, the models and tools it reaches, MCP servers and their clients, cost at list prices, guardrails that page, and governance (owner, purpose, approval, shadow AI). |
+| **Catalog from source** | A GitHub App onboards repositories into the catalog from a reviewed manifest, so what Tracesis knows comes from where the code lives. |
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph sources [Your platform]
+    apps[Applications<br/>OTel SDKs]
+    ebpf[eBPF · OBI<br/>no code changes]
+    agents[AI agents<br/>& MCP servers]
+    k8s[Kubernetes]
+  end
+  subgraph otel [Telemetry pipeline]
+    gw[OTel gateway<br/>GenAI normalised,<br/>content dropped]
+    ch[(ClickHouse<br/>traces · logs)]
+    prom[(Prometheus)]
+  end
+  subgraph tracesis [Tracesis]
+    api[API<br/>FastAPI · RBAC · audit]
+    web[Web<br/>Next.js]
+    agent[Cluster agent<br/>Go · read-only]
+    pg[(PostgreSQL)]
+  end
+  apps --> gw
+  ebpf --> gw
+  agents -->|OTLP · /otlp with token| gw
+  gw --> ch
+  k8s --> prom
+  k8s --> agent --> api
+  ch --> api
+  prom --> api
+  api --> pg
+  web --> api
+```
+
+**Principles that do not bend**
+
+- The browser talks to one thing: the Tracesis API. It never reaches Prometheus, ClickHouse, Alertmanager or the Kubernetes API.
+- Queries are repository-owned templates. Users cannot submit PromQL or SQL.
+- The cluster agent is read-only (`get` / `list` / `watch`), never sees Secrets, never gets `exec`.
+- Prompts, model answers and tool arguments are removed at the gateway. Tracesis keeps names, counts and timing.
+- Unknown is shown as unknown — never silently converted to zero or "healthy".
+- Every write is scoped by role and recorded in an append-only audit log.
 
 ## Repository layout
 
 ```text
 apps/
-  web/            Next.js UI
-  api/            FastAPI control plane
+  web/            Next.js UI (EN/TR, light/dark)
+  api/            FastAPI control plane, migrations, background loops
   worker/         Background job runner
-  cluster-agent/  Go read-only Kubernetes agent
+  cluster-agent/  Go read-only Kubernetes inventory agent
 packages/
-  contracts/      JSON Schemas, fixtures, validator CLI
+  contracts/      JSON Schemas, fixtures and the validator CLI
 deploy/
+  drake/          Helm chart for Tracesis itself
+  otel/           OpenTelemetry gateway, agents, OBI and ClickHouse
+  agent/          The cluster agent's chart
+  edge-tls/       Certificate for the public edge
   local/          Local-only Docker Compose stack
 docs/
   adr/            Architecture decision records
-  sprints/        Sprint reports
-tests/            Cross-cutting test assets
+  runbooks/       Operating procedures
 ```
+
+> Tracesis was called **Drake** while it was being built. Python packages, image
+> and chart names (`drake_api`, `drake-api`, `deploy/drake`) keep that name; the
+> product, the UI and the repository are Tracesis.
 
 ## Getting started
 
-Prerequisites: Node.js (see `.nvmrc`), pnpm, Python 3.13 + [uv](https://docs.astral.sh/uv/),
-Go (see `apps/cluster-agent/go.mod`), Docker.
+Prerequisites: Node.js (see `.nvmrc`), pnpm, Python 3.13 with
+[uv](https://docs.astral.sh/uv/), Go (see `apps/cluster-agent/go.mod`) and Docker.
 
 ```bash
 pnpm install          # JS/TS workspaces
 uv sync               # Python workspaces (api, worker)
-make up               # local PostgreSQL 16 + Redis 7 (localhost only)
-make test             # run all test suites
-make down             # stop local stack (keeps data)
+make up               # local PostgreSQL, Redis, ClickHouse, Prometheus, OTel collector
+make test             # every test suite
+make down             # stop the local stack (keeps data)
 ```
 
-See the `Makefile` for the full task list. All development happens against the
-local stack; nothing in this repository connects to shared or production
-infrastructure.
+Development happens against the local stack; nothing here connects to shared or
+production infrastructure. `scripts/ci_job.sh <job>` runs any CI job locally
+(`python`, `web`, `chart`, …).
 
-## Status
+## Deploying
 
-Sprints 0–3 delivered: foundation (contracts, local environment, CI/security
-gates), identity (OIDC + server-side sessions, dynamic scoped RBAC,
-transactional idempotency, append-only audit), the catalog control plane
-(project/environment/service/cluster catalog with scoped read APIs, global
-authorized search, and the premium web experience), and the metrics
-foundation: versioned metric/query/dashboard registries, a server-side
-Query Broker (authorization before cache/provider, fail-closed budgets,
-Redis-backed cache with honest stale semantics, SSRF-bounded Prometheus
-adapter), a digest-pinned local Prometheus fixture stack, and real golden
-signals on the project and service screens. Drake stores no raw samples,
-the browser never talks to a provider, and users cannot submit PromQL —
-queries exist only as repository-controlled templates. The
-kube-prometheus-stack dev package is rendered and policy-checked in CI
-only; no cluster deployment has happened. Kubernetes inventory, GitHub,
-tenants, and backups remain honestly not_configured.
+Tracesis ships as container images and Helm charts. A release pins image digests
+in the environment's values, takes a database backup, previews with a dry run and
+rolls out — see [`docs/runbooks/`](docs/runbooks/) and the chart under
+[`deploy/drake/`](deploy/drake/). Connecting an agent or an OpenTelemetry-instrumented
+service takes environment variables, not code: **Agents → Connect an agent** shows
+the exact values for a deployment.
+
+## Documentation
+
+- [Architecture decision records](docs/adr/)
+- [Runbooks](docs/runbooks/) — alerts and SLOs, incidents, GitHub App onboarding, the cluster agent
+- [CI and test policy](docs/CI_AND_TEST_POLICY.md)
+
+<p align="center"><sub>Tracesis is a Duosis product.</sub></p>
