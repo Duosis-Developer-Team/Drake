@@ -16,14 +16,14 @@ export const onboarding = defineMessages({
     page: {
       title: "Onboard a project",
       description:
-        "Tracery reads a repository statically, proposes a catalog change, and applies nothing until someone approves it.",
+        "Tracesis reads a repository statically, proposes a catalog change, and applies nothing until someone approves it.",
     },
     how: {
       title: "How this works",
       description:
         "Seven steps from a repository to a catalog project. Nothing changes before approval.",
       nothingExecuted:
-        "Nothing in a repository is executed: no build, no install, no script, no hook, no workflow. Tracery reads an allowlist of metadata files at one immutable commit.",
+        "Nothing in a repository is executed: no build, no install, no script, no hook, no workflow. Tracesis reads an allowlist of metadata files at one immutable commit.",
     },
     step: {
       integrationStatus: "Integration status",
@@ -38,7 +38,7 @@ export const onboarding = defineMessages({
       integrationStatus: "GitHub App ready",
       repository: "Pick one to onboard",
       safeDiscovery: "Metadata files only",
-      detectedStructure: "What Tracery found",
+      detectedStructure: "What Tracesis found",
       review: "Item by item",
       approval: "This exact plan",
       result: "Written to the catalog",
@@ -46,9 +46,9 @@ export const onboarding = defineMessages({
     notConfigured: {
       title: "GitHub is not configured",
       description:
-        "Tracery cannot read repositories. Nothing has been contacted, no token has been issued, and no repository list is being shown.",
+        "Tracesis cannot read repositories. Nothing has been contacted, no token has been issued, and no repository list is being shown.",
       operatorNote:
-        "An operator configures the App identity and its credential references outside Tracery. Tracery never accepts a credential through this screen.",
+        "An operator configures the App identity and its credential references outside Tracesis. Tracesis never accepts a credential through this screen.",
     },
     missingInput: {
       feature_disabled: "The GitHub App integration is switched off.",
@@ -65,7 +65,7 @@ export const onboarding = defineMessages({
       failedPullRequests: "Failed pull requests",
       ofPullRequests:
         "of {count, plural, one {# manifest pull request} other {# manifest pull requests}}",
-      gitopsOff: "GitOps pull requests are switched off. Tracery will not write to any repository.",
+      gitopsOff: "GitOps pull requests are switched off. Tracesis will not write to any repository.",
     },
     pipeline: {
       title: "Session pipeline",
@@ -115,7 +115,7 @@ export const onboarding = defineMessages({
       empty: {
         title: "No repositories you can onboard",
         description:
-          "Tracery projects no repository in a scope where you hold the onboarding manage permission. This is not a statement about which repositories exist.",
+          "Tracesis projects no repository in a scope where you hold the onboarding manage permission. This is not a statement about which repositories exist.",
       },
       loadingMore: "Loading…",
       loadMore: "Load more repositories",
@@ -164,9 +164,9 @@ export const onboarding = defineMessages({
     candidateBlocker: {
       security_gate_open: "Closed by a manual security review. Ask a platform owner to clear it.",
       repository_unavailable:
-        "Tracery cannot reach this repository — it is archived, disabled, or the installation lost access.",
+        "Tracesis cannot reach this repository — it is archived, disabled, or the installation lost access.",
       repository_not_ready:
-        "Tracery has not finished projecting this repository. Reconcile it first, then try again.",
+        "Tracesis has not finished projecting this repository. Reconcile it first, then try again.",
       session_in_progress: "An onboarding is already open for this repository.",
     },
     errorGuidance: {
@@ -193,7 +193,7 @@ export const onboarding = defineMessages({
         title: "Security gate",
         cardTitle: "Closed by a manual security gate",
         description:
-          "This repository cannot be onboarded until an operator closes the gate. Tracery makes no provider call and issues no token for it.",
+          "This repository cannot be onboarded until an operator closes the gate. Tracesis makes no provider call and issues no token for it.",
       },
       stale: {
         title: "Out of date",
@@ -225,7 +225,7 @@ export const onboarding = defineMessages({
           low: "low confidence — review",
         },
         pathsOnly:
-          "Paths and digests only. Tracery stores no file content, and never reads environment files, private keys, credentials or cluster configuration.",
+          "Paths and digests only. Tracesis stores no file content, and never reads environment files, private keys, credentials or cluster configuration.",
       },
       session: {
         title: "Session",
@@ -257,7 +257,7 @@ export const onboarding = defineMessages({
           update_metadata:
             "These rewrite fields on rows that already exist. Approving accepts these exact values.",
           conflict:
-            "Apply is blocked until each of these is resolved. Tracery refuses to choose rather than filing something under the wrong project.",
+            "Apply is blocked until each of these is resolved. Tracesis refuses to choose rather than filing something under the wrong project.",
         },
         evidenceOnly: "Recorded as evidence only — no catalog row is written for it.",
         before: "before:",
@@ -265,7 +265,7 @@ export const onboarding = defineMessages({
         structuredValue: "(structured value)",
         listValue: "{count, plural, one {# item} other {# items}}",
         applyAvailable:
-          "This plan can be applied. Applying writes to Tracery's catalog and changes nothing in the repository.",
+          "This plan can be applied. Applying writes to Tracesis's catalog and changes nothing in the repository.",
         applyBlocked: "Apply is blocked: {count} item(s) need a decision.",
         applyNoPermission:
           "You can review this plan but not apply it. Applying needs the onboarding apply permission.",
@@ -275,10 +275,10 @@ export const onboarding = defineMessages({
         title: "Manifest pull requests",
         openDraft: "Open draft pull request #{number} →",
         draftNote:
-          "The pull request Tracery opens is a {draft}, and deliberately incomplete: every {token} in it is a decision a person has to make. Fill them in and merge it in GitHub.",
+          "The pull request Tracesis opens is a {draft}, and deliberately incomplete: every {token} in it is a decision a person has to make. Fill them in and merge it in GitHub.",
         draft: "draft",
         mergeNote:
-          "Merging it does not import anything into Tracery — it puts the manifest in the repository, which is where Tracery reads intent from. Analyse again afterwards and approve the plan; the import happens there.",
+          "Merging it does not import anything into Tracesis — it puts the manifest in the repository, which is where Tracesis reads intent from. Analyse again afterwards and approve the plan; the import happens there.",
       },
     },
     actions: {
@@ -311,7 +311,7 @@ export const onboarding = defineMessages({
         title: "Apply the approved plan?",
         confirm: "Apply",
         approvedVersion: "Approved version",
-        note: "This writes the approved plan to Tracery's catalog. It does not write to the repository.",
+        note: "This writes the approved plan to Tracesis's catalog. It does not write to the repository.",
       },
       confirmCancel: {
         title: "Cancel this session?",
@@ -338,13 +338,13 @@ export const onboarding = defineMessages({
     page: {
       title: "Proje katılımı",
       description:
-        "Tracery depoyu statik olarak okur, bir katalog değişikliği önerir ve biri onaylayana kadar hiçbir şeyi uygulamaz.",
+        "Tracesis depoyu statik olarak okur, bir katalog değişikliği önerir ve biri onaylayana kadar hiçbir şeyi uygulamaz.",
     },
     how: {
       title: "Nasıl çalışır",
       description: "Depodan katalog projesine yedi adım. Onaydan önce hiçbir şey değişmez.",
       nothingExecuted:
-        "Depodaki hiçbir şey çalıştırılmaz: derleme, kurulum, betik, hook veya iş akışı yok. Tracery, izin listesindeki meta veri dosyalarını tek bir değişmez commit'te okur.",
+        "Depodaki hiçbir şey çalıştırılmaz: derleme, kurulum, betik, hook veya iş akışı yok. Tracesis, izin listesindeki meta veri dosyalarını tek bir değişmez commit'te okur.",
     },
     step: {
       integrationStatus: "Entegrasyon durumu",
@@ -359,7 +359,7 @@ export const onboarding = defineMessages({
       integrationStatus: "GitHub App hazır",
       repository: "Katılım için bir depo seçin",
       safeDiscovery: "Yalnızca meta veri dosyaları",
-      detectedStructure: "Tracery'nin bulduğu yapı",
+      detectedStructure: "Tracesis'in bulduğu yapı",
       review: "Öğe öğe",
       approval: "Tam olarak bu plan",
       result: "Kataloğa yazıldı",
@@ -367,9 +367,9 @@ export const onboarding = defineMessages({
     notConfigured: {
       title: "GitHub yapılandırılmamış",
       description:
-        "Tracery depoları okuyamıyor. Hiçbir yere bağlanılmadı, hiçbir token verilmedi ve hiçbir depo listesi gösterilmiyor.",
+        "Tracesis depoları okuyamıyor. Hiçbir yere bağlanılmadı, hiçbir token verilmedi ve hiçbir depo listesi gösterilmiyor.",
       operatorNote:
-        "GitHub App kimliğini ve kimlik bilgisi referanslarını bir operatör Tracery dışında yapılandırır. Tracery bu ekrandan asla bir kimlik bilgisi kabul etmez.",
+        "GitHub App kimliğini ve kimlik bilgisi referanslarını bir operatör Tracesis dışında yapılandırır. Tracesis bu ekrandan asla bir kimlik bilgisi kabul etmez.",
     },
     missingInput: {
       feature_disabled: "GitHub App entegrasyonu kapalı.",
@@ -385,7 +385,7 @@ export const onboarding = defineMessages({
       ofAnalyses: "{count} analizden · son: {when}",
       failedPullRequests: "Başarısız pull request'ler",
       ofPullRequests: "{count} manifest pull request'inden",
-      gitopsOff: "GitOps pull request'leri kapalı. Tracery hiçbir depoya yazmayacak.",
+      gitopsOff: "GitOps pull request'leri kapalı. Tracesis hiçbir depoya yazmayacak.",
     },
     pipeline: {
       title: "Oturum hattı",
@@ -435,7 +435,7 @@ export const onboarding = defineMessages({
       empty: {
         title: "Katılım başlatabileceğiniz depo yok",
         description:
-          "Tracery, katılım yönetme yetkisine sahip olduğunuz bir kapsamda hiçbir depo yansıtmıyor. Bu, hangi depoların var olduğuna dair bir ifade değildir.",
+          "Tracesis, katılım yönetme yetkisine sahip olduğunuz bir kapsamda hiçbir depo yansıtmıyor. Bu, hangi depoların var olduğuna dair bir ifade değildir.",
       },
       loadingMore: "Yükleniyor…",
       loadMore: "Daha fazla depo yükle",
@@ -485,9 +485,9 @@ export const onboarding = defineMessages({
       security_gate_open:
         "Manuel güvenlik incelemesi nedeniyle kapalı. Kaldırması için bir platform sahibine başvurun.",
       repository_unavailable:
-        "Tracery bu depoya erişemiyor: depo arşivlenmiş, devre dışı bırakılmış ya da kurulum erişimini yitirmiş.",
+        "Tracesis bu depoya erişemiyor: depo arşivlenmiş, devre dışı bırakılmış ya da kurulum erişimini yitirmiş.",
       repository_not_ready:
-        "Tracery bu depoyu yansıtmayı henüz tamamlamadı. Önce uzlaştırın, sonra yeniden deneyin.",
+        "Tracesis bu depoyu yansıtmayı henüz tamamlamadı. Önce uzlaştırın, sonra yeniden deneyin.",
       session_in_progress: "Bu depo için zaten açık bir katılım var.",
     },
     errorGuidance: {
@@ -515,7 +515,7 @@ export const onboarding = defineMessages({
         title: "Güvenlik kapısı",
         cardTitle: "Manuel güvenlik kapısı nedeniyle kapalı",
         description:
-          "Bir operatör kapıyı kaldırana kadar bu depo için katılım yapılamaz. Tracery bu depo için sağlayıcı çağrısı yapmaz ve token vermez.",
+          "Bir operatör kapıyı kaldırana kadar bu depo için katılım yapılamaz. Tracesis bu depo için sağlayıcı çağrısı yapmaz ve token vermez.",
       },
       stale: {
         title: "Güncel değil",
@@ -547,7 +547,7 @@ export const onboarding = defineMessages({
           low: "düşük güven — gözden geçirin",
         },
         pathsOnly:
-          "Yalnızca yollar ve özetler. Tracery dosya içeriği saklamaz; ortam dosyalarını, özel anahtarları, kimlik bilgilerini veya küme yapılandırmasını asla okumaz.",
+          "Yalnızca yollar ve özetler. Tracesis dosya içeriği saklamaz; ortam dosyalarını, özel anahtarları, kimlik bilgilerini veya küme yapılandırmasını asla okumaz.",
       },
       session: {
         title: "Oturum",
@@ -579,7 +579,7 @@ export const onboarding = defineMessages({
           update_metadata:
             "Bunlar zaten var olan kayıtlardaki alanları yeniden yazar. Onaylamak tam olarak bu değerleri kabul etmek demektir.",
           conflict:
-            "Bunların her biri çözülene kadar uygulama engellenir. Tracery, bir şeyi yanlış projenin altına koymaktansa seçim yapmayı reddeder.",
+            "Bunların her biri çözülene kadar uygulama engellenir. Tracesis, bir şeyi yanlış projenin altına koymaktansa seçim yapmayı reddeder.",
         },
         evidenceOnly: "Yalnızca kanıt olarak kaydedildi; bunun için katalog kaydı yazılmaz.",
         before: "önce:",
@@ -587,7 +587,7 @@ export const onboarding = defineMessages({
         structuredValue: "(yapılandırılmış değer)",
         listValue: "{count} öğe",
         applyAvailable:
-          "Bu plan uygulanabilir. Uygulamak Tracery'nin kataloğuna yazar ve depoda hiçbir şeyi değiştirmez.",
+          "Bu plan uygulanabilir. Uygulamak Tracesis'in kataloğuna yazar ve depoda hiçbir şeyi değiştirmez.",
         applyBlocked: "Uygulama engellendi: {count} öğe için karar gerekiyor.",
         applyNoPermission:
           "Bu planı inceleyebilir ancak uygulayamazsınız. Uygulamak için katılım uygulama yetkisi gerekir.",
@@ -597,10 +597,10 @@ export const onboarding = defineMessages({
         title: "Manifest pull request'leri",
         openDraft: "#{number} numaralı taslak pull request'i aç →",
         draftNote:
-          "Tracery'nin açtığı pull request bir {draft} ve bilerek eksik bırakılmıştır: içindeki her {token}, bir kişinin vermesi gereken bir karardır. Bunları doldurup GitHub'da birleştirin.",
+          "Tracesis'in açtığı pull request bir {draft} ve bilerek eksik bırakılmıştır: içindeki her {token}, bir kişinin vermesi gereken bir karardır. Bunları doldurup GitHub'da birleştirin.",
         draft: "taslaktır",
         mergeNote:
-          "Birleştirmek Tracery'ye hiçbir şey aktarmaz; manifesti depoya koyar ve Tracery niyeti oradan okur. Ardından yeniden analiz edip planı onaylayın; içe aktarma orada gerçekleşir.",
+          "Birleştirmek Tracesis'e hiçbir şey aktarmaz; manifesti depoya koyar ve Tracesis niyeti oradan okur. Ardından yeniden analiz edip planı onaylayın; içe aktarma orada gerçekleşir.",
       },
     },
     actions: {
@@ -633,7 +633,7 @@ export const onboarding = defineMessages({
         title: "Onaylanan plan uygulansın mı?",
         confirm: "Uygula",
         approvedVersion: "Onaylanan sürüm",
-        note: "Bu, onaylanan planı Tracery'nin kataloğuna yazar. Depoya yazmaz.",
+        note: "Bu, onaylanan planı Tracesis'in kataloğuna yazar. Depoya yazmaz.",
       },
       confirmCancel: {
         title: "Bu oturum iptal edilsin mi?",

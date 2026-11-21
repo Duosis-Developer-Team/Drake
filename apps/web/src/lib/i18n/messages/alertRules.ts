@@ -11,7 +11,7 @@ export const alertRules = defineMessages({
   en: {
     title: "Alert rules",
     titleWindow: "/ last 24 hours",
-    lede: "Say when you want to hear about a service. Tracery checks every rule each minute against the same live measurements Service health shows, and opens an incident when a critical rule fires.",
+    lede: "Say when you want to hear about a service. Tracesis checks every rule each minute against the same live measurements Service health shows, and opens an incident when a critical rule fires.",
     muteAll: "Mute all for 1 hour",
     mutedAll: "Muted for 1 hour",
     create: "Create rule",
@@ -205,7 +205,7 @@ export const alertRules = defineMessages({
   tr: {
     title: "Alarm kuralları",
     titleWindow: "/ son 24 saat",
-    lede: "Bir servis hakkında ne zaman haber almak istediğini burada söylersin. Tracery her kuralı dakikada bir, Servis sağlığı'nın gösterdiği canlı ölçümlerle karşılaştırır; kritik bir kural tetiklenince incident açar.",
+    lede: "Bir servis hakkında ne zaman haber almak istediğini burada söylersin. Tracesis her kuralı dakikada bir, Servis sağlığı'nın gösterdiği canlı ölçümlerle karşılaştırır; kritik bir kural tetiklenince incident açar.",
     muteAll: "Tümünü 1 saat sustur",
     mutedAll: "1 saat sessiz",
     create: "Kural oluştur",

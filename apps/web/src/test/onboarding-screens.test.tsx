@@ -450,7 +450,7 @@ describe("onboarding session", () => {
 
     // The operator is told what the pull request actually is.
     expect(screen.getByText(/REPLACE_ME/)).toBeInTheDocument();
-    expect(screen.getByText(/does not import anything into Tracery/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not import anything into Tracesis/i)).toBeInTheDocument();
   });
 
   it("renders no repository content, credential or URL", async () => {
@@ -656,7 +656,7 @@ describe("session actions", () => {
     });
     fireEvent.click(await screen.findByTestId("action-apply"));
     const dialog = await screen.findByTestId("confirm-apply");
-    expect(dialog).toHaveTextContent("writes the approved plan to Tracery");
+    expect(dialog).toHaveTextContent("writes the approved plan to Tracesis");
     expect(dialog).toHaveTextContent("does not write to the repository");
   });
 

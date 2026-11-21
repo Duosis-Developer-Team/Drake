@@ -34,7 +34,7 @@ export const alerting = defineMessages({
       environment_unknown:
         "The environment label does not match any environment in this project.",
       service_unknown: "The service label does not match any service in this project.",
-      cluster_unknown: "The cluster label does not match any cluster Tracery knows about.",
+      cluster_unknown: "The cluster label does not match any cluster Tracesis knows about.",
       environment_ambiguous:
         "This service exists in more than one environment and the alert named none of them.",
     },
@@ -57,7 +57,7 @@ export const alerting = defineMessages({
         "No requests were observed in this window, so compliance cannot be computed. This is not the same as a perfect score.",
       stale: "The last measurement is older than this SLO's freshness limit.",
       query_failed:
-        "Tracery could not read the SLI. This says nothing about the service — only that the measurement did not happen.",
+        "Tracesis could not read the SLI. This says nothing about the service — only that the measurement did not happen.",
       not_configured: "No SLI is mapped to this SLO yet, so nothing is being measured.",
     },
     silence: {
@@ -116,14 +116,14 @@ export const alerting = defineMessages({
       empty: {
         title: "No alerts match",
         description:
-          "No alert in your scope reached Tracery for these filters — not a claim that nothing is wrong.",
+          "No alert in your scope reached Tracesis for these filters — not a claim that nothing is wrong.",
         status: "Status · {value}",
         priority: "Priority · {value}",
         any: "any",
       },
       unmapped: {
         title: "Unmapped alerts",
-        fallback: "Tracery could not place this alert in the catalog, so it opened no incident.",
+        fallback: "Tracesis could not place this alert in the catalog, so it opened no incident.",
       },
       now: {
         title: "Now",
@@ -166,8 +166,8 @@ export const alerting = defineMessages({
       },
       mapping: {
         title: "Catalog mapping",
-        fallback: "Tracery could not resolve this alert into the catalog.",
-        kept: "Tracery kept the alert as integration evidence and opened no incident. Filing it against a guessed project would send it to the wrong team.",
+        fallback: "Tracesis could not resolve this alert into the catalog.",
+        kept: "Tracesis kept the alert as integration evidence and opened no incident. Filing it against a guessed project would send it to the wrong team.",
       },
       said: {
         title: "What Alertmanager said",
@@ -175,10 +175,10 @@ export const alerting = defineMessages({
         ended: "Ended",
         stillFiring: "still firing",
         lastSeen: "Last seen",
-        received: "Received by Tracery",
+        received: "Received by Tracesis",
         episodes: "Firing episodes",
         unknownSeverity:
-          "This alert carried a severity Tracery does not recognise. It was treated as P3 rather than guessed upward or downward.",
+          "This alert carried a severity Tracesis does not recognise. It was treated as P3 rather than guessed upward or downward.",
         labels: "Labels",
       },
       incident: {
@@ -309,7 +309,7 @@ export const alerting = defineMessages({
         bothWindows:
           "A level is active only when its long and its short window both exceed the threshold. One window alone is a spike or a memory.",
         notPaging:
-          "Tracery computes these for the dashboard. The authoritative paging signal is PrometheusRule → Alertmanager; Tracery does not page.",
+          "Tracesis computes these for the dashboard. The authoritative paging signal is PrometheusRule → Alertmanager; Tracesis does not page.",
       },
       context: {
         title: "Around this objective",
@@ -356,7 +356,7 @@ export const alerting = defineMessages({
       project_mismatch: "Uyarı, bu Alertmanager'ın kayıtlı olmadığı bir projeyi belirtti.",
       environment_unknown: "Ortam etiketi bu projedeki hiçbir ortamla eşleşmiyor.",
       service_unknown: "Servis etiketi bu projedeki hiçbir servisle eşleşmiyor.",
-      cluster_unknown: "Küme etiketi Tracery'nin bildiği hiçbir kümeyle eşleşmiyor.",
+      cluster_unknown: "Küme etiketi Tracesis'in bildiği hiçbir kümeyle eşleşmiyor.",
       environment_ambiguous:
         "Bu servis birden fazla ortamda var ve uyarı hiçbirini belirtmedi.",
     },
@@ -379,7 +379,7 @@ export const alerting = defineMessages({
         "Bu pencerede hiç istek gözlemlenmedi, dolayısıyla uyum hesaplanamıyor. Bu, kusursuz bir sonuçla aynı şey değildir.",
       stale: "Son ölçüm bu SLO'nun tazelik sınırından daha eski.",
       query_failed:
-        "Tracery SLI'yı okuyamadı. Bu servis hakkında bir şey söylemez; yalnızca ölçümün yapılmadığını gösterir.",
+        "Tracesis SLI'yı okuyamadı. Bu servis hakkında bir şey söylemez; yalnızca ölçümün yapılmadığını gösterir.",
       not_configured: "Bu SLO'ya henüz bir SLI eşlenmedi, dolayısıyla hiçbir şey ölçülmüyor.",
     },
     silence: {
@@ -437,14 +437,14 @@ export const alerting = defineMessages({
       empty: {
         title: "Eşleşen uyarı yok",
         description:
-          "Kapsamınızdaki hiçbir uyarı bu filtrelerle Tracery'ye ulaşmadı; bu, hiçbir sorun olmadığı anlamına gelmez.",
+          "Kapsamınızdaki hiçbir uyarı bu filtrelerle Tracesis'e ulaşmadı; bu, hiçbir sorun olmadığı anlamına gelmez.",
         status: "Durum · {value}",
         priority: "Öncelik · {value}",
         any: "tümü",
       },
       unmapped: {
         title: "Eşlenmemiş uyarılar",
-        fallback: "Tracery bu uyarıyı kataloğa yerleştiremedi, bu yüzden olay açmadı.",
+        fallback: "Tracesis bu uyarıyı kataloğa yerleştiremedi, bu yüzden olay açmadı.",
       },
       now: {
         title: "Şu an",
@@ -487,8 +487,8 @@ export const alerting = defineMessages({
       },
       mapping: {
         title: "Katalog eşlemesi",
-        fallback: "Tracery bu uyarıyı katalogda çözümleyemedi.",
-        kept: "Tracery uyarıyı entegrasyon kanıtı olarak sakladı ve olay açmadı. Tahmini bir projeye kaydetmek onu yanlış ekibe gönderirdi.",
+        fallback: "Tracesis bu uyarıyı katalogda çözümleyemedi.",
+        kept: "Tracesis uyarıyı entegrasyon kanıtı olarak sakladı ve olay açmadı. Tahmini bir projeye kaydetmek onu yanlış ekibe gönderirdi.",
       },
       said: {
         title: "Alertmanager ne dedi",
@@ -496,10 +496,10 @@ export const alerting = defineMessages({
         ended: "Bitiş",
         stillFiring: "hâlâ tetiklenmiş",
         lastSeen: "Son görülme",
-        received: "Tracery'ye ulaşma",
+        received: "Tracesis'e ulaşma",
         episodes: "Tetiklenme sayısı",
         unknownSeverity:
-          "Bu uyarı Tracery'nin tanımadığı bir önem derecesi taşıyordu. Yukarı veya aşağı tahmin edilmek yerine P3 olarak değerlendirildi.",
+          "Bu uyarı Tracesis'in tanımadığı bir önem derecesi taşıyordu. Yukarı veya aşağı tahmin edilmek yerine P3 olarak değerlendirildi.",
         labels: "Etiketler",
       },
       incident: {
@@ -631,7 +631,7 @@ export const alerting = defineMessages({
         bothWindows:
           "Bir seviye yalnızca hem uzun hem de kısa penceresi eşiği aştığında etkindir. Tek bir pencere ya bir ani yükseliş ya da geçmişin izidir.",
         notPaging:
-          "Tracery bunları pano için hesaplar. Yetkili çağırma sinyali PrometheusRule → Alertmanager'dır; Tracery çağırmaz.",
+          "Tracesis bunları pano için hesaplar. Yetkili çağırma sinyali PrometheusRule → Alertmanager'dır; Tracesis çağırmaz.",
       },
       context: {
         title: "Bu hedefin çevresinde",

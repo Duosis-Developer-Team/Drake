@@ -100,7 +100,7 @@ describe("TimelineStrip", () => {
     render(<TimelineStrip bindingId="b1" environmentServiceId="es1" selected={null} onSelect={() => {}} />);
 
     const strip = await screen.findByTestId("timeline-strip");
-    expect(within(strip).getAllByText("Not enabled on this Tracery")).toHaveLength(3);
+    expect(within(strip).getAllByText("Not enabled on this Tracesis")).toHaveLength(3);
     expect(within(strip).queryByText("The store did not answer")).not.toBeInTheDocument();
   });
 

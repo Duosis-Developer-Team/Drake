@@ -30,9 +30,9 @@ export const deployments = defineMessages({
       verified: "Commit, workflow run and image digest all line up with the running workload.",
       partial: "Some of the chain was observed, but it does not close end to end.",
       unverified:
-        "Only a mutable image tag was seen. It may well be correct; Tracery has no evidence for it.",
+        "Only a mutable image tag was seen. It may well be correct; Tracesis has no evidence for it.",
       conflict:
-        "The workload declares one image digest and the node pulled another. Tracery does not pick a side.",
+        "The workload declares one image digest and the node pulled another. Tracesis does not pick a side.",
     },
     verdict: {
       improved: "Improved",
@@ -71,7 +71,7 @@ export const deployments = defineMessages({
     list: {
       title: "Deployments",
       description:
-        "Every observed workload revision, and how much of its commit-to-workload chain Tracery actually saw.",
+        "Every observed workload revision, and how much of its commit-to-workload chain Tracesis actually saw.",
       row: {
         unbound: "not bound to a service",
         ready: "ready",
@@ -108,7 +108,7 @@ export const deployments = defineMessages({
       empty: {
         title: "No deployments",
         description:
-          "Nothing matches these filters. Tracery records a revision when a cluster agent reports a workload generation.",
+          "Nothing matches these filters. Tracesis records a revision when a cluster agent reports a workload generation.",
         rollout: "Rollout · {value}",
         evidence: "Evidence · {value}",
         started: "Started · {value}",
@@ -152,7 +152,7 @@ export const deployments = defineMessages({
       comparison: {
         title: "Health before and after",
         description:
-          "A comparison of two time windows, not a causal claim. Tracery does not assert that this deployment caused any change it shows here.",
+          "A comparison of two time windows, not a causal claim. Tracesis does not assert that this deployment caused any change it shows here.",
         incidentsInWindow:
           "{count, plural, one {# incident} other {# incidents}} opened in the window after this rollout",
         signal: "Signal",
@@ -194,9 +194,9 @@ export const deployments = defineMessages({
       verified: "Commit, iş akışı çalıştırması ve imaj digest'i çalışan iş yüküyle birebir örtüşüyor.",
       partial: "Zincirin bir kısmı gözlemlendi, ancak uçtan uca kapanmıyor.",
       unverified:
-        "Yalnızca değiştirilebilir bir imaj etiketi görüldü. Doğru olabilir; ancak Tracery'nin elinde buna dair kanıt yok.",
+        "Yalnızca değiştirilebilir bir imaj etiketi görüldü. Doğru olabilir; ancak Tracesis'in elinde buna dair kanıt yok.",
       conflict:
-        "İş yükü bir imaj digest'i bildiriyor, düğüm ise başka birini çekti. Tracery taraf tutmaz.",
+        "İş yükü bir imaj digest'i bildiriyor, düğüm ise başka birini çekti. Tracesis taraf tutmaz.",
     },
     verdict: {
       improved: "İyileşti",
@@ -235,7 +235,7 @@ export const deployments = defineMessages({
     list: {
       title: "Dağıtımlar",
       description:
-        "Gözlemlenen her iş yükü revizyonu ve commit'ten iş yüküne uzanan zincirinin Tracery'nin gerçekten ne kadarını gördüğü.",
+        "Gözlemlenen her iş yükü revizyonu ve commit'ten iş yüküne uzanan zincirinin Tracesis'in gerçekten ne kadarını gördüğü.",
       row: {
         unbound: "bir servise bağlı değil",
         ready: "hazır",
@@ -271,7 +271,7 @@ export const deployments = defineMessages({
       empty: {
         title: "Dağıtım yok",
         description:
-          "Bu filtrelerle eşleşen bir kayıt yok. Tracery, bir küme ajanı yeni bir iş yükü generation'ı bildirdiğinde revizyon kaydeder.",
+          "Bu filtrelerle eşleşen bir kayıt yok. Tracesis, bir küme ajanı yeni bir iş yükü generation'ı bildirdiğinde revizyon kaydeder.",
         rollout: "Rollout durumu · {value}",
         evidence: "Kanıt · {value}",
         started: "Başlangıç · {value}",
@@ -315,7 +315,7 @@ export const deployments = defineMessages({
       comparison: {
         title: "Öncesi ve sonrası sağlık",
         description:
-          "Bu, iki zaman penceresinin karşılaştırmasıdır; bir nedensellik iddiası değildir. Tracery, burada gösterdiği hiçbir değişikliğe bu dağıtımın yol açtığını öne sürmez.",
+          "Bu, iki zaman penceresinin karşılaştırmasıdır; bir nedensellik iddiası değildir. Tracesis, burada gösterdiği hiçbir değişikliğe bu dağıtımın yol açtığını öne sürmez.",
         incidentsInWindow: "bu rollout'tan sonraki pencerede {count} olay açıldı",
         signal: "Sinyal",
         before: "Önce",

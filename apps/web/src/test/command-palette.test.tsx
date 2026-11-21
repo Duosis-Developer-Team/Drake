@@ -34,7 +34,7 @@ function renderSearch(permissions: string[] = []) {
 }
 
 async function open() {
-  fireEvent.click(screen.getAllByRole("button", { name: /search tracery/i })[0]);
+  fireEvent.click(screen.getAllByRole("button", { name: /search tracesis/i })[0]);
   return screen.findByLabelText("Search query");
 }
 
