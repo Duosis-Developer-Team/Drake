@@ -207,6 +207,21 @@ def build_envelope(event: str, payload: dict[str, Any]) -> WebhookEnvelope:
         account = installation.get("account")
         if isinstance(account, dict):
             account_login = _bounded_text(account.get("login"))
+    if not account_login:
+        # GitHub names the installation's account only on installation
+        # events. On `push` and `repository` the `installation` object is
+        # just {id, node_id}; the owner is in `organization` and in
+        # `repository.owner`. Same signed payload, same evidence — reading
+        # it there is what lets those events through ownership at all, and
+        # its absence everywhere is still a refusal.
+        organization = payload.get("organization")
+        repository = payload.get("repository")
+        if isinstance(organization, dict):
+            account_login = _bounded_text(organization.get("login"))
+        if not account_login and isinstance(repository, dict):
+            owner = repository.get("owner")
+            if isinstance(owner, dict):
+                account_login = _bounded_text(owner.get("login"))
 
     observed = 0
     candidates: list[dict[str, Any]] = []

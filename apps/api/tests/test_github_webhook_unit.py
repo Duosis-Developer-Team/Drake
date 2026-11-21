@@ -12,6 +12,7 @@ from drake_api.github_app.webhook import (
     SUPPORTED_EVENTS,
     WebhookRejectedError,
     build_envelope,
+    check_ownership,
     payload_digest,
     validate_delivery_id,
     validate_event_name,
@@ -208,3 +209,49 @@ def test_envelope_ignores_malformed_repository_entries() -> None:
         "repositories": ["not-an-object", {"no_id": True}, {"id": "not-an-int"}],
     }
     assert build_envelope("installation_repositories", payload).repositories == ()
+
+
+PUSH = {
+    "ref": "refs/heads/main",
+    # On push and repository events GitHub sends only the installation id.
+    "installation": {"id": 42, "node_id": "MDIz"},
+    "repository": {
+        "id": 101,
+        "full_name": "Duosis-Developer-Team/Hermes",
+        "owner": {"login": "Duosis-Developer-Team"},
+    },
+    "organization": {"login": "Duosis-Developer-Team"},
+}
+
+
+def test_push_takes_its_owner_from_the_organization() -> None:
+    envelope = build_envelope("push", PUSH)
+    assert envelope.account_login == "Duosis-Developer-Team"
+    check_ownership(envelope)  # accepted
+
+
+def test_without_an_organization_the_repository_owner_is_the_evidence() -> None:
+    payload = {k: v for k, v in PUSH.items() if k != "organization"}
+    envelope = build_envelope("repository", payload)
+    assert envelope.account_login == "Duosis-Developer-Team"
+    check_ownership(envelope)
+
+
+def test_no_owner_anywhere_is_still_a_refusal() -> None:
+    payload = {"installation": {"id": 42}, "repository": {"id": 101}}
+    with pytest.raises(WebhookRejectedError) as refusal:
+        check_ownership(build_envelope("push", payload))
+    assert refusal.value.reason == "account_missing"
+
+
+def test_a_foreign_organization_is_refused() -> None:
+    payload = {**PUSH, "organization": {"login": "someone-else"}}
+    with pytest.raises(WebhookRejectedError) as refusal:
+        check_ownership(build_envelope("push", payload))
+    assert refusal.value.reason == "owner_mismatch"
+
+
+def test_the_installation_account_still_wins_when_present() -> None:
+    payload = {**PUSH, "installation": {"id": 42, "account": {"login": "someone-else"}}}
+    with pytest.raises(WebhookRejectedError):
+        check_ownership(build_envelope("push", payload))
