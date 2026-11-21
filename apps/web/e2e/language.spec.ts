@@ -71,12 +71,12 @@ test("language: the sign-in screen and the search palette are translated too", a
   await page.goto("/");
   await page.evaluate(() => localStorage.setItem("drake-locale", "tr"));
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Tracery'ye giriş yapın" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tracesis'e giriş yapın" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Giriş yap" })).toBeVisible();
 
   await signIn(page);
   await page.keyboard.press("ControlOrMeta+K");
-  const dialog = page.getByRole("dialog", { name: "Tracery'de ara" });
+  const dialog = page.getByRole("dialog", { name: "Tracesis'te ara" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("textbox", { name: "Arama sorgusu" }).fill("olay");
   await expect(dialog.getByRole("option", { name: /Olaylar/ })).toBeVisible();

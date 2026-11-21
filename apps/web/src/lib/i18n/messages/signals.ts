@@ -25,7 +25,7 @@ export const signals = defineMessages({
     clear: "No service is failing requests or logging errors above the threshold.",
     clearNote: "Judged from {count, plural, one {# service} other {# services}} with telemetry.",
     noTelemetry: "No bound service has logs or traces you can read yet.",
-    notConfigured: "Logs and traces are not enabled on this Tracery.",
+    notConfigured: "Logs and traces are not enabled on this Tracesis.",
     partial: {
       logs: "Log counts are unavailable right now; only requests are judged.",
       traces: "Request counts are unavailable right now; only logs are judged.",
@@ -57,7 +57,7 @@ export const signals = defineMessages({
     clear: "Eşiğin üstünde istek hatası ya da hata logu üreten servis yok.",
     clearNote: "Telemetrisi olan {count} servise bakılarak değerlendirildi.",
     noTelemetry: "Bağlı servislerin henüz okuyabileceğin log ya da trace verisi yok.",
-    notConfigured: "Bu Tracery'de loglar ve trace'ler açık değil.",
+    notConfigured: "Bu Tracesis'te loglar ve trace'ler açık değil.",
     partial: {
       logs: "Log sayıları şu an alınamıyor; yalnızca isteklere bakılıyor.",
       traces: "İstek sayıları şu an alınamıyor; yalnızca loglara bakılıyor.",

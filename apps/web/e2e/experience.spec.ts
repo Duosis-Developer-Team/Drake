@@ -79,7 +79,7 @@ test("brand: the sidebar logo is drawn from the theme it sits on", async ({ page
   await signIn(page);
   const wordmark = page.getByTestId("brand-wordmark");
   await expect(wordmark).toBeVisible();
-  await expect(wordmark).toContainText("tracery");
+  await expect(wordmark).toHaveAccessibleName("Tracesis");
 
   const rootBar = wordmark.locator("svg rect").first();
   const fillFor = async () => rootBar.evaluate((node) => getComputedStyle(node).fill);

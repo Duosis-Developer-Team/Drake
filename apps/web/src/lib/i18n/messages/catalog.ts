@@ -186,15 +186,15 @@ export const catalog = defineMessages({
         description: "Capabilities, dependencies and the catalog record behind this project.",
       },
       capabilities: {
-        description: "What Tracery can observe here. Not configured is an absence, not a fault.",
+        description: "What Tracesis can observe here. Not configured is an absence, not a fault.",
       },
       managed: {
         title: "Managed dependencies",
-        description: "Run by a provider, not by Tracery — no in-cluster workload behind them.",
+        description: "Run by a provider, not by Tracesis — no in-cluster workload behind them.",
       },
       inCluster: {
         title: "In-cluster datastores",
-        description: "Tracery runs these, so their health comes from the workload path.",
+        description: "Tracesis runs these, so their health comes from the workload path.",
         scope: "scope",
       },
       dependency: {
@@ -259,7 +259,7 @@ export const catalog = defineMessages({
         emptyBody: "Services appear here once one is bound to this environment.",
       },
       capabilities: {
-        description: "What Tracery can observe here.",
+        description: "What Tracesis can observe here.",
       },
       metadata: {
         title: "Environment metadata",
@@ -295,7 +295,7 @@ export const catalog = defineMessages({
         notConfigured: "Not configured",
       },
       measures: {
-        title: "What Tracery measures here",
+        title: "What Tracesis measures here",
         description: "The binding and the capabilities behind the signals above.",
       },
       binding: {
@@ -513,15 +513,15 @@ export const catalog = defineMessages({
         description: "Bu projenin arkasındaki yetenekler, bağımlılıklar ve katalog kaydı.",
       },
       capabilities: {
-        description: "Tracery'nin burada gözlemleyebildikleri. Yapılandırılmamış olması bir eksikliktir, arıza değil.",
+        description: "Tracesis'in burada gözlemleyebildikleri. Yapılandırılmamış olması bir eksikliktir, arıza değil.",
       },
       managed: {
         title: "Yönetilen bağımlılıklar",
-        description: "Tracery değil, bir sağlayıcı tarafından çalıştırılır; arkalarında küme içi bir iş yükü yoktur.",
+        description: "Tracesis değil, bir sağlayıcı tarafından çalıştırılır; arkalarında küme içi bir iş yükü yoktur.",
       },
       inCluster: {
         title: "Küme içi veri depoları",
-        description: "Bunları Tracery çalıştırır; sağlıkları iş yükü yolundan gelir.",
+        description: "Bunları Tracesis çalıştırır; sağlıkları iş yükü yolundan gelir.",
         scope: "kapsam",
       },
       dependency: {
@@ -586,7 +586,7 @@ export const catalog = defineMessages({
         emptyBody: "Bu ortama bir servis bağlandığında burada görünür.",
       },
       capabilities: {
-        description: "Tracery'nin burada gözlemleyebildikleri.",
+        description: "Tracesis'in burada gözlemleyebildikleri.",
       },
       metadata: {
         title: "Ortam meta verileri",
@@ -622,7 +622,7 @@ export const catalog = defineMessages({
         notConfigured: "Yapılandırılmamış",
       },
       measures: {
-        title: "Tracery burada neyi ölçüyor",
+        title: "Tracesis burada neyi ölçüyor",
         description: "Yukarıdaki sinyallerin arkasındaki bağlama ve yetenekler.",
       },
       binding: {

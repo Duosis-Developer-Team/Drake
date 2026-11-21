@@ -17,7 +17,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { TraceryMark, TraceryWordmark } from "@/components/shell/Brand";
+import { TracesisMark, TracesisWordmark } from "@/components/shell/Brand";
 import { useT } from "@/lib/i18n";
 import { NAVIGATION, activeNavHref } from "@/lib/navigation";
 import { useSession } from "@/lib/session";
@@ -82,7 +82,7 @@ export function Sidebar({
           aria-label={t("sidebar.home")}
           className="flex min-w-0 items-center rounded-control"
         >
-          {collapsed ? <TraceryMark height={13} /> : <TraceryWordmark size={19} />}
+          {collapsed ? <TracesisMark height={13} /> : <TracesisWordmark size={19} />}
         </Link>
         {onToggleCollapse && !collapsed ? (
           <button

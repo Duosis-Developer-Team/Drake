@@ -94,7 +94,7 @@ export const logs = defineMessages({
       notConfigured: {
         title: "Log store not configured",
         description:
-          "This Tracery has no log store connected, so nothing was read. Logs are not missing; they are not being collected here.",
+          "This Tracesis has no log store connected, so nothing was read. Logs are not missing; they are not being collected here.",
       },
       unavailable: {
         title: "Logs could not be read",
@@ -201,7 +201,7 @@ export const logs = defineMessages({
       notConfigured: {
         title: "Log deposu yapılandırılmamış",
         description:
-          "Bu Tracery'ye bağlı bir log deposu yok, hiçbir şey okunmadı. Loglar kayıp değil; burada toplanmıyor.",
+          "Bu Tracesis'e bağlı bir log deposu yok, hiçbir şey okunmadı. Loglar kayıp değil; burada toplanmıyor.",
       },
       unavailable: {
         title: "Loglar okunamadı",

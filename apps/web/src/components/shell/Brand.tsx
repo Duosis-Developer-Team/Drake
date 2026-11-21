@@ -1,5 +1,5 @@
 /**
- * The Tracery logo.
+ * The Tracesis logo.
  *
  * The mark is a trace waterfall: a root span across the top, a child span
  * hanging off it, and a last span in gold — the slowest call, the one the
@@ -11,10 +11,11 @@
  * 2026-11-21) at a 450 × 200 viewBox. Do not redraw it; change it here only
  * when the artwork changes.
  *
- * The wordmark is the product name in Plus Jakarta Sans ExtraBold, lowercase,
- * tight tracking — the same setting as the artwork. It is real text so it
- * stays crisp at every size and is read by assistive technology once (the
- * mark itself is decorative).
+ * The wordmark is "tracesis" in Plus Jakarta Sans ExtraBold, lowercase, tight
+ * tracking. As in the Duosis wordmark, "sis" is set apart in colour and its
+ * i carries a slanted cut instead of a dot — here cobalt letters and a gold
+ * cut, the two colours of the mark. The letters are real text (crisp at any
+ * size); assistive technology reads the name once, from the label.
  */
 
 const MARK_RATIO = 450 / 200;
@@ -32,11 +33,11 @@ function MarkShapes() {
 }
 
 /** The mark alone, for the collapsed rail and small surfaces. */
-export function TraceryMark({ height = 14, className = "" }: { height?: number; className?: string }) {
+export function TracesisMark({ height = 14, className = "" }: { height?: number; className?: string }) {
   return (
     <span
       role="img"
-      aria-label="Tracery" // i18n-ignore: the product name is a proper noun
+      aria-label="Tracesis" // i18n-ignore: the product name is a proper noun
       data-testid="brand-mark"
       className={`inline-flex shrink-0 ${className}`}
       style={{ height, width: Math.round(height * MARK_RATIO) }}
@@ -49,13 +50,15 @@ export function TraceryMark({ height = 14, className = "" }: { height?: number; 
 }
 
 /**
- * Mark plus wordmark. `size` is the cap height of the wordmark in px; the
+ * Mark plus wordmark. `size` is the font size of the wordmark in px; the
  * mark is drawn at the proportion of the approved lockup.
  */
-export function TraceryWordmark({ size = 20, className = "" }: { size?: number; className?: string }) {
+export function TracesisWordmark({ size = 20, className = "" }: { size?: number; className?: string }) {
   const markHeight = Math.round(size * 0.62);
   return (
     <span
+      role="img"
+      aria-label="Tracesis" // i18n-ignore: the product name is a proper noun
       data-testid="brand-wordmark"
       className={`inline-flex shrink-0 items-center text-ink ${className}`}
       style={{ gap: Math.round(size * 0.42) }}
@@ -70,10 +73,30 @@ export function TraceryWordmark({ size = 20, className = "" }: { size?: number; 
         <MarkShapes />
       </svg>
       <span
+        aria-hidden
         className="font-[family-name:var(--font-display)] leading-none font-extrabold"
         style={{ fontSize: size, letterSpacing: "-0.045em" }}
       >
-        tracery{/* i18n-ignore: the product name is a proper noun */}
+        {/* i18n-ignore: the product name is a proper noun */}
+        trace
+        <span style={{ color: "var(--brand)" }}>
+          s
+          <span className="relative inline-block">
+            {"\u0131"}
+            <span
+              className="absolute"
+              style={{
+                left: "0.015em",
+                top: "0.01em",
+                width: "0.17em",
+                height: "0.23em",
+                background: "var(--gold)",
+                clipPath: "polygon(0 38%, 100% 0, 100% 100%, 0 100%)",
+              }}
+            />
+          </span>
+          s
+        </span>
       </span>
     </span>
   );

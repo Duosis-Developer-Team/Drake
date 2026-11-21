@@ -53,7 +53,7 @@ export const notifications = defineMessages({
     inbox: {
       markReadFailed: "Could not mark as read. Nothing changed; try again.",
       title: "Notifications",
-      description: "Incidents a notification policy routed to you. Tracery writes every one of these.",
+      description: "Incidents a notification policy routed to you. Tracesis writes every one of these.",
       routingPolicies: "Routing policies",
       row: {
         read: "read",
@@ -82,7 +82,7 @@ export const notifications = defineMessages({
       errorTitle: "Could not load notifications",
       emptyUnread: "Nothing unread",
       empty: "No notifications",
-      emptyDescription: "Tracery sends these when an incident matches a policy you are a destination for.",
+      emptyDescription: "Tracesis sends these when an incident matches a policy you are a destination for.",
       reviewPolicies: "Review routing policies",
       list: {
         title: "Inbox",
@@ -256,7 +256,7 @@ export const notifications = defineMessages({
     inbox: {
       markReadFailed: "Okundu olarak işaretlenemedi. Hiçbir şey değişmedi; yeniden deneyin.",
       title: "Bildirimler",
-      description: "Bir bildirim politikasının size yönlendirdiği olaylar. Bunların her birini Tracery yazar.",
+      description: "Bir bildirim politikasının size yönlendirdiği olaylar. Bunların her birini Tracesis yazar.",
       routingPolicies: "Yönlendirme politikaları",
       row: {
         read: "okundu",
@@ -286,7 +286,7 @@ export const notifications = defineMessages({
       emptyUnread: "Okunmamış bildirim yok",
       empty: "Bildirim yok",
       emptyDescription:
-        "Tracery bunları, bir olay hedefi olduğunuz bir politikayla eşleştiğinde gönderir.",
+        "Tracesis bunları, bir olay hedefi olduğunuz bir politikayla eşleştiğinde gönderir.",
       reviewPolicies: "Yönlendirme politikalarını incele",
       list: {
         title: "Gelen kutusu",

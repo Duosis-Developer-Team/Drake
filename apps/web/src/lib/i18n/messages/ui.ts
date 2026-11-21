@@ -248,7 +248,7 @@ export const ui = defineMessages({
       scraped: "Being scraped",
       notScraped: "Not being scraped",
       scrapedDetail: "Latest scrape sample in this window",
-      unknownDetail: "No sample arrived, so Tracery cannot say whether this target is scraped.",
+      unknownDetail: "No sample arrived, so Tracesis cannot say whether this target is scraped.",
       seriesN: "series {n}",
     },
     dashboard: {
@@ -281,7 +281,7 @@ export const ui = defineMessages({
     error: {
       kicker: "Screen failed to render",
       title: "Something in this page broke",
-      body: "This is a fault in the interface, not a statement about the systems Tracery monitors — nothing here should be read as a health signal. Other screens are unaffected.",
+      body: "This is a fault in the interface, not a statement about the systems Tracesis monitors — nothing here should be read as a health signal. Other screens are unaffected.",
       commandCenter: "Overview",
       reference: "Reference",
       referenceLabel: "error reference",
@@ -289,7 +289,7 @@ export const ui = defineMessages({
     notFound: {
       code: "Error 404",
       title: "This page does not exist",
-      body: "The address is not a Tracery route. It may have been mistyped, or it may have been a link to something that has since been removed.",
+      body: "The address is not a Tracesis route. It may have been mistyped, or it may have been a link to something that has since been removed.",
     },
   },
   tr: {
@@ -525,7 +525,7 @@ export const ui = defineMessages({
       notScraped: "Veri toplanmıyor",
       scrapedDetail: "Bu penceredeki son toplama örneği",
       unknownDetail:
-        "Hiç örnek gelmedi; bu nedenle Tracery bu hedeften veri toplanıp toplanmadığını söyleyemez.",
+        "Hiç örnek gelmedi; bu nedenle Tracesis bu hedeften veri toplanıp toplanmadığını söyleyemez.",
       seriesN: "seri {n}",
     },
     dashboard: {
@@ -558,7 +558,7 @@ export const ui = defineMessages({
     error: {
       kicker: "Ekran oluşturulamadı",
       title: "Bu sayfada bir şey bozuldu",
-      body: "Bu, arayüzdeki bir hatadır; Tracery'nin izlediği sistemler hakkında bir ifade değildir — buradaki hiçbir şey sağlık sinyali olarak okunmamalıdır. Diğer ekranlar etkilenmez.",
+      body: "Bu, arayüzdeki bir hatadır; Tracesis'in izlediği sistemler hakkında bir ifade değildir — buradaki hiçbir şey sağlık sinyali olarak okunmamalıdır. Diğer ekranlar etkilenmez.",
       commandCenter: "Genel bakış",
       reference: "Referans",
       referenceLabel: "hata referansı",
@@ -566,7 +566,7 @@ export const ui = defineMessages({
     notFound: {
       code: "Hata 404",
       title: "Bu sayfa mevcut değil",
-      body: "Bu adres bir Tracery rotası değil. Yanlış yazılmış ya da sonradan kaldırılmış bir şeye bağlantı olabilir.",
+      body: "Bu adres bir Tracesis rotası değil. Yanlış yazılmış ya da sonradan kaldırılmış bir şeye bağlantı olabilir.",
     },
   },
 });

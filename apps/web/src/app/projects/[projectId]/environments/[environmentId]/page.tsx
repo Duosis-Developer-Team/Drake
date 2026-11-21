@@ -273,7 +273,7 @@ export default function EnvironmentDetailPage() {
         </div>
 
         {/* Who calls whom in this environment — only where workloads run
-            in a cluster Tracery reads; an external runtime has no traces. */}
+            in a cluster Tracesis reads; an external runtime has no traces. */}
         {data.cluster ? (
           <div className="mb-6">
             <ServiceMapPanel

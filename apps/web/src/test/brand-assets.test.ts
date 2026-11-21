@@ -1,7 +1,7 @@
 /**
  * Brand guardrails.
  *
- * The Tracery logo is inline SVG drawn from theme tokens (Brand.tsx), so the
+ * The Tracesis logo is inline SVG drawn from theme tokens (Brand.tsx), so the
  * runtime ships only the app icon in three forms. A stray master or an old
  * derivative dropped into public/brand fails here before it ships.
  */
@@ -15,7 +15,7 @@ const WEB_ROOT = existsSync(join(process.cwd(), "public", "brand"))
   : join(process.cwd(), "apps", "web");
 const RUNTIME_BRAND_DIR = join(WEB_ROOT, "public", "brand");
 
-const EXPECTED = ["tracery-icon.svg", "tracery-favicon-32.png", "tracery-apple-touch.png"];
+const EXPECTED = ["tracesis-icon.svg", "tracesis-favicon-32.png", "tracesis-apple-touch.png"];
 const PER_FILE_BUDGET_BYTES = 8 * 1024;
 
 describe("brand assets", () => {

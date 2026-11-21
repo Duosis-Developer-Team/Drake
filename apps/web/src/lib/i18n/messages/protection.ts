@@ -16,7 +16,7 @@ export const protection = defineMessages({
     page: {
       title: "Protection",
       description:
-        "Backed up and proven restorable are two different answers — Tracery keeps them apart.",
+        "Backed up and proven restorable are two different answers — Tracesis keeps them apart.",
     },
     backup: {
       protected: "Protected",
@@ -155,7 +155,7 @@ export const protection = defineMessages({
         notEvaluated: "Each link of the chain, as observed",
         notEvaluatedTitle: "Not evaluated yet",
         notEvaluatedDescription:
-          "No assessment has been recorded for this policy. Tracery shows nothing rather than assuming a state.",
+          "No assessment has been recorded for this policy. Tracesis shows nothing rather than assuming a state.",
       },
       chain: {
         label: "Evidence chain",
@@ -248,7 +248,7 @@ export const protection = defineMessages({
     page: {
       title: "Koruma",
       description:
-        "Yedeklenmiş olmak ile kurtarılabildiği kanıtlanmış olmak iki ayrı yanıttır; Tracery bunları ayrı tutar.",
+        "Yedeklenmiş olmak ile kurtarılabildiği kanıtlanmış olmak iki ayrı yanıttır; Tracesis bunları ayrı tutar.",
     },
     backup: {
       protected: "Korunuyor",
@@ -387,7 +387,7 @@ export const protection = defineMessages({
         notEvaluated: "Zincirin her halkası, gözlemlendiği şekliyle",
         notEvaluatedTitle: "Henüz değerlendirilmedi",
         notEvaluatedDescription:
-          "Bu politika için kayıtlı bir değerlendirme yok. Tracery bir durum varsaymak yerine hiçbir şey göstermez.",
+          "Bu politika için kayıtlı bir değerlendirme yok. Tracesis bir durum varsaymak yerine hiçbir şey göstermez.",
       },
       chain: {
         label: "Kanıt zinciri",
