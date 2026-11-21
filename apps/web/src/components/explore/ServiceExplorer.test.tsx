@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ServiceExplorer } from "@/components/explore/ServiceExplorer";
@@ -68,7 +74,16 @@ describe("ServiceExplorer", () => {
     installFetchMock({
       "/v1/service-health/services": {
         status: 200,
-        body: { items: [row("quiet-api", "b1"), row("core-service", "b2"), row("unbound", null)], total: 3, limit: 100, offset: 0 },
+        body: {
+          items: [
+            row("quiet-api", "b1"),
+            row("core-service", "b2"),
+            row("unbound", null),
+          ],
+          total: 3,
+          limit: 100,
+          offset: 0,
+        },
       },
       "/v1/service-health/signals": {
         status: 200,
@@ -88,20 +103,77 @@ describe("ServiceExplorer", () => {
 
     const list = await screen.findByRole("list");
     // Once the last hour's signals arrive, the failing service leads.
-    await waitFor(() => expect(within(list).getAllByRole("button")[0]).toHaveTextContent("core-service"));
+    await waitFor(() =>
+      expect(within(list).getAllByRole("button")[0]).toHaveTextContent(
+        "core-service",
+      ),
+    );
     const items = within(list).getAllByRole("button");
     // An unbound service has nothing to read and is not offered.
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent("5% failed");
     fireEvent.click(items[0]);
-    expect(replace).toHaveBeenCalledWith("/traces?binding=b2", { scroll: false });
+    expect(replace).toHaveBeenCalledWith("/traces?binding=b2", {
+      scroll: false,
+    });
+  });
+
+  it("narrows application, then environment, then service", async () => {
+    const at = (key: string, id: string, project: string, env: string) => ({
+      ...row(key, id),
+      project_id: `p-${project}`,
+      project_key: project,
+      environment_id: `e-${project}-${env}`,
+      environment_key: env,
+    });
+    installFetchMock({
+      "/v1/service-health/services": {
+        status: 200,
+        body: {
+          items: [
+            at("api", "h1", "hermes", "dev"),
+            at("api", "h2", "hermes", "prod"),
+            at("web", "h3", "hermes", "prod"),
+            at("api", "l1", "logislot", "test"),
+          ],
+          total: 4,
+          limit: 100,
+          offset: 0,
+        },
+      },
+    });
+    render(<ServiceExplorer kind="traces" />);
+    const apps = await screen.findByRole("radiogroup", { name: "Application" });
+    expect(within(apps).getAllByRole("radio").map((r) => r.textContent)).toEqual(["HEhermes3", "LOlogislot1"]);
+    // Nothing to choose below the application yet.
+    expect(screen.queryByTestId("explore-service-picker")).toBeNull();
+
+    fireEvent.click(within(apps).getByRole("radio", { name: /hermes/ }));
+    const envs = screen.getByRole("radiogroup", { name: "Environment" });
+    // Production first.
+    expect(within(envs).getAllByRole("radio").map((r) => r.textContent)).toEqual(["prod2", "dev1"]);
+    fireEvent.click(within(envs).getByRole("radio", { name: /prod/ }));
+    const picker = screen.getByTestId("explore-service-picker") as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(["Choose a service", "api", "web"]);
+    fireEvent.change(picker, { target: { value: "h3" } });
+    expect(replace).toHaveBeenCalledWith("/traces?binding=h3", { scroll: false });
+
+    // An application with one environment needs no second choice.
+    fireEvent.click(within(apps).getByRole("radio", { name: /logislot/ }));
+    const only = within(screen.getByRole("radiogroup", { name: "Environment" })).getByRole("radio");
+    expect(only).toHaveAttribute("aria-checked", "true");
   });
 
   it("says so when no service is bound", async () => {
     installFetchMock({
-      "/v1/service-health/services": { status: 200, body: { items: [row("web", null)], total: 1, limit: 100, offset: 0 } },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [row("web", null)], total: 1, limit: 100, offset: 0 },
+      },
     });
     render(<ServiceExplorer kind="logs" />);
-    expect(await screen.findByText(/No service is bound to a workload yet/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/No service is bound to a workload yet/),
+    ).toBeInTheDocument();
   });
 });
