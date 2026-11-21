@@ -238,7 +238,7 @@ describe("service health list", () => {
 
     const bound = await screen.findByTestId("service-row-api");
     expect(within(bound).getByText("Healthy")).toBeInTheDocument();
-    expect(within(bound).getByText("Resolved")).toBeInTheDocument();
+    expect(within(bound).getByText(/Deployment hermes-api/)).toBeInTheDocument();
 
     const unbound = screen.getByTestId("service-row-web");
     expect(within(unbound).getByText("Not configured")).toBeInTheDocument();
@@ -327,7 +327,7 @@ function signals(traces: unknown, logs: unknown, state = "ok") {
 }
 
 describe("service health detail", () => {
-  it("has a section index, and counts failures only where there are some", async () => {
+  it("has tabs, and counts failures only where there are some", async () => {
     renderDetail(
       {},
       signals(
@@ -337,19 +337,20 @@ describe("service health detail", () => {
     );
     render(<ServiceHealthDetailPage />);
 
-    const nav = await screen.findByTestId("section-nav");
-    for (const label of ["Overview", "Why", "Requests", "Logs", "Incidents", "Configuration"]) {
-      expect(within(nav).getByRole("link", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
+    const tabs = await screen.findByRole("tablist");
+    for (const label of ["Overview", "Requests", "Logs", "Metrics", "Incidents", "Configuration"]) {
+      expect(within(tabs).getByRole("tab", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
     }
+    expect(within(tabs).getByRole("tab", { name: /^Overview/ })).toHaveAttribute("aria-selected", "true");
     await waitFor(() =>
-      expect(within(nav).getByRole("link", { name: /^Requests/ })).toHaveTextContent("5 errors"),
+      expect(within(tabs).getByRole("tab", { name: /^Requests/ })).toHaveTextContent("5 errors"),
     );
     // Zero error lines is not shown as a badge: a "0" would read as a verdict.
-    expect(within(nav).getByRole("link", { name: /^Logs/ })).toHaveTextContent(/^Logs$/);
-    for (const link of within(nav).getAllByRole("link")) {
-      const target = link.getAttribute("href")!.slice(1);
-      expect(document.getElementById(target)).not.toBeNull();
-    }
+    expect(within(tabs).getByRole("tab", { name: /^Logs/ })).toHaveTextContent(/^Logs$/);
+    // Every tab opens its own panel.
+    fireEvent.click(within(tabs).getByRole("tab", { name: /^Configuration/ }));
+    expect(within(tabs).getByRole("tab", { name: /^Configuration/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "sh-panel-setup");
   });
 
   it("says what the service served in the last hour, and nothing when there is no store", async () => {
@@ -371,7 +372,7 @@ describe("service health detail", () => {
 
     renderDetail({}, signals(null, null, "not_configured"));
     render(<ServiceHealthDetailPage />);
-    await screen.findByTestId("section-nav");
+    await screen.findByRole("tablist");
     expect(screen.queryByTestId("telemetry-line")).not.toBeInTheDocument();
   });
 
@@ -390,12 +391,11 @@ describe("service health detail", () => {
     for (const title of ["Availability", "Stability", "Resources", "Application"]) {
       expect(await screen.findByTestId(`section-${title.toLowerCase()}`)).toBeInTheDocument();
     }
-    // Ready-over-desired is a ring plus its exact digits now; the digits are
-    // what the assertion is about — a percentage alone would hide the
-    // difference between 0/0 and an unmeasured pair.
+    // Ready-over-desired keeps its exact digits — a percentage alone would
+    // hide the difference between 0/0 and an unmeasured pair.
     const availability = screen.getByTestId("section-availability");
     expect(availability).toHaveTextContent("3/3");
-    expect(within(availability).getByTestId("ring-progress")).toBeInTheDocument();
+    expect(availability).toHaveTextContent("100%");
   });
 
   it("explains a service that publishes no golden signals without blaming it", async () => {
@@ -464,6 +464,7 @@ describe("service health detail", () => {
   it("offers only the fixed time ranges for charts", async () => {
     renderDetail();
     render(<ServiceHealthDetailPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Metrics/ }));
 
     const group = await screen.findByRole("group", { name: /time range/i });
     const labels = within(group)
@@ -477,6 +478,7 @@ describe("service health detail", () => {
   it("charts only the signals the binding's preset actually reads", async () => {
     renderDetail();
     render(<ServiceHealthDetailPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Metrics/ }));
 
     const history = await screen.findByRole("region", { name: /signal history/i });
     expect(within(history).getByText("CPU usage")).toBeInTheDocument();

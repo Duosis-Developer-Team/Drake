@@ -96,12 +96,12 @@ describe("service health in Turkish", () => {
     );
 
     // Page title, from the catalogue rather than the English literal.
-    expect(await screen.findByRole("heading", { level: 1, name: "Servis sağlığı" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Servisler" })).toBeInTheDocument();
 
     // Enum labels: the status badge and the binding state badge.
     const bound = await screen.findByTestId("service-row-api");
     expect(within(bound).getByText("Sağlıklı")).toBeInTheDocument();
-    expect(within(bound).getByText("Çözümlendi")).toBeInTheDocument();
+    expect(within(bound).queryByText("Resolved")).not.toBeInTheDocument();
     expect(within(bound).getByText("30 sn önce", { exact: false })).toBeInTheDocument();
 
     // An unbound service: its status and the action that fixes it.
@@ -114,8 +114,9 @@ describe("service health in Turkish", () => {
     const filter = screen.getByRole("group", { name: "Duruma göre filtrele" });
     expect(within(filter).getByRole("button", { name: /Tümü/ })).toBeInTheDocument();
 
-    // Nothing English leaked into the KPI strip.
-    expect(screen.getByText("Kapsamdaki servisler")).toBeInTheDocument();
+    // Nothing English leaked into the table or the view switch.
+    expect(screen.getByRole("radio", { name: "Liste" })).toBeInTheDocument();
     expect(screen.queryByText("Services in scope")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Başarısız").length).toBeGreaterThan(0);
   });
 });
