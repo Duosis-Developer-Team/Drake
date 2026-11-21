@@ -132,6 +132,8 @@ spec:
               value: {{ (.Values.agents).clusterEndpoint | default "http://drake-otel-gateway.drake-otel.svc:4318" | quote }}
             - name: DRAKE_AGENT_EXTERNAL_INGEST
               value: {{ (.Values.agentIngest).enabled | default false | quote }}
+            - name: DRAKE_AGENT_PRICES_ENABLED
+              value: {{ (.Values.agents).pricesEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_ENABLED
               value: {{ (.Values.slo).evaluatorEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_INTERVAL_SECONDS

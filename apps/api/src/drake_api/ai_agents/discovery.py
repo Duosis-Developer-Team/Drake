@@ -40,6 +40,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from drake_api.ai_agents.pricing import infer_provider
 from drake_api.observability.scope import clickhouse_time
 from drake_api.observability.store import ClickHouseStore, safe_identifier
 
@@ -439,12 +440,11 @@ class Harvest:
             ident = identity_of(row)
             hour = datetime.fromtimestamp(_int(row.get("hour")), tz=UTC)
             self._see(ident, hour)
-            key = (
-                ident.key,
-                hour,
-                str(row.get("provider") or "")[:64],
-                str(row.get("model") or "")[:128],
-            )
+            model = str(row.get("model") or "")[:128]
+            # Some SDKs and eBPF name the model only: the provider is read
+            # off the name ("gpt-5" → openai) so its calls are costed too.
+            provider = str(row.get("provider") or "") or infer_provider(model)
+            key = (ident.key, hour, provider[:64], model)
             self.rollups.setdefault(key, Bucket()).add(row)
 
     def take_tools(self, rows: list[dict[str, Any]]) -> None:

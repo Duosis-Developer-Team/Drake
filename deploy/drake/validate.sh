@@ -234,12 +234,14 @@ if ! helm template drake . -f values-drake-prod.yaml --namespace drake-prod \
   fail "a narrow /32 HTTPS egress entry was refused but should be allowed"
 fi
 
-# ...while these stay fail-closed.
+# ...while these stay fail-closed. The half-declared entries go at [1]:
+# drake-prod already declares [0] (the model price list), and a --set on
+# [0] would inherit its other field.
 for override in \
   "networkPolicy.apiExternalEgress[0].cidr=0.0.0.0/0 --set networkPolicy.apiExternalEgress[0].port=443" \
   "networkPolicy.apiExternalEgress[0].cidr=::/0 --set networkPolicy.apiExternalEgress[0].port=443" \
-  "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32" \
-  "networkPolicy.apiExternalEgress[0].port=443" \
+  "networkPolicy.apiExternalEgress[1].cidr=203.0.113.10/32" \
+  "networkPolicy.apiExternalEgress[1].port=443" \
   "networkPolicy.apiExternalEgress[0].cidr=203.0.113.10/32 --set networkPolicy.apiExternalEgress[0].port=5432" \
   "networkPolicy.database.namespaceSelector.matchLabels.name=elsewhere" \
   "networkPolicy.redis.namespaceSelector.matchLabels.name=elsewhere" \

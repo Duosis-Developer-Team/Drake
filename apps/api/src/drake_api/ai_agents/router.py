@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from drake_api.ai_agents import repository as repo
 from drake_api.ai_agents import runs as run_views
 from drake_api.ai_agents.discovery import identity_of
+from drake_api.ai_agents.pricing import infer_provider
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
@@ -66,6 +67,15 @@ async def agent_topology(
     if body is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return body
+
+
+@router.get("/agents/prices")
+async def prices(request: Request, auth: AuthContext = Depends(require_auth)) -> dict[str, Any]:
+    """Where agent costs come from, and which models have no price."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        body = await repo.price_status(connection, auth.principal)
+    return {**body, "enabled": settings.agent_prices_enabled}
 
 
 @router.get("/agents/mcp-servers")
@@ -196,7 +206,35 @@ async def agent_run(
     )
     if run is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    # Each model call at the list price in force when the run started.
+    pairs = {
+        (span["provider"] or infer_provider(span["model"]), span["model"])
+        for span in run.spans
+        if span["step"] == "model" and span["model"]
+    }
+    async with engine.connect() as connection:
+        price = await repo.prices_for(connection, pairs, datetime.fromisoformat(run.started_at))
+    total_cost: float | None = None
+    for span in run.spans:
+        span["cost_usd"] = None
+        if span["step"] != "model" or not span["model"]:
+            continue
+        found = price.get((span["provider"] or infer_provider(span["model"]), span["model"]))
+        if found is None:
+            continue
+        span["cost_usd"] = round(
+            repo.token_cost(
+                found,
+                inp=span["input_tokens"],
+                out=span["output_tokens"],
+                cached=span["cache_read_tokens"],
+                reasoning=span["reasoning_tokens"],
+            ),
+            6,
+        )
+        total_cost = (total_cost or 0.0) + span["cost_usd"]
     return {
+        "cost_usd": round(total_cost, 6) if total_cost is not None else None,
         "agent_id": str(agent_id),
         "trace_id": run.trace_id,
         "state": "ok",

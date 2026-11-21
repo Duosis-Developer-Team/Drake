@@ -114,6 +114,57 @@ def _agent(row: Any, now: datetime) -> dict[str, Any]:
     }
 
 
+# Cost (phase 4): each hourly row joined to the price its (provider, model)
+# matched, in force in that hour. Input includes cached reads and cache
+# writes (OpenTelemetry), output includes reasoning; each subset is costed
+# at its own price when the list has one. USD.
+_PRICED = """
+    LEFT JOIN model_price_matches pm ON pm.provider = r.provider AND pm.model = r.model
+    LEFT JOIN model_prices mp ON mp.model_key = pm.model_key AND mp.valid_from <= r.hour
+         AND (mp.valid_to IS NULL OR mp.valid_to > r.hour)
+"""
+_COST = """(
+    greatest(r.input_tokens - r.cache_read_tokens - r.cache_write_tokens, 0) * mp.input_usd
+    + r.cache_read_tokens * coalesce(mp.cache_read_usd, mp.input_usd)
+    + r.cache_write_tokens * coalesce(mp.cache_write_usd, mp.input_usd)
+    + greatest(r.output_tokens - r.reasoning_tokens, 0) * mp.output_usd
+    + r.reasoning_tokens * coalesce(mp.reasoning_usd, mp.output_usd)
+) / 1000000.0"""
+_COST_GROUPS = {"agent_id", "hour", "provider", "model"}
+
+
+async def _costs(
+    connection: AsyncConnection, ids: list[uuid.UUID], since: datetime, group: tuple[str, ...]
+) -> dict[tuple[Any, ...], tuple[float, int]]:
+    """(cost in USD, tokens with no price) per group of agent usage."""
+    if not ids:
+        return {}
+    if not set(group) <= _COST_GROUPS:
+        raise ValueError("unknown cost grouping")
+    cols = ", ".join(f"r.{c}" for c in group)
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT {cols}, coalesce(sum({_COST}), 0),
+                       coalesce(sum(CASE WHEN mp.id IS NULL AND r.model <> ''
+                                         THEN r.input_tokens + r.output_tokens ELSE 0 END), 0)
+                FROM agent_rollups r {_PRICED}
+                WHERE r.agent_id = ANY(:ids) AND r.hour >= :since
+                GROUP BY {cols}
+                """  # noqa: S608 - fixed fragments; group columns checked above
+            ),
+            {"ids": ids, "since": since},
+        )
+    ).all()
+    n = len(group)
+    return {tuple(row[:n]): (float(row[n]), int(row[n + 1])) for row in rows}
+
+
+def _usd(value: float) -> float:
+    return round(value, 6)
+
+
 async def list_agents(
     connection: AsyncConnection,
     principal: Principal,
@@ -146,6 +197,8 @@ async def list_agents(
         str(r[0]): {
             **_agent(r, moment),
             "totals": _totals([0] * 10),
+            "cost_usd": 0.0,
+            "unpriced_tokens": 0,
             "providers": [],
             "models": [],
             "series": [],
@@ -156,7 +209,7 @@ async def list_agents(
     hours = _hours(span, moment)
     index = {h: i for i, h in enumerate(hours)}
     total_series: list[dict[str, Any]] = [
-        {"t": h.isoformat(), "calls": 0, "errors": 0, "tokens": 0} for h in hours
+        {"t": h.isoformat(), "calls": 0, "errors": 0, "tokens": 0, "cost_usd": 0.0} for h in hours
     ]
     if ids:
         for row in (
@@ -225,6 +278,20 @@ async def list_agents(
             total_series[i]["calls"] += int(row[2])
             total_series[i]["errors"] += int(row[3])
             total_series[i]["tokens"] += int(row[4])
+        for (agent_id,), (cost, unpriced) in (
+            await _costs(connection, ids, since, ("agent_id",))
+        ).items():
+            items[str(agent_id)]["cost_usd"] = _usd(cost)
+            items[str(agent_id)]["unpriced_tokens"] = unpriced
+        model_costs = await _costs(connection, ids, since, ("agent_id", "provider", "model"))
+        for (agent_id, provider, model), (cost, _) in model_costs.items():
+            for m in items[str(agent_id)]["models"]:
+                if m["model"] == model and (m["provider"] or "") == (provider or ""):
+                    m["cost_usd"] = _usd(cost)
+        for (hour,), (cost, _) in (await _costs(connection, ids, since, ("hour",))).items():
+            i = index.get(hour)
+            if i is not None:
+                total_series[i]["cost_usd"] = _usd(cost)
         for k, s in series.items():
             items[k]["series"] = s
             items[k]["models"].sort(key=lambda m: -m["calls"])
@@ -259,6 +326,8 @@ async def list_agents(
             )
         },
         "series": total_series,
+        "cost_usd": _usd(sum(i["cost_usd"] for i in rows)),
+        "unpriced_tokens": sum(i["unpriced_tokens"] for i in rows),
     }
     return {"window": window if window in WINDOWS else "24h", "items": rows, "summary": summary}
 
@@ -313,6 +382,7 @@ async def get_agent(
             "errors": 0,
             "input_tokens": 0,
             "output_tokens": 0,
+            "cost_usd": 0.0,
         }
         for h in hours
     ]
@@ -338,6 +408,15 @@ async def get_agent(
                 input_tokens=int(r[5]),
                 output_tokens=int(r[6]),
             )
+    for (hour,), (cost, _) in (await _costs(connection, [agent_id], since, ("hour",))).items():
+        i = index.get(hour)
+        if i is not None:
+            series[i]["cost_usd"] = _usd(cost)
+    whole = await _costs(connection, [agent_id], since, ("agent_id",))
+    cost, unpriced = next(iter(whole.values()), (0.0, 0))
+    agent["cost_usd"] = _usd(cost)
+    agent["unpriced_tokens"] = unpriced
+    by_model = await _costs(connection, [agent_id], since, ("provider", "model"))
     agent["series"] = series
     agent["models"] = [
         {
@@ -349,6 +428,8 @@ async def get_agent(
             "cache_read_tokens": int(r[5]),
             "reasoning_tokens": int(r[6]),
             "errors": int(r[7]),
+            "cost_usd": _usd(by_model[(r[0], r[1])][0]) if (r[0], r[1]) in by_model else None,
+            "priced": (r[0], r[1]) in by_model and by_model[(r[0], r[1])][1] == 0,
         }
         for r in (
             await connection.execute(
@@ -761,3 +842,107 @@ async def list_mcp_servers(
         server["tools"] = server["tools"][:20]
         server["clients"] = server["clients"][:10]
     return {"window": window, "servers": list(servers.values())}
+
+
+async def price_status(connection: AsyncConnection, principal: Principal) -> dict[str, Any]:
+    """Where costs come from: the last price fetch, the last good one, how
+    many models are priced, and the models this caller's agents use that
+    have no price."""
+
+    def fetch(row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {
+            "fetched_at": row[0].isoformat(),
+            "status": row[1],
+            "source": row[2],
+            "models": int(row[3]),
+            "changed": int(row[4]),
+        }
+
+    columns = "SELECT fetched_at, status, source, models, changed FROM model_price_fetches"
+    last = (await connection.execute(text(f"{columns} ORDER BY fetched_at DESC LIMIT 1"))).first()
+    good = (
+        await connection.execute(
+            text(f"{columns} WHERE status IN ('live', 'fallback') ORDER BY fetched_at DESC LIMIT 1")
+        )
+    ).first()
+    priced = (
+        await connection.execute(text("SELECT count(*) FROM model_prices WHERE valid_to IS NULL"))
+    ).scalar_one()
+    projects, unbound = await _visibility(connection, principal)
+    unmatched = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT DISTINCT r.provider, r.model
+                FROM agent_rollups r
+                JOIN agents g ON g.id = r.agent_id
+                JOIN model_price_matches pm ON pm.provider = r.provider AND pm.model = r.model
+                WHERE pm.model_key IS NULL AND {_clause()}
+                ORDER BY r.model LIMIT 50
+                """  # noqa: S608 - fixed fragments
+            ),
+            {"projects": projects, "unbound": unbound},
+        )
+    ).all()
+    return {
+        "currency": "USD",
+        "basis": "list prices per token; no discounts, batch or priority tiers",
+        "last_fetch": fetch(last),
+        "last_good_fetch": fetch(good),
+        "priced_models": int(priced),
+        "unpriced": [{"provider": r[0] or None, "model": r[1]} for r in unmatched],
+    }
+
+
+async def prices_for(
+    connection: AsyncConnection, pairs: set[tuple[str, str]], at: datetime
+) -> dict[tuple[str, str], dict[str, float | None]]:
+    """The price in force at `at` for each (provider, model), USD per
+    million tokens — for the pairs already matched."""
+    if not pairs:
+        return {}
+    providers = [p for p, _ in pairs]
+    models = [m for _, m in pairs]
+    rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT pm.provider, pm.model, mp.input_usd, mp.output_usd, mp.cache_read_usd,
+                       mp.cache_write_usd, mp.reasoning_usd
+                FROM unnest(CAST(:providers AS text[]), CAST(:models AS text[])) AS q(p, m)
+                JOIN model_price_matches pm ON pm.provider = q.p AND pm.model = q.m
+                JOIN model_prices mp ON mp.model_key = pm.model_key AND mp.valid_from <= :at
+                     AND (mp.valid_to IS NULL OR mp.valid_to > :at)
+                """
+            ),
+            {"providers": providers, "models": models, "at": at},
+        )
+    ).all()
+    return {
+        (str(r[0]), str(r[1])): {
+            "input": float(r[2]),
+            "output": float(r[3]),
+            "cache_read": float(r[4]) if r[4] is not None else None,
+            "cache_write": float(r[5]) if r[5] is not None else None,
+            "reasoning": float(r[6]) if r[6] is not None else None,
+        }
+        for r in rows
+    }
+
+
+def token_cost(
+    price: dict[str, float | None], *, inp: int, out: int, cached: int, reasoning: int
+) -> float:
+    """USD for one call's tokens at a price (per million tokens)."""
+    base_in = float(price["input"] or 0)
+    base_out = float(price["output"] or 0)
+    cache = price["cache_read"] if price["cache_read"] is not None else base_in
+    think = price["reasoning"] if price["reasoning"] is not None else base_out
+    return (
+        max(inp - cached, 0) * base_in
+        + cached * float(cache)
+        + max(out - reasoning, 0) * base_out
+        + reasoning * float(think)
+    ) / 1_000_000
