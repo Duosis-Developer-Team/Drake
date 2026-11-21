@@ -37,7 +37,8 @@ const VIEWPORTS = [
 
 async function signIn(page: Page) {
   await page.goto("/v1/auth/login?redirect=/&login_hint=user-owner");
-  await expect(page.getByTestId("sidebar")).toBeVisible();
+  // The rail is hidden below lg; the page landmark exists at every width.
+  await expect(page.locator("main")).toBeVisible();
 }
 
 async function setTheme(page: Page, theme: "light" | "dark") {

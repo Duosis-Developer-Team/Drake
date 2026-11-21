@@ -105,6 +105,7 @@ export function RolesPanel() {
     }
   };
 
+  const [confirmArchive, setConfirmArchive] = useState<string | null>(null);
   const archiveRole = async (role: Role) => {
     setSaveError(null);
     try {
@@ -450,14 +451,34 @@ export function RolesPanel() {
                       >
                         {t("roles.detail.save")}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void archiveRole(selected)}
-                        className={PILL_BUTTON}
-                      >
-                        <Archive aria-hidden className="h-3.5 w-3.5" />
-                        {t("roles.detail.archive")}
-                      </button>
+                      {confirmArchive === selected.id ? (
+                        <span className="inline-flex flex-wrap items-center gap-2" data-testid="archive-confirm">
+                          <span className="text-micro text-ink-muted">{t("roles.detail.confirmArchive")}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmArchive(null);
+                              void archiveRole(selected);
+                            }}
+                            className={`${PILL_BUTTON} text-critical`}
+                          >
+                            <Archive aria-hidden className="h-3.5 w-3.5" />
+                            {t("roles.detail.archive")}
+                          </button>
+                          <button type="button" onClick={() => setConfirmArchive(null)} className={PILL_BUTTON}>
+                            {t("roles.detail.keep")}
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmArchive(selected.id)}
+                          className={PILL_BUTTON}
+                        >
+                          <Archive aria-hidden className="h-3.5 w-3.5" />
+                          {t("roles.detail.archive")}
+                        </button>
+                      )}
                     </div>
                   ) : null}
                 </>

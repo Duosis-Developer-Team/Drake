@@ -16,7 +16,7 @@ import { DataState } from "@/components/state/DataState";
 import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ApiError, apiGet } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { useFormat, useT } from "@/lib/i18n";
 
 interface AuditEvent {
   id: string;
@@ -40,6 +40,7 @@ const RESULT_STATUS = {
 
 export function AuditPanel() {
   const t = useT("admin");
+  const fmt = useFormat();
   const common = useT("common");
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -134,7 +135,7 @@ export function AuditPanel() {
                 {events.map((event) => (
                   <tr key={event.id} className="h-14 transition-colors hover:bg-surface-hover">
                     <td className="px-7 font-mono text-micro whitespace-nowrap text-ink-secondary">
-                      {event.occurred_at.replace("T", " ").slice(0, 19)}
+                      {fmt.utc(event.occurred_at)}
                     </td>
                     <td className="px-3">
                       <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-2.5 pl-1 text-micro text-ink-secondary">

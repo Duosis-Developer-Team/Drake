@@ -218,6 +218,12 @@ export const onboarding = defineMessages({
           description:
             "The analysis stopped at a budget, so this describes part of the repository. It is not a complete picture.",
         },
+        findings: "{count, plural, one {# thing found} other {# things found}} — paths only",
+        confidence: {
+          high: "high confidence",
+          medium: "medium confidence",
+          low: "low confidence — review",
+        },
         pathsOnly:
           "Paths and digests only. Tracery stores no file content, and never reads environment files, private keys, credentials or cluster configuration.",
       },
@@ -533,6 +539,12 @@ export const onboarding = defineMessages({
           title: "Kısmi analiz",
           description:
             "Analiz bir bütçe sınırında durdu; bu yüzden deponun yalnızca bir kısmını açıklıyor. Tam bir resim değildir.",
+        },
+        findings: "{count} bulgu — yalnızca yollar",
+        confidence: {
+          high: "yüksek güven",
+          medium: "orta güven",
+          low: "düşük güven — gözden geçirin",
         },
         pathsOnly:
           "Yalnızca yollar ve özetler. Tracery dosya içeriği saklamaz; ortam dosyalarını, özel anahtarları, kimlik bilgilerini veya küme yapılandırmasını asla okumaz.",

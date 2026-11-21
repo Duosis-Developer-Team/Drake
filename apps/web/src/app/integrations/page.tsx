@@ -31,7 +31,9 @@ import { useFormat, useT, type Translator } from "@/lib/i18n";
 
 const OBSERVED_STATUS: Record<string, HealthStatus> = {
   ok: "healthy",
-  degraded: "critical",
+  // Degraded is a warning everywhere else in the catalog; only a failure
+  // is critical.
+  degraded: "warning",
   stale: "stale",
   unknown: "unknown",
   not_configured: "unknown",
@@ -244,13 +246,13 @@ function ProviderTile({
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
               <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 font-mono text-micro text-ink-secondary">
-                {integration.configuration_state}
+                {t.dyn("state.configuration", integration.configuration_state, integration.configuration_state)}
               </span>
               <StatusBadge
                 status={
                   OBSERVED_STATUS[integration.observed_state] ?? "unknown"
                 }
-                label={integration.observed_state}
+                label={t.dyn("state.observed", integration.observed_state, integration.observed_state)}
                 size="compact"
               />
             </div>

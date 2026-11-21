@@ -61,6 +61,8 @@ export const admin = defineMessages({
         permissionsLegend: "Permissions",
         save: "Save permissions",
         archive: "Archive role",
+        confirmArchive: "Archive this role? Grants that use it stop working.",
+        keep: "Keep",
       },
     },
     grants: {
@@ -86,6 +88,8 @@ export const admin = defineMessages({
         active: "active",
         revoked: "revoked",
         revoke: "Revoke",
+        confirmRevoke: "Revoke now? Access ends immediately.",
+        keep: "Keep",
       },
       form: {
         title: "Create grant",
@@ -196,6 +200,8 @@ export const admin = defineMessages({
         permissionsLegend: "Yetkiler",
         save: "Yetkileri kaydet",
         archive: "Rolü arşivle",
+        confirmArchive: "Bu rol arşivlensin mi? Onu kullanan yetkiler çalışmayı bırakır.",
+        keep: "Vazgeç",
       },
     },
     grants: {
@@ -221,6 +227,8 @@ export const admin = defineMessages({
         active: "etkin",
         revoked: "geri alındı",
         revoke: "Geri al",
+        confirmRevoke: "Şimdi geri alınsın mı? Erişim hemen biter.",
+        keep: "Vazgeç",
       },
       form: {
         title: "Atama oluştur",

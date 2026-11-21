@@ -40,7 +40,6 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
-import { SortedBarChart } from "@/components/charts/CategoryCharts";
 import { ToneCounters } from "@/components/charts/visuals";
 import {
   IconBubble,
@@ -465,18 +464,54 @@ function InventoryInner() {
           </Panel>
 
           <div className="h-full min-w-0 [&>*]:h-full">
-            <SortedBarChart
-              title={t("shared.resourcesByKind")}
-              question={t("inventory.kinds.question")}
-              unit="count"
-              status={kindCategories.length === 0 ? "empty" : "ready"}
-              asOf={summary.data.as_of}
-              freshness={
-                summary.data.inventory.state === "stale" ? "stale" : "fresh"
-              }
-              categories={kindCategories}
-              emptyDescription={t("inventory.kinds.emptyDescription")}
-            />
+            {/* A ranked list that is also the kind filter: clicking a kind
+                narrows the table below to it. Kinds outside the browsable
+                allowlist are listed but not offered as a filter. */}
+            <Panel data-testid="kinds-panel">
+              <PanelHeader title={t("shared.resourcesByKind")} description={t("inventory.kinds.question")} />
+              {kindCategories.length === 0 ? (
+                <p className="text-caption text-ink-muted">{t("inventory.kinds.emptyDescription")}</p>
+              ) : (
+                <ul className="space-y-0.5">
+                  {[...kindCategories]
+                    .sort((a, b) => b.value - a.value)
+                    .map((entry) => {
+                      const top = Math.max(1, ...kindCategories.map((c) => c.value));
+                      const browsable = (INVENTORY_KINDS as readonly string[]).includes(entry.name);
+                      const active = kind === entry.name;
+                      const body = (
+                        <>
+                          <span className="w-36 shrink-0 truncate font-mono text-caption text-ink">{entry.name}</span>
+                          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-3">
+                            <span className="block h-full rounded-full bg-brand" style={{ width: `${(entry.value / top) * 100}%` }} />
+                          </span>
+                          <span data-tabular className="w-12 shrink-0 text-right font-mono text-caption text-ink-secondary">
+                            {entry.value}
+                          </span>
+                        </>
+                      );
+                      return (
+                        <li key={entry.name}>
+                          {browsable ? (
+                            <button
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => setParam({ kind: active ? "" : entry.name, event_type: "" })}
+                              className={`flex w-full items-center gap-3 rounded-control px-2 py-1.5 text-left transition-colors ${
+                                active ? "bg-surface-selected" : "hover:bg-surface-hover"
+                              }`}
+                            >
+                              {body}
+                            </button>
+                          ) : (
+                            <span className="flex items-center gap-3 px-2 py-1.5 opacity-70">{body}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                </ul>
+              )}
+            </Panel>
           </div>
         </div>
       ) : null}

@@ -147,6 +147,14 @@ describe("notification inbox", () => {
     expect((call?.init?.headers as Record<string, string>)["X-CSRF-Token"]).toBeTruthy();
   });
 
+  it("says so when marking read fails, instead of staying silent", async () => {
+    renderInbox([inboxItem()], {
+      "/v1/notifications/read": { status: 500, body: errorBody("error", "boom") },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /mark read/i }));
+    expect(await screen.findByTestId("mark-read-failed")).toHaveTextContent(/could not mark as read/i);
+  });
+
   it("separates loading, empty and error", async () => {
     installFetchMock({ "/v1/me": { status: 200, body: makeMe() } });
     const { unmount } = render(
@@ -304,11 +312,22 @@ describe("notification policies", () => {
     expect(conflict).toHaveTextContent(/someone else saved first/i);
   });
 
+  it("keeps the saved notice after an edit closes the form", async () => {
+    renderPolicies(["notification.manage"], {
+      "/v1/notification-policies/pol-1": { status: 200, body: { ...POLICY, version: 2 } },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /edit/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /save changes/i }));
+    expect(await screen.findByTestId("policy-saved")).toBeInTheDocument();
+  });
+
   it("disables the form without notification.manage", async () => {
     renderPolicies(["notification.view"]);
     await screen.findByRole("form", { name: /notification policy/i });
     expect(screen.getByTestId("state-permission-denied")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create policy/i })).toBeDisabled();
+    // Nothing to edit with: the cards offer no Edit either.
+    expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
   });
 });
 

@@ -154,6 +154,21 @@ export const integrations = defineMessages({
       private_key_reference: "Private key secret reference",
       webhook_secret_reference: "Webhook secret reference",
     },
+    state: {
+      configuration: {
+        configured: "configured",
+        not_configured: "not configured",
+        disabled: "disabled",
+        invalid: "invalid",
+      },
+      observed: {
+        ok: "OK",
+        degraded: "Degraded",
+        stale: "Stale",
+        unknown: "Unknown",
+        not_configured: "Not configured",
+      },
+    },
     badge: {
       onboarding: {
         discovered: "discovered",
@@ -321,6 +336,21 @@ export const integrations = defineMessages({
       app_identity: "App istemci kimliği (veya app kimliği)",
       private_key_reference: "Özel anahtar referansı",
       webhook_secret_reference: "Webhook gizli anahtarı referansı",
+    },
+    state: {
+      configuration: {
+        configured: "yapılandırıldı",
+        not_configured: "yapılandırılmadı",
+        disabled: "devre dışı",
+        invalid: "geçersiz",
+      },
+      observed: {
+        ok: "Sağlıklı",
+        degraded: "Bozulmuş",
+        stale: "Eski",
+        unknown: "Bilinmiyor",
+        not_configured: "Yapılandırılmadı",
+      },
     },
     badge: {
       onboarding: {

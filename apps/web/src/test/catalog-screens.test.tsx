@@ -416,8 +416,8 @@ describe("catalog screens", () => {
     await waitFor(() =>
       expect(screen.getByTestId("integration-table")).toBeInTheDocument(),
     );
-    expect(screen.getByText("not_configured")).toBeInTheDocument();
-    expect(screen.getByText("unknown")).toBeInTheDocument();
+    expect(screen.getByText("not configured")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
     expect(screen.getByText("never")).toBeInTheDocument();
     expect(screen.queryByText(/healthy/i)).not.toBeInTheDocument();
   });

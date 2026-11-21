@@ -118,6 +118,7 @@ test("grant lifecycle: create, visible in list, double-submit safe, revoke", asy
   while ((await activeRows.count()) > 0) {
     const before = await activeRows.count();
     await activeRows.first().getByRole("button", { name: /revoke/i }).click();
+    await activeRows.first().getByTestId("revoke-confirm").getByRole("button", { name: /^revoke$/i }).click();
     await expect(activeRows).toHaveCount(before - 1);
   }
 
@@ -141,8 +142,10 @@ test("grant lifecycle: create, visible in list, double-submit safe, revoke", asy
   ).toHaveText(/required/i);
   await expect(activeRows).toHaveCount(1);
 
-  // Revoke it and observe the lifecycle state change.
+  // Revoke it — a second, confirming click — and observe the lifecycle
+  // state change.
   await activeRows.first().getByRole("button", { name: /revoke/i }).click();
+  await activeRows.first().getByTestId("revoke-confirm").getByRole("button", { name: /^revoke$/i }).click();
   await expect(activeRows).toHaveCount(0);
   await expect(
     table
