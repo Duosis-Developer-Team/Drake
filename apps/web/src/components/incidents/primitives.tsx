@@ -25,7 +25,7 @@ import { RingProgress } from "@/components/charts/visuals";
 import { Panel } from "@/components/ui/Panel";
 import { DataState } from "@/components/state/DataState";
 import type { StatusTone } from "@/lib/design/status";
-import { useT } from "@/lib/i18n";
+import { useFormat, useT } from "@/lib/i18n";
 
 /**
  * One KPI tile for a list screen's summary row: a big honest count with a
@@ -159,6 +159,7 @@ export function IncidentLifecycle({
   resolvedAt: string | null;
 }) {
   const t = useT("incidents");
+  const fmt = useFormat();
   const steps: { key: string; label: string; time: string | null; tone: StatusTone }[] = [
     { key: "opened", label: t("step.opened"), time: openedAt, tone: "critical" },
     {
@@ -188,7 +189,7 @@ export function IncidentLifecycle({
               <span className={`text-micro font-medium ${done ? "text-ink" : "text-ink-muted"}`}>
                 {step.label}
               </span>
-              <span className="font-mono text-micro text-ink-muted">{step.time ?? "—"}</span>
+              <span className="font-mono text-micro text-ink-muted">{step.time ? fmt.utc(step.time) : "—"}</span>
             </div>
             {index < steps.length - 1 ? (
               <span
@@ -212,6 +213,7 @@ export function IncidentLifecycle({
  */
 export function IncidentTimeline({ events }: { events: IncidentEvent[] }) {
   const t = useT("incidents");
+  const fmt = useFormat();
   if (events.length === 0) {
     return <p className="text-sm text-ink-secondary">{t("timeline.empty")}</p>;
   }
@@ -233,7 +235,7 @@ export function IncidentTimeline({ events }: { events: IncidentEvent[] }) {
               {t.dyn("eventDescription", event.event_type, EVENT_DESCRIPTIONS[event.event_type])}
             </p>
             <p className="mt-0.5 text-[11px] text-ink-muted">
-              <time className="font-mono">{event.occurred_at}</time>
+              <time dateTime={event.occurred_at} className="font-mono">{fmt.utc(event.occurred_at)}</time>
               {event.actor ? <> · {event.actor}</> : null}
             </p>
           </div>

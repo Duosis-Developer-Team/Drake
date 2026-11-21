@@ -9,21 +9,18 @@
  */
 
 import {
-  CheckCircle2,
   Fingerprint,
   GitCommitHorizontal,
-  Hourglass,
   PackageSearch,
   Rocket,
   ShieldCheck,
-  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
-import { useApi } from "@/components/catalog/primitives";
+import { CountTile, ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
 import {
   EVIDENCE_TONE,
   EvidenceBadge,
@@ -33,11 +30,9 @@ import {
   VerdictBadge,
 } from "@/components/deployments/primitives";
 import {
-  BreakdownRing,
   CardTitle,
   EmptyHero,
   FactPill,
-  KpiTile,
   PillSelect,
   RowBubble,
   ShareBar,
@@ -52,7 +47,6 @@ import {
   EVIDENCE_LABELS,
   deploymentListPath,
   rolloutDurationSeconds,
-  type DeploymentPage,
   type DeploymentRow,
   type EvidenceState,
   type RolloutState,
@@ -196,37 +190,44 @@ function DeploymentRowView({ row }: { row: DeploymentRow }) {
   );
 }
 
-/** Evidence grades on this page, as four lanes — never merged into one. */
-function EvidenceLanes({ items }: { items: DeploymentRow[] }) {
+/** Evidence grades under the current filters, as four lanes — never merged
+ *  into one. Each count is the server's own total, and each lane filters. */
+function EvidenceLanes({
+  totals,
+  active,
+  onPick,
+}: {
+  totals: Record<EvidenceState, number | null>;
+  active: EvidenceState | "";
+  onPick: (state: EvidenceState | "") => void;
+}) {
   const t = useT("deployments");
-  const total = items.length;
+  const all = EVIDENCE_STATES.reduce((sum, state) => sum + (totals[state] ?? 0), 0);
   return (
-    <ul className="space-y-4">
+    <ul className="space-y-1">
       {EVIDENCE_STATES.map((state) => {
-        const count = items.filter(
-          (row) => row.evidence_state === state,
-        ).length;
+        const count = totals[state];
         return (
-          <li key={state} className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex min-w-0 items-center gap-2 text-caption text-ink-secondary">
-                <span
-                  aria-hidden
-                  className={`h-2 w-2 shrink-0 rounded-full ${toneSpec(EVIDENCE_TONE[state]).dot}`}
-                />
-                <span className="truncate">
-                  {t.dyn("evidence", state, EVIDENCE_LABELS[state])}
+          <li key={state}>
+            <button
+              type="button"
+              aria-pressed={active === state}
+              onClick={() => onPick(active === state ? "" : state)}
+              className={`flex w-full flex-col gap-2 rounded-control px-2 py-2 text-left transition-colors ${
+                active === state ? "bg-surface-selected" : "hover:bg-surface-hover"
+              }`}
+            >
+              <span className="flex w-full items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2 text-caption text-ink-secondary">
+                  <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${toneSpec(EVIDENCE_TONE[state]).dot}`} />
+                  <span className="truncate">{t.dyn("evidence", state, EVIDENCE_LABELS[state])}</span>
+                </span>
+                <span data-tabular className="text-body font-semibold text-ink">
+                  {count ?? "—"}
                 </span>
               </span>
-              <span data-tabular className="text-body font-semibold text-ink">
-                {count}
-              </span>
-            </div>
-            <ShareBar
-              share={total > 0 ? count / total : null}
-              tone={EVIDENCE_TONE[state]}
-              className="h-2"
-            />
+              <ShareBar share={count !== null && all > 0 ? count / all : null} tone={EVIDENCE_TONE[state]} className="h-1.5" />
+            </button>
           </li>
         );
       })}
@@ -234,39 +235,47 @@ function EvidenceLanes({ items }: { items: DeploymentRow[] }) {
   );
 }
 
+const FILTER_KEYS = ["rollout_state", "evidence_state", "started_within"] as const;
+
+function withLimit(path: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}limit=1`;
+}
+
 function DeploymentTable() {
   const t = useT("deployments");
   const c = useT("common");
-  const [rolloutState, setRolloutState] = useState<RolloutState | "">("");
-  const [evidenceState, setEvidenceState] = useState<EvidenceState | "">("");
-  const [startedWithin, setStartedWithin] = useState("");
+  const [filters, update] = useUrlFilters(FILTER_KEYS);
+  const rolloutState = (ROLLOUT_STATES as readonly string[]).includes(filters.rollout_state)
+    ? (filters.rollout_state as RolloutState)
+    : "";
+  const evidenceState = (EVIDENCE_STATES as readonly string[]).includes(filters.evidence_state)
+    ? (filters.evidence_state as EvidenceState)
+    : "";
+  const startedWithin = WINDOWS.some((w) => w.value === filters.started_within) ? filters.started_within : "";
 
-  const [page, retry] = useApi<DeploymentPage>(
+  const [list, retry] = useCursorList<DeploymentRow>(
     deploymentListPath({
       rolloutState: rolloutState || undefined,
       evidenceState: evidenceState || undefined,
       startedWithin: startedWithin || undefined,
     }),
   );
-
-  const items = page.state === "ready" ? page.data.items : [];
-  const total = items.length;
-  const failed = items.filter((row) => row.rollout_state === "failed").length;
-  const degraded = items.filter(
-    (row) => row.rollout_state === "degraded",
-  ).length;
-  const stalled = items.filter((row) => row.rollout_state === "stalled").length;
-  const progressing = items.filter(
-    (row) => row.rollout_state === "progressing",
-  ).length;
-  const healthy = items.filter((row) => row.rollout_state === "healthy").length;
-  const unknownState = items.filter((row) =>
-    ["unknown", "pending"].includes(row.rollout_state),
-  ).length;
-  const verified = items.filter(
-    (row) => row.evidence_state === "verified",
-  ).length;
-  const share = (count: number) => (total > 0 ? count / total : null);
+  // Server totals under the other filters; each tile then applies its own.
+  const rolloutTotal = (state: RolloutState) =>
+    withLimit(deploymentListPath({ rolloutState: state, evidenceState: evidenceState || undefined, startedWithin: startedWithin || undefined }));
+  const evidenceTotal = (state: EvidenceState) =>
+    withLimit(deploymentListPath({ rolloutState: rolloutState || undefined, evidenceState: state, startedWithin: startedWithin || undefined }));
+  const healthy = useTotal(rolloutTotal("healthy"));
+  const failed = useTotal(rolloutTotal("failed"));
+  const degraded = useTotal(rolloutTotal("degraded"));
+  const stalled = useTotal(rolloutTotal("stalled"));
+  const evidence: Record<EvidenceState, number | null> = {
+    verified: useTotal(evidenceTotal("verified")),
+    partial: useTotal(evidenceTotal("partial")),
+    unverified: useTotal(evidenceTotal("unverified")),
+    conflict: useTotal(evidenceTotal("conflict")),
+  };
+  const toggleRollout = (state: RolloutState) => update({ rollout_state: rolloutState === state ? "" : state });
 
   const windowLabel = (value: string): string => {
     const window = WINDOWS.find((entry) => entry.value === value);
@@ -274,53 +283,51 @@ function DeploymentTable() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      {page.state === "ready" ? (
-        <div className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
-          <KpiTile
-            data-testid="deployment-kpi-healthy"
-            label={t("list.kpi.healthy")}
-            value={healthy}
-            icon={CheckCircle2}
-            tone="success"
-            share={share(healthy)}
-            caption={t("list.kpi.healthyCaption", { count: total })}
-          />
-          <KpiTile
-            data-testid="deployment-kpi-failed-or-degraded"
-            label={t("list.kpi.failedOrDegraded")}
-            value={failed + degraded}
-            icon={XCircle}
-            tone="critical"
-            share={share(failed + degraded)}
-            caption={t("list.kpi.failedOrDegradedCaption", { failed, degraded })}
-          />
-          <KpiTile
-            data-testid="deployment-kpi-stalled"
-            label={t("list.kpi.stalled")}
-            value={stalled}
-            icon={Hourglass}
-            tone="warning"
-            share={share(stalled)}
-            caption={t("list.kpi.stalledCaption", { count: progressing })}
-          />
-          <KpiTile
-            data-testid="deployment-kpi-verified-evidence"
-            label={t("list.kpi.verified")}
-            value={verified}
-            icon={ShieldCheck}
-            tone="info"
-            share={share(verified)}
-            caption={t("list.kpi.verifiedCaption")}
-          />
-        </div>
-      ) : null}
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <CountTile
+          data-testid="deployment-kpi-healthy"
+          label={t("list.kpi.healthy")}
+          value={healthy}
+          tone="success"
+          active={rolloutState === "healthy"}
+          onClick={() => toggleRollout("healthy")}
+          caption={t("list.kpi.healthyCaption")}
+        />
+        <CountTile
+          data-testid="deployment-kpi-failed"
+          label={t("list.kpi.failed")}
+          value={failed}
+          tone="critical"
+          active={rolloutState === "failed"}
+          onClick={() => toggleRollout("failed")}
+          caption={t("list.kpi.failedCaption")}
+        />
+        <CountTile
+          data-testid="deployment-kpi-degraded"
+          label={t("list.kpi.degraded")}
+          value={degraded}
+          tone="warning"
+          active={rolloutState === "degraded"}
+          onClick={() => toggleRollout("degraded")}
+          caption={t("list.kpi.degradedCaption")}
+        />
+        <CountTile
+          data-testid="deployment-kpi-stalled"
+          label={t("list.kpi.stalled")}
+          value={stalled}
+          tone="warning"
+          active={rolloutState === "stalled"}
+          onClick={() => toggleRollout("stalled")}
+          caption={t("list.kpi.stalledCaption")}
+        />
+      </div>
 
       <Toolbar
         data-testid="deployment-filters"
         summary={
-          page.state === "ready"
-            ? t("list.filters.summary", { shown: total, total: page.data.total })
+          list.state === "ready" && list.total !== null
+            ? t("list.filters.summary", { shown: list.items.length, total: list.total })
             : undefined
         }
       >
@@ -332,7 +339,7 @@ function DeploymentTable() {
             value,
             label: t.dyn("rollout", value, value),
           }))}
-          onChange={(value) => setRolloutState(value as RolloutState | "")}
+          onChange={(value) => update({ rollout_state: value })}
         />
         <PillSelect
           label={t("list.filters.evidence")}
@@ -342,51 +349,41 @@ function DeploymentTable() {
             value,
             label: t.dyn("evidence", value, EVIDENCE_LABELS[value]),
           }))}
-          onChange={(value) => setEvidenceState(value as EvidenceState | "")}
+          onChange={(value) => update({ evidence_state: value })}
         />
         <PillSelect
           label={t("list.filters.startedWithin")}
           value={startedWithin}
           placeholder={t("list.filters.anyTime")}
           options={WINDOWS.map(({ value }) => ({ value, label: windowLabel(value) }))}
-          onChange={setStartedWithin}
+          onChange={(value) => update({ started_within: value })}
         />
       </Toolbar>
 
       <div className="page-split">
         <div className="page-main">
-          <Panel
-            flush
-            className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
-          >
+          <Panel flush>
             <CardTitle
               flush
               icon={Rocket}
               title={t("list.table.title")}
               description={t("list.table.description")}
             />
-            {page.state === "loading" ? (
+            {list.state === "loading" ? (
               <StatePad>
                 <DataState kind="loading" />
               </StatePad>
             ) : null}
-            {page.state === "error" ? (
+            {list.state === "error" ? (
               <StatePad>
-                {page.notFound ? (
-                  <DataState
-                    kind="permission-denied"
-                    description={t("list.table.forbidden")}
-                  />
+                {list.denied ? (
+                  <DataState kind="permission-denied" description={t("list.table.forbidden")} />
                 ) : (
-                  <DataState
-                    kind="error"
-                    description={page.message}
-                    onRetry={retry}
-                  />
+                  <DataState kind="error" description={list.message} onRetry={retry} />
                 )}
               </StatePad>
             ) : null}
-            {page.state === "ready" && total === 0 ? (
+            {list.state === "ready" && list.items.length === 0 ? (
               <EmptyHero
                 icon={PackageSearch}
                 title={t("list.empty.title")}
@@ -394,9 +391,7 @@ function DeploymentTable() {
               >
                 <FactPill>
                   {t("list.empty.rollout", {
-                    value: rolloutState
-                      ? t.dyn("rollout", rolloutState, rolloutState)
-                      : t("list.filters.any"),
+                    value: rolloutState ? t.dyn("rollout", rolloutState, rolloutState) : t("list.filters.any"),
                   })}
                 </FactPill>
                 <FactPill>
@@ -413,60 +408,45 @@ function DeploymentTable() {
                 </FactPill>
               </EmptyHero>
             ) : null}
-            {page.state === "ready" && total > 0 ? (
+            {list.state === "ready" && list.items.length > 0 ? (
               <>
-                <ul
-                  className="divide-y divide-border"
-                  data-testid="deployment-table"
-                >
-                  {items.map((row) => (
+                <ul className="divide-y divide-border" data-testid="deployment-table">
+                  {list.items.map((row) => (
                     <DeploymentRowView key={row.id} row={row} />
                   ))}
                 </ul>
-                <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
-                  {t("list.table.footer", { shown: items.length, total: page.data.total })}
-                </p>
+                <ListFooter
+                  shown={list.items.length}
+                  summary={t("list.table.footer", { shown: list.items.length, total: list.total ?? list.items.length })}
+                  hasMore={list.hasMore}
+                  loadingMore={list.loadingMore}
+                  moreError={list.moreError}
+                  onMore={list.loadMore}
+                  moreLabel={t("list.more")}
+                  loadingLabel={t("list.loadingMore")}
+                  errorLabel={t("list.moreError")}
+                />
               </>
             ) : null}
           </Panel>
         </div>
 
-        {page.state === "ready" ? (
-          <div className="page-aside">
-            <Panel
-              data-testid="deployment-summary"
-              className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]"
-            >
-              <CardTitle
-                icon={Rocket}
-                title={t("list.outcomes.title")}
-                description={t("list.outcomes.description")}
-              />
-              <BreakdownRing
-                label={t("list.outcomes.chart")}
-                centerCaption={t("list.outcomes.center")}
-                slices={[
-                  { name: t("rollout.failed"), value: failed, tone: "critical" },
-                  { name: t("rollout.degraded"), value: degraded, tone: "warning" },
-                  { name: t("rollout.stalled"), value: stalled, tone: "warning" },
-                  { name: t("rollout.progressing"), value: progressing, tone: "info" },
-                  { name: t("rollout.healthy"), value: healthy, tone: "success" },
-                  { name: t("rollout.unknown"), value: unknownState, tone: "unknown" },
-                ]}
-              />
-            </Panel>
-            <Panel className="motion-safe:animate-[fade-in_460ms_var(--ease-entrance)_backwards] [animation-delay:100ms]">
-              <CardTitle
-                icon={ShieldCheck}
-                title={t("list.evidencePanel.title")}
-                description={t("list.evidencePanel.description")}
-              />
-              {/* `unverified` is its own lane and deliberately not red: an
-                  absence of evidence is not a failed rollout. */}
-              <EvidenceLanes items={items} />
-            </Panel>
-          </div>
-        ) : null}
+        <div className="page-aside">
+          <Panel data-testid="deployment-summary">
+            <CardTitle
+              icon={ShieldCheck}
+              title={t("list.evidencePanel.title")}
+              description={t("list.evidencePanel.description")}
+            />
+            {/* `unverified` is its own lane and deliberately not red: an
+                absence of evidence is not a failed rollout. */}
+            <EvidenceLanes
+              totals={evidence}
+              active={evidenceState}
+              onPick={(state) => update({ evidence_state: state })}
+            />
+          </Panel>
+        </div>
       </div>
     </div>
   );

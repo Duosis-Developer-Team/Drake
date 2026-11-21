@@ -33,7 +33,6 @@ import { useSession } from "@/lib/session";
 
 import s from "./alertRules.module.css";
 import {
-  AlarmClock,
   DAY_MS,
   Lane,
   SignalChart,
@@ -53,7 +52,6 @@ import {
 } from "./RuleDrawer";
 
 const REFRESH_MS = 60_000;
-const MAX_RINGS = 9;
 type Filter = "all" | "firing" | "ok" | "muted";
 const STATUS_ORDER: Record<AlertRule["status"], number> = {
   firing: 0,
@@ -106,7 +104,6 @@ export function AlertRulesScreen() {
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<string | null>(null);
   const [histories, setHistories] = useState<Record<string, RuleHistory>>({});
-  const [hovered, setHovered] = useState<string | null>(null);
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const [drawer, setDrawer] = useState<{ rule: AlertRule | null; template: TemplateKey | null } | null>(
     null,
@@ -241,9 +238,6 @@ export function AlertRulesScreen() {
     formatSignal(rule.signal, value, fmt.number);
   const time = (value: number) => hhmm(new Date(value), fmt.tag);
 
-  const ringRules = [...rules]
-    .sort((a, b) => Number(b.status === "firing") - Number(a.status === "firing") || b.episodes.length - a.episodes.length)
-    .slice(0, MAX_RINGS);
   const counts = {
     all: rules.length,
     firing: rules.filter((r) => matches(r, "firing")).length,
@@ -319,55 +313,6 @@ export function AlertRulesScreen() {
           ) : (
             <>
               <section className={s.console} aria-label={t("now.caption")}>
-                <div className={s.clock}>
-                  <div className={s.clockHead}>
-                    <span className={s.cap}>{t("clock.caption")}</span>
-                    <span className={`${s.cap} ${s.d}`}>{t("clock.now", { time: time(now) })}</span>
-                  </div>
-                  <div
-                    onMouseLeave={() => {
-                      setHovered(null);
-                      setTip(null);
-                    }}
-                  >
-                    <ClockWithDimming
-                      rules={ringRules}
-                      now={now}
-                      firing={firing.length}
-                      hovered={hovered}
-                      labels={{
-                        center: t("clock.center", { total: rules.length }),
-                        firing: t("clock.firing"),
-                      }}
-                      onPick={(id) => open(id, true)}
-                      onHover={(rule, event) => {
-                        setHovered(rule?.id ?? null);
-                        if (rule && event) showTip(event, `${rule.name} · ${scopeText(rule, all)}`);
-                        else setTip(null);
-                      }}
-                    />
-                  </div>
-                  <div className={s.clockFoot}>
-                    <span style={{ ["--c" as string]: "var(--crit)" }}>
-                      <i className={s.swatch} />
-                      {t("clock.legendCritical")}
-                    </span>
-                    <span style={{ ["--c" as string]: "var(--warn)" }}>
-                      <i className={s.swatch} />
-                      {t("clock.legendWarning")}
-                    </span>
-                    <span style={{ ["--c" as string]: "var(--track)" }}>
-                      <i className={s.swatch} />
-                      {t("clock.legendQuiet")}
-                    </span>
-                    <span>
-                      {rules.length > MAX_RINGS
-                        ? t("clock.more", { count: rules.length - MAX_RINGS })
-                        : t("clock.hint")}
-                    </span>
-                  </div>
-                </div>
-
                 <div className={s.now}>
                   <div className={s.nowHead}>
                     <span className={s.cap}>{t("now.caption")}</span>
@@ -559,6 +504,7 @@ export function AlertRulesScreen() {
                               )
                             }
                             onAskDelete={() => setConfirmDelete(rule.id)}
+                            onCancelDelete={() => setConfirmDelete(null)}
                             onDelete={() =>
                               void act(async () => {
                                 await deleteRule(csrfToken as string, rule.id);
@@ -595,21 +541,6 @@ export function AlertRulesScreen() {
   );
 }
 
-function ClockWithDimming(props: React.ComponentProps<typeof AlarmClock> & { hovered: string | null }) {
-  const { hovered, ...rest } = props;
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const rings = ref.current?.querySelectorAll<SVGGElement>("[data-ring]") ?? [];
-    rings.forEach((ring) => {
-      ring.classList.toggle(s.ringDim, hovered !== null && ring.dataset.ring !== hovered);
-    });
-  }, [hovered]);
-  return (
-    <div ref={ref}>
-      <AlarmClock {...rest} />
-    </div>
-  );
-}
 
 function Inspector({
   rule,
@@ -623,6 +554,7 @@ function Inspector({
   onMute,
   onToggle,
   onAskDelete,
+  onCancelDelete,
   onDelete,
 }: {
   rule: AlertRule;
@@ -636,6 +568,8 @@ function Inspector({
   onMute: (minutes: number) => void;
   onToggle: () => void;
   onAskDelete: () => void;
+  /** Backs out of the delete confirmation only — the inspector stays open. */
+  onCancelDelete: () => void;
   onDelete: () => void;
 }) {
   const t = useT("alertRules");
@@ -802,7 +736,7 @@ function Inspector({
               <button type="button" className={`${s.btn} ${s.danger}`} onClick={onDelete}>
                 {t("inspector.confirmYes")}
               </button>
-              <button type="button" className={s.btn} onClick={onClose}>
+              <button type="button" className={s.btn} onClick={onCancelDelete}>
                 {t("drawer.cancel")}
               </button>
             </div>

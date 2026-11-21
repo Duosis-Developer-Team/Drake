@@ -126,7 +126,7 @@ export function PillSelect<T extends string>({
   const active = value !== "";
   return (
     <div
-      className={`relative inline-flex h-10 min-w-0 items-center rounded-full border pr-9 pl-4 focus-within:ring-2 focus-within:ring-focus shadow-panel transition-colors ${
+      className={`relative inline-flex h-9 min-w-0 items-center rounded-control border pr-8 pl-3 focus-within:ring-2 focus-within:ring-focus transition-colors ${
         active ? "border-border-strong bg-surface-selected" : "border-border bg-surface hover:bg-surface-hover"
       }`}
     >

@@ -209,6 +209,27 @@ describe("alert rules screen", () => {
     expect(screen.getByRole("button", { name: "Mute for 1 hour" })).toBeInTheDocument();
   });
 
+  it("backs out of a delete without closing the inspector", async () => {
+    routes();
+    render(
+      <SessionProvider>
+        <AlertRulesPage />
+      </SessionProvider>,
+    );
+    const register = await screen.findByRole("region", { name: "Rules" });
+    const row = within(register)
+      .getAllByRole("button")
+      .find((button) => button.getAttribute("aria-expanded") !== null && button.textContent?.includes("Checkout errors"));
+    fireEvent.click(row as HTMLElement);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/Delete this rule\?/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // The confirmation is gone; the rule stays open with its actions.
+    expect(screen.queryByText(/Delete this rule\?/)).not.toBeInTheDocument();
+    expect(screen.getByText(/If Error rate stays above 5% for 5m/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mute for 1 hour" })).toBeInTheDocument();
+  });
+
   it("previews a draft with the server's replay before saving", async () => {
     const calls = routes();
     render(

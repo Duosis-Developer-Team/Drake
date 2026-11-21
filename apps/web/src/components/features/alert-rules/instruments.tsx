@@ -28,23 +28,8 @@ export function severityTone(severity: Severity): string {
 }
 
 export function hhmm(date: Date, tag: string): string {
-  return date.toLocaleTimeString(tag, { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function polar(cx: number, cy: number, r: number, deg: number): [number, number] {
-  const a = ((deg - 90) * Math.PI) / 180;
-  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-}
-
-function arc(cx: number, cy: number, r: number, d0: number, d1: number): string {
-  const [x0, y0] = polar(cx, cy, r, d0);
-  const [x1, y1] = polar(cx, cy, r, Math.min(d1, d0 + 359.9));
-  const large = d1 - d0 > 180 ? 1 : 0;
-  return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
-}
-
-function dayDegrees(date: Date): number {
-  return ((date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60) / 4) % 360;
+  // UTC, like every other time in the product.
+  return date.toLocaleTimeString(tag, { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
 }
 
 export interface Span {
@@ -65,126 +50,6 @@ export function spans(episodes: Episode[], now: number): Span[] {
     .filter((span) => span.end >= span.start);
 }
 
-export function AlarmClock({
-  rules,
-  now,
-  firing,
-  labels,
-  onPick,
-  onHover,
-}: {
-  rules: AlertRule[];
-  now: number;
-  firing: number;
-  labels: { center: string; firing: string };
-  onPick: (id: string) => void;
-  onHover: (rule: AlertRule | null, event?: React.MouseEvent) => void;
-}) {
-  const cx = 240;
-  const cy = 240;
-  const r0 = 92;
-  const gap = rules.length > 7 ? Math.max(11, 128 / rules.length) : 19;
-  const width = Math.min(11, gap - 6);
-  const ticks = [];
-  for (let h = 0; h < 24; h++) {
-    const deg = h * 15;
-    const major = h % 6 === 0;
-    const [x0, y0] = polar(cx, cy, 226, deg);
-    const [x1, y1] = polar(cx, cy, major ? 212 : 219, deg);
-    ticks.push(
-      <line
-        key={`t${h}`}
-        x1={x0}
-        y1={y0}
-        x2={x1}
-        y2={y1}
-        stroke={major ? "var(--ink-3)" : "var(--hair)"}
-        strokeWidth={major ? 1.4 : 1}
-      />,
-    );
-    if (h % 3 === 0) {
-      const [tx, ty] = polar(cx, cy, 236, deg);
-      ticks.push(
-        <text
-          key={`l${h}`}
-          x={tx}
-          y={ty + 4}
-          textAnchor="middle"
-          fontSize="11"
-          fill="var(--ink-3)"
-          fontFamily="var(--font-mono)"
-        >
-          {String(h).padStart(2, "0")}
-        </text>,
-      );
-    }
-  }
-  const [hx, hy] = polar(cx, cy, 226, dayDegrees(new Date(now)));
-  return (
-    <svg viewBox="-16 -8 512 496" role="img" aria-label={labels.center}>
-      {ticks}
-      {rules.map((rule, k) => {
-        const radius = r0 + k * gap;
-        const color = tone({ ...rule, status: rule.status === "muted" ? "muted" : "firing" });
-        return (
-          <g
-            key={rule.id}
-            className={s.ring}
-            data-ring={rule.id}
-            onMouseMove={(event) => onHover(rule, event)}
-            onMouseLeave={() => onHover(null)}
-            onClick={() => onPick(rule.id)}
-          >
-            <circle cx={cx} cy={cy} r={radius} fill="none" stroke="var(--track)" strokeWidth={width} />
-            {spans(rule.episodes, now).map((span) => {
-              const d0 = dayDegrees(new Date(span.start));
-              const minutes = (span.end - span.start) / 60000;
-              return (
-                <path
-                  key={span.episode.fired_at + span.episode.binding_id}
-                  d={arc(cx, cy, radius, d0, d0 + Math.max(4, minutes / 4))}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={width}
-                />
-              );
-            })}
-            <circle cx={cx} cy={cy} r={radius} fill="none" stroke="transparent" strokeWidth={gap} />
-          </g>
-        );
-      })}
-      <line x1={cx} y1={cy} x2={hx} y2={hy} stroke="var(--ink)" strokeWidth="1.5" />
-      <circle cx={hx} cy={hy} r="4" fill="var(--ink)" />
-      <circle cx={cx} cy={cy} r="72" fill="var(--plate)" stroke="var(--hair)" />
-      <text
-        x={cx}
-        y={cy - 4}
-        textAnchor="middle"
-        fontSize="46"
-        fontWeight="500"
-        fill={firing ? "var(--crit)" : "var(--ok)"}
-        fontFamily="var(--font-mono)"
-        letterSpacing="-2"
-      >
-        {firing}
-      </text>
-      <text x={cx} y={cy + 18} textAnchor="middle" fontSize="12" fill="var(--ink-2)">
-        {labels.center}
-      </text>
-      <text
-        x={cx}
-        y={cy + 34}
-        textAnchor="middle"
-        fontSize="10"
-        fill="var(--ink-3)"
-        fontFamily="var(--font-mono)"
-        letterSpacing="1.4"
-      >
-        {labels.firing}
-      </text>
-    </svg>
-  );
-}
 
 export function Lane({
   rule,

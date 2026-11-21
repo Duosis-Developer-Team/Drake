@@ -258,7 +258,7 @@ export default function IncidentDetailPage() {
                     </span>
                   </MetaRow>
                   <MetaRow label={t("detail.timing.opened")}>
-                    <span className="font-mono text-xs">{detail.opened_at}</span>
+                    <span className="font-mono text-xs">{fmt.utc(detail.opened_at)}</span>
                   </MetaRow>
                   <MetaRow label={t("detail.timing.duration")}>
                     <span className="font-mono text-xs">
@@ -266,13 +266,13 @@ export default function IncidentDetailPage() {
                     </span>
                   </MetaRow>
                   <MetaRow label={t("detail.timing.lastCritical")}>
-                    <span className="font-mono text-xs">{detail.last_critical_at}</span>
+                    <span className="font-mono text-xs">{fmt.utc(detail.last_critical_at)}</span>
                   </MetaRow>
                   <MetaRow label={t("detail.timing.acknowledged")}>
                     <span className="text-xs">
                       {detail.acknowledged_at ? (
                         <>
-                          <time className="font-mono">{detail.acknowledged_at}</time>
+                          <time className="font-mono">{fmt.utc(detail.acknowledged_at)}</time>
                           {detail.acknowledged_by
                             ? ` · ${detail.acknowledged_by.display_name}`
                             : null}
@@ -286,7 +286,7 @@ export default function IncidentDetailPage() {
                     <span className="text-xs">
                       {detail.resolved_at ? (
                         <>
-                          <time className="font-mono">{detail.resolved_at}</time>
+                          <time className="font-mono">{fmt.utc(detail.resolved_at)}</time>
                           {detail.resolution_source === "health_recovered"
                             ? ` · ${t("detail.timing.healthRecovered")}`
                             : null}

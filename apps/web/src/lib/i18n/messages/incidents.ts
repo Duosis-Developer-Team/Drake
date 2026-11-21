@@ -65,6 +65,8 @@ export const incidents = defineMessages({
         resolvedCaption: "closed on a real recovery",
         shown: "Shown",
         shownCaption: "of {total} in your authorized scope",
+        all: "All",
+        allCaption: "in your authorized scope",
       },
       queue: {
         title: "Incident queue",
@@ -82,6 +84,9 @@ export const incidents = defineMessages({
       },
       footer:
         "Showing {shown} of {total, plural, one {# incident} other {# incidents}} in your authorized scope.",
+      more: "Load more",
+      loadingMore: "Loading…",
+      moreError: "The next page could not be loaded.",
       byState: {
         title: "By state",
         description: "Incidents on this page",
@@ -240,6 +245,8 @@ export const incidents = defineMessages({
         resolvedCaption: "gerçek bir toparlanmayla kapandı",
         shown: "Gösterilen",
         shownCaption: "yetkili kapsamınızdaki {total} olaydan",
+        all: "Tümü",
+        allCaption: "yetkili olduğunuz kapsamda",
       },
       queue: {
         title: "Olay kuyruğu",
@@ -256,6 +263,9 @@ export const incidents = defineMessages({
         anyTime: "tüm zamanlar",
       },
       footer: "Yetkili kapsamınızdaki {total} olaydan {shown} tanesi gösteriliyor.",
+      more: "Daha fazla yükle",
+      loadingMore: "Yükleniyor…",
+      moreError: "Sonraki sayfa yüklenemedi.",
       byState: {
         title: "Duruma göre",
         description: "Bu sayfadaki olaylar",
