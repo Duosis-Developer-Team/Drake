@@ -194,7 +194,7 @@ test("integration health: safe fields for owner, empty for narrow env user", asy
   // What matters here is that the integration is listed at all, so the match
   // is on the name rather than on how the page chooses to case it.
   await expect(page.getByTestId("integration-table")).toContainText(/prometheus/i);
-  await expect(page.getByTestId("integration-table")).toContainText("not_configured");
+  await expect(page.getByTestId("integration-table")).toContainText("not configured");
   await expect(page.getByTestId("integration-table")).toContainText("never");
   await expect(page.locator("body")).not.toContainText("config_ref");
   await signOutIfNeeded(page);

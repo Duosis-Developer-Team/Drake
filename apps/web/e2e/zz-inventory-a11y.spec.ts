@@ -159,8 +159,10 @@ test("keyboard only: filter, row link, and drilldown are reachable", async ({
   await expect(page.getByTestId("resource-rows")).toBeVisible();
 
   // Reach the kind filter with Tab alone and drive it with the keyboard.
+  // The "Resources by kind" list above it is a row of filter buttons too,
+  // one per kind, so the walk is longer than it once was.
   const kindFilter = page.getByTestId("filter-kind");
-  for (let presses = 0; presses < 40; presses++) {
+  for (let presses = 0; presses < 120; presses++) {
     if (await kindFilter.evaluate((el) => el === document.activeElement)) break;
     await page.keyboard.press("Tab");
   }
