@@ -92,10 +92,15 @@ export function saveDashboard(
 }
 
 /** Move a widget one step; the layout stays a permutation of the catalog. */
+/** Moves *key* one place among the VISIBLE widgets. Hidden ones keep their
+ * slots: swapping with a hidden neighbour changed the stored order but not
+ * the page, so the arrow seemed to do nothing. */
 export function moveWidget(layout: WidgetSlot[], key: WidgetKey, step: -1 | 1): WidgetSlot[] {
   const i = layout.findIndex((w) => w.key === key);
-  const j = i + step;
-  if (i < 0 || j < 0 || j >= layout.length) return layout;
+  if (i < 0) return layout;
+  let j = i + step;
+  while (j >= 0 && j < layout.length && layout[j].hidden) j += step;
+  if (j < 0 || j >= layout.length) return layout;
   const next = layout.slice();
   [next[i], next[j]] = [next[j], next[i]];
   return next;

@@ -106,6 +106,22 @@ describe("dashboards", () => {
     expect(overview.path).toContain("range=24h");
   });
 
+  it("aborts a superseded or abandoned overview read", async () => {
+    const calls = routes();
+    const { unmount } = render(<SessionProvider><EnvironmentDashboardPage /></SessionProvider>);
+    const reads = () => calls.filter((c) => c.path.startsWith("/v1/service-health/overview"));
+    await waitFor(() => expect(reads()).toHaveLength(1));
+    fireEvent.click(await screen.findByRole("button", { name: "6 hours" }));
+    await waitFor(() => expect(reads().some((c) => c.path.includes("range=6h"))).toBe(true));
+    // The 24-hour read can no longer land on top of the 6-hour one.
+    expect(reads()[0].init?.signal?.aborted).toBe(true);
+    const sixHours = reads().find((c) => c.path.includes("range=6h"))!;
+    expect(sixHours.init?.signal?.aborted).toBe(false);
+    // Leaving the page stops what is still in flight.
+    unmount();
+    expect(sixHours.init?.signal?.aborted).toBe(true);
+  });
+
   it("saves a changed layout against the version it edited", async () => {
     const calls = routes();
     render(<SessionProvider><EnvironmentDashboardPage /></SessionProvider>);
