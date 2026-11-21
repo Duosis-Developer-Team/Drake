@@ -2453,14 +2453,15 @@ def test_the_agent_door_routes_otlp_to_the_gateway_unrewritten() -> None:
 
 def test_the_former_name_redirects_and_keeps_only_the_webhook_path() -> None:
     """Renamed to Tracesis: the old sslip.io name is a 308 to the new
-    origin, path kept — except GitHub's webhook path, which GitHub will
-    not follow through a redirect."""
+    origin — except GitHub's webhook path, which GitHub will not follow
+    through a redirect. No `$request_uri` in the target: ingress-nginx
+    rejects the annotation, and the redirect silently disappears."""
     docs = render_prod()
     by_name = {i["metadata"]["name"]: i for i in by_kind(docs, "Ingress")}
     redirect, keep = by_name["drake-redirect"], by_name["drake-redirect-keep"]
     notes = redirect["metadata"]["annotations"]
     assert notes["nginx.ingress.kubernetes.io/permanent-redirect"] == (
-        "https://tracesis-84-247-180-173.sslip.io:30773$request_uri"
+        "https://tracesis-84-247-180-173.sslip.io:30773/"
     )
     assert notes["nginx.ingress.kubernetes.io/permanent-redirect-code"] == "308"
     for aux in (redirect, keep):
@@ -2472,4 +2473,5 @@ def test_the_former_name_redirects_and_keeps_only_the_webhook_path() -> None:
         for r in keep["spec"]["rules"]
         for p in r["http"]["paths"]
     ]
-    assert kept == [("/v1/github/", "drake-api")]
+    # The real webhook route (github_app/router_webhook.py).
+    assert kept == [("/v1/integrations/github/", "drake-api")]

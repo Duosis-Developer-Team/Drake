@@ -189,13 +189,14 @@ ingress:
   # the Certificate's dnsName change together and nothing else does.
   host: tracesis-84-247-180-173.sslip.io
   # The deployment was renamed Tracesis (2026-11-22). The old name still
-  # resolves and is still on the certificate: browsers are redirected,
+  # resolves and is still on the certificate: browsers are redirected to
+  # the new origin's root,
   # and GitHub's webhook path keeps answering there until the App's
   # webhook URL is updated to the new name.
   redirectHosts:
     - drake-84-247-180-173.sslip.io
   redirectKeepPaths:
-    - /v1/github/
+    - /v1/integrations/github/
   tls:
     enabled: true
     mode: secret
