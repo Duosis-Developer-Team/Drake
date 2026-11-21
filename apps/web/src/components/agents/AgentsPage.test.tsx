@@ -126,6 +126,11 @@ const PRICES = {
   },
 };
 
+let MCP: { window: string; servers: unknown[] } = {
+  window: "24h",
+  servers: [],
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -138,9 +143,11 @@ function serve(inv: AgentInventory) {
   fetchMock.mockImplementation(async (input: string) =>
     String(input).includes("/v1/agents/connect")
       ? respond(CONNECT)
-      : String(input).includes("/v1/agents/prices")
-        ? respond(PRICES)
-        : respond(inv),
+      : String(input).includes("/v1/agents/mcp-servers")
+        ? respond(MCP)
+        : String(input).includes("/v1/agents/prices")
+          ? respond(PRICES)
+          : respond(inv),
   );
 }
 
@@ -218,5 +225,38 @@ describe("Agents inventory", () => {
     expect(
       fetchMock.mock.calls.some((c) => String(c[0]).includes("window=7d")),
     ).toBe(true);
+  });
+
+  it("shows MCP servers even before any agent reports", async () => {
+    MCP = {
+      window: "24h",
+      servers: [
+        {
+          id: "m1",
+          service_name: "hermes-mcp",
+          cluster_ref: "c1",
+          namespace: "hermes-test",
+          workload: "hermes-mcp",
+          first_seen_at: "2026-11-21T21:00:00Z",
+          last_seen_at: "2026-11-21T21:59:59Z",
+          project: null,
+          environment: null,
+          calls: 2,
+          errors: 0,
+          avg_ms: 436,
+          tools: [{ name: "hermes_whoami", calls: 1, errors: 0, avg_ms: 93 }],
+          clients: [{ name: "claude-code", calls: 2, errors: 0, avg_ms: 436 }],
+          methods: [],
+          series: [],
+        },
+      ],
+    };
+    serve(inventory([]));
+    renderPage();
+    fireEvent.click(await screen.findByTestId("agents-mcp-teaser"));
+    const card = await screen.findByTestId("mcp-server-hermes-mcp");
+    expect(within(card).getByText("hermes_whoami")).toBeTruthy();
+    expect(within(card).getByText("claude-code")).toBeTruthy();
+    MCP = { window: "24h", servers: [] };
   });
 });

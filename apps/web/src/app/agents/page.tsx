@@ -45,6 +45,7 @@ import {
   compact,
   fetchAgents,
   fetchConnect,
+  fetchMcpServers,
   fetchTopology,
   type AgentConnect,
   type AgentInventory,
@@ -203,7 +204,19 @@ export default function AgentsPage() {
         </Panel>
       ) : null}
 
-      {data && data.items.length === 0 ? (
+      {data && data.items.length === 0 && view === "mcp" ? (
+        <McpServers span={span} />
+      ) : null}
+      {data && data.items.length === 0 && view === "governance" ? (
+        <GovernanceView span={span} />
+      ) : null}
+      {data && data.items.length === 0 && view === "map" ? (
+        <MapSection span={span} />
+      ) : null}
+      {data && data.items.length === 0 && view === "inventory" ? (
+        <McpTeaser span={span} onOpen={() => setView("mcp")} />
+      ) : null}
+      {data && data.items.length === 0 && view === "inventory" ? (
         <Panel className="overflow-hidden" data-testid="agents-empty">
           <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
             <div className="flex flex-col justify-center gap-4">
@@ -497,6 +510,45 @@ function MapSection({ span }: { span: Window }) {
         <AgentMap topology={topology} />
       ) : null}
     </Panel>
+  );
+}
+
+/** With no agent yet, the MCP servers agents call may already report. */
+function McpTeaser({ span, onOpen }: { span: Window; onOpen: () => void }) {
+  const t = useT("agents");
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let active = true;
+    fetchMcpServers(span)
+      .then((body) => active && setCount(body.servers.length))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [span]);
+  if (!count) return null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="agents-mcp-teaser"
+      className="mb-6 flex w-full items-center gap-3 rounded-panel border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-brand hover:bg-brand-soft/40"
+    >
+      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand">
+        <Plug aria-hidden className="h-4.5 w-4.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-body font-semibold text-ink">
+          {t("mcpTeaser.title", { count })}
+        </span>
+        <span className="block text-caption text-ink-secondary">
+          {t("mcpTeaser.body")}
+        </span>
+      </span>
+      <span className="shrink-0 text-caption font-semibold text-brand">
+        {t("mcpTeaser.open")} →
+      </span>
+    </button>
   );
 }
 
