@@ -77,6 +77,16 @@ _EVENT_SENTENCES: dict[str, dict[str, str]] = {
         "opened": "An external alert fired for this service, so Drake opened an incident.",
         "auto_resolved": "The external alert resolved, so Drake resolved this incident.",
     },
+    "slo": {
+        "opened": (
+            "A service objective is burning its error budget fast enough to run out, "
+            "so Drake opened an incident."
+        ),
+        "auto_resolved": (
+            "The objective's error budget is no longer burning at a paging rate, so "
+            "Drake resolved this incident."
+        ),
+    },
     "protection": {
         "opened": "A backup protection check failed, so Drake opened an incident.",
         "auto_resolved": (
@@ -98,11 +108,13 @@ _PROTECTION_REASONS = frozenset(
 
 
 def incident_kind(primary_reason: str) -> str:
-    """`health`, `rule`, `alert` or `protection`, from the opening reason."""
+    """`health`, `rule`, `alert`, `slo` or `protection`, from the opening reason."""
     if primary_reason == "rule_firing":
         return "rule"
     if primary_reason == "alert_firing":
         return "alert"
+    if primary_reason == "slo_burn":
+        return "slo"
     if primary_reason in _PROTECTION_REASONS:
         return "protection"
     return "health"

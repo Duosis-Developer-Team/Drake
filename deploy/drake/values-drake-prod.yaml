@@ -425,6 +425,15 @@ incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
 
+# Objectives (migration 0031, 2026-11-21). The evaluator judges enabled
+# objectives every five minutes and keeps the five-minute request counts
+# (from the trace store, counts only) that objectives defined in the screen
+# are measured on. An objective burning its budget at a paging rate opens
+# an incident, which the planner below routes like any other.
+slo:
+  evaluatorEnabled: true
+  evaluatorIntervalSeconds: 300
+
 # Backup posture (2026-11-21). Judged on a timer so silence reads as
 # overdue. No reporter is registered yet: each team adds theirs here with
 # its own Secret (see the Protection screen's setup guide), and only then

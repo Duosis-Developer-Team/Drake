@@ -278,6 +278,15 @@ incidents:
   # Floor of 30 s is enforced by the API's own settings validation.
   runnerIntervalSeconds: 120
 
+slo:
+  # Objectives (migration 0031): the evaluator judges every enabled
+  # objective on a timer and opens an incident while its error budget burns
+  # at a paging rate. With observability traces on, it also keeps the
+  # five-minute request counts that objectives defined in the screen are
+  # measured on. Off by default; rendered in both states.
+  evaluatorEnabled: false
+  evaluatorIntervalSeconds: 300
+
 protection:
   # Judges every backup policy on a timer, so a reporter that falls silent
   # reads as overdue, and creates the policies the reviewed contract

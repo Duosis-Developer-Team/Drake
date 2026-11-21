@@ -223,6 +223,56 @@ export const alerting = defineMessages({
     kpi: {
       shareLabel: "{label} share",
     },
+    sloCompose: {
+      open: "New objective",
+      title: "New objective",
+      description:
+        "Measured on the requests Tracesis stores for the service, counted per request.",
+      target: "Service",
+      application: "Application",
+      environment: "Environment",
+      service: "Service",
+      choose: "Choose",
+      pickApplication: "Choose an application first",
+      pickEnvironment: "Choose an environment first",
+      indicator: "Indicator",
+      explain: {
+        availability: "The share of requests that did not fail.",
+        latency: "The share of requests faster than the threshold.",
+      },
+      objective: "Target",
+      threshold: "Faster than",
+      window: "Over",
+      name: "Name",
+      namePlaceholder: "Named after the service",
+      summary: {
+        availability:
+          "{ratio} of requests succeed over {window}. That leaves {budget} of requests to fail before the objective is broken.",
+        latency:
+          "{ratio} of requests are faster than {threshold} over {window}. That leaves {budget} of requests to be slower.",
+      },
+      notMeasuring:
+        "This deployment does not keep request counts yet, so the objective will read as not measured until it does.",
+      save: "Create objective",
+      cancel: "Cancel",
+      failed: "The objective could not be created.",
+      suggest: {
+        title: "Services without an objective",
+        description:
+          "One click sets a target a healthy service already meets: availability {availability}, or latency {latency} under {threshold}, over 30 days.",
+        availability: "Availability {ratio}",
+        latency: "Latency {ratio} < {threshold}",
+        more: "{count} more in the form above",
+      },
+      manage: {
+        disable: "Pause",
+        enable: "Resume",
+        delete: "Delete",
+        confirmDelete: "Delete this objective and its history?",
+        manifest: "Declared in the project manifest; change it there.",
+        failed: "The change could not be saved.",
+      },
+    },
     sloList: {
       title: "Service objectives",
       description:
@@ -248,7 +298,8 @@ export const alerting = defineMessages({
       },
       empty: {
         title: "No objectives in scope",
-        description: "No service level objective is configured for anything you can see.",
+        description:
+          "No objective is set for anything you can see yet. Set one with “New objective”, or from the services listed above.",
         state: "State · {value}",
         any: "any",
       },
@@ -544,6 +595,56 @@ export const alerting = defineMessages({
     kpi: {
       shareLabel: "{label} payı",
     },
+    sloCompose: {
+      open: "Yeni hedef",
+      title: "Yeni hedef",
+      description:
+        "Tracesis'in servis için sakladığı istekler üzerinden, istek başına ölçülür.",
+      target: "Servis",
+      application: "Uygulama",
+      environment: "Ortam",
+      service: "Servis",
+      choose: "Seçin",
+      pickApplication: "Önce bir uygulama seçin",
+      pickEnvironment: "Önce bir ortam seçin",
+      indicator: "Gösterge",
+      explain: {
+        availability: "Başarısız olmayan isteklerin oranı.",
+        latency: "Eşikten hızlı yanıtlanan isteklerin oranı.",
+      },
+      objective: "Hedef",
+      threshold: "Şundan hızlı",
+      window: "Süre",
+      name: "Ad",
+      namePlaceholder: "Servisin adıyla",
+      summary: {
+        availability:
+          "{window} boyunca isteklerin {ratio} kadarı başarılı olsun. Hedef bozulmadan önce isteklerin {budget} kadarı hata verebilir.",
+        latency:
+          "{window} boyunca isteklerin {ratio} kadarı {threshold} altında yanıtlansın. İsteklerin {budget} kadarı daha yavaş olabilir.",
+      },
+      notMeasuring:
+        "Bu kurulum henüz istek sayılarını tutmuyor; tutana kadar hedef ölçülmemiş görünecek.",
+      save: "Hedefi oluştur",
+      cancel: "Vazgeç",
+      failed: "Hedef oluşturulamadı.",
+      suggest: {
+        title: "Hedefi olmayan servisler",
+        description:
+          "Tek tıkla, sağlıklı bir servisin zaten karşıladığı bir hedef koyun: 30 gün boyunca erişilebilirlik {availability} ya da {threshold} altında gecikme {latency}.",
+        availability: "Erişilebilirlik {ratio}",
+        latency: "Gecikme {ratio} < {threshold}",
+        more: "{count} servis daha; yukarıdaki formdan ekleyin",
+      },
+      manage: {
+        disable: "Duraklat",
+        enable: "Sürdür",
+        delete: "Sil",
+        confirmDelete: "Bu hedef ve geçmişi silinsin mi?",
+        manifest: "Proje manifestinde tanımlı; orada değiştirin.",
+        failed: "Değişiklik kaydedilemedi.",
+      },
+    },
     sloList: {
       title: "Servis hedefleri",
       description:
@@ -570,7 +671,7 @@ export const alerting = defineMessages({
       empty: {
         title: "Kapsamda hedef yok",
         description:
-          "Görebildiğiniz hiçbir şey için bir servis seviyesi hedefi yapılandırılmamış.",
+          "Görebildiğiniz hiçbir şey için henüz hedef yok. “Yeni hedef” ile ya da yukarıda listelenen servislerden bir hedef koyun.",
         state: "Durum · {value}",
         any: "tümü",
       },

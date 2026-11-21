@@ -1,11 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AlertDetailPage from "@/app/alerts/[alertId]/page";
 import AlertsPage from "@/app/alerts/page";
 import SloDetailPage from "@/app/slo/[sloId]/page";
 import SloPage from "@/app/slo/page";
-import { errorBody, installFetchMock } from "@/test/mock-api";
+import { SessionProvider } from "@/lib/session";
+import { errorBody, installFetchMock, makeMe } from "@/test/mock-api";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/alerts",
@@ -161,14 +162,20 @@ function renderAlertDetail(overrides: Record<string, { status: number; body: unk
 
 function renderSlo(overrides: Record<string, { status: number; body: unknown }> = {}) {
   installFetchMock({
+    "/v1/me": { status: 200, body: makeMe({ permissions: ["slo.view", "project.view"] }) },
     "/v1/slo": { status: 200, body: { items: [slo()], total: 1, limit: 25, offset: 0 } },
     ...overrides,
   });
-  return render(<SloPage />);
+  return render(
+    <SessionProvider>
+      <SloPage />
+    </SessionProvider>,
+  );
 }
 
 function renderSloDetail(overrides: Record<string, { status: number; body: unknown }> = {}) {
   installFetchMock({
+    "/v1/me": { status: 200, body: makeMe({ permissions: ["slo.view", "project.view"] }) },
     "/v1/slo/slo-1": {
       status: 200,
       body: {
@@ -196,7 +203,11 @@ function renderSloDetail(overrides: Record<string, { status: number; body: unkno
     },
     ...overrides,
   });
-  return render(<SloDetailPage />);
+  return render(
+    <SessionProvider>
+      <SloDetailPage />
+    </SessionProvider>,
+  );
 }
 
 afterEach(() => {
@@ -557,5 +568,96 @@ describe("SLO detail", () => {
     expect(
       screen.getByText(/not the same as meeting it/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("setting objectives", () => {
+  const OPTIONS = {
+    can_manage: true,
+    measuring: true,
+    services: [
+      { environment_service_id: "es-1", project_id: "p-h", project_key: "hermes", environment_id: "e-hp", environment_key: "prod", service_id: "s-1", service_key: "api", objectives: 0 },
+      { environment_service_id: "es-2", project_id: "p-h", project_key: "hermes", environment_id: "e-hd", environment_key: "dev", service_id: "s-1", service_key: "api", objectives: 1 },
+    ],
+    indicators: ["availability", "latency"],
+    objectives: [0.9, 0.95, 0.99, 0.995, 0.999],
+    windows_seconds: [604800, 2419200, 2592000],
+    thresholds_ms: [100, 250, 500, 1000, 2500, 5000],
+    suggested: {
+      availability: { objective_ratio: 0.995, window_seconds: 2592000 },
+      latency: { objective_ratio: 0.95, window_seconds: 2592000, threshold_ms: 1000 },
+    },
+  };
+
+  function renderWithOptions(permissions: string[] = ["slo.view", "slo.manage", "project.view"]) {
+    const calls = installFetchMock({
+      "/v1/me": { status: 200, body: makeMe({ permissions }) },
+      "/v1/slo": { status: 200, body: { items: [], total: 0, limit: 25, offset: 0 } },
+      "/v1/slo/options": { status: 200, body: OPTIONS },
+    });
+    render(
+      <SessionProvider>
+        <SloPage />
+      </SessionProvider>,
+    );
+    return calls;
+  }
+
+  it("suggests a quiet target for each service without one, in one click", async () => {
+    const calls = renderWithOptions();
+    const suggestions = await screen.findByTestId("slo-suggestions");
+    // Only the service with no objective is suggested.
+    expect(suggestions).toHaveTextContent("hermes/prod");
+    expect(suggestions).not.toHaveTextContent("hermes/dev");
+    fireEvent.click(screen.getByTestId("suggest-latency-api-prod"));
+    await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true));
+    const body = JSON.parse(String(calls.find((c) => c.init?.method === "POST")!.init?.body));
+    expect(body).toEqual({
+      environment_service_id: "es-1",
+      display_name: "api latency < 1 s",
+      indicator: "latency",
+      objective_ratio: 0.95,
+      window_seconds: 2592000,
+      threshold_ms: 1000,
+    });
+  });
+
+  it("composes an objective: application, environment, service, then the promise", async () => {
+    const calls = renderWithOptions();
+    fireEvent.click(await screen.findByTestId("slo-new"));
+    const composer = screen.getByTestId("slo-composer");
+    fireEvent.change(within(composer).getByLabelText("Application"), { target: { value: "p-h" } });
+    // Two environments: production is offered first.
+    const env = within(composer).getByLabelText("Environment") as HTMLSelectElement;
+    expect([...env.options].map((o) => o.textContent)).toEqual(["Choose", "prod", "dev"]);
+    fireEvent.change(env, { target: { value: "e-hp" } });
+    fireEvent.change(screen.getByTestId("slo-compose-service"), { target: { value: "es-1" } });
+    expect(screen.getByTestId("slo-compose-summary")).toHaveTextContent("99.5% of requests succeed over");
+    fireEvent.click(screen.getByTestId("slo-compose-save"));
+    await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true));
+    const body = JSON.parse(String(calls.find((c) => c.init?.method === "POST")!.init?.body));
+    expect(body).toMatchObject({
+      environment_service_id: "es-1",
+      indicator: "availability",
+      objective_ratio: 0.995,
+      display_name: "api availability",
+      threshold_ms: null,
+    });
+  });
+
+  it("offers nothing to write without slo.manage", async () => {
+    installFetchMock({
+      "/v1/me": { status: 200, body: makeMe({ permissions: ["slo.view", "project.view"] }) },
+      "/v1/slo": { status: 200, body: { items: [], total: 0, limit: 25, offset: 0 } },
+      "/v1/slo/options": { status: 200, body: { ...OPTIONS, can_manage: false, services: [] } },
+    });
+    render(
+      <SessionProvider>
+        <SloPage />
+      </SessionProvider>,
+    );
+    expect(await screen.findByText("No objectives in scope")).toBeInTheDocument();
+    expect(screen.queryByTestId("slo-new")).toBeNull();
+    expect(screen.queryByTestId("slo-suggestions")).toBeNull();
   });
 });

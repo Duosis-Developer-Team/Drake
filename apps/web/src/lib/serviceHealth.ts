@@ -249,6 +249,7 @@ export const REASON_LABELS: Record<string, string> = {
   partial_result: "Partial result",
   no_ready_replicas: "No replicas ready",
   rule_firing: "An alert rule fired",
+  slo_burn: "Error budget burning",
   partial_availability: "Fewer replicas ready than desired",
   rollout_incomplete: "Rollout incomplete",
   restart_spike: "Restart spike",

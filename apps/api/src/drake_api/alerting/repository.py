@@ -395,7 +395,8 @@ _SLO_COLUMNS = """
     ev.status, ev.data_quality, ev.compliance_ratio, ev.error_budget_total,
     ev.error_budget_consumed, ev.error_budget_remaining, ev.burn_rates,
     ev.evaluated_for, ev.window_start, ev.window_end, ev.freshness_seconds,
-    ev.error_code, ev.sample_count, ev.objective_ratio, ev.definition_version
+    ev.error_code, ev.sample_count, ev.objective_ratio, ev.definition_version,
+    d.sli_template_key
 """
 
 _SLO_JOINS = """
@@ -432,7 +433,15 @@ def _slo_row(row: Any) -> dict[str, Any]:
         "environment_id": str(row[14]) if row[14] else None,
         # How this number is actually produced. A compliance figure whose
         # method is invisible invites a stronger reading than it deserves.
-        "measurement": indicator_measurement(str(row[3])),
+        "measurement": (
+            _TRACE_MEASUREMENT[str(row[3])]
+            if str(row[30]).startswith("traces.")
+            else indicator_measurement(str(row[3]))
+        ),
+        # `traces`: measured on stored requests and editable in the screen;
+        # `manifest`: declared by the project manifest and owned there.
+        "source": "traces" if str(row[30]).startswith("traces.") else "manifest",
+        "latency_threshold_ms": _threshold_ms(row[6]),
         # `null` when nothing has been evaluated. Never a cheerful default.
         "evaluation": (
             None
@@ -459,6 +468,28 @@ def _slo_row(row: Any) -> dict[str, Any]:
             }
         ),
     }
+
+
+_TRACE_MEASUREMENT = {
+    "availability": (
+        "Requests that did not fail, out of every request the service served "
+        "(server spans, health checks left out), counted per request."
+    ),
+    "latency": (
+        "Timed requests faster than the threshold, out of every timed request "
+        "the service served, counted per request."
+    ),
+}
+
+
+def _threshold_ms(profile_key: Any) -> int | None:
+    key = str(profile_key or "")
+    if not key.startswith("traces.over_") or not key.endswith("ms"):
+        return None
+    try:
+        return int(key.removeprefix("traces.over_").removesuffix("ms"))
+    except ValueError:
+        return None
 
 
 def _float(value: Any) -> float | None:

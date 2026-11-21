@@ -15,7 +15,7 @@
  *   formatted at the last moment, once, in `formatRatio`.
  */
 
-import { apiGet } from "@/lib/api";
+import { apiGet, apiMutate } from "@/lib/api";
 
 export type AlertStatus = "firing" | "resolved";
 export type Severity = "critical" | "high" | "medium" | "info" | "unknown";
@@ -222,7 +222,75 @@ export interface Slo {
   environment_key: string | null;
   service_key: string | null;
   measurement: string;
+  /** `traces`: measured on stored requests, editable in the screen.
+   * `manifest`: declared by the project manifest and owned there. */
+  source?: "traces" | "manifest";
+  latency_threshold_ms?: number | null;
   evaluation: SloEvaluation | null;
+}
+
+export interface SloService {
+  environment_service_id: string;
+  project_id: string;
+  project_key: string;
+  environment_id: string;
+  environment_key: string;
+  service_id: string;
+  service_key: string;
+  /** Objectives already set for this service, of any source. */
+  objectives: number;
+}
+
+export interface SloOptions {
+  can_manage: boolean;
+  /** Whether this deployment keeps the request counts objectives need. */
+  measuring: boolean;
+  services: SloService[];
+  indicators: ("availability" | "latency")[];
+  objectives: number[];
+  windows_seconds: number[];
+  thresholds_ms: number[];
+  suggested: {
+    availability: { objective_ratio: number; window_seconds: number };
+    latency: { objective_ratio: number; window_seconds: number; threshold_ms: number };
+  };
+}
+
+export interface SloDraft {
+  environment_service_id: string;
+  display_name: string;
+  indicator: "availability" | "latency";
+  objective_ratio: number;
+  window_seconds: number;
+  threshold_ms?: number | null;
+}
+
+export const fetchSloOptions = () => apiGet<SloOptions>("/v1/slo/options");
+
+export function createSlo(csrfToken: string, draft: SloDraft) {
+  return apiMutate<{ id: string; version: number; slo_key: string }>("/v1/slo", {
+    csrfToken,
+    body: draft,
+  });
+}
+
+export function updateSlo(
+  csrfToken: string,
+  sloId: string,
+  version: number,
+  changes: Partial<Omit<SloDraft, "environment_service_id" | "indicator">> & { enabled?: boolean },
+) {
+  return apiMutate<{ id: string; version: number }>(`/v1/slo/${encodeURIComponent(sloId)}`, {
+    csrfToken,
+    body: { expected_version: version, ...changes },
+  });
+}
+
+export function deleteSlo(csrfToken: string, sloId: string) {
+  return apiMutate<{ deleted: string }>(`/v1/slo/${encodeURIComponent(sloId)}`, {
+    csrfToken,
+    method: "DELETE",
+  });
 }
 
 export interface SloContext {
@@ -327,6 +395,11 @@ export async function fetchAlertEvents(alertId: string): Promise<AlertEvent[]> {
 export function formatRatio(value: number | null, digits = 3): string {
   if (value === null || Number.isNaN(value)) return "—";
   return `${(value * 100).toFixed(digits)}%`;
+}
+
+/** A target as people say it: 99.5%, 99.95%, 95% — no trailing zeros. */
+export function formatTarget(value: number): string {
+  return `${(value * 100).toFixed(3).replace(/\.?0+$/, "")}%`;
 }
 
 /** Error budget remaining, sign preserved. 180% burned reads as −80%. */

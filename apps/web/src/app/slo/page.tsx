@@ -15,11 +15,22 @@
 
 import { Target } from "lucide-react";
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
-import { CountTile, ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
+import {
+  NewSloButton,
+  SloComposer,
+  SloSuggestions,
+} from "@/components/alerting/SloComposer";
+import {
+  CountTile,
+  ListFooter,
+  useCursorList,
+  useTotal,
+  useUrlFilters,
+} from "@/components/ops/ListKit";
 import {
   CardTitle,
   EmptyHero,
@@ -35,12 +46,16 @@ import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
 import type { StatusTone } from "@/lib/design/status";
 import { useFormat, useT } from "@/lib/i18n";
+import { useSession } from "@/lib/session";
 import {
   SLO_EXPLANATIONS,
   SLO_LABELS,
   formatBudget,
+  fetchSloOptions,
   formatRatio,
+  formatTarget,
   sloListPath,
+  type SloOptions,
   type Slo,
   type SloStatus,
 } from "@/lib/alerting";
@@ -124,29 +139,37 @@ function SloRow({ slo }: { slo: Slo }) {
           <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
           <span className="text-caption text-ink-secondary">
             {t("sloList.row.target", {
-              ratio: formatRatio(slo.objective_ratio),
+              ratio: formatTarget(slo.objective_ratio),
               window: fmt.duration(slo.window_seconds, { compact: true }),
             })}
           </span>
           {!activeBurn ? <span>{t("sloList.row.notBurning")}</span> : null}
-          <span>{evaluation ? fmt.relative(evaluation.evaluated_for) : "—"}</span>
+          <span>
+            {evaluation ? fmt.relative(evaluation.evaluated_for) : "—"}
+          </span>
         </div>
       </div>
       <div className="col-span-2 grid grid-cols-2 gap-6 lg:col-span-1 lg:w-80">
         <div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-micro text-ink-muted">{t("sloList.row.compliance")}</span>
+            <span className="text-micro text-ink-muted">
+              {t("sloList.row.compliance")}
+            </span>
             <span data-tabular className="text-body font-semibold text-ink">
               {formatRatio(evaluation?.compliance_ratio ?? null)}
             </span>
           </div>
           <p className="mt-2 truncate text-micro text-ink-muted">
-            {t("sloList.row.ofTarget", { ratio: formatRatio(slo.objective_ratio) })}
+            {t("sloList.row.ofTarget", {
+              ratio: formatRatio(slo.objective_ratio),
+            })}
           </p>
         </div>
         <div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-micro text-ink-muted">{t("sloList.row.budgetLeft")}</span>
+            <span className="text-micro text-ink-muted">
+              {t("sloList.row.budgetLeft")}
+            </span>
             <span
               data-tabular
               className={`text-body font-semibold ${
@@ -173,11 +196,32 @@ function withLimit(path: string): string {
   return `${path}${path.includes("?") ? "&" : "?"}limit=1`;
 }
 
-function SloInner() {
+function SloInner({ onChanged }: { onChanged: () => void }) {
   const t = useT("alerting");
+  const { state: session } = useSession();
+  const csrfToken =
+    session.status === "authenticated" ? session.me.csrf_token : null;
+  const [options, setOptions] = useState<SloOptions | null>(null);
+  const [composing, setComposing] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetchSloOptions()
+      .then((value) => active && setOptions(value))
+      .catch(() => active && setOptions(null));
+    return () => {
+      active = false;
+    };
+  }, []);
+  const canCompose = Boolean(
+    options?.can_manage && csrfToken && options.services.length > 0,
+  );
   const [filters, update] = useUrlFilters(FILTER_KEYS);
-  const status = (STATES as string[]).includes(filters.status) ? filters.status : "";
-  const [list, retry] = useCursorList<Slo>(sloListPath({ status }), { paging: "offset" });
+  const status = (STATES as string[]).includes(filters.status)
+    ? filters.status
+    : "";
+  const [list, retry] = useCursorList<Slo>(sloListPath({ status }), {
+    paging: "offset",
+  });
   const items = list.state === "ready" ? list.items : [];
 
   // Server totals, not a tally of the loaded page. Breached spans three
@@ -191,18 +235,36 @@ function SloInner() {
   const failed = useTotal(withLimit(sloListPath({ status: "query_failed" })));
   const stale = useTotal(withLimit(sloListPath({ status: "stale" })));
   const sum = (values: (number | null)[]) =>
-    values.some((v) => v === null) ? null : values.reduce<number>((a, v) => a + (v ?? 0), 0);
+    values.some((v) => v === null)
+      ? null
+      : values.reduce<number>((a, v) => a + (v ?? 0), 0);
   const breached = sum([critical, exhausted, failed]);
   const known = sum([meeting, burning, breached, stale]);
-  const neverMeasured = all === null || known === null ? null : Math.max(0, all - known);
-  const toggle = (value: string) => update({ status: status === value ? "" : value });
+  const neverMeasured =
+    all === null || known === null ? null : Math.max(0, all - known);
+  const toggle = (value: string) =>
+    update({ status: status === value ? "" : value });
 
   return (
     <PageFrame>
       <PageHeader
         title={t("sloList.title")}
         description={t("sloList.description")}
+        actions={
+          canCompose ? (
+            <NewSloButton onClick={() => setComposing(true)} />
+          ) : undefined
+        }
       />
+      {options && canCompose && csrfToken ? (
+        <SloComposer
+          open={composing}
+          onClose={() => setComposing(false)}
+          options={options}
+          csrfToken={csrfToken}
+          onCreated={onChanged}
+        />
+      ) : null}
       <div className="flex flex-col gap-5">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <CountTile
@@ -241,11 +303,22 @@ function SloInner() {
           />
         </div>
 
+        {options && csrfToken ? (
+          <SloSuggestions
+            options={options}
+            csrfToken={csrfToken}
+            onCreated={onChanged}
+          />
+        ) : null}
+
         <Toolbar
           data-testid="slo-filters"
           summary={
             list.state === "ready" && list.total !== null
-              ? t("sloList.shown", { shown: list.items.length, total: list.total })
+              ? t("sloList.shown", {
+                  shown: list.items.length,
+                  total: list.total,
+                })
               : undefined
           }
         >
@@ -282,7 +355,11 @@ function SloInner() {
                   {list.denied ? (
                     <DataState kind="permission-denied" />
                   ) : (
-                    <DataState kind="error" description={list.message} onRetry={retry} />
+                    <DataState
+                      kind="error"
+                      description={list.message}
+                      onRetry={retry}
+                    />
                   )}
                 </StatePad>
               ) : items.length === 0 ? (
@@ -308,7 +385,13 @@ function SloInner() {
                   </ul>
                   <ListFooter
                     shown={items.length}
-                    summary={t("sloList.shown", { shown: items.length, total: list.state === "ready" ? (list.total ?? items.length) : items.length })}
+                    summary={t("sloList.shown", {
+                      shown: items.length,
+                      total:
+                        list.state === "ready"
+                          ? (list.total ?? items.length)
+                          : items.length,
+                    })}
                     hasMore={list.state === "ready" && list.hasMore}
                     loadingMore={list.state === "ready" && list.loadingMore}
                     moreError={list.state === "ready" && list.moreError}
@@ -372,7 +455,6 @@ function SloInner() {
               )}
             </Panel>
           </div>
-
         </div>
       </div>
     </PageFrame>
@@ -380,9 +462,15 @@ function SloInner() {
 }
 
 export default function SloPage() {
+  // A new objective changes the list, every count and the suggestions:
+  // remounting reads them all again rather than patching each by hand.
+  const [generation, setGeneration] = useState(0);
   return (
     <Suspense fallback={<DataState kind="loading" />}>
-      <SloInner />
+      <SloInner
+        key={generation}
+        onChanged={() => setGeneration((n) => n + 1)}
+      />
     </Suspense>
   );
 }
