@@ -12,6 +12,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PageFrame } from "@/components/shell/AppShell";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
+import { useCrumbLabel } from "@/lib/crumbs";
 import { DataState } from "@/components/state/DataState";
 import {
   OVERVIEW_RANGES,
@@ -79,6 +81,8 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
   const [saving, setSaving] = useState<"idle" | "saving" | "conflict" | "failed">("idle");
   const [versions, setVersions] = useState<DashboardVersion[] | null>(null);
   const [showVersions, setShowVersions] = useState(false);
+  // The breadcrumb names the environment, not its id.
+  useCrumbLabel(environmentId, dashboard ? `${dashboard.project_key} / ${dashboard.environment_key}` : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,12 +243,17 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
         <div className={s.head}>
           <div>
             <Link href="/dashboards" className={s.back}><ArrowLeft size={14} />{t("all")}</Link>
+            <div className={s.headMain}>
+            <ProjectLogo projectId={dashboard.project_id} name={dashboard.project_name} size="lg" variant="mark" />
+            <div className="min-w-0">
             <h1 className={s.title}>{dashboard.title}</h1>
             <p className={s.sub}>
               {t("subtitle", { project: dashboard.project_name, environment: dashboard.environment_key, services: bindings.length })}
               {dashboard.saved && dashboard.updated_at ? ` · ${t("savedAt", { version: dashboard.version, when: fmt.date(dashboard.updated_at, { dateStyle: "medium", timeStyle: "short" }) })}` : ` · ${t("default")}`}
               {overview ? ` · ${(overview.age_seconds ?? 0) < 60 ? t("freshNow") : t("readAgo", { minutes: Math.round((overview.age_seconds ?? 0) / 60) })}` : ""}
             </p>
+            </div>
+            </div>
           </div>
           <div className={s.tools}>
             <div className={s.pills} role="group" aria-label={t("rangeLabel")}>

@@ -14,6 +14,7 @@ import { fetchDashboards, type DashboardListItem } from "@/lib/dashboards";
 import { useT } from "@/lib/i18n";
 
 import s from "./dashboards.module.css";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 
 export function DashboardIndex() {
   const t = useT("dashboards");
@@ -41,6 +42,7 @@ export function DashboardIndex() {
           <div className={s.list}>
             {shown.map((item, i) => (
               <Link key={item.environment_id} href={`/dashboards/${item.environment_id}`} className={s.tile} style={{ animationDelay: `${i * 50}ms` }}>
+                <ProjectLogo projectId={item.project_id} name={item.project_name} size="lg" variant="mark" className={s.tileLogo} />
                 <b>{item.title}</b>
                 <span>{t("tileServices", { count: item.services })}</span>
                 <em>{item.saved ? t("tileSaved", { version: item.version }) : t("default")}</em>

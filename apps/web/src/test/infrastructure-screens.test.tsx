@@ -127,8 +127,8 @@ describe("infrastructure screen", () => {
         <InfrastructurePage />
       </SessionProvider>,
     );
-    expect(await screen.findByRole("heading", { level: 1, name: "Infrastructure" })).toBeInTheDocument();
-    expect(screen.getByText("Duosis Production · 2 machines · 78 pods")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Resource usage" })).toBeInTheDocument();
+    expect(await screen.findByText("Duosis Production · 2 machines · 78 pods")).toBeInTheDocument();
     const ledger = screen.getByRole("region", { name: "Machine" });
     expect(within(ledger).getByRole("heading", { name: "node1" })).toBeInTheDocument();
     expect(within(ledger).getByText("At this rate it fills in ≈20 days")).toBeInTheDocument();
@@ -206,8 +206,8 @@ describe("infrastructure screen in Turkish", () => {
         </SessionProvider>
       </LocaleProvider>,
     );
-    expect(await screen.findByRole("heading", { level: 1, name: "Altyapı" })).toBeInTheDocument();
-    expect(screen.getByText("Duosis Production · 2 makine · 78 pod")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Kaynak kullanımı" })).toBeInTheDocument();
+    expect(await screen.findByText("Duosis Production · 2 makine · 78 pod")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Tracesis.*İsteğini aşıyor/s })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Hangi makineler" })).toBeInTheDocument();
   });

@@ -44,6 +44,7 @@ async def main() -> None:
                 "environment_services",
                 "service_definitions",
                 "environments",
+                "project_dependencies",
                 "project_owners",
                 "projects",
                 "clusters",
