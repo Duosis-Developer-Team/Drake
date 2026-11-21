@@ -16,6 +16,7 @@ import {
   Network,
   Plug,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -25,6 +26,7 @@ import { ConnectPanel } from "@/components/agents/ConnectPanel";
 import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
 import { ActivityBars, ProviderMix } from "@/components/agents/visuals";
 import { AgentMap } from "@/components/agents/AgentMap";
+import { GovernanceView } from "@/components/agents/Governance";
 import { McpServers } from "@/components/agents/McpServers";
 import { PriceNote } from "@/components/agents/PriceNote";
 import { KpiTile, PillTabs } from "@/components/features/configure/kit";
@@ -63,7 +65,9 @@ export default function AgentsPage() {
   const fmt = useFormat();
   const { locale } = useLocale();
   const [span, setSpan] = useState<Window>("24h");
-  const [view, setView] = useState<"inventory" | "map" | "mcp">("inventory");
+  const [view, setView] = useState<"inventory" | "map" | "mcp" | "governance">(
+    "inventory",
+  );
   const [metric, setMetric] = useState<"calls" | "cost">("calls");
   const [state, setState] = useState<State>({ kind: "loading" });
   const [connect, setConnect] = useState<AgentConnect | null>(null);
@@ -147,6 +151,11 @@ export default function AgentsPage() {
               },
               { key: "map", label: t("view.map"), icon: Network },
               { key: "mcp", label: t("view.mcp"), icon: Plug },
+              {
+                key: "governance",
+                label: t("view.governance"),
+                icon: ShieldCheck,
+              },
             ]}
           />
         }
@@ -275,7 +284,9 @@ export default function AgentsPage() {
           </div>
           <PriceNote />
 
-          {view === "mcp" ? (
+          {view === "governance" ? (
+            <GovernanceView span={span} />
+          ) : view === "mcp" ? (
             <McpServers span={span} />
           ) : view === "map" ? (
             <MapSection span={span} />

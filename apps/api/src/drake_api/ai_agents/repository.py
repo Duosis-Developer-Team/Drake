@@ -49,6 +49,46 @@ async def _visibility(
     return project_ids, root is not None and root in agents
 
 
+MANAGE = "agent.manage"
+
+
+async def _manage_visibility(
+    connection: AsyncConnection, principal: Principal
+) -> tuple[set[uuid.UUID], bool]:
+    """(projects whose agents this caller may govern, may govern agents
+    outside the catalog)."""
+    manage = set(await visible_scope_ids(connection, principal, MANAGE))
+    if not manage:
+        return set(), False
+    projects = set(await visible_scope_ids(connection, principal, "project.view"))
+    scopes = list(manage & projects) or [uuid.UUID(int=0)]
+    ids = {
+        uuid.UUID(str(r[0]))
+        for r in (
+            await connection.execute(
+                text("SELECT id FROM projects WHERE scope_id = ANY(:s)"), {"s": scopes}
+            )
+        ).all()
+    }
+    root = (
+        await connection.execute(
+            text(
+                "SELECT id FROM scopes WHERE scope_type = 'organization' AND external_ref = 'root'"
+            )
+        )
+    ).scalar_one_or_none()
+    return ids, root is not None and root in manage
+
+
+async def may_manage(
+    connection: AsyncConnection, principal: Principal, project_id: uuid.UUID | None
+) -> bool:
+    projects, unbound = await _manage_visibility(connection, principal)
+    if project_id is None:
+        return unbound
+    return uuid.UUID(str(project_id)) in projects
+
+
 def _clause(alias: str = "g") -> str:
     return f"(({alias}.project_id = ANY(:projects)) OR ({alias}.project_id IS NULL AND :unbound))"
 
@@ -87,7 +127,14 @@ def _totals(row: Any, offset: int = 0) -> dict[str, int]:
 _AGENT_COLUMNS = """
     g.id, g.display_name, g.confidence, g.ingest, g.lifecycle, g.service_name, g.namespace,
     g.workload, g.cluster_ref, g.agent_external_id, g.first_seen_at, g.last_seen_at,
-    p.id, p.project_key, p.display_name, e.id, e.environment_key, g.binding_id
+    p.id, p.project_key, p.display_name, e.id, e.environment_key, g.binding_id,
+    g.purpose, o.id, o.display_name, g.lifecycle_changed_at, c.display_name
+"""
+
+# Who owns the agent and who last changed its lifecycle (phase 5).
+_PEOPLE = """
+    LEFT JOIN identities o ON o.id = g.owner_identity_id
+    LEFT JOIN identities c ON c.id = g.lifecycle_changed_by
 """
 
 
@@ -111,6 +158,18 @@ def _agent(row: Any, now: datetime) -> dict[str, Any]:
         ),
         "environment": ({"id": str(row[15]), "key": row[16]} if row[15] is not None else None),
         "binding_id": str(row[17]) if row[17] is not None else None,
+        "purpose": row[18],
+        "owner": {"id": str(row[19]), "name": row[20] or None} if row[19] is not None else None,
+        "lifecycle_changed_at": row[21].isoformat() if row[21] is not None else None,
+        "lifecycle_changed_by": row[22],
+        # Shadow AI: nobody approved it, and it runs outside the catalog or
+        # is known only from the wire.
+        "shadow": row[4] == "observed" and (row[12] is None or row[2] == "observed"),
+        # last_seen_at is the end of the last hour with usage, so only an hour
+        # that began after the retirement counts as being seen again.
+        "seen_after_retirement": (
+            row[4] == "retired" and row[21] is not None and row[11] > row[21] + timedelta(hours=1)
+        ),
     }
 
 
@@ -180,13 +239,15 @@ async def list_agents(
     principal: Principal,
     *,
     window: str = "24h",
+    include_retired: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     moment = now or datetime.now(UTC)
     span = WINDOWS.get(window, WINDOWS["24h"])
     since = moment - span
     projects, unbound = await _visibility(connection, principal)
-    params = {"projects": projects, "unbound": unbound, "since": since}
+    governed, governed_unbound = await _manage_visibility(connection, principal)
+    params = {"projects": projects, "unbound": unbound, "since": since, "retired": include_retired}
     agents = (
         await connection.execute(
             text(
@@ -195,7 +256,8 @@ async def list_agents(
                 FROM agents g
                 LEFT JOIN projects p ON p.id = g.project_id
                 LEFT JOIN environments e ON e.id = g.environment_id
-                WHERE {_clause()} AND g.lifecycle != 'retired'
+                {_PEOPLE}
+                WHERE {_clause()} AND (:retired OR g.lifecycle != 'retired')
                 ORDER BY g.last_seen_at DESC
                 LIMIT 500
                 """  # noqa: S608 - fixed fragments
@@ -210,6 +272,9 @@ async def list_agents(
             "cost_usd": 0.0,
             "unpriced_tokens": 0,
             "guardrails_firing": 0,
+            "can_manage": (
+                uuid.UUID(str(r[12])) in governed if r[12] is not None else governed_unbound
+            ),
             "providers": [],
             "models": [],
             "series": [],
@@ -354,6 +419,15 @@ async def list_agents(
         "cost_usd": _usd(sum(i["cost_usd"] for i in rows)),
         "unpriced_tokens": sum(i["unpriced_tokens"] for i in rows),
         "guardrails_firing": sum(1 for i in rows if i["guardrails_firing"]),
+        "governance": {
+            "approved": sum(1 for i in rows if i["lifecycle"] == "approved"),
+            "review": sum(1 for i in rows if i["lifecycle"] == "observed"),
+            "retired": sum(1 for i in rows if i["lifecycle"] == "retired"),
+            "shadow": sum(1 for i in rows if i["shadow"]),
+            "no_owner": sum(1 for i in rows if i["owner"] is None and i["lifecycle"] != "retired"),
+            "seen_after_retirement": sum(1 for i in rows if i["seen_after_retirement"]),
+        },
+        "can_manage": bool(governed) or governed_unbound,
     }
     return {"window": window if window in WINDOWS else "24h", "items": rows, "summary": summary}
 
@@ -378,6 +452,7 @@ async def get_agent(
                 FROM agents g
                 LEFT JOIN projects p ON p.id = g.project_id
                 LEFT JOIN environments e ON e.id = g.environment_id
+                {_PEOPLE}
                 WHERE g.id = :id AND {_clause()}
                 """  # noqa: S608 - fixed fragments
             ),
@@ -387,6 +462,7 @@ async def get_agent(
     if row is None:
         return None
     agent = _agent(row, moment)
+    agent["can_manage"] = await may_manage(connection, principal, row[12])
     totals = (
         await connection.execute(
             text(
@@ -972,3 +1048,59 @@ def token_cost(
         + max(out - reasoning, 0) * base_out
         + reasoning * float(think)
     ) / 1_000_000
+
+
+LIFECYCLES = ("observed", "approved", "retired")
+
+
+async def set_governance(
+    connection: AsyncConnection,
+    principal: Principal,
+    agent_id: uuid.UUID,
+    *,
+    actor: uuid.UUID,
+    lifecycle: str | None = None,
+    owner: str | None = None,
+    purpose: str | None = None,
+    clear_purpose: bool = False,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Change what the organisation decided about an agent. `owner` is
+    "me" or "none". None when the caller may not see or govern it."""
+    project = (
+        await connection.execute(
+            text("SELECT project_id, lifecycle FROM agents WHERE id = :id"), {"id": agent_id}
+        )
+    ).first()
+    if project is None or await agent_for_runs(connection, principal, agent_id) is None:
+        return None
+    if not await may_manage(connection, principal, project[0]):
+        return None
+    changes: dict[str, Any] = {}
+    if lifecycle is not None:
+        if lifecycle not in LIFECYCLES:
+            raise ValueError("lifecycle")
+        if lifecycle != project[1]:
+            changes.update(
+                lifecycle=lifecycle,
+                lifecycle_changed_at=now or datetime.now(UTC),
+                lifecycle_changed_by=actor,
+            )
+    if owner is not None:
+        if owner not in ("me", "none"):
+            raise ValueError("owner")
+        changes["owner_identity_id"] = actor if owner == "me" else None
+    if clear_purpose:
+        changes["purpose"] = None
+    elif purpose is not None:
+        cleaned = " ".join(purpose.split())
+        if len(cleaned) > 500:
+            raise ValueError("purpose")
+        changes["purpose"] = cleaned or None
+    if changes:
+        assignments = ", ".join(f"{k} = :{k}" for k in changes)
+        await connection.execute(
+            text(f"UPDATE agents SET {assignments}, updated_at = now() WHERE id = :id"),  # noqa: S608
+            {**changes, "id": agent_id},
+        )
+    return {"changed": sorted(changes)}

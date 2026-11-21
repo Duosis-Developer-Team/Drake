@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { LifecycleBadge } from "@/components/agents/Governance";
 import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { AgentGlyph, MiniArea } from "@/components/agents/visuals";
 import { useFormat, useLocale, useT } from "@/lib/i18n";
@@ -99,6 +100,7 @@ export function AgentCard({ agent }: { agent: Agent }) {
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <ConfidenceBadge confidence={agent.confidence} />
+            <LifecycleBadge agent={agent} compactMode />
             {agent.ingest === "external" ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-2 py-0.5 text-micro font-medium text-ink-secondary">
                 <Globe aria-hidden className="h-3 w-3" />
