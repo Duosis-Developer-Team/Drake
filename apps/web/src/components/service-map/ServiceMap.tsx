@@ -137,14 +137,52 @@ export function ServiceMap({
     const ux = dx / len;
     const uy = dy / len;
     const ring = compact ? 6 : 8;
-    const sx = a.x + ux * (a.r + ring + 4);
-    const sy = a.y + uy * (a.r + ring + 4);
-    const ex = b.x - ux * (b.r + ring + 8);
-    const ey = b.y - uy * (b.r + ring + 8);
+    let sx = a.x + ux * (a.r + ring + 4);
+    let sy = a.y + uy * (a.r + ring + 4);
+    let ex = b.x - ux * (b.r + ring + 8);
+    let ey = b.y - uy * (b.r + ring + 8);
     const skip = Math.max(0, Math.abs(b.column - a.column) - 1);
-    const bend = (dy === 0 ? 0 : 18) + skip * 64;
-    const mx = (sx + ex) / 2 - uy * bend;
-    const my = (sy + ey) / 2 + ux * bend;
+    let mx = (sx + ex) / 2;
+    let my = (sy + ey) / 2;
+    if (skip > 0) {
+      // A call that skips columns must not run through the nodes in between:
+      // route it through the nearest free band (between two nodes' labels,
+      // or above / below the column), then solve the control point so the
+      // curve's midpoint sits in that band.
+      const lo = Math.min(a.column, b.column);
+      const hi = Math.max(a.column, b.column);
+      const between = [...layout.placed.values()]
+        .filter((p) => p.column > lo && p.column < hi)
+        .sort((p, q) => p.y - q.y);
+      const bands: number[] = [];
+      if (between.length) {
+        const first = between[0];
+        const last = between[between.length - 1];
+        bands.push(first.y - first.r - 22, last.y + last.r + (compact ? 52 : 62));
+        for (let k = 1; k < between.length; k++) {
+          const top = between[k - 1].y + between[k - 1].r + (compact ? 46 : 56);
+          const bottom = between[k].y - between[k].r - 18;
+          if (bottom > top) bands.push((top + bottom) / 2);
+        }
+      }
+      const target = bands.length
+        ? bands.reduce((best, y) => (Math.abs(y - my) < Math.abs(best - my) ? y : best))
+        : my - 64 * skip;
+      my = 2 * target - (sy + ey) / 2;
+    } else if (dy !== 0) {
+      mx -= uy * 18;
+      my += ux * 18;
+    }
+    // Leave and enter each ring along the curve's own tangent, not the
+    // straight line, so a bent edge does not cut through its own node.
+    if (skip > 0) {
+      const la = Math.hypot(mx - a.x, my - a.y) || 1;
+      sx = a.x + ((mx - a.x) / la) * (a.r + ring + 4);
+      sy = a.y + ((my - a.y) / la) * (a.r + ring + 4);
+      const lb = Math.hypot(b.x - mx, b.y - my) || 1;
+      ex = b.x - ((b.x - mx) / lb) * (b.r + ring + 8);
+      ey = b.y - ((b.y - my) / lb) * (b.r + ring + 8);
+    }
     const slow = edge.kind === "call" && (edge.p95 ?? 0) >= SLOW_MS;
     const at = 0.5;
     const lx = (1 - at) ** 2 * sx + 2 * (1 - at) * at * mx + at * at * ex;
@@ -205,7 +243,11 @@ export function ServiceMap({
   };
 
   const showNodeTip = (p: PlacedNode) =>
-    setTip({ x: p.x + p.r + 18, y: Math.max(8, p.y - p.r), lines: nodeTip(p) });
+    setTip({
+      x: p.x + p.r + 200 > layout.width ? p.x - p.r - 200 : p.x + p.r + 18,
+      y: Math.max(8, p.y - p.r),
+      lines: nodeTip(p),
+    });
 
   return (
     <div ref={wrapRef} className="relative w-full" data-testid="service-map">
@@ -229,8 +271,9 @@ export function ServiceMap({
               viewBox="0 0 10 10"
               refX="7"
               refY="5"
-              markerWidth="4.5"
-              markerHeight="4.5"
+              markerWidth="9"
+              markerHeight="9"
+              markerUnits="userSpaceOnUse"
               orient="auto-start-reverse"
             >
               <path d="M0,0L10,5L0,10z" style={{ fill: colour }} />
@@ -242,7 +285,6 @@ export function ServiceMap({
           const colour = g.slow ? SLOW : g.edge.kind === "query" ? QUERY : EDGE;
           const key = g.slow ? "s" : g.edge.kind === "query" ? "q" : "n";
           const lit = active === null || g.edge.from === active || g.edge.to === active;
-          const labelWidth = g.label.length * 6.4 + 16;
           return (
             <g
               key={`${g.edge.from}-${g.edge.to}-${i}`}
@@ -278,7 +320,17 @@ export function ServiceMap({
                 style={{ stroke: colour, ["--flow" as string]: `${g.seconds}s` }}
               />
               <path d={g.d} fill="none" strokeWidth={14} stroke="transparent" />
-              <g>
+            </g>
+          );
+        })}
+
+
+        {/* Labels last, so no edge ever runs across another edge's count. */}
+        {geometry.map((g, i) => {
+          const lit = active === null || g.edge.from === active || g.edge.to === active;
+          const labelWidth = g.label.length * 7.1 + 18;
+          return (
+            <g key={`label-${i}`} style={{ opacity: lit ? 1 : 0.18, transition: "opacity 160ms" }} aria-hidden>
                 <rect
                   x={g.lx - labelWidth / 2}
                   y={g.ly - 10}
@@ -296,7 +348,6 @@ export function ServiceMap({
                 >
                   {g.label}
                 </text>
-              </g>
             </g>
           );
         })}
@@ -311,9 +362,9 @@ export function ServiceMap({
           const series = node.series.length > 1 ? node.series : [0, 0];
           const top = Math.max(...series, 1e-9);
           const ww = p.r * 1.5;
-          const hh = p.r * 0.42;
+          const hh = p.r * 0.3;
           const x0 = -ww / 2;
-          const y0 = p.r * 0.8;
+          const y0 = p.r * 0.88;
           const wave = smooth(
             series.map((v, j): [number, number] => [x0 + (j / Math.max(1, series.length - 1)) * ww, y0 - (v / top) * hh]),
           );
@@ -402,14 +453,14 @@ export function ServiceMap({
                 <path d={wave} fill="none" strokeWidth={1.3} style={{ stroke: node.slow ? SLOW : "var(--brand)", strokeOpacity: 0.7 }} />
               </g>
               <text
-                y={compact ? 1 : -1}
+                y={compact ? -2 : -5}
                 textAnchor="middle"
                 className="font-[family-name:var(--font-display)]"
                 style={{ fontSize: compact ? 15 : 19, fontWeight: 700, fill: "var(--text-primary)", letterSpacing: "-0.02em" }}
               >
                 {big}
               </text>
-              <text y={compact ? 14 : 15} textAnchor="middle" style={{ fontSize: compact ? 9.5 : 10.5, fill: "var(--text-muted)" }}>
+              <text y={compact ? 10 : 11} textAnchor="middle" style={{ fontSize: compact ? 9.5 : 10.5, fill: "var(--text-muted)" }}>
                 {unit}
               </text>
               <text

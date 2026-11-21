@@ -134,7 +134,10 @@ export function layoutServiceMap(
   }
 
   const crowded = Math.max(1, ...[...columns.values()].map((l) => l.length));
-  const rowGap = compact ? 2 * rMax + 56 : 2 * rMax + 74;
+  // A call that skips a column is routed between that column's nodes, so
+  // leave it a lane wide enough for the line and its count.
+  const skips = edges.some((e) => Math.abs((depth.get(e.from) ?? 1) - (depth.get(e.to) ?? 1)) > 1);
+  const rowGap = (compact ? 2 * rMax + 56 : 2 * rMax + 74) + (skips ? 34 : 0);
   const top = compact ? 34 : 44;
   const bottom = compact ? 50 : 62;
   const height = Math.max(compact ? 260 : 420, top + bottom + crowded * rowGap);
