@@ -219,6 +219,28 @@ async def test_cluster_view_without_telemetry_is_denied_not_zero(engine: AsyncEn
     assert provider.queries == []
 
 
+async def test_a_warm_cache_still_asks_for_telemetry_query(engine: AsyncEngine) -> None:
+    """The cached snapshot is telemetry. A cluster viewer without
+    telemetry.query used to receive the owner's cached measurements; now
+    they get the same `denied` a cold build gives them (ADR-0032)."""
+    harness, provider = infra_harness()
+    world = await cluster_world(engine)
+    cluster_id = world["cluster_a"].id
+    await make_role(harness, engine, "Cluster Viewer Cache", ["cluster.view"])
+    await harness_login(harness, "user-cluster")
+    await grant(engine, harness, "user-cluster", "Cluster Viewer Cache", "organization", "root")
+    async with signed_in(harness, engine, "user-owner") as client:
+        warm = (await client.get(f"/v1/infrastructure/clusters/{cluster_id}")).json()
+    assert warm["state"] == "ok" and warm["nodes"]
+    built = len(provider.queries)
+
+    async with signed_in(harness, engine, "user-cluster") as client:
+        body = (await client.get(f"/v1/infrastructure/clusters/{cluster_id}")).json()
+    assert body["state"] == "denied"
+    assert body["nodes"] == [] and body["namespaces"] == []
+    assert len(provider.queries) == built
+
+
 async def test_projects_the_viewer_cannot_see_are_not_named(engine: AsyncEngine) -> None:
     harness, _provider = infra_harness()
     world = await cluster_world(engine)

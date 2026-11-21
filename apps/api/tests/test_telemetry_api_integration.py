@@ -337,7 +337,16 @@ async def test_success_cache_and_observation(engine: AsyncEngine) -> None:
             if value is None:
                 continue
             payload = value.decode() if isinstance(value, bytes) else str(value)
-            for forbidden in ("http_server_requests_total", "59095", "config_ref", "it-fake"):
+            # The connector's address, not its bare port digits: a cached
+            # number elsewhere (a value, a timestamp) can contain "59095",
+            # which made this assertion fail by chance.
+            for forbidden in (
+                "http_server_requests_total",
+                FAKE_CONNECTOR_URL,
+                "127.0.0.1:59095",
+                "config_ref",
+                "it-fake",
+            ):
                 assert forbidden not in payload
     finally:
         await redis.aclose()

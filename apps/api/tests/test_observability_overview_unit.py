@@ -289,6 +289,27 @@ def test_log_lines_and_patterns() -> None:
     assert patterns[0]["severity_number"] == 21 and patterns[0]["workloads"] == 2
 
 
+def test_dashboard_log_patterns_are_redacted() -> None:
+    """The per-service patterns were redacted and these were not: a
+    credential that slipped past ingest reached every dashboard viewer."""
+    q = query(CORE)
+    patterns = normalize_log_patterns(
+        [
+            {
+                "pattern": "connect postgres://app:s3cr3t-pass@db:5432/app Bearer abcdefgh12345678",
+                "lines": "3",
+                "severity_number": 17,
+                "severity_text": "ERROR",
+                "workloads": "1",
+                "wks": [CORE_KEY],
+            }
+        ],
+        q,
+    )
+    assert "s3cr3t-pass" not in patterns[0]["pattern"]
+    assert "abcdefgh12345678" not in patterns[0]["pattern"]
+
+
 def test_a_malformed_row_is_refused() -> None:
     q = query(CORE)
     with pytest.raises(ValueError):

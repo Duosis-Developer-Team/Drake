@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from drake_api.logging import redact
 from drake_api.observability.health_checks import (
     LONG_LIVED_SECONDS,
     health_check_parameter,
@@ -536,7 +537,9 @@ def normalize_log_patterns(
         bindings = sorted({query.keys[w] for w in map(str, wks) if w in query.keys})
         out.append(
             {
-                "pattern": str(row.get("pattern") or ""),
+                # Redacted here as the per-service patterns are: the
+                # gateway's ingest redaction must not be the only guard.
+                "pattern": redact(str(row.get("pattern") or "")),
                 "lines": _count(row.get("lines")),
                 "severity_number": _count(row.get("severity_number")),
                 "severity_text": str(row.get("severity_text") or "") or None,
