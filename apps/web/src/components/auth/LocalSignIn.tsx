@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowRight, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { useId, useState } from "react";
 
 import { useT } from "@/lib/i18n";
@@ -24,6 +25,7 @@ export function LocalSignIn() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [reveal, setReveal] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -59,47 +61,88 @@ export function LocalSignIn() {
   }
 
   return (
-    <form onSubmit={submit} noValidate className="space-y-4 text-left">
-      <div className="space-y-1">
-        <label htmlFor={emailId} className="block text-sm font-medium text-ink">
+    <form onSubmit={submit} noValidate className="space-y-5 text-left">
+      <div className="space-y-1.5">
+        <label
+          htmlFor={emailId}
+          className="block text-[0.8125rem] font-semibold text-ink"
+        >
           {t("localSignIn.email")}
         </label>
-        <input
-          id={emailId}
-          name="email"
-          type="email"
-          autoComplete="username"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
-          className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
-        />
+        <span className="relative block">
+          <Mail
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-muted"
+          />
+          <input
+            id={emailId}
+            name="email"
+            type="email"
+            autoComplete="username"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            placeholder={t("localSignIn.emailPlaceholder")}
+            className="h-12 w-full rounded-xl border border-border bg-surface pl-10 text-[0.9375rem] text-ink shadow-sm transition-colors placeholder:text-ink-muted hover:border-border-strong focus-visible:border-brand focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand/30 pr-3"
+          />
+        </span>
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor={passwordId} className="block text-sm font-medium text-ink">
+      <div className="space-y-1.5">
+        <label
+          htmlFor={passwordId}
+          className="block text-[0.8125rem] font-semibold text-ink"
+        >
           {t("localSignIn.password")}
         </label>
-        <input
-          id={passwordId}
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
-          className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
-        />
+        <span className="relative block">
+          <Lock
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-muted"
+          />
+          <input
+            id={passwordId}
+            name="password"
+            type={reveal ? "text" : "password"}
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            className="h-12 w-full rounded-xl border border-border bg-surface pl-10 text-[0.9375rem] text-ink shadow-sm transition-colors placeholder:text-ink-muted hover:border-border-strong focus-visible:border-brand focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand/30 pr-11"
+          />
+          <button
+            type="button"
+            onClick={() => setReveal(!reveal)}
+            aria-label={
+              reveal
+                ? t("localSignIn.hidePassword")
+                : t("localSignIn.showPassword")
+            }
+            aria-pressed={reveal}
+            className="absolute top-1/2 right-2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-ink-muted hover:bg-surface-hover hover:text-ink"
+          >
+            {reveal ? (
+              <EyeOff aria-hidden className="h-4 w-4" />
+            ) : (
+              <Eye aria-hidden className="h-4 w-4" />
+            )}
+          </button>
+        </span>
       </div>
 
       {error ? (
         // assertive: a failed sign-in is the only thing the user is waiting
         // on, so it should interrupt rather than queue behind other updates.
-        <p id={errorId} role="alert" aria-live="assertive" className="text-sm text-danger">
+        <p
+          id={errorId}
+          role="alert"
+          aria-live="assertive"
+          className="rounded-lg bg-critical-soft px-3 py-2 text-[0.8125rem] font-medium text-critical"
+        >
           {error}
         </p>
       ) : null}
@@ -107,9 +150,18 @@ export function LocalSignIn() {
       <button
         type="submit"
         disabled={pending}
-        className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-accent px-5 text-sm font-medium text-ink-inverse transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+        className="group inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-[0.9375rem] font-semibold text-ink-inverse shadow-lg shadow-brand/25 transition-all hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
       >
+        {pending ? (
+          <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
+        ) : null}
         {pending ? t("localSignIn.submitting") : t("localSignIn.submit")}
+        {pending ? null : (
+          <ArrowRight
+            aria-hidden
+            className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+          />
+        )}
       </button>
     </form>
   );
