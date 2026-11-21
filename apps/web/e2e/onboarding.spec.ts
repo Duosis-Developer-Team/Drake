@@ -96,7 +96,7 @@ async function deliverRepositoriesAdded(request: APIRequestContext) {
 
 async function signInAs(page: Page, subject: string) {
   await page.goto(`/v1/auth/login?redirect=/&login_hint=${subject}`);
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 async function csrfToken(page: Page): Promise<string> {

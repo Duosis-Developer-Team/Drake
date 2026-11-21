@@ -84,7 +84,7 @@ function installationPayload(action: string) {
 
 async function signInAs(page: Page, subject: string) {
   await page.goto(`/v1/auth/login?redirect=/&login_hint=${subject}`);
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 /** POSTs to Drake carry the session CSRF token, exactly like the browser. */

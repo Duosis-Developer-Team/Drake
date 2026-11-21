@@ -24,7 +24,7 @@
  * most dangerous thing a monitoring product can render.
  */
 
-import { ArrowRight, Boxes, FolderKanban, Layers, RefreshCw, Server } from "lucide-react";
+import { ArrowRight, Server } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
@@ -39,7 +39,6 @@ import { SignalBoard } from "@/components/service-health/SignalBoard";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
-import { Button } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlay";
 import { FreshnessIndicator, RelativeTime } from "@/components/ui/identifiers";
 import {
@@ -52,7 +51,7 @@ import { alertListPath, type AlertInstance, type AlertSummary, type Page } from 
 import type { CatalogContext, Cluster, IntegrationHealth } from "@/lib/catalog";
 import { compareTone, humanize, toneForHealth, toneSpec } from "@/lib/design/status";
 import { deploymentListPath, type DeploymentPage } from "@/lib/deployments";
-import { useT } from "@/lib/i18n";
+import { useFormat, useT } from "@/lib/i18n";
 import type { IncidentSummary } from "@/lib/incidents";
 import {
   alertItems,
@@ -79,7 +78,6 @@ const REFRESH_MS = 60_000;
 
 export default function CommandCenterPage() {
   const t = useT("commandCenter");
-  const common = useT("common");
   const context = useResource<CatalogContext>("/v1/catalog/context", { refreshMs: REFRESH_MS });
   const incidents = useResource<{ items: IncidentSummary[]; total: number }>(
     "/v1/incidents?state=open&limit=25",
@@ -121,7 +119,6 @@ export default function CommandCenterPage() {
 
   const anyLoading = sources.some(({ resource }) => resource.loading && !resource.data);
   const refreshing = sources.some(({ resource }) => resource.refreshing);
-  const answered = sources.filter(({ resource }) => resource.data !== null);
 
   const attention = sortAttention([
     ...(incidents.data ? incidentItems(incidents.data.items) : []),
@@ -220,6 +217,15 @@ export default function CommandCenterPage() {
     />
   );
 
+  const kpis = (
+    <OverviewKpis
+      services={services}
+      incidents={incidents}
+      alerts={alerts}
+      deployments={recentDeployments}
+    />
+  );
+
   return (
     <PageFrame width="wide">
       <PageHeader
@@ -231,73 +237,59 @@ export default function CommandCenterPage() {
               asOf={context.fetchedAt}
               state={context.error ? "unknown" : "fresh"}
             />
-            <span>{t("page.sourcesAnswered", { answered: answered.length, total: sources.length })}</span>
+            <CatalogCounts resource={context} />
             {refreshing ? <span>{t("page.refreshing")}</span> : null}
           </>
         }
-        actions={
-          <Button icon={RefreshCw} onClick={reloadAll} disabled={refreshing}>
-            {common("action.refresh")}
-          </Button>
-        }
       />
 
-      {isNarrow ? (
-        <div className="flex flex-col gap-6">
-          <div className="motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards]">
-            {verdict}
-          </div>
-          <Reveal delay={80}>{attentionQueueSection}</Reveal>
-          {signalSection ? <Reveal delay={110}>{signalSection}</Reveal> : null}
-          <Reveal delay={140}>{timelineSection}</Reveal>
-          <Reveal delay={200}>{healthMatrixSection}</Reveal>
-          <Reveal delay={260}>{capacityRiskSection}</Reveal>
-          <Reveal delay={320}>{evidenceCoverageSection}</Reveal>
-        </div>
-      ) : (
-        /* Wide, airy rows: the lead verdict beside two summary cards, then
-           the working panels two-up at full height, never squeezed into a
-           narrow side column. */
-        <div className="flex flex-col gap-6">
-          <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="h-full motion-safe:animate-[scale-in_360ms_var(--ease-entrance)_backwards] lg:col-span-2 2xl:col-span-1 [&>*]:h-full">
-              {verdict}
+      <div className="flex flex-col gap-5">
+        {verdict}
+        {kpis}
+        {isNarrow ? (
+          <>
+            {attentionQueueSection}
+            {timelineSection}
+            {signalSection}
+            {healthMatrixSection}
+            {capacityRiskSection}
+            {evidenceCoverageSection}
+            <div className="flex flex-col gap-5" data-testid="estate-overview">
+              <Panel flush><FleetPanel resource={clusters} /></Panel>
+              <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
             </div>
-            <Reveal delay={80} className="[&>*]:h-full">
-              <Panel flush>
-                <ServiceHealthPanel resource={services} />
-              </Panel>
-            </Reveal>
-            <Reveal delay={140} className="[&>*]:h-full">
-              <Panel flush>
-                <CatalogPanel resource={context} />
-              </Panel>
-            </Reveal>
-          </div>
-          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
-            <Reveal delay={200} className="[&>*]:h-full">{attentionQueueSection}</Reveal>
-            <Reveal delay={260} className="[&>*]:h-full">{timelineSection}</Reveal>
-          </div>
-          {signalSection ? <Reveal delay={290}>{signalSection}</Reveal> : null}
-          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
-            <Reveal delay={320} className="[&>*]:h-full">{healthMatrixSection}</Reveal>
-            <Reveal delay={380} className="[&>*]:h-full">{capacityRiskSection}</Reveal>
-          </div>
-          <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
-            <Reveal delay={440} className="[&>*]:h-full">
-              <Panel flush data-testid="estate-overview">
-                <FleetPanel resource={clusters} />
-              </Panel>
-            </Reveal>
-            <Reveal delay={500} className="[&>*]:h-full">
-              <Panel flush>
-                <IntegrationsPanel resource={integrations} />
-              </Panel>
-            </Reveal>
-          </div>
-          <Reveal delay={560}>{evidenceCoverageSection}</Reveal>
-        </div>
-      )}
+          </>
+        ) : (
+          <>
+            {/* What to act on, beside where it lives. */}
+            <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+              <div className="[&>*]:h-full">{attentionQueueSection}</div>
+              <div className="[&>*]:h-full">{healthMatrixSection}</div>
+            </div>
+            {timelineSection}
+            {signalSection ? (
+              <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
+                <div className="[&>*]:h-full">{signalSection}</div>
+                <div className="[&>*]:h-full">{capacityRiskSection}</div>
+              </div>
+            ) : null}
+            <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2" data-testid="estate-overview">
+              <Panel flush><FleetPanel resource={clusters} /></Panel>
+              <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
+            </div>
+            {/* Without a signal board, capacity risk pairs with the evidence
+                behind the verdict instead of stretching across the page. */}
+            {signalSection ? (
+              evidenceCoverageSection
+            ) : (
+              <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
+                <div className="[&>*]:h-full">{capacityRiskSection}</div>
+                <div className="[&>*]:h-full">{evidenceCoverageSection}</div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       <Modal
         open={timelineDialogOpen}
@@ -306,44 +298,146 @@ export default function CommandCenterPage() {
       >
         <OperationalTimeline lanes={timelineLanes} />
       </Modal>
-
-      {isNarrow ? (
-        <div className="mt-6 flex flex-col gap-6" data-testid="estate-overview">
-          <Panel flush><FleetPanel resource={clusters} /></Panel>
-          <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
-          <Panel flush><CatalogPanel resource={context} /></Panel>
-          <Panel flush><ServiceHealthPanel resource={services} /></Panel>
-        </div>
-      ) : null}
     </PageFrame>
   );
 }
 
-/**
- * A panel's entrance. One fade+rise pass, staggered by `delay` so a grid of
- * panels arrives as a cascade rather than a flat pop — never a loop, never
- * re-triggered on data refresh (this wraps the section once, not per render
- * of its contents). `backwards` holds each panel at its `from` frame until
- * its own delay elapses, so a later panel never flashes at full opacity
- * before its turn. `className` carries layout concerns (grid dividers) that
- * belong to the caller's arrangement, not to the entrance itself.
- */
-function Reveal({
-  delay = 0,
-  className = "",
-  children,
+const KPI_TILE =
+  "flex min-w-0 flex-col gap-1.5 rounded-panel border border-border bg-surface px-4 py-3.5 shadow-panel transition-colors hover:border-border-strong";
+
+/** Four doors: each number opens the screen that explains it. */
+function OverviewKpis({
+  services,
+  incidents,
+  alerts,
+  deployments,
 }: {
-  delay?: number;
-  className?: string;
-  children: ReactNode;
+  services: Resource<{ items: ServiceHealthRow[] }>;
+  incidents: Resource<{ items: IncidentSummary[]; total: number }>;
+  alerts: Resource<AlertSummary>;
+  deployments: Resource<DeploymentPage>;
 }) {
+  const t = useT("commandCenter");
+  const fmt = useFormat();
+  const rows = services.data?.items ?? [];
+  const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
+  const open = incidents.data?.items ?? [];
+  const oldest = open.reduce<string | null>(
+    (best, i) => (!best || i.opened_at < best ? i.opened_at : best),
+    null,
+  );
+  const deploys = deployments.data?.items ?? [];
+  const bad = deploys.filter((d) => d.rollout_state === "failed" || d.rollout_state === "degraded").length;
+  const value = (v: number | null) => (
+    <span data-tabular className="font-[family-name:var(--font-display)] text-[1.75rem] leading-none font-bold tracking-[-0.03em] text-ink">
+      {v === null ? "—" : fmt.number(v)}
+    </span>
+  );
+  const head = (label: string) => (
+    <span className="flex items-center justify-between text-caption text-ink-muted">
+      {label}
+      <ArrowRight className="h-3.5 w-3.5 text-ink-muted" aria-hidden />
+    </span>
+  );
+  const line = (children: ReactNode) => (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">{children}</span>
+  );
+  const dot = (tone: Parameters<typeof toneSpec>[0]) => (
+    <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${toneSpec(tone).dot}`} />
+  );
   return (
-    <div
-      className={`min-w-0 motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] ${className}`}
-      style={{ animationDelay: `${delay}ms` }}
-    >
-      {children}
-    </div>
+    <section aria-label={t("kpi.label")} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="overview-kpis">
+      <Link href="/service-health" className={KPI_TILE}>
+        {head(t("kpi.services"))}
+        {value(services.data ? rows.length : null)}
+        {line(
+          services.data
+            ? tally.map(({ tone, count }) => (
+                <span key={tone} className="inline-flex items-center gap-1.5">
+                  {dot(tone)}
+                  {count} {t(`tone.${tone}`).toLocaleLowerCase()}
+                </span>
+              ))
+            : t("kpi.unreadable"),
+        )}
+      </Link>
+      <Link href="/incidents" className={KPI_TILE}>
+        {head(t("kpi.openIncidents"))}
+        {value(incidents.data ? incidents.data.total : null)}
+        {line(
+          !incidents.data ? (
+            t("kpi.unreadable")
+          ) : open.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-critical">
+              {dot("critical")}
+              {t("kpi.oldest", { age: fmt.relative(oldest) })}
+            </span>
+          ) : (
+            t("kpi.noneOpen")
+          ),
+        )}
+      </Link>
+      <Link href="/alerts" className={KPI_TILE}>
+        {head(t("kpi.firing"))}
+        {value(alerts.data ? alerts.data.firing : null)}
+        {line(
+          alerts.data ? (
+            <>
+              <span className={`inline-flex items-center gap-1.5 ${alerts.data.p1 > 0 ? "text-critical" : ""}`}>
+                {dot(alerts.data.p1 > 0 ? "critical" : alerts.data.p2 > 0 ? "warning" : "success")}
+                {t("kpi.priorities", { p1: alerts.data.p1, p2: alerts.data.p2 })}
+              </span>
+              {alerts.data.silenced > 0 ? <span>{t("kpi.silenced", { count: alerts.data.silenced })}</span> : null}
+            </>
+          ) : (
+            t("kpi.unreadable")
+          ),
+        )}
+      </Link>
+      <Link href="/deployments" className={KPI_TILE}>
+        {head(t("kpi.deploys"))}
+        {value(deployments.data ? deploys.length : null)}
+        {line(
+          !deployments.data ? (
+            t("kpi.unreadable")
+          ) : bad > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-critical">
+              {dot("critical")}
+              {t("kpi.deploysBad", { count: bad })}
+            </span>
+          ) : (
+            t("kpi.deploysOk")
+          ),
+        )}
+      </Link>
+    </section>
+  );
+}
+
+/** The catalog as a line under the title: what the reader is authorized to see. */
+function CatalogCounts({ resource }: { resource: Resource<CatalogContext> }) {
+  const t = useT("commandCenter");
+  if (!resource.data) return null;
+  const item = (label: string, count: number, href: string | null) => {
+    const body = (
+      <>
+        {label} <b className="font-semibold text-ink-secondary">{count}</b>
+      </>
+    );
+    return href ? (
+      <Link href={href} className="hover:text-ink">
+        {body}
+      </Link>
+    ) : (
+      <span>{body}</span>
+    );
+  };
+  return (
+    <span data-testid="catalog-counts" className="inline-flex flex-wrap items-center gap-x-3">
+      {item(t("catalog.projects"), resource.data.projects, "/projects")}
+      {item(t("catalog.environments"), resource.data.environments, null)}
+      {item(t("catalog.clusters"), resource.data.clusters, "/clusters")}
+    </span>
   );
 }
 
@@ -385,154 +479,6 @@ function TimelineSummary({ lanes, onExpand }: { lanes: TimelineLane[]; onExpand:
       >
         {t("timeline.viewFull")}
       </button>
-    </div>
-  );
-}
-
-function CatalogPanel({ resource }: { resource: Resource<CatalogContext> }) {
-  const t = useT("commandCenter");
-  return (
-    <div data-testid="catalog-counts" className="flex h-full min-w-0 flex-col gap-6 p-7">
-      <PanelHeader title={t("catalog.title")} description={t("catalog.description")} />
-      {resource.loading && !resource.data ? (
-        <LoadingSkeleton rows={2} />
-      ) : resource.denied ? (
-        <DeniedState compact />
-      ) : !resource.data ? (
-        <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
-      ) : (
-        /* A list of counts, not term/definition pairs: a <dl> whose children
-           are links is both wrong markup and an axe violation. Drawn as the
-           chain the estate actually is — projects hold environments, which
-           run on clusters. */
-        <ul className="relative my-auto grid grid-cols-3 gap-2">
-          <span aria-hidden className="absolute top-[1.375rem] right-[16%] left-[16%] h-px bg-[repeating-linear-gradient(90deg,var(--border-strong)_0_4px,transparent_4px_8px)] opacity-60" />
-          {(
-            [
-              [t("catalog.projects"), resource.data.projects, "/projects", FolderKanban],
-              [t("catalog.environments"), resource.data.environments, null, Layers],
-              [t("catalog.clusters"), resource.data.clusters, "/clusters", Boxes],
-            ] as const
-          ).map(([label, count, href, TileIcon]) => {
-            const body = (
-              <>
-                <span aria-hidden className="relative mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-panel transition-transform group-hover:scale-105">
-                  <TileIcon className="h-[1.125rem] w-[1.125rem]" />
-                </span>
-                <span data-tabular className="mt-3 block text-center text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-ink">
-                  {count}
-                </span>
-                <span className="mt-1 block text-center text-caption text-ink-muted">{label}</span>
-              </>
-            );
-            return (
-              <li key={label}>
-                {href ? (
-                  <Link href={href} className="group block rounded-[0.625rem] py-1 transition-colors hover:bg-surface-hover">
-                    {body}
-                  </Link>
-                ) : (
-                  <span className="group block py-1">{body}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function ServiceHealthPanel({ resource }: { resource: Resource<{ items: ServiceHealthRow[] }> }) {
-  const t = useT("commandCenter");
-  const rows = resource.data?.items ?? [];
-  const tally = tallyByTone(rows, (row) => toneForHealth(row.health.status));
-  return (
-    <div data-testid="service-health-rollup" className="flex h-full min-w-0 flex-col gap-6 p-7">
-      <PanelHeader title={t("serviceHealth.title")} description={t("serviceHealth.description")} />
-      {resource.loading && !resource.data ? (
-        <LoadingSkeleton rows={2} />
-      ) : resource.denied ? (
-        <DeniedState compact />
-      ) : !resource.data ? (
-        <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
-      ) : rows.length === 0 ? (
-        <NotConfiguredState
-          compact
-          title={t("serviceHealth.emptyTitle")}
-          description={t("serviceHealth.emptyDescription")}
-        />
-      ) : (
-        <>
-          <div className="flex items-end justify-between gap-4">
-            <p>
-              <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
-                {rows.length}
-              </span>
-              <span className="ml-2 text-caption text-ink-muted">{t("serviceHealth.services", { count: rows.length })}</span>
-            </p>
-            <p className="text-right text-caption text-ink-muted">
-              <span data-tabular className="font-semibold text-ink">
-                {tally.find((entry) => entry.tone === "success")?.count ?? 0}
-              </span>{" "}
-              {t("serviceHealth.reportingHealthy")}
-            </p>
-          </div>
-          {/* One tile per service, coloured by its own reported state: at
-              this scale a count you can literally see beats a pie. */}
-          <ul
-            aria-label={t("serviceHealth.tilesLabel", {
-              breakdown: tally.map((entry) => `${t(`tone.${entry.tone}`)} ${entry.count}`).join(", "),
-            })}
-            className="grid grid-cols-[repeat(auto-fill,minmax(1.75rem,1fr))] gap-1.5"
-          >
-            {/* Worst first — the shared severity order, not an alphabetical
-                sort of whatever the status words happen to be in this locale. */}
-            {[...rows]
-              .sort((x, y) => compareTone(toneForHealth(x.health.status), toneForHealth(y.health.status)))
-              .map((row) => {
-                const rowTone = toneForHealth(row.health.status);
-                const rowSpec = toneSpec(rowTone);
-                const status = t(`tone.${rowTone}`);
-                const name = row.display_name || row.service_key;
-                return (
-                  <li key={row.environment_service_id}>
-                    <Link
-                      href={`/service-health?project_id=${encodeURIComponent(row.project_id)}&environment_id=${encodeURIComponent(row.environment_id)}`}
-                      title={t("serviceHealth.tileTitle", {
-                        name,
-                        project: row.project_key,
-                        environment: row.environment_key,
-                        status,
-                      })}
-                      aria-label={t("serviceHealth.tileLabel", { name, status })}
-                      className={`block aspect-square rounded-[0.5rem] transition-transform hover:scale-110 ${rowSpec.chip}`}
-                    />
-                  </li>
-                );
-              })}
-          </ul>
-          <ul className="flex flex-wrap gap-2">
-            {tally.map((entry) => (
-              <li
-                key={entry.tone}
-                className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary"
-              >
-                <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec(entry.tone).dot}`} />
-                {t(`tone.${entry.tone}`)}
-                <span data-tabular className="font-semibold text-ink">{entry.count}</span>
-              </li>
-            ))}
-          </ul>
-          <Link
-            href="/service-health"
-            className="mt-auto inline-flex items-center gap-1 self-start rounded-full border border-border px-3.5 py-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
-          >
-            {t("serviceHealth.open")}
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-          </Link>
-        </>
-      )}
     </div>
   );
 }

@@ -3,7 +3,8 @@
  *
  * Grouped by the question an operator is asking, in the order they ask it:
  *
- *   (top)          what is happening — overview, services, projects, boards
+ *   (top)          what is happening — overview, services, projects,
+ *                  traces, logs, boards
  *   Respond        what needs action — incidents, rules, incoming alerts,
  *                  what changed
  *   Infrastructure what it runs on — clusters, resource usage, objectives,
@@ -27,12 +28,14 @@ import {
   PanelsTopLeft,
   Puzzle,
   Rocket,
+  ScrollText,
   Send,
   Server,
   Shield,
   ShieldCheck,
   Siren,
   Target,
+  Waypoints,
   type LucideIcon,
 } from "lucide-react";
 
@@ -78,6 +81,22 @@ export const NAVIGATION: NavGroup[] = [
         icon: FolderKanban,
         matchPrefix: "/projects",
         anyPermission: ["project.view", "environment.view"],
+      },
+      {
+        key: "traces",
+        label: "Traces",
+        href: "/traces",
+        icon: Waypoints,
+        matchPrefix: "/traces",
+        anyPermission: ["environment.view"],
+      },
+      {
+        key: "logs",
+        label: "Logs",
+        href: "/logs",
+        icon: ScrollText,
+        matchPrefix: "/logs",
+        anyPermission: ["environment.view"],
       },
       {
         key: "dashboards",

@@ -92,7 +92,7 @@ async function resolveWave3Routes(page: Page): Promise<RouteTarget[]> {
 
 async function signIn(page: Page) {
   await page.goto("/v1/auth/login?redirect=/&login_hint=user-owner");
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 async function setTheme(page: Page, theme: "light" | "dark") {

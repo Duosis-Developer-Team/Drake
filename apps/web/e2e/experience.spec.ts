@@ -22,9 +22,11 @@ test.setTimeout(120_000);
 
 /** Every route that exists without a fixture id. */
 const STATIC_ROUTES = [
-  ["Command Center", "/"],
+  ["Overview", "/"],
   ["Projects", "/projects"],
-  ["Service health", "/service-health"],
+  ["Services", "/service-health"],
+  ["Traces", "/traces"],
+  ["Logs", "/logs"],
   ["Clusters", "/clusters"],
   ["Objectives", "/slo"],
   ["Incidents", "/incidents"],
@@ -54,7 +56,7 @@ const VIEWPORTS = [
 
 async function signIn(page: Page) {
   await page.goto("/v1/auth/login?redirect=/&login_hint=user-owner");
-  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 async function setTheme(page: Page, theme: "light" | "dark" | "system") {

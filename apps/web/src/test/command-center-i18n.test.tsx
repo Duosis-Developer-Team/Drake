@@ -97,7 +97,7 @@ describe("Command Center (tr)", () => {
     );
 
     // Page title and a panel heading come straight from the catalogue.
-    expect(screen.getByRole("heading", { level: 1, name: "Komuta Merkezi" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Genel bakış" })).toBeInTheDocument();
     expect(screen.getByText("Dikkat kuyruğu")).toBeInTheDocument();
     expect(screen.getByText("Kanıt kapsamı")).toBeInTheDocument();
 
