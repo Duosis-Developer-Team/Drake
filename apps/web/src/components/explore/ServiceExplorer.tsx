@@ -27,6 +27,7 @@ import { useFormat, useT } from "@/lib/i18n";
 import { serviceHealthListPath, type ServiceHealthPage, type ServiceHealthRow } from "@/lib/serviceHealth";
 import { boundIds, judgeSignal, signalsPath, type SignalItem, type SignalPage } from "@/lib/signals";
 import { useResource } from "@/lib/useResource";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 
 type Kind = "traces" | "logs";
 
@@ -85,6 +86,7 @@ function QuickList({ kind, rows, onPick }: { kind: Kind; rows: ServiceHealthRow[
                 onClick={() => onPick(row.binding!.id)}
                 className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-left transition-colors hover:bg-surface-hover"
               >
+                <ProjectLogo projectId={row.project_id} name={row.project_key} size="md" variant="mark" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-body font-semibold text-ink">{row.display_name || row.service_key}</span>
                   <span className="block truncate font-mono text-micro text-ink-muted">
