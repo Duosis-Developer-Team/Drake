@@ -17,6 +17,14 @@ spec:
     - name: otlp-grpc
       port: 4317
       targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    {{- if .Values.gateway.externalIngest.enabled }}
+    - name: otlp-external
+      port: 4319
+      targetPort: 4319
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -46,6 +54,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        # Secret volumes are root-owned; with fsGroup the collector's own
+        # group can read the external door's token (0440) and nobody else.
+        fsGroup: 10001
       # The ClickHouse exporter creates its schema at start-up and exits if
       # the store is not answering yet, so on a fresh install the gateway
       # crash-looped until ClickHouse was up. Waiting here instead turns
@@ -79,6 +90,10 @@ spec:
                 secretKeyRef: {name: {{ .Values.clickhouse.existingSecret }}, key: ingest-password}
           ports:
             - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            {{- if .Values.gateway.externalIngest.enabled }}
+            - {name: otlp-external, containerPort: 4319}
+            {{- end }}
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
           securityContext:
@@ -90,6 +105,18 @@ spec:
             initialDelaySeconds: 10
           volumeMounts:
             - {name: config, mountPath: /etc/otelcol}
+            {{- if .Values.gateway.externalIngest.enabled }}
+            - {name: external-token, mountPath: /etc/otelcol-external, readOnly: true}
+            {{- end }}
       volumes:
         - name: config
           configMap: {name: drake-otel-gateway}
+        {{- if .Values.gateway.externalIngest.enabled }}
+        - name: external-token
+          secret:
+            secretName: {{ required "gateway.externalIngest.existingSecret is required when the external door is on" .Values.gateway.externalIngest.existingSecret }}
+            items:
+              - {key: token, path: token}
+            # Readable by the collector's group (fsGroup above), nobody else.
+            defaultMode: 0440
+        {{- end }}

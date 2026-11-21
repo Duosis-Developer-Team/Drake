@@ -25,6 +25,14 @@ images:
     # 26.8.36.3, the 26.8 LTS line.
     digest: "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
 
+gateway:
+  # Tracesis Agent Visibility (2026-11-21): agent-running systems outside
+  # the cluster send OTLP/HTTP traces through Tracesis's edge at /otlp. The
+  # bearer token lives in this Secret (key `token`), created out of band.
+  externalIngest:
+    enabled: true
+    existingSecret: drake-otel-external-ingest
+
 obi:
   enabled: true
   image:

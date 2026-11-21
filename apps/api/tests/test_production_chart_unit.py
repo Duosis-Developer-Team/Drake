@@ -2377,3 +2377,34 @@ def test_production_mails_nobody_until_a_sender_is_configured() -> None:
     assert env["DRAKE_WEBHOOK_WORKER_ENABLED"] == "false"
     assert "DRAKE_NOTIFICATION_EMAIL_SENDER" not in env
     assert env.get("DRAKE_NOTIFICATION_EMAILS", "{}") in ("", "{}")
+
+
+# --- the agent door (Tracesis Agent Visibility) ----------------------------
+
+
+def test_the_agent_door_is_closed_by_default() -> None:
+    docs = render()
+    assert not any(doc["metadata"]["name"].endswith("-otlp") for doc in by_kind(docs, "Ingress"))
+    assert not any(
+        doc["spec"].get("type") == "ExternalName" for doc in by_kind(docs, "Service")
+    )
+
+
+def test_the_agent_door_routes_otlp_to_the_gateway_unrewritten() -> None:
+    docs = render("--set", "agentIngest.enabled=true")
+    [door] = [doc for doc in by_kind(docs, "Ingress") if doc["metadata"]["name"] == "drake-otlp"]
+    [path] = door["spec"]["rules"][0]["http"]["paths"]
+    assert path["path"] == "/otlp" and path["pathType"] == "Prefix"
+    assert door["spec"]["rules"][0]["host"] == "drake.example.test"
+    assert door["spec"]["tls"][0]["secretName"] == "drake-tls"
+    annotations = door["metadata"].get("annotations") or {}
+    assert not any("rewrite" in key or "snippet" in key for key in annotations)
+    [target] = [
+        doc for doc in by_kind(docs, "Service") if doc["metadata"]["name"] == "drake-otlp-external"
+    ]
+    assert target["spec"]["type"] == "ExternalName"
+    assert target["spec"]["externalName"] == "drake-otel-gateway.drake-otel.svc.cluster.local"
+    assert path["backend"]["service"]["port"]["number"] == 4319
+    # The API's own route is untouched.
+    main = next(doc for doc in by_kind(docs, "Ingress") if doc["metadata"]["name"] == "drake")
+    assert {p["path"] for p in main["spec"]["rules"][0]["http"]["paths"]} == {"/v1", "/"}

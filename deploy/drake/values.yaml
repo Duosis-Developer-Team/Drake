@@ -278,6 +278,16 @@ incidents:
   # Floor of 30 s is enforced by the API's own settings validation.
   runnerIntervalSeconds: 120
 
+agentIngest:
+  # Route `/otlp` on the public origin to the OTel gateway's external
+  # receiver (deploy/otel: gateway.externalIngest), so agent-running systems
+  # outside the cluster can send traces. The gateway requires a bearer token;
+  # this only opens the path. Off by default.
+  enabled: false
+  gatewayHost: drake-otel-gateway.drake-otel.svc.cluster.local
+  port: 4319
+  maxBodySize: 8m
+
 slo:
   # Objectives (migration 0031): the evaluator judges every enabled
   # objective on a timer and opens an incident while its error budget burns

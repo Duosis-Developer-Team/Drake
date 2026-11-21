@@ -86,4 +86,25 @@ data:
     otel_traces_export:
       endpoint: http://drake-otel-gateway.{{ .Release.Namespace }}.svc:4317
       protocol: grpc
+      # OBI's default trace protocols, plus `genai`: calls to OpenAI,
+      # Anthropic, Gemini, Bedrock, Qwen, OpenAI-compatible gateways and
+      # MCP, recognised on the wire with no SDK in the application. This is
+      # how an agent nobody instrumented still shows up (Tracesis Agent
+      # Visibility). Payload extraction stays off: no prompt or answer is
+      # read; the gateway would remove one anyway.
+      instrumentations:
+        - http
+        - grpc
+        - sql
+        - redis
+        - kafka
+        - mqtt
+        - nats
+        - amqp
+        - mongo
+        - couchbase
+        - memcached
+        - sunrpc
+        - aerospike
+        - genai
 {{- end }}

@@ -10,11 +10,33 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
+      {{- if .Values.gateway.externalIngest.enabled }}
+      # The external door's token, from an out-of-band Secret mounted as a
+      # file; the value never appears in this ConfigMap.
+      bearertokenauth/external:
+        filename: /etc/otelcol-external/token
+      {{- end }}
     receivers:
       otlp:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+          # OTLP/HTTP inside the cluster: most AI SDKs and agent
+          # frameworks export over HTTP by default.
+          http:
+            endpoint: 0.0.0.0:4318
+      {{- if .Values.gateway.externalIngest.enabled }}
+      # The door for agent-running systems outside the cluster: OTLP/HTTP
+      # traces on their own port and path (/otlp/v1/traces never collides
+      # with the API's /v1), and nothing without the bearer token.
+      otlp/external:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4319
+            traces_url_path: /otlp/v1/traces
+            auth:
+              authenticator: bearertokenauth/external
+      {{- end }}
     processors:
       memory_limiter:
         check_interval: 1s
@@ -27,6 +49,75 @@ data:
           - replace_pattern(log.body, "(?i)(bearer\\s+)[a-z0-9._~+/=-]{8,}", "$$1[REDACTED]")
           - replace_pattern(log.body, "(://[^/\\s@:]+:)[^@\\s]+(@)", "$$1[REDACTED]$$2")
           - set(log.body, Substring(log.body, 0, 16384)) where Len(log.body) > 16384
+      # --- AI agents (Tracesis Agent Visibility, phase 1) -------------------
+      # Every source of agent telemetry is turned into ONE shape, OpenTelemetry
+      # GenAI (`gen_ai.*`), before anything is stored: OpenInference (Phoenix,
+      # Arize) and OpenLLMetry (Traceloop) through the contrib normaliser's
+      # built-ins; the older OTel names and the Vercel AI SDK's legacy `ai.*`
+      # attributes through mappings written here. Same block as the gateway.
+      gen_ai_normalizer:
+        sources:
+          - name: openinference
+            remove_originals: true
+          - name: openllmetry
+            remove_originals: true
+          - name: otel_legacy
+            remove_originals: true
+            mappings:
+              gen_ai.system: gen_ai.provider.name
+              gen_ai.usage.prompt_tokens: gen_ai.usage.input_tokens
+              gen_ai.usage.completion_tokens: gen_ai.usage.output_tokens
+          - name: vercel_ai_legacy
+            remove_originals: true
+            mappings:
+              ai.model.id: gen_ai.request.model
+              ai.response.model: gen_ai.response.model
+              ai.usage.promptTokens: gen_ai.usage.input_tokens
+              ai.usage.completionTokens: gen_ai.usage.output_tokens
+              ai.telemetry.functionId: gen_ai.agent.name
+
+      # Prompts, answers, system instructions and tool arguments/results are
+      # never stored (decided 2026-11-21). OpenTelemetry keeps them opt-in, but
+      # some SDKs send them by default (Vercel AI SDK v7), so they are removed
+      # here, under every name they are known by, before ClickHouse sees them.
+      # Counts, names and durations stay.
+      transform/genai-content:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - delete_key(attributes, "gen_ai.input.messages")
+              - delete_key(attributes, "gen_ai.output.messages")
+              - delete_key(attributes, "gen_ai.system_instructions")
+              - delete_key(attributes, "gen_ai.tool.call.arguments")
+              - delete_key(attributes, "gen_ai.tool.call.result")
+              - delete_key(attributes, "gen_ai.tool.definitions")
+              - delete_matching_keys(attributes, "^gen_ai\\.(prompt|completion)(\\..*)?$")
+              - delete_matching_keys(attributes, "^(input|output)\\.(value|mime_type)$")
+              - delete_matching_keys(attributes, "^llm\\.(input_messages|output_messages|prompts|prompt_template)(\\..*)?$")
+              - delete_matching_keys(attributes, "^ai\\.(prompt|response\\.(text|object|toolCalls|reasoning)|toolCall\\.(args|result))(\\..*)?$")
+          - context: spanevent
+            statements:
+              - delete_matching_keys(attributes, "^gen_ai\\.(prompt|completion|input|output|system_instructions|tool\\.call)(\\..*)?$")
+
+      # The content-carrying GenAI events, dropped whole: on spans and, when a
+      # library sends them as log records instead, in the logs pipeline.
+      filter/genai-content:
+        error_mode: ignore
+        traces:
+          spanevent:
+            - 'IsMatch(name, "^gen_ai\\.(content\\.|user\\.message|assistant\\.message|system\\.message|tool\\.message|choice|client\\.inference\\.operation\\.details)")'
+        logs:
+          log_record:
+            - 'IsMatch(event_name, "^gen_ai\\.")'
+            - 'IsMatch(attributes["event.name"], "^gen_ai\\.")'
+      {{- if .Values.gateway.externalIngest.enabled }}
+      resource/external:
+        attributes:
+          - key: tracesis.ingest
+            value: external
+            action: upsert
+      {{- end }}
       batch:
         send_batch_size: 2000
         timeout: 5s
@@ -70,7 +161,7 @@ data:
           enabled: true
           max_elapsed_time: 120s
     service:
-      extensions: [health_check]
+      extensions: [health_check{{ if .Values.gateway.externalIngest.enabled }}, bearertokenauth/external{{ end }}]
       telemetry:
         logs:
           level: warn
@@ -79,9 +170,15 @@ data:
       pipelines:
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, transform/redact, batch]
+          processors: [memory_limiter, filter/genai-content, transform/redact, batch]
           exporters: [clickhouse/logs]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, resource/cluster, batch]
+          processors: [memory_limiter, resource/cluster, gen_ai_normalizer, transform/genai-content, filter/genai-content, batch]
           exporters: [clickhouse/traces]
+        {{- if .Values.gateway.externalIngest.enabled }}
+        traces/external:
+          receivers: [otlp/external]
+          processors: [memory_limiter, resource/external, gen_ai_normalizer, transform/genai-content, filter/genai-content, batch]
+          exporters: [clickhouse/traces]
+        {{- end }}

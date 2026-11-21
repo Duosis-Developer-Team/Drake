@@ -425,6 +425,11 @@ incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
 
+# Agent Visibility (2026-11-21): `/otlp` on this origin reaches the OTel
+# gateway's external receiver (bearer token required, see deploy/otel).
+agentIngest:
+  enabled: true
+
 # Objectives (migration 0031, 2026-11-21). The evaluator judges enabled
 # objectives every five minutes and keeps the five-minute request counts
 # (from the trace store, counts only) that objectives defined in the screen
