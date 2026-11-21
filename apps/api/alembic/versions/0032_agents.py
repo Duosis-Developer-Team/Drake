@@ -71,10 +71,16 @@ def upgrade() -> None:
         sa.Column("first_seen_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.Column("last_seen_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.Column(
-            "created_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
         ),
         sa.Column(
-            "updated_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
         ),
         sa.UniqueConstraint("identity_key", name="uq_agent_identity"),
         sa.CheckConstraint(
