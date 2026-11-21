@@ -178,6 +178,24 @@ describe("infrastructure screen", () => {
   });
 });
 
+describe("infrastructure screen, failures", () => {
+  it("retries the cluster list when that is what failed", async () => {
+    const calls = installFetchMock({
+      "/v1/me": { status: 200, body: makeMe({ permissions: ["cluster.view", "telemetry.query"] }) },
+      "/v1/infrastructure/clusters": { status: 500, body: { error: { code: "error", message: "boom" } } },
+    });
+    render(
+      <SessionProvider>
+        <InfrastructurePage />
+      </SessionProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /retry/i }));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.path === "/v1/infrastructure/clusters")).toHaveLength(2),
+    );
+  });
+});
+
 describe("infrastructure screen in Turkish", () => {
   it("renders the title and the table from the catalogue", async () => {
     routes();

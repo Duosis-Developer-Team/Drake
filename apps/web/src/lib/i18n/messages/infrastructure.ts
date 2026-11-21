@@ -10,6 +10,10 @@ export const infrastructure = defineMessages({
     summary: "{cluster} · {machines} · {pods}",
     refresh: "refreshed every minute",
     updated: "updated {age}",
+    age: "Snapshot {age} old",
+    refreshing: "refreshing",
+    building:
+      "Building this cluster's first snapshot — about 17 queries against Prometheus. The first read can take up to a minute; later reads come from the cache.",
     cluster: "Cluster",
     loadError: "Infrastructure could not be read.",
     state: {
@@ -196,6 +200,10 @@ export const infrastructure = defineMessages({
     summary: "{cluster} · {machines} · {pods}",
     refresh: "her dakika yenilenir",
     updated: "{age} güncellendi",
+    age: "Anlık görüntü {age} önce alındı",
+    refreshing: "yenileniyor",
+    building:
+      "Bu kümenin ilk anlık görüntüsü hazırlanıyor — Prometheus'a yaklaşık 17 sorgu. İlk okuma bir dakikayı bulabilir; sonrakiler önbellekten gelir.",
     cluster: "Küme",
     loadError: "Altyapı bilgisi okunamadı.",
     state: {

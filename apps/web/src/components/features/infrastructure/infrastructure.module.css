@@ -1319,3 +1319,9 @@
 .erow[aria-expanded="true"] .chev {
   transform: rotate(90deg);
 }
+
+.age {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}

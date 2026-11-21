@@ -7,6 +7,7 @@ named, a namespace drill-down is bound to a row the agent reported, and the
 snapshot is served from its cache without asking Prometheus again.
 """
 
+import asyncio
 import uuid as uuidlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -173,6 +174,23 @@ async def test_snapshot_is_served_from_cache(engine: AsyncEngine) -> None:
         again = (await client.get(f"/v1/infrastructure/clusters/{cluster_id}")).json()
     assert len(provider.queries) == before
     assert again["refreshing"] is False and again["age_seconds"] < 60
+
+
+async def test_concurrent_cold_reads_build_the_snapshot_once(engine: AsyncEngine) -> None:
+    # The screen polls, and several viewers may open it at once. A cold
+    # cluster must cost one build (17 queries), not one per request.
+    harness, provider = infra_harness()
+    world = await cluster_world(engine)
+    cluster_id = str(world["cluster_a"].id)
+    async with signed_in(harness, engine, "user-owner") as client:
+        first, second, third = await asyncio.gather(
+            client.get(f"/v1/infrastructure/clusters/{cluster_id}"),
+            client.get(f"/v1/infrastructure/clusters/{cluster_id}"),
+            client.get(f"/v1/infrastructure/clusters/{cluster_id}"),
+        )
+    assert {first.status_code, second.status_code, third.status_code} == {200}
+    assert len(provider.queries) == 17
+    assert first.json()["nodes"] == second.json()["nodes"] == third.json()["nodes"]
 
 
 async def test_a_cluster_without_a_grant_is_not_there(engine: AsyncEngine) -> None:
