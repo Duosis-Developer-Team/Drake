@@ -5,15 +5,19 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
+from drake_api.ai_agents import guardrails as guard
 from drake_api.ai_agents import repository as repo
 from drake_api.ai_agents import runs as run_views
 from drake_api.ai_agents.discovery import identity_of
 from drake_api.ai_agents.pricing import infer_provider
-from drake_api.auth.dependencies import AuthContext, require_auth
+from drake_api.audit.service import AuditEventData, record_audit_event_in
+from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
 from drake_api.observability.store import ClickHouseStore, StoreContractError, StoreUnavailableError
@@ -244,3 +248,101 @@ async def agent_run(
         "truncated": len(rows) >= run_views.MAX_RUN_SPANS,
         "spans": run.spans,
     }
+
+
+class GuardrailSet(BaseModel):
+    threshold: Decimal = Field(gt=0)
+    severity: str = Field(pattern="^(warning|critical)$")
+    enabled: bool = True
+
+
+def _guard_audit(
+    auth: AuthContext, action: str, agent_id: uuid.UUID, meta: dict[str, Any]
+) -> AuditEventData:
+    return AuditEventData(
+        actor_type="user",
+        actor_id=auth.session.identity_id,
+        action=action,
+        result="success",
+        target_type="agent",
+        target_id=str(agent_id),
+        correlation_id=correlation_id_var.get(),
+        metadata=meta,
+    )
+
+
+@router.get("/agents/{agent_id}/guardrails")
+async def agent_guardrails(
+    request: Request, agent_id: uuid.UUID, auth: AuthContext = Depends(require_auth)
+) -> dict[str, Any]:
+    """The lines this agent should not cross, and where it stands."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        body = await guard.read(connection, auth.principal, agent_id)
+    if body is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return {**body, "evaluating": bool(getattr(request.app.state, "agent_guardrails", None))}
+
+
+@router.post("/agents/{agent_id}/guardrails/{kind}")
+async def set_guardrail(
+    request: Request,
+    agent_id: uuid.UUID,
+    kind: str,
+    payload: GuardrailSet,
+    auth: AuthContext = Depends(require_csrf),
+) -> dict[str, Any]:
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).begin() as connection:
+        try:
+            await guard.put(
+                connection,
+                auth.principal,
+                agent_id,
+                kind,
+                threshold=payload.threshold,
+                severity=payload.severity,
+                enabled=payload.enabled,
+                actor=uuid.UUID(auth.session.identity_id),
+            )
+        except guard.GuardrailError as error:
+            raise HTTPException(status_code=error.status, detail=error.code) from error
+        await record_audit_event_in(
+            connection,
+            _guard_audit(
+                auth,
+                "agent.guardrail.set",
+                agent_id,
+                {
+                    "kind": kind,
+                    "threshold": str(payload.threshold),
+                    "severity": payload.severity,
+                    "enabled": payload.enabled,
+                },
+            ),
+        )
+        body = await guard.read(connection, auth.principal, agent_id)
+    return body or {}
+
+
+@router.delete("/agents/{agent_id}/guardrails/{kind}")
+async def delete_guardrail(
+    request: Request,
+    agent_id: uuid.UUID,
+    kind: str,
+    auth: AuthContext = Depends(require_csrf),
+) -> dict[str, Any]:
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).begin() as connection:
+        try:
+            removed = await guard.remove(
+                connection, auth.principal, agent_id, kind, datetime.now(UTC)
+            )
+        except guard.GuardrailError as error:
+            raise HTTPException(status_code=error.status, detail=error.code) from error
+        if removed:
+            await record_audit_event_in(
+                connection, _guard_audit(auth, "agent.guardrail.remove", agent_id, {"kind": kind})
+            )
+        body = await guard.read(connection, auth.principal, agent_id)
+    return body or {}

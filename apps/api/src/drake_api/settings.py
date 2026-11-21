@@ -478,6 +478,10 @@ class Settings(BaseSettings):
     agent_prices_enabled: bool = False
     agent_prices_source: str = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
     agent_prices_refresh_hours: float = 24.0
+    # Guardrails on agents (phase 5): measured every few minutes; critical
+    # ones on agents in a project environment open incidents.
+    agent_guardrails_enabled: bool = False
+    agent_guardrails_interval_seconds: float = 300.0
 
     slo_evaluator_enabled: bool = False
     slo_evaluator_interval_seconds: float = 300.0

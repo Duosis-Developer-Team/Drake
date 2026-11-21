@@ -161,6 +161,16 @@ async def _costs(
     return {tuple(row[:n]): (float(row[n]), int(row[n + 1])) for row in rows}
 
 
+async def agent_costs(
+    connection: AsyncConnection, ids: list[uuid.UUID], since: datetime
+) -> dict[uuid.UUID, float]:
+    """USD per agent since a time, at the prices in force each hour."""
+    return {
+        uuid.UUID(str(key[0])): cost
+        for key, (cost, _) in (await _costs(connection, ids, since, ("agent_id",))).items()
+    }
+
+
 def _usd(value: float) -> float:
     return round(value, 6)
 
@@ -199,6 +209,7 @@ async def list_agents(
             "totals": _totals([0] * 10),
             "cost_usd": 0.0,
             "unpriced_tokens": 0,
+            "guardrails_firing": 0,
             "providers": [],
             "models": [],
             "series": [],
@@ -278,6 +289,20 @@ async def list_agents(
             total_series[i]["calls"] += int(row[2])
             total_series[i]["errors"] += int(row[3])
             total_series[i]["tokens"] += int(row[4])
+        for agent_id, firing in (
+            await connection.execute(
+                text(
+                    """
+                    SELECT g.agent_id, count(*) FROM agent_guardrails g
+                    JOIN agent_guardrail_states s ON s.guardrail_id = g.id
+                    WHERE g.agent_id = ANY(:ids) AND g.enabled AND s.state = 'firing'
+                    GROUP BY g.agent_id
+                    """
+                ),
+                {"ids": ids},
+            )
+        ).all():
+            items[str(agent_id)]["guardrails_firing"] = int(firing)
         for (agent_id,), (cost, unpriced) in (
             await _costs(connection, ids, since, ("agent_id",))
         ).items():
@@ -328,6 +353,7 @@ async def list_agents(
         "series": total_series,
         "cost_usd": _usd(sum(i["cost_usd"] for i in rows)),
         "unpriced_tokens": sum(i["unpriced_tokens"] for i in rows),
+        "guardrails_firing": sum(1 for i in rows if i["guardrails_firing"]),
     }
     return {"window": window if window in WINDOWS else "24h", "items": rows, "summary": summary}
 

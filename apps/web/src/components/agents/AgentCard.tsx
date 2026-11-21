@@ -6,6 +6,7 @@ import {
   Globe,
   Radar,
   ServerCog,
+  ShieldAlert,
   Tag,
 } from "lucide-react";
 import Link from "next/link";
@@ -102,6 +103,12 @@ export function AgentCard({ agent }: { agent: Agent }) {
               <span className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-2 py-0.5 text-micro font-medium text-ink-secondary">
                 <Globe aria-hidden className="h-3 w-3" />
                 {t("card.external")}
+              </span>
+            ) : null}
+            {agent.guardrails_firing ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-critical-soft px-2 py-0.5 text-micro font-semibold text-critical">
+                <ShieldAlert aria-hidden className="h-3 w-3" />
+                {t("guard.firing", { count: agent.guardrails_firing })}
               </span>
             ) : null}
             {agent.new ? (

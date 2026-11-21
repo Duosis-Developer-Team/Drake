@@ -438,6 +438,7 @@ agentIngest:
 agents:
   discoveryEnabled: true
   pricesEnabled: true
+  guardrailsEnabled: true
 
 # Objectives (migration 0031, 2026-11-21). The evaluator judges enabled
 # objectives every five minutes and keeps the five-minute request counts
