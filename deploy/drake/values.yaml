@@ -278,6 +278,20 @@ incidents:
   # Floor of 30 s is enforced by the API's own settings validation.
   runnerIntervalSeconds: 120
 
+protection:
+  # Judges every backup policy on a timer, so a reporter that falls silent
+  # reads as overdue, and creates the policies the reviewed contract
+  # (packages/contracts/protection/connectors.v1.json) declares for each
+  # registered reporter. Off by default; rendered in both states.
+  evaluationEnabled: false
+  evaluationIntervalSeconds: 300
+  # Reporters this deployment accepts evidence from. Each names its project
+  # and an out-of-band Secret with a `signing-secret` key, mounted as a
+  # file; the value never becomes an environment variable. Example:
+  #   logislot-backup: {projectKey: logislot, existingSecret: tracesis-protection-logislot}
+  connectors: {}
+  secretMountPath: /etc/drake/protection
+
 notifications:
   # The two background actors behind notification policies (ADR-0024),
   # stated in both states. The planner turns committed incident events into

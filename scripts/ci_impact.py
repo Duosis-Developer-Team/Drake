@@ -113,6 +113,7 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
         "apps/api/tests/test_onboarding_gitops_race_integration.py",
         "apps/api/tests/test_onboarding_release_candidate.py",
         "apps/api/tests/test_protection_integration.py",
+        "apps/api/tests/test_protection_setup_integration.py",
     ),
     "clusters_inventory": (
         "apps/api/tests/test_cluster_registration_integration.py",

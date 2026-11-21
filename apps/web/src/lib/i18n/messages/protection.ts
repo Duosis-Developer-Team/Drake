@@ -13,6 +13,38 @@ import { defineMessages } from "../define";
 
 export const protection = defineMessages({
   en: {
+    setup: {
+      title: "Backup reporters",
+      descriptionWaiting:
+        "{waiting} of {total} expected reporters have not sent evidence yet. A policy is judged only on what its backup job reports.",
+      descriptionAll: "Every expected reporter is sending evidence.",
+      policies: "{count, plural, one {# policy} other {# policies}}",
+      state: {
+        reporting: "Reporting",
+        waiting: "Waiting for first report",
+        not_registered: "Not registered",
+      },
+      step: {
+        registered: "Registered in this deployment",
+        secret: "Signing secret in place",
+        firstReport: "First report",
+        seen: "Last report {when}",
+      },
+      rpo: "RPO {value}",
+      offsite: "offsite copy required",
+      howTo: {
+        title: "Connecting a backup job",
+        secret:
+          "Create the reporter's signing secret as a Secret, and give the same value to the backup job.",
+        register: "Register the reporter in the deployment's values; its declared policies are created on the next cycle.",
+        report:
+          "At the end of each backup, run the reporter. It sends the run, the file's size and SHA-256, and the offsite copy — never the file, its path or a credential.",
+        signing:
+          "Every request is signed: headers {headers}; HMAC-SHA256 over {material}.",
+      },
+      notEvaluating:
+        "This deployment does not judge policies on a timer yet, so a silent reporter will not read as overdue.",
+    },
     page: {
       title: "Protection",
       description:
@@ -133,7 +165,7 @@ export const protection = defineMessages({
       denied: "Viewing protection posture needs protection.view in this scope.",
       emptyTitle: "No protection policies",
       emptyDescription:
-        "Nothing matches in your authorized scope. A policy appears once a registered connector reports one.",
+        "Nothing matches in your authorized scope. A policy appears once its backup reporter is registered — see the reporters above.",
       title: "Policies",
       description: "Backup and restore evidence per store, in your authorized scope.",
     },
@@ -245,6 +277,38 @@ export const protection = defineMessages({
     },
   },
   tr: {
+    setup: {
+      title: "Yedek raporlayıcıları",
+      descriptionWaiting:
+        "Beklenen {total} raporlayıcının {waiting} tanesi henüz kanıt göndermedi. Bir politika yalnızca yedek işinin bildirdiğine göre değerlendirilir.",
+      descriptionAll: "Beklenen her raporlayıcı kanıt gönderiyor.",
+      policies: "{count, plural, one {# politika} other {# politika}}",
+      state: {
+        reporting: "Raporluyor",
+        waiting: "İlk rapor bekleniyor",
+        not_registered: "Kayıtlı değil",
+      },
+      step: {
+        registered: "Bu kurulumda kayıtlı",
+        secret: "İmza sırrı yerinde",
+        firstReport: "İlk rapor",
+        seen: "Son rapor {when}",
+      },
+      rpo: "RPO hedefi {value}",
+      offsite: "offsite kopya gerekli",
+      howTo: {
+        title: "Bir yedek işini bağlamak",
+        secret:
+          "Raporlayıcının imza sırrını bir Secret olarak oluşturun ve aynı değeri yedek işine verin.",
+        register: "Raporlayıcıyı kurulumun values dosyasına kaydedin; tanımlı politikaları bir sonraki döngüde oluşturulur.",
+        report:
+          "Her yedeğin sonunda raporlayıcıyı çalıştırın. Çalıştırmayı, dosyanın boyutunu ve SHA-256'sını, offsite kopyayı gönderir — dosyanın kendisini, yolunu ya da bir kimlik bilgisini asla.",
+        signing:
+          "Her istek imzalıdır: başlıklar {headers}; {material} üzerinde HMAC-SHA256.",
+      },
+      notEvaluating:
+        "Bu kurulum politikaları henüz zamanlayıcıyla değerlendirmiyor; sessiz kalan bir raporlayıcı gecikmiş görünmez.",
+    },
     page: {
       title: "Koruma",
       description:
@@ -365,7 +429,7 @@ export const protection = defineMessages({
       denied: "Koruma durumunu görüntülemek için bu kapsamda protection.view yetkisi gerekir.",
       emptyTitle: "Koruma politikası yok",
       emptyDescription:
-        "Yetkili olduğunuz kapsamda eşleşen bir kayıt yok. Kayıtlı bir bağlayıcı politika bildirdiğinde burada görünür.",
+        "Yetkili olduğunuz kapsamda eşleşen bir kayıt yok. Bir politika, yedek raporlayıcısı kaydedildiğinde görünür — yukarıdaki raporlayıcılara bakın.",
       title: "Politikalar",
       description: "Yetkili olduğunuz kapsamda, depo başına yedek ve geri yükleme kanıtı.",
     },

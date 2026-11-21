@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.db import get_engine
 from drake_api.protection import repository as repo
+from drake_api.protection import setup
 from drake_api.settings import Settings
 
 logger = logging.getLogger("drake_api.protection")
@@ -44,6 +45,18 @@ async def protection_summary(
     engine = get_engine(settings)
     async with engine.connect() as connection:
         return await repo.summary(connection, auth.principal)
+
+
+@router.get("/protection/connectors")
+async def protection_connectors(
+    request: Request, auth: AuthContext = Depends(require_auth)
+) -> dict[str, Any]:
+    """The declared backup reporters on projects the caller may see, and
+    whether each is registered, has its secret, and has reported. No
+    secret, URL or storage path is part of the answer."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        return await setup.connector_status(connection, auth.principal, settings)
 
 
 @router.get("/protection/filters")

@@ -287,3 +287,66 @@ describe("protection detail", () => {
     }
   });
 });
+
+describe("backup reporters", () => {
+  const STATUS = {
+    evaluating: true,
+    reporters: [
+      {
+        connector_key: "logislot-backup",
+        display_name: "LogiSlot backup reporter",
+        project_key: "logislot",
+        project_id: "p-l",
+        registered: false,
+        secret_present: false,
+        last_seen_at: null,
+        state: "not_registered",
+        policies: [
+          {
+            policy_key: "logislot-prod-db",
+            display_name: "LogiSlot PostgreSQL",
+            environment_key: "prod",
+            store_kind: "postgresql",
+            schedule: "Daily",
+            rpo_seconds: 86400,
+            requires_offsite: true,
+            requires_integrity_check: true,
+            created: false,
+          },
+        ],
+      },
+    ],
+    signing: {
+      connector_header: "X-Drake-Protection-Connector",
+      timestamp_header: "X-Drake-Protection-Timestamp",
+      signature_header: "X-Drake-Protection-Signature",
+      algorithm: "hmac-sha256",
+      signed_material: "<unix-seconds>.<raw request body>",
+      signature_format: "v1=<hex digest>",
+      endpoint: "/v1/protection/ingest/events",
+      event_types: [],
+    },
+  };
+
+  it("lists who should report, what they will be judged on, and how to connect", async () => {
+    installFetchMock({
+      "/v1/protection/summary": {
+        status: 200,
+        body: { total_policies: 0, backup: {}, recoverability: {}, overall: {}, offsite: {} },
+      },
+      "/v1/protection/policies": { status: 200, body: { items: [], total: 0, limit: 50, offset: 0 } },
+      "/v1/protection/connectors": { status: 200, body: STATUS },
+    });
+    render(<ProtectionPage />);
+    const reporter = await screen.findByTestId("reporter-logislot-backup");
+    expect(reporter).toHaveTextContent("Not registered");
+    // With no policy yet, the first reporter is open: its promise is visible.
+    expect(reporter).toHaveTextContent("LogiSlot PostgreSQL");
+    expect(reporter).toHaveTextContent("RPO 1d");
+    const howTo = screen.getByTestId("reporter-howto");
+    expect(howTo).toHaveTextContent("tracesis-protection-logislot-backup");
+    expect(howTo).toHaveTextContent("--policy logislot-prod-db");
+    // No secret value anywhere on the screen.
+    expect(document.body.textContent).not.toMatch(/signing-secret=[0-9a-f]{16}/);
+  });
+});
