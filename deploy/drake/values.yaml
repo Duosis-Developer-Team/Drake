@@ -68,6 +68,11 @@ ingress:
   className: ""
   host: ""
   annotations: {}
+  # Former names of this deployment: 308 to the public origin, path kept.
+  redirectHosts: []
+  # Paths still answered on the former names, unredirected (callers that
+  # do not follow redirects, such as GitHub webhook deliveries).
+  redirectKeepPaths: []
   tls:
     enabled: false
     # `secret`             — terminate with a certificate this cluster holds.
