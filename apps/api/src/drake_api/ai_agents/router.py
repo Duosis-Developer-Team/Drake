@@ -52,6 +52,22 @@ async def connect(request: Request, auth: AuthContext = Depends(require_auth)) -
     }
 
 
+@router.get("/agents/topology")
+async def agent_topology(
+    request: Request,
+    window: str = Query("24h", pattern="^(24h|7d)$"),
+    focus: uuid.UUID | None = Query(None),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """Agents and what they reach: models, tools by server, other agents."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        body = await repo.topology(connection, auth.principal, window=window, focus=focus)
+    if body is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return body
+
+
 @router.get("/agents/{agent_id}")
 async def get_agent(
     request: Request,

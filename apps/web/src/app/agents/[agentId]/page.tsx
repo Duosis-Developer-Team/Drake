@@ -19,6 +19,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ConfidenceBadge } from "@/components/agents/AgentCard";
+import { AgentConnections } from "@/components/agents/AgentMap";
 import { RunsPanel } from "@/components/agents/RunsPanel";
 import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
 import {
@@ -286,6 +287,8 @@ export default function AgentPage() {
         </Panel>
 
         <RunsPanel agentId={a.id} span={span} />
+
+        <AgentConnections agentId={a.id} span={span} />
 
         <Panel>
           <PanelHeader

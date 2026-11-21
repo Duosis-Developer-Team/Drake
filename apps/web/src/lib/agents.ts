@@ -356,3 +356,227 @@ export function timeShare(spans: RunSpan[], total: number) {
   const tool = Math.min(Math.max(0, total - model), union("tool"));
   return { model, tool, other: Math.max(0, total - model - tool) };
 }
+
+// --- topology (phase 3b) -----------------------------------------------------
+
+export interface TopologyNode {
+  id: string;
+  kind: "agent" | "model" | "tool";
+  label: string;
+  calls: number;
+  errors: number;
+  agent_id?: string;
+  confidence?: Confidence;
+  ingest?: "cluster" | "external";
+  project?: string | null;
+  provider?: string | null;
+  tokens?: number;
+  server?: string | null;
+  avg_ms?: number | null;
+}
+
+export interface TopologyEdge {
+  source: string;
+  target: string;
+  kind: "agent" | "model" | "tool";
+  calls: number;
+  errors: number;
+  tokens?: number;
+  avg_ms?: number | null;
+}
+
+export interface Topology {
+  window: Window;
+  focus?: string | null;
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}
+
+export const fetchTopology = (window: Window, focus?: string) =>
+  apiGet<Topology>(
+    `/v1/agents/topology?window=${window}${focus ? `&focus=${encodeURIComponent(focus)}` : ""}`,
+  );
+
+export interface Placed {
+  node: TopologyNode;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PlacedHeader {
+  key: string;
+  kind: "models" | "tools" | "server";
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+}
+
+export interface MapLayout {
+  width: number;
+  height: number;
+  nodes: Placed[];
+  headers: PlacedHeader[];
+  byId: Map<string, Placed>;
+}
+
+const AGENT_W = 216;
+const AGENT_H = 58;
+const RES_W = 248;
+const RES_H = 42;
+const GAP = 10;
+const HEADER_H = 26;
+const PAD = 8;
+
+/**
+ * Columns: agents by depth (a sub-agent one column right of its caller),
+ * then one column of what agents reach — models first, then tools grouped
+ * by the server they run on. Within a column, nodes sit at the average
+ * height of what they connect to, which keeps lines from crossing.
+ */
+export function layoutTopology(topology: Topology, width: number): MapLayout {
+  const agents = topology.nodes.filter((n) => n.kind === "agent");
+  const models = topology.nodes.filter((n) => n.kind === "model");
+  const tools = topology.nodes.filter((n) => n.kind === "tool");
+  const delegations = topology.edges.filter((e) => e.kind === "agent");
+
+  // Depth: longest chain of callers, bounded (cycles stop at the bound).
+  const depth = new Map<string, number>(agents.map((a) => [a.id, 0]));
+  for (let pass = 0; pass < 3; pass++) {
+    for (const e of delegations) {
+      const d = (depth.get(e.source) ?? 0) + 1;
+      if (depth.has(e.target) && d > (depth.get(e.target) ?? 0))
+        depth.set(e.target, Math.min(d, 2));
+    }
+  }
+  const agentCols = Math.max(1, ...[...depth.values()].map((d) => d + 1));
+  const cols = agentCols + 1;
+  const usable = Math.max(width, AGENT_W * agentCols + RES_W + 80 * agentCols);
+  const step = (usable - PAD * 2 - RES_W) / Math.max(1, cols - 1);
+  const colX = (c: number) => PAD + c * step;
+
+  const placed = new Map<string, Placed>();
+  const headers: PlacedHeader[] = [];
+  const neighbours = (id: string) =>
+    topology.edges.flatMap((e) =>
+      e.target === id ? [e.source] : e.source === id ? [e.target] : [],
+    );
+  const centre = (id: string, fallback: number) => {
+    const ys = neighbours(id)
+      .map((n) => placed.get(n))
+      .filter((p): p is Placed => !!p)
+      .map((p) => p.y + p.h / 2);
+    return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : fallback;
+  };
+
+  const columnHeights: number[] = [];
+  for (let c = 0; c < agentCols; c++) {
+    const inCol = agents.filter((a) => (depth.get(a.id) ?? 0) === c);
+    const ordered =
+      c === 0
+        ? [...inCol].sort(
+            (a, b) => b.calls - a.calls || a.label.localeCompare(b.label),
+          )
+        : [...inCol].sort((a, b) => centre(a.id, 0) - centre(b.id, 0));
+    let y = HEADER_H;
+    for (const node of ordered) {
+      placed.set(node.id, { node, x: colX(c), y, w: AGENT_W, h: AGENT_H });
+      y += AGENT_H + GAP;
+    }
+    columnHeights.push(y);
+  }
+
+  // The resource column's height does not depend on its order: know it
+  // first, centre the agent columns against it, then order resources by
+  // where their agents now sit.
+  const servers = new Set(tools.map((x) => x.server ?? "")).size;
+  const resourceHeight =
+    (models.length ? HEADER_H + models.length * (RES_H + GAP) + GAP : 0) +
+    (tools.length
+      ? HEADER_H +
+        servers * (HEADER_H - 4 + GAP / 2) +
+        tools.length * (RES_H + GAP)
+      : 0);
+  const height =
+    Math.max(...columnHeights, resourceHeight, AGENT_H + HEADER_H) + PAD;
+  for (let c = 0; c < agentCols; c++) {
+    const shift = Math.max(0, (height - columnHeights[c]) / 2 - HEADER_H / 2);
+    for (const p of placed.values())
+      if (p.x === colX(c) && p.node.kind === "agent") p.y += shift;
+  }
+
+  const rx = colX(cols - 1);
+  let y = 0;
+  if (models.length) {
+    headers.push({
+      key: "models",
+      kind: "models",
+      label: "",
+      x: rx,
+      y,
+      w: RES_W,
+    });
+    y += HEADER_H;
+    for (const node of [...models].sort(
+      (a, b) => centre(a.id, 0) - centre(b.id, 0) || b.calls - a.calls,
+    )) {
+      placed.set(node.id, { node, x: rx, y, w: RES_W, h: RES_H });
+      y += RES_H + GAP;
+    }
+    y += GAP;
+  }
+  if (tools.length) {
+    headers.push({
+      key: "tools",
+      kind: "tools",
+      label: "",
+      x: rx,
+      y,
+      w: RES_W,
+    });
+    y += HEADER_H;
+    const groups = new Map<string, TopologyNode[]>();
+    for (const t of tools) {
+      const key = t.server ?? "";
+      groups.set(key, [...(groups.get(key) ?? []), t]);
+    }
+    const groupCentre = (list: TopologyNode[]) =>
+      list.reduce((a, n) => a + centre(n.id, 0), 0) / Math.max(1, list.length);
+    const orderedGroups = [...groups.entries()].sort(
+      (a, b) => groupCentre(a[1]) - groupCentre(b[1]),
+    );
+    for (const [server, list] of orderedGroups) {
+      headers.push({
+        key: `server:${server}`,
+        kind: "server",
+        label: server,
+        x: rx,
+        y,
+        w: RES_W,
+      });
+      y += HEADER_H - 4;
+      for (const node of [...list].sort(
+        (a, b) => centre(a.id, 0) - centre(b.id, 0) || b.calls - a.calls,
+      )) {
+        placed.set(node.id, { node, x: rx, y, w: RES_W, h: RES_H });
+        y += RES_H + GAP;
+      }
+      y += GAP / 2;
+    }
+  }
+  return {
+    width: usable,
+    height,
+    nodes: [...placed.values()],
+    headers,
+    byId: placed,
+  };
+}
+
+/** Line width for a link carrying `calls`, against the busiest link shown. */
+export function edgeWidth(calls: number, max: number): number {
+  if (max <= 0) return 1.25;
+  return 1.25 + (3.75 * Math.log1p(calls)) / Math.log1p(max);
+}
