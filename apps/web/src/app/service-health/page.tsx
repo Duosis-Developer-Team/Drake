@@ -1,405 +1,262 @@
 "use client";
 
 /**
- * Service health list.
+ * Services.
  *
  * Every service in scope appears, bound or not. A list that quietly dropped
  * unbound services would make an unobserved estate look like a healthy one,
  * which is the single most expensive way for a dashboard to be wrong.
+ *
+ * One table, grouped by project and environment, worst first. Each row
+ * carries what the old page spread over four cards and a separate board:
+ * the reported state, last-hour requests / failures / p95 from traces, and
+ * the workload's own numbers (ready, restarts, CPU, memory). A dash is
+ * "not measured", never zero. Filters live in the URL so a view can be
+ * shared; "Map" draws the chosen environment's service map.
  */
 
-import {
-  Activity,
-  AlertTriangle,
-  ChevronRight,
-  HeartPulse,
-  Layers,
-  Link2,
-  Plus,
-  ServerCog,
-  Unplug,
-} from "lucide-react";
+import { Activity, ChevronRight, Layers, Map as MapIcon, Plus, Rows3 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
-import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useMemo } from "react";
 
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
   BindingStateBadge,
   HealthBadge,
-  IconBubble,
-  MiniMeter,
   STATUS_LABELS,
   STATUS_ORDER,
   StateCard,
   toneForServiceStatus,
   useAge,
 } from "@/components/service-health/primitives";
-import { RingProgress, ValueChip } from "@/components/charts/visuals";
+import { ServiceMapPanel } from "@/components/service-map/ServiceMapPanel";
+import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataState } from "@/components/state/DataState";
-import { SignalBoard } from "@/components/service-health/SignalBoard";
-import { Panel, PanelHeader } from "@/components/ui/Panel";
-import {
-  toneForThreshold,
-  toneSpec,
-  type StatusTone,
-} from "@/lib/design/status";
-import { useT, type Translator } from "@/lib/i18n";
+import { SearchInput, SegmentedControl, Select } from "@/components/ui/controls";
+import { Panel } from "@/components/ui/Panel";
+import { toneForThreshold, toneSpec, type StatusTone } from "@/lib/design/status";
+import { useFormat, useT } from "@/lib/i18n";
 import {
   serviceHealthListPath,
   type ServiceHealthPage,
   type ServiceHealthRow,
   type ServiceHealthStatus,
 } from "@/lib/serviceHealth";
-import { boundIds, signalsPath, type SignalPage } from "@/lib/signals";
+import {
+  boundIds,
+  judgeSignal,
+  signalsPath,
+  type SignalItem,
+  type SignalPage,
+  type SignalVerdict,
+} from "@/lib/signals";
 import { useResource } from "@/lib/useResource";
-
-/** How many services sit in each verdict, from the rows the page already
- *  has — never a second query, and never a bucket invented beyond the ones
- *  the API itself reports. Worst first. */
-function tally(items: ServiceHealthRow[], t: Translator<"serviceHealth">) {
-  const counts = new Map<ServiceHealthStatus, number>();
-  for (const row of items) {
-    counts.set(row.health.status, (counts.get(row.health.status) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort(([a], [b]) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b))
-    .map(([status, count]) => ({
-      status,
-      label: t.dyn("status", status, STATUS_LABELS[status] ?? status.replace(/_/g, " ")),
-      count,
-      tone: toneForServiceStatus(status),
-    }));
-}
 
 /** The pressure bands the platform already judges utilisation by. */
 const UTILISATION = { warn: 0.8, critical: 0.9, direction: "above" as const };
+const RESTARTS = { warn: 1, critical: 5, direction: "above" as const };
+const SLOW_P95_MS = 1000;
+const WARN_P95_MS = 500;
 
-const BIG_NUMBER =
-  "text-[2.25rem] leading-none font-semibold tracking-[-0.03em] text-ink";
-
-/** One KPI card: icon bubble, label, big number, and a visual underneath. */
-function KpiCard({
-  icon,
-  tone,
-  label,
-  value,
-  suffix,
-  visual,
-  footnote,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: StatusTone;
-  label: string;
-  value: React.ReactNode;
-  suffix?: React.ReactNode;
-  visual?: React.ReactNode;
-  footnote?: React.ReactNode;
-}) {
-  return (
-    <Panel className="h-full">
-      <div className="flex items-center gap-3">
-        <IconBubble icon={icon} tone={tone} />
-        <span className="text-caption font-medium text-ink-secondary">
-          {label}
-        </span>
-      </div>
-      <div className="flex items-end justify-between gap-3">
-        <p className="min-w-0">
-          <span data-tabular className={BIG_NUMBER}>
-            {value}
-          </span>
-          {suffix ? (
-            <span className="ml-1.5 text-caption text-ink-muted">{suffix}</span>
-          ) : null}
-        </p>
-        {visual}
-      </div>
-      {footnote ? <div className="-mt-2 min-w-0">{footnote}</div> : null}
-    </Panel>
-  );
-}
-
-function KpiStrip({ items }: { items: ServiceHealthRow[] }) {
-  const t = useT("serviceHealth");
-  const total = items.length;
-  const bound = items.filter((row) => row.binding).length;
-  const healthy = items.filter((row) => row.health.status === "healthy").length;
-  const attention = items.filter(
-    (row) =>
-      row.health.status === "critical" || row.health.status === "degraded",
-  ).length;
-  const unobserved = items.filter((row) =>
-    ["unknown", "stale", "not_configured"].includes(row.health.status),
-  ).length;
-  const sorted = [...items].sort(
-    (a, b) =>
-      STATUS_ORDER.indexOf(a.health.status) -
-      STATUS_ORDER.indexOf(b.health.status),
-  );
-
-  return (
-    <div className="page-grid">
-      <KpiCard
-        icon={Layers}
-        label={t("list.kpi.inScope")}
-        value={total}
-        suffix={t("list.kpi.services")}
-        footnote={
-          /* One tile per service in its own reported colour: at this scale a
-             count you can see beats a pie. */
-          <ul
-            aria-label={t("list.kpi.byState")}
-            className="grid grid-cols-[repeat(auto-fill,minmax(0.875rem,1fr))] gap-1"
-          >
-            {sorted.map((row) => (
-              <li
-                key={row.environment_service_id}
-                title={t("list.kpi.tileTitle", {
-                  name: row.display_name || row.service_key,
-                  scope: `${row.project_key}/${row.environment_key}`,
-                  status: t.dyn("status", row.health.status, STATUS_LABELS[row.health.status]),
-                })}
-                className={`aspect-square rounded-[0.3rem] ${toneSpec(toneForServiceStatus(row.health.status)).chip}`}
-              />
-            ))}
-          </ul>
-        }
-      />
-      <KpiCard
-        icon={Link2}
-        tone={bound === 0 ? undefined : "info"}
-        label={t("list.kpi.bound")}
-        value={bound}
-        suffix={t("list.kpi.ofTotal", { total })}
-        visual={
-          <RingProgress
-            size={52}
-            label={t("list.kpi.boundRing")}
-            value={total > 0 ? (bound / total) * 100 : null}
-            tone={
-              bound === total ? "success" : bound === 0 ? "unknown" : "info"
-            }
-          />
-        }
-        footnote={
-          <p className="text-micro text-ink-muted">
-            {total - bound === 0
-              ? t("list.kpi.allBound")
-              : t("list.kpi.notObserved", { count: total - bound })}
-          </p>
-        }
-      />
-      <KpiCard
-        icon={HeartPulse}
-        tone={healthy > 0 ? "success" : undefined}
-        label={t("list.kpi.healthy")}
-        value={healthy}
-        suffix={t("list.kpi.ofTotal", { total })}
-        footnote={
-          <div className="space-y-2">
-            <MiniMeter
-              fraction={total > 0 ? healthy / total : null}
-              tone="success"
-            />
-            <p className="text-micro text-ink-muted">{t("list.kpi.healthyNote")}</p>
-          </div>
-        }
-      />
-      <KpiCard
-        icon={AlertTriangle}
-        tone={attention > 0 ? "critical" : undefined}
-        label={t("list.kpi.attention")}
-        value={attention}
-        suffix={t("list.kpi.attentionSuffix")}
-        footnote={
-          <p data-tabular className="text-micro text-ink-muted">
-            {t("list.kpi.unobserved", { count: unobserved })}
-          </p>
-        }
-      />
-    </div>
-  );
-}
-
-/** Ready over desired: two exact numbers, plus a bar only when both exist. */
-function ReadyCell({ row }: { row: ServiceHealthRow }) {
-  const t = useT("serviceHealth");
-  const ready = row.health.availability?.ready_replicas ?? null;
-  const desired = row.health.availability?.desired_replicas ?? null;
-  const fraction = ready !== null && desired ? ready / desired : null;
-  const tone: StatusTone =
-    fraction === null
-      ? "unknown"
-      : fraction >= 1
-        ? "success"
-        : ready === 0
-          ? "critical"
-          : "warning";
-  return (
-    <div className="min-w-0">
-      <span className="block text-micro text-ink-muted @min-[48rem]/table:hidden">
-        {t("list.row.ready")}
-      </span>
-      {/* Ready/desired stays two numbers: a single percentage would hide
-          the difference between 0/0 and an unmeasured pair. */}
-      <span
-        data-tabular
-        className={`text-body ${ready === null ? "text-ink-muted" : "font-semibold text-ink"}`}
-      >
-        {ready ?? "—"}
-        <span className="font-normal text-ink-muted">/{desired ?? "—"}</span>
-      </span>
-      {fraction !== null ? (
-        <MiniMeter fraction={fraction} tone={tone} className="mt-1.5 w-14" />
-      ) : null}
-    </div>
-  );
-}
-
-function UtilisationCell({
-  label,
-  value,
-}: {
-  label: string;
-  value: number | null;
-}) {
-  return (
-    <div className="min-w-0">
-      <span className="block text-micro text-ink-muted @min-[48rem]/table:hidden">
-        {label}
-      </span>
-      {/* The chip keeps exact digits; its colour says which row to read first. */}
-      <ValueChip value={value} unit="ratio" thresholds={UTILISATION} />
-      {value !== null ? (
-        <MiniMeter
-          fraction={value}
-          tone={toneForThreshold(value, UTILISATION)}
-          className="mt-1.5 w-16"
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/* Keyed to the table's own width (`@container/table` on its panel), not the
- * viewport: the table sits in the main column, which is far narrower than
- * the window. From 48rem the row is a grid whose last column stacks status
- * over the action; from 64rem status and action get columns of their own.
- * Both steps leave the service name at least 14rem. */
+/* Keyed to the table's own width. Under 60rem a row stacks; from 60rem it is
+ * one aligned line per service. */
 const ROW_GRID =
-  "@min-[48rem]/table:grid @min-[48rem]/table:grid-cols-[minmax(14rem,1fr)_3.5rem_4.5rem_4.5rem_4.5rem_9.25rem] @min-[48rem]/table:items-center @min-[48rem]/table:gap-3 @min-[64rem]/table:grid-cols-[minmax(14rem,1fr)_3.5rem_4.5rem_4.5rem_4.5rem_8.5rem_9.25rem]";
+  "@min-[60rem]/table:grid @min-[60rem]/table:grid-cols-[minmax(9rem,1fr)_8.5rem_4.5rem_4rem_4.5rem_3.5rem_4.75rem_3.5rem_4.5rem_2rem] @min-[60rem]/table:items-center @min-[60rem]/table:gap-2.5";
 
-/**
- * One service. Identity and binding lead; the four measured numbers sit in
- * aligned columns so rows compare down the page; status and the next action
- * trail on the right. A bound row opens its detail page from anywhere.
- */
-function ServiceRow({ row }: { row: ServiceHealthRow }) {
+type Filters = {
+  q: string;
+  project: string;
+  environment: string;
+  status: ServiceHealthStatus | "";
+  view: "list" | "map";
+};
+
+function useFilters(): [Filters, (patch: Partial<Filters>) => void] {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname() || "/service-health";
+  const filters: Filters = {
+    q: params.get("q") ?? "",
+    project: params.get("project_id") ?? "",
+    environment: params.get("environment_id") ?? "",
+    status: (params.get("status") as ServiceHealthStatus | null) ?? "",
+    view: params.get("view") === "map" ? "map" : "list",
+  };
+  const update = useCallback(
+    (patch: Partial<Filters>) => {
+      const next = new URLSearchParams(params.toString());
+      const set = (key: string, value: string | undefined) => {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      };
+      if ("q" in patch) set("q", patch.q);
+      if ("project" in patch) set("project_id", patch.project);
+      if ("environment" in patch) set("environment_id", patch.environment);
+      if ("status" in patch) set("status", patch.status);
+      if ("view" in patch) set("view", patch.view === "map" ? "map" : undefined);
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [params, pathname, router],
+  );
+  return [filters, update];
+}
+
+const TONE_RANK: Record<string, number> = { critical: 0, warning: 1, success: 2 };
+
+function sortRows(rows: ServiceHealthRow[], signals: Map<string, SignalItem>): ServiceHealthRow[] {
+  const verdict = (row: ServiceHealthRow) => {
+    const item = row.binding ? signals.get(row.binding.id) : undefined;
+    return item ? (TONE_RANK[judgeSignal(item).tone] ?? 3) : 3;
+  };
+  return [...rows].sort(
+    (a, b) =>
+      STATUS_ORDER.indexOf(a.health.status) - STATUS_ORDER.indexOf(b.health.status) ||
+      verdict(a) - verdict(b) ||
+      (a.display_name || a.service_key).localeCompare(b.display_name || b.service_key),
+  );
+}
+
+function Cell({ label, children, align = "right" }: { label: string; children: React.ReactNode; align?: "left" | "right" }) {
+  return (
+    <div className={`min-w-0 ${align === "right" ? "@min-[60rem]/table:text-right" : ""}`}>
+      <span className="block text-micro text-ink-muted @min-[60rem]/table:hidden">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function Num({ value, tone }: { value: string; tone?: StatusTone | null }) {
+  const missing = value === "—";
+  const colour =
+    missing ? "text-ink-muted" : tone === "critical" ? "font-semibold text-critical" : tone === "warning" ? "font-semibold text-warning" : "text-ink";
+  return (
+    <span data-tabular className={`font-mono text-[0.8125rem] ${colour}`}>
+      {value}
+    </span>
+  );
+}
+
+function ServiceRow({
+  row,
+  item,
+  verdict,
+}: {
+  row: ServiceHealthRow;
+  item: SignalItem | undefined;
+  verdict: SignalVerdict | null;
+}) {
   const t = useT("serviceHealth");
+  const ts = useT("signals");
+  const fmt = useFormat();
   const age = useAge();
   const { binding, health } = row;
-  const tone = toneForServiceStatus(health.status);
   const name = row.display_name || row.service_key;
+  const traces = item?.traces ?? null;
+  const ready = health.availability?.ready_replicas ?? null;
+  const desired = health.availability?.desired_replicas ?? null;
+  const readyTone: StatusTone | undefined =
+    ready === null || !desired ? undefined : ready >= desired ? undefined : ready === 0 ? "critical" : "warning";
+  const p95 = traces?.p95_ms ?? null;
+  const failedRatio = traces && traces.requests > 0 ? traces.error_ratio : null;
+  const critical = health.status === "critical";
+  const restarts = health.stability?.restarts_in_window ?? null;
+  const cpu = health.resources?.cpu_utilization ?? null;
+  const memory = health.resources?.memory_utilization ?? null;
+  const pct = (ratio: number | null) => (ratio === null ? "—" : `${fmt.number(ratio * 100, { maximumFractionDigits: 0 })}%`);
+
   return (
     <li
       data-testid={`service-row-${row.service_key}`}
-      className={`relative flex flex-col gap-4 px-7 py-4 transition-colors hover:bg-surface-hover ${ROW_GRID}`}
+      className={`relative flex flex-col gap-3 px-5 py-3 transition-colors hover:bg-surface-hover ${critical ? "bg-critical-soft/60" : ""} ${ROW_GRID}`}
     >
-      <div className="flex min-w-0 items-center gap-4">
-        <IconBubble
-          icon={binding ? ServerCog : Unplug}
-          tone={binding ? tone : undefined}
-        />
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            {binding ? (
-              <Link
-                href={`/service-health/${binding.id}`}
-                className="truncate text-body font-semibold text-ink after:absolute after:inset-0 hover:text-brand"
-              >
-                {name}
-              </Link>
-            ) : (
-              <span className="truncate text-body font-semibold text-ink">
-                {name}
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {binding ? (
+            <Link
+              href={`/service-health/${binding.id}`}
+              className="truncate text-body font-semibold text-ink after:absolute after:inset-0 hover:text-brand"
+            >
+              {name}
+            </Link>
+          ) : (
+            <span className="truncate text-body font-semibold text-ink">{name}</span>
+          )}
+          {health.served_from_last_good ? (
+            <span className="text-micro text-stale">{t("list.row.lastKnown")}</span>
+          ) : health.partial ? (
+            <span className="text-micro text-ink-muted">{t("list.row.partial")}</span>
+          ) : null}
+        </div>
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-micro text-ink-muted">
+          {binding ? (
+            <>
+              {/* The binding's own state only when it needs attention: a
+                  resolved, active binding is the normal case. */}
+              {binding.lifecycle !== "active" || !binding.resolved ? (
+                <BindingStateBadge lifecycle={binding.lifecycle} resolved={binding.resolved} />
+              ) : null}
+              <span className="truncate font-mono">
+                {binding.workload_kind} {binding.workload_name}
               </span>
-            )}
-            <span className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-micro text-ink-muted">
-              {row.project_key}/{row.environment_key}
-            </span>
-            {health.served_from_last_good ? (
-              <span className="text-micro italic text-stale">{t("list.row.lastKnown")}</span>
-            ) : health.partial ? (
-              <span className="text-micro italic text-ink-muted">{t("list.row.partial")}</span>
-            ) : null}
-          </div>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-micro text-ink-muted">
-            {binding ? (
-              <>
-                <BindingStateBadge
-                  lifecycle={binding.lifecycle}
-                  resolved={binding.resolved}
-                />
-                <span className="truncate font-mono">
-                  {binding.cluster.cluster_ref}/{binding.namespace}/
-                  {binding.workload_name}
-                </span>
-              </>
-            ) : (
-              <span>{t("list.row.noWorkload")}</span>
-            )}
-            {health.freshness_age_seconds !== null ? (
-              <span>· {age(health.freshness_age_seconds)}</span>
-            ) : null}
-          </div>
+            </>
+          ) : (
+            <span>{t("list.row.noWorkload")}</span>
+          )}
+          {verdict?.cause ? (
+            <span className={toneSpec(verdict.tone).text}>· {ts(`cause.${verdict.cause}`)}</span>
+          ) : null}
+          {health.freshness_age_seconds !== null ? <span>· {age(health.freshness_age_seconds)}</span> : null}
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 pl-14 @min-[48rem]/table:contents">
-        <ReadyCell row={row} />
-        <div className="min-w-0">
-          <span className="block text-micro text-ink-muted @min-[48rem]/table:hidden">
-            {t("list.row.restarts")}
-          </span>
-          {/* A restart count has no ceiling, so it carries severity rather
-              than a percentage. */}
-          <ValueChip
-            value={health.stability?.restarts_in_window ?? null}
-            unit="count"
-            thresholds={{ warn: 1, critical: 5, direction: "above" }}
+      <div className="flex flex-wrap items-center gap-2 @min-[60rem]/table:block">
+        <HealthBadge status={health.status} />
+      </div>
+
+      <div className="grid grid-cols-4 gap-3 @min-[60rem]/table:contents">
+        <Cell label={t("list.table.requests")}>
+          <Num value={traces ? fmt.number(traces.requests) : "—"} />
+        </Cell>
+        <Cell label={t("list.table.failed")}>
+          <Num
+            value={failedRatio === null ? "—" : `${fmt.number(failedRatio * 100, { maximumFractionDigits: failedRatio < 0.1 ? 1 : 0 })}%`}
+            tone={verdict?.cause === "requests" ? verdict.tone : undefined}
           />
-        </div>
-        <UtilisationCell
-          label={t("list.row.cpu")}
-          value={health.resources?.cpu_utilization ?? null}
-        />
-        <UtilisationCell
-          label={t("list.row.memory")}
-          value={health.resources?.memory_utilization ?? null}
-        />
+        </Cell>
+        <Cell label={t("list.table.p95")}>
+          <Num
+            value={fmt.latency(p95)}
+            tone={p95 === null ? undefined : p95 >= SLOW_P95_MS ? "critical" : p95 >= WARN_P95_MS ? "warning" : undefined}
+          />
+        </Cell>
+        <Cell label={t("list.row.ready")}>
+          <Num value={ready === null ? "—" : `${ready}/${desired ?? "—"}`} tone={readyTone} />
+        </Cell>
       </div>
 
-      <div className="flex items-center justify-between gap-3 pl-14 @min-[48rem]/table:flex-col @min-[48rem]/table:items-end @min-[48rem]/table:gap-2 @min-[48rem]/table:pl-0 @min-[64rem]/table:contents">
-        <div className="min-w-0">
-          <HealthBadge status={health.status} />
-        </div>
+      <div className="grid grid-cols-4 gap-3 @min-[60rem]/table:contents">
+        <Cell label={t("list.row.restarts")}>
+          <Num value={restarts === null ? "—" : fmt.number(restarts)} tone={toneForThreshold(restarts, RESTARTS)} />
+        </Cell>
+        <Cell label={t("list.row.cpu")}>
+          <Num value={pct(cpu)} tone={toneForThreshold(cpu, UTILISATION)} />
+        </Cell>
+        <Cell label={t("list.row.memory")}>
+          <Num value={pct(memory)} tone={toneForThreshold(memory, UTILISATION)} />
+        </Cell>
         <div className="relative z-10 flex justify-end">
           {binding ? (
-            <span
-              aria-hidden
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-ink-muted"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </span>
+            <ChevronRight aria-hidden className="h-4 w-4 text-ink-muted" />
           ) : (
             <Link
               href={`/service-health/bind?environment_service_id=${row.environment_service_id}`}
-              className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-surface px-3 py-1.5 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
+              aria-label={t("list.row.bind")}
+              title={t("list.row.bind")}
+              className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-control border border-border bg-surface px-2 text-caption font-medium text-ink transition-colors hover:bg-surface-hover"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
-              {t("list.row.bind")}
             </Link>
           )}
         </div>
@@ -408,263 +265,314 @@ function ServiceRow({ row }: { row: ServiceHealthRow }) {
   );
 }
 
-function StatusFilter({
-  items,
-  total,
+interface Group {
+  key: string;
+  projectKey: string;
+  environmentKey: string;
+  environmentId: string;
+  rows: ServiceHealthRow[];
+}
+
+function groupRows(rows: ServiceHealthRow[]): Group[] {
+  const groups = new Map<string, Group>();
+  for (const row of rows) {
+    const key = `${row.project_key}/${row.environment_key}`;
+    const group =
+      groups.get(key) ??
+      { key, projectKey: row.project_key, environmentKey: row.environment_key, environmentId: row.environment_id, rows: [] };
+    group.rows.push(row);
+    groups.set(key, group);
+  }
+  // Groups follow their worst row, so the page reads top-down by urgency.
+  const worst = (g: Group) => Math.min(...g.rows.map((r) => STATUS_ORDER.indexOf(r.health.status)));
+  return [...groups.values()].sort((a, b) => worst(a) - worst(b) || a.key.localeCompare(b.key));
+}
+
+function GroupHeader({ group, onMap }: { group: Group; onMap: () => void }) {
+  const t = useT("serviceHealth");
+  const counts = new Map<ServiceHealthStatus, number>();
+  for (const row of group.rows) counts.set(row.health.status, (counts.get(row.health.status) ?? 0) + 1);
+  const bound = group.rows.filter((r) => r.binding).length;
+  const first = group.rows.find((r) => r.binding)?.binding;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface-2 px-5 py-2.5">
+      <h3 className="text-[0.84375rem] font-semibold text-ink">
+        {group.projectKey} <span className="text-ink-muted">/</span> {group.environmentKey}
+      </h3>
+      <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-secondary">
+        {STATUS_ORDER.filter((s) => counts.get(s)).map((status) => (
+          <li key={status} className="inline-flex items-center gap-1.5">
+            <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${toneSpec(toneForServiceStatus(status)).dot}`} />
+            {counts.get(status)} {t.dyn("status", status, STATUS_LABELS[status]).toLocaleLowerCase()}
+          </li>
+        ))}
+      </ul>
+      <span className="ml-auto flex items-center gap-3 text-micro text-ink-muted">
+        {first ? (
+          <span className="hidden font-mono md:inline">
+            {t("list.group.cluster", { cluster: first.cluster.cluster_ref, namespace: first.namespace })}
+          </span>
+        ) : null}
+        <span data-tabular>{t("list.group.bound", { bound, total: group.rows.length })}</span>
+        {bound > 0 ? (
+          <button
+            type="button"
+            onClick={onMap}
+            className="inline-flex items-center gap-1 rounded-control px-1.5 py-0.5 font-medium text-brand hover:bg-brand-soft"
+          >
+            <MapIcon className="h-3.5 w-3.5" aria-hidden />
+            {t("list.group.openMap")}
+          </button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function StatusChips({
+  rows,
   value,
   onChange,
 }: {
-  items: ReturnType<typeof tally>;
-  total: number;
-  value: ServiceHealthStatus | "all";
-  onChange: (next: ServiceHealthStatus | "all") => void;
+  rows: ServiceHealthRow[];
+  value: ServiceHealthStatus | "";
+  onChange: (next: ServiceHealthStatus | "") => void;
 }) {
   const t = useT("serviceHealth");
   const tc = useT("common");
-  const pill = (active: boolean) =>
-    `inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-caption font-medium transition-colors ${
-      active
-        ? "bg-ink text-canvas"
-        : "border border-border bg-surface text-ink-secondary hover:bg-surface-hover"
+  const counts = new Map<ServiceHealthStatus, number>();
+  for (const row of rows) counts.set(row.health.status, (counts.get(row.health.status) ?? 0) + 1);
+  const chip = (active: boolean) =>
+    `inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-caption font-medium transition-colors ${
+      active ? "border-border-strong bg-surface-selected text-ink" : "border-border bg-surface text-ink-secondary hover:bg-surface-hover"
     }`;
   return (
-    <div
-      role="group"
-      aria-label={t("list.filter.label")}
-      className="flex flex-wrap items-center gap-2"
-    >
-      <button
-        type="button"
-        aria-pressed={value === "all"}
-        className={pill(value === "all")}
-        onClick={() => onChange("all")}
-      >
+    <div role="group" aria-label={t("list.filter.label")} className="flex flex-wrap items-center gap-1.5">
+      <button type="button" aria-pressed={value === ""} className={chip(value === "")} onClick={() => onChange("")}>
         {tc("count.all")}
-        <span data-tabular className="opacity-70">
-          {total}
-        </span>
+        <span data-tabular className="font-mono text-micro text-ink-muted">{rows.length}</span>
       </button>
-      {items.map((item) => (
+      {STATUS_ORDER.filter((s) => counts.get(s)).map((status) => (
         <button
-          key={item.status}
+          key={status}
           type="button"
-          aria-pressed={value === item.status}
-          className={pill(value === item.status)}
-          onClick={() => onChange(item.status)}
+          aria-pressed={value === status}
+          className={chip(value === status)}
+          onClick={() => onChange(value === status ? "" : status)}
         >
-          <span
-            aria-hidden
-            className={`h-2 w-2 rounded-full ${toneSpec(item.tone).dot}`}
-          />
-          {item.label}
-          <span data-tabular className="opacity-70">
-            {item.count}
-          </span>
+          <span aria-hidden className={`h-2 w-2 rounded-full ${toneSpec(toneForServiceStatus(status)).dot}`} />
+          {t.dyn("status", status, STATUS_LABELS[status])}
+          <span data-tabular className="font-mono text-micro text-ink-muted">{counts.get(status)}</span>
         </button>
       ))}
     </div>
   );
 }
 
-/** Status composition as one proportional bar with an exact legend. */
-function BreakdownCard({ items }: { items: ServiceHealthRow[] }) {
+function ServicesBody({ data }: { data: ServiceHealthPage }) {
   const t = useT("serviceHealth");
-  const buckets = tally(items, t);
-  const total = items.length;
-  return (
-    <Panel>
-      <PanelHeader title={t("list.breakdown.title")} description={t("list.breakdown.description")} />
-      <div
-        role="img"
-        aria-label={t("list.breakdown.aria", {
-          items: buckets
-            .map((b) => t("list.breakdown.item", { label: b.label, count: b.count }))
-            .join(", "),
-        })}
-        className="flex h-3 w-full gap-1 overflow-hidden rounded-full"
-      >
-        {buckets.map((bucket) => (
-          <span
-            key={bucket.status}
-            className={`h-full rounded-full ${toneSpec(bucket.tone).dot}`}
-            style={{ width: `${(bucket.count / total) * 100}%` }}
-          />
-        ))}
-      </div>
-      <ul className="space-y-3">
-        {STATUS_ORDER.map((status) => {
-          const count = buckets.find((b) => b.status === status)?.count ?? 0;
-          const spec = toneSpec(toneForServiceStatus(status));
-          return (
-            <li
-              key={status}
-              className={`flex min-w-0 items-center gap-2 text-caption ${count === 0 ? "opacity-50" : ""}`}
-            >
-              <span
-                aria-hidden
-                className={`h-2.5 w-2.5 shrink-0 rounded-full ${spec.dot}`}
-              />
-              <span className="min-w-0 truncate text-ink-secondary">
-                {t.dyn("status", status, STATUS_LABELS[status])}
-              </span>
-              <span
-                data-tabular
-                className="ml-auto shrink-0 font-semibold text-ink"
-              >
-                {count}
-              </span>
-              <span
-                data-tabular
-                className="w-9 shrink-0 text-right text-micro text-ink-muted"
-              >
-                {total > 0 ? Math.round((count / total) * 100) : 0}%
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-    </Panel>
+  const ts = useT("signals");
+  const [filters, update] = useFilters();
+  const signals = useResource<SignalPage>(signalsPath(boundIds(data.items)), { refreshMs: 60_000 });
+  const signalById = useMemo(
+    () => new Map((signals.data?.items ?? []).map((item) => [item.binding_id, item])),
+    [signals.data],
   );
-}
 
-/** Binding coverage per project/environment — where the blind spots are. */
-function CoverageCard({ items }: { items: ServiceHealthRow[] }) {
-  const t = useT("serviceHealth");
-  const groups = new Map<string, { total: number; bound: number }>();
-  for (const row of items) {
-    const key = `${row.project_key}/${row.environment_key}`;
-    const entry = groups.get(key) ?? { total: 0, bound: 0 };
-    entry.total += 1;
-    if (row.binding) entry.bound += 1;
-    groups.set(key, entry);
-  }
-  const rows = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  return (
-    <Panel>
-      <PanelHeader title={t("list.coverage.title")} description={t("list.coverage.description")} />
-      <ul className="space-y-4">
-        {rows.map(([key, entry]) => (
-          <li key={key} className="min-w-0">
-            <div className="flex items-baseline justify-between gap-3 text-caption">
-              <span className="truncate font-mono text-ink-secondary">
-                {key}
-              </span>
-              <span data-tabular className="shrink-0 text-ink">
-                <span className="font-semibold">{entry.bound}</span>
-                <span className="text-ink-muted">/{entry.total}</span>
-              </span>
-            </div>
-            <div className="mt-1.5 flex gap-1" aria-hidden>
-              {Array.from({ length: entry.total }, (_, index) => (
-                <span
-                  key={index}
-                  className={`h-2 flex-1 rounded-full ${index < entry.bound ? "bg-info" : "bg-surface-3"}`}
-                />
-              ))}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
+  const projects = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of data.items) seen.set(row.project_id, row.project_key);
+    return [...seen.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [data.items]);
+  const environments = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of data.items) {
+      if (filters.project && row.project_id !== filters.project) continue;
+      seen.set(row.environment_id, `${row.project_key}/${row.environment_key}`);
+    }
+    return [...seen.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [data.items, filters.project]);
 
-function ServiceHealthBody({ data }: { data: ServiceHealthPage }) {
-  const t = useT("serviceHealth");
-  const [filter, setFilter] = useState<ServiceHealthStatus | "all">("all");
-  const buckets = useMemo(() => tally(data.items, t), [data.items, t]);
-  const signals = useResource<SignalPage>(signalsPath(boundIds(data.items)), {
-    refreshMs: 60_000,
-  });
-  const visible = useMemo(
+  const scoped = useMemo(
     () =>
-      [...data.items]
-        .filter((row) => filter === "all" || row.health.status === filter)
-        .sort(
-          (a, b) =>
-            STATUS_ORDER.indexOf(a.health.status) -
-            STATUS_ORDER.indexOf(b.health.status),
-        ),
-    [data.items, filter],
+      data.items.filter(
+        (row) =>
+          (!filters.project || row.project_id === filters.project) &&
+          (!filters.environment || row.environment_id === filters.environment),
+      ),
+    [data.items, filters.project, filters.environment],
   );
+  const visible = useMemo(() => {
+    const q = filters.q.trim().toLocaleLowerCase();
+    return sortRows(
+      scoped.filter(
+        (row) =>
+          (!filters.status || row.health.status === filters.status) &&
+          (!q || `${row.display_name ?? ""} ${row.service_key}`.toLocaleLowerCase().includes(q)),
+      ),
+      signalById,
+    );
+  }, [scoped, filters.status, filters.q, signalById]);
+  const groups = useMemo(() => groupRows(visible), [visible]);
+
+  const projectCount = new Set(scoped.map((r) => r.project_id)).size;
+  const environmentCount = new Set(scoped.map((r) => r.environment_id)).size;
+  const tracesOff = signals.data?.traces.state === "not_configured";
+  const filtered = Boolean(filters.q || filters.status || filters.project || filters.environment);
+
+  const mapEnvironments = environments.filter((env) =>
+    data.items.some((row) => row.environment_id === env.value && row.binding),
+  );
+  const mapEnvironment =
+    mapEnvironments.find((env) => env.value === filters.environment)?.value ?? mapEnvironments[0]?.value ?? "";
 
   return (
-    <div className="space-y-6 motion-safe:animate-[fade-in_400ms_var(--ease-entrance)_backwards]">
-      <KpiStrip items={data.items} />
-
-      <div className="page-grid" data-cols="2">
-        <BreakdownCard items={data.items} />
-        <CoverageCard items={data.items} />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-caption text-ink-muted">
+          {t("list.summary", { projects: projectCount, environments: environmentCount, services: scoped.length })}
+        </p>
+        <SegmentedControl
+          label={t("list.view.label")}
+          value={filters.view}
+          options={[
+            { value: "list", label: t("list.view.list"), icon: Rows3 },
+            { value: "map", label: t("list.view.map"), icon: MapIcon },
+          ]}
+          onChange={(view) => update({ view })}
+        />
       </div>
 
-      {boundIds(data.items).length > 0 ? (
-        <SignalBoard rows={data.items} resource={signals} />
-      ) : null}
-
-      <div className="flex flex-col gap-6">
-        <StatusFilter
-          items={buckets}
-          total={data.items.length}
-          value={filter}
-          onChange={setFilter}
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
+          label={t("list.search")}
+          placeholder={t("list.search")}
+          value={filters.q}
+          onChange={(q) => update({ q })}
+          className="w-full sm:w-64"
         />
+        <Select
+          label={t("list.project")}
+          value={filters.project}
+          placeholder={t("list.anyScope")}
+          options={projects}
+          onChange={(project) => update({ project, environment: "" })}
+        />
+        <Select
+          label={t("list.environment")}
+          value={filters.environment}
+          placeholder={t("list.anyScope")}
+          options={environments}
+          onChange={(environment) => update({ environment })}
+        />
+        {filters.view === "list" ? (
+          <StatusChips rows={scoped} value={filters.status} onChange={(status) => update({ status })} />
+        ) : null}
+      </div>
+
+      {filters.view === "map" ? (
+        mapEnvironment ? (
+          <div className="space-y-3">
+            {mapEnvironments.length > 1 ? (
+              <Select
+                label={t("list.mapPick")}
+                value={mapEnvironment}
+                options={mapEnvironments}
+                onChange={(environment) => update({ environment })}
+              />
+            ) : null}
+            <ServiceMapPanel
+              environmentId={mapEnvironment}
+              environmentLabel={mapEnvironments.find((e) => e.value === mapEnvironment)?.label}
+            />
+          </div>
+        ) : (
+          <Panel>
+            <DataState kind="empty" title={t("list.mapNone")} description={t("list.mapNoneHint")} />
+          </Panel>
+        )
+      ) : (
         <Panel flush className="@container/table">
           <div
             aria-hidden
-            className={`hidden border-b border-border px-7 py-3 text-micro font-medium tracking-[0.08em] text-ink-muted uppercase ${ROW_GRID}`}
+            className={`hidden border-b border-border px-5 py-2.5 font-mono text-[0.6875rem] font-medium tracking-[0.06em] text-ink-muted uppercase ${ROW_GRID}`}
           >
             <span>{t("list.table.service")}</span>
-            <span>{t("list.table.ready")}</span>
-            <span>{t("list.table.restarts")}</span>
-            <span>{t("list.table.cpu")}</span>
-            <span>{t("list.table.memory")}</span>
-            <span className="@min-[48rem]/table:text-right @min-[64rem]/table:text-left">
-              {t("list.table.status")}
-            </span>
-            <span className="hidden @min-[64rem]/table:block" />
+            <span>{t("list.table.status")}</span>
+            <span className="text-right">{t("list.table.requests")}</span>
+            <span className="text-right">{t("list.table.failed")}</span>
+            <span className="text-right">{t("list.table.p95")}</span>
+            <span className="text-right">{t("list.table.ready")}</span>
+            <span className="text-right">{t("list.table.restarts")}</span>
+            <span className="text-right">{t("list.table.cpu")}</span>
+            <span className="text-right">{t("list.table.memory")}</span>
+            <span />
           </div>
-          <ul
-            className="divide-y divide-border"
-            data-testid="service-health-table"
-          >
-            {visible.map((row) => (
-              <ServiceRow key={row.environment_service_id} row={row} />
-            ))}
-          </ul>
-          <p className="flex items-center gap-2 border-t border-border px-7 py-4 text-micro text-ink-muted">
+          {groups.length === 0 ? (
+            <div className="p-5">
+              <DataState kind="empty" title={t("list.noMatch")} description={t("list.noMatchHint")} />
+            </div>
+          ) : (
+            <div data-testid="service-health-table">
+              {groups.map((group) => (
+                <section key={group.key} aria-label={group.key}>
+                  <GroupHeader
+                    group={group}
+                    onMap={() => update({ view: "map", environment: group.environmentId })}
+                  />
+                  <ul className="divide-y divide-border">
+                    {group.rows.map((row) => {
+                      const item = row.binding ? signalById.get(row.binding.id) : undefined;
+                      return (
+                        <ServiceRow
+                          key={row.environment_service_id}
+                          row={row}
+                          item={item}
+                          verdict={item ? judgeSignal(item) : null}
+                        />
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-5 py-3 text-micro text-ink-muted">
             <Activity className="h-3.5 w-3.5" aria-hidden />
-            {t("list.table.showing", { shown: data.items.length, total: data.total })}
-            <span className="ml-auto hidden sm:inline">{t("list.table.dashNote")}</span>
-          </p>
+            <span>{t("list.table.showing", { shown: data.items.length, total: data.total })}</span>
+            <span>{t("list.table.dashNote")}</span>
+            {tracesOff ? <span>{t("list.tracesOff")}</span> : null}
+            {signals.data?.traces.state === "unavailable" ? <span>{ts("partial.traces")}</span> : null}
+            {filtered ? (
+              <button
+                type="button"
+                onClick={() => update({ q: "", status: "", project: "", environment: "" })}
+                className="ml-auto font-medium text-brand hover:underline"
+              >
+                {t("list.clearFilters")}
+              </button>
+            ) : null}
+          </div>
         </Panel>
-      </div>
+      )}
     </div>
   );
 }
 
-function ServiceHealthTable() {
+function ServicesScreen() {
   const t = useT("serviceHealth");
-  const params = useSearchParams();
-  const [page, retry] = useApi<ServiceHealthPage>(
-    serviceHealthListPath({
-      projectId: params.get("project_id") ?? undefined,
-      environmentId: params.get("environment_id") ?? undefined,
-    }),
-  );
-
+  // The whole authorized list in one read; project and environment narrow it
+  // on the client, so the pickers always offer every scope there is.
+  const [page, retry] = useApi<ServiceHealthPage>(serviceHealthListPath({}));
   return (
     <LoadGate value={page} retry={retry}>
       {(data) =>
         data.items.length === 0 ? (
           <Panel>
-            <StateCard
-              icon={Layers}
-              title={t("list.empty.title")}
-              description={t("list.empty.description")}
-            />
+            <StateCard icon={Layers} title={t("list.empty.title")} description={t("list.empty.description")} />
           </Panel>
         ) : (
-          <ServiceHealthBody data={data} />
+          <ServicesBody data={data} />
         )
       }
     </LoadGate>
@@ -677,7 +585,7 @@ export default function ServiceHealthPage() {
     <PageFrame>
       <PageHeader title={t("list.title")} description={t("list.description")} />
       <Suspense fallback={<DataState kind="loading" />}>
-        <ServiceHealthTable />
+        <ServicesScreen />
       </Suspense>
     </PageFrame>
   );

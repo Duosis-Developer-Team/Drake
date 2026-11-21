@@ -29,26 +29,29 @@ import { NAV_ITEMS } from "@/lib/navigation";
  */
 const SEGMENT_LABELS: Record<string, string> = {
   admin: "Audit & access",
-  alerts: "Alerts",
+  alerts: "Incoming alerts",
   "alert-rules": "Alert rules",
   bind: "New binding",
   clusters: "Clusters",
+  dashboards: "Dashboards",
   deployments: "Deployments",
   environments: "Environments",
   github: "GitHub",
   incidents: "Incidents",
-  infrastructure: "Infrastructure",
+  infrastructure: "Resource usage",
   integrations: "Integrations",
   inventory: "Inventory",
+  logs: "Logs",
   "notification-deliveries": "Deliveries",
   "notification-policies": "Notification routing",
   notifications: "Notifications",
   onboarding: "Onboarding",
   projects: "Projects",
   protection: "Protection",
-  "service-health": "Service health",
+  "service-health": "Services",
   services: "Services",
   slo: "Objectives",
+  traces: "Traces",
 };
 
 /** Routes that exist as pages; anything else is rendered as plain text. */

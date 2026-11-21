@@ -238,7 +238,7 @@ describe("service health list", () => {
 
     const bound = await screen.findByTestId("service-row-api");
     expect(within(bound).getByText("Healthy")).toBeInTheDocument();
-    expect(within(bound).getByText("Resolved")).toBeInTheDocument();
+    expect(within(bound).getByText(/Deployment hermes-api/)).toBeInTheDocument();
 
     const unbound = screen.getByTestId("service-row-web");
     expect(within(unbound).getByText("Not configured")).toBeInTheDocument();

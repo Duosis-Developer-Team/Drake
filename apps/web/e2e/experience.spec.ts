@@ -24,7 +24,9 @@ test.setTimeout(120_000);
 const STATIC_ROUTES = [
   ["Overview", "/"],
   ["Projects", "/projects"],
-  ["Service health", "/service-health"],
+  ["Services", "/service-health"],
+  ["Traces", "/traces"],
+  ["Logs", "/logs"],
   ["Clusters", "/clusters"],
   ["Objectives", "/slo"],
   ["Incidents", "/incidents"],
