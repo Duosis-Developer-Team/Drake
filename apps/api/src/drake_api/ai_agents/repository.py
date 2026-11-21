@@ -652,3 +652,112 @@ async def topology(
         "nodes": nodes + resources,
         "edges": [e for e in edges if e["source"] in kept and e["target"] in kept],
     }
+
+
+async def list_mcp_servers(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    window: str = "24h",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """The MCP servers agents called in the window, for the servers this
+    caller may see (the same project rule as agents): what each serves,
+    who calls it, how it went, hour by hour."""
+    moment = now or datetime.now(UTC)
+    span = WINDOWS.get(window, WINDOWS["24h"])
+    since = moment - span
+    hours = _hours(span, moment)
+    index = {h: i for i, h in enumerate(hours)}
+    projects, unbound = await _visibility(connection, principal)
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT s.id, s.service_name, s.cluster_ref, s.namespace, s.workload,
+                       s.first_seen_at, s.last_seen_at, p.id, p.project_key, p.display_name,
+                       e.environment_key,
+                       coalesce(sum(r.calls), 0), coalesce(sum(r.errors), 0),
+                       coalesce(sum(r.duration_ms), 0)
+                FROM mcp_servers s
+                LEFT JOIN projects p ON p.id = s.project_id
+                LEFT JOIN environments e ON e.id = s.environment_id
+                LEFT JOIN mcp_server_rollups r ON r.server_id = s.id AND r.hour >= :since
+                WHERE {_clause("s")} AND s.last_seen_at >= :since
+                GROUP BY s.id, p.id, p.project_key, p.display_name, e.environment_key
+                ORDER BY 12 DESC, s.service_name
+                LIMIT 50
+                """  # noqa: S608 - fixed fragments
+            ),
+            {"projects": projects, "unbound": unbound, "since": since},
+        )
+    ).all()
+    servers: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        calls = int(r[11])
+        servers[str(r[0])] = {
+            "id": str(r[0]),
+            "service_name": r[1] or None,
+            "cluster_ref": r[2] or None,
+            "namespace": r[3] or None,
+            "workload": r[4] or None,
+            "first_seen_at": r[5].isoformat(),
+            "last_seen_at": r[6].isoformat(),
+            "project": {"id": str(r[7]), "key": r[8], "name": r[9]} if r[7] else None,
+            "environment": r[10],
+            "calls": calls,
+            "errors": int(r[12]),
+            "avg_ms": round(int(r[13]) / calls) if calls else None,
+            "tools": [],
+            "clients": [],
+            "methods": [],
+            "series": [{"t": h.isoformat(), "calls": 0, "errors": 0} for h in hours],
+        }
+    if not servers:
+        return {"window": window, "servers": []}
+    ids = [uuid.UUID(k) for k in servers]
+    params = {"ids": ids, "since": since}
+    for column, key in (("tool_name", "tools"), ("client", "clients"), ("method", "methods")):
+        for sid, name, calls, errors, duration in (
+            await connection.execute(
+                text(
+                    f"""
+                    SELECT server_id, {column}, sum(calls), sum(errors), sum(duration_ms)
+                    FROM mcp_server_rollups
+                    WHERE server_id = ANY(:ids) AND hour >= :since
+                    GROUP BY server_id, {column}
+                    ORDER BY 3 DESC
+                    """  # noqa: S608 - column from a fixed tuple
+                ),
+                params,
+            )
+        ).all():
+            servers[str(sid)][key].append(
+                {
+                    "name": name or None,
+                    "calls": int(calls),
+                    "errors": int(errors),
+                    "avg_ms": round(int(duration) / int(calls)) if int(calls) else None,
+                }
+            )
+    for sid, hour, calls, errors in (
+        await connection.execute(
+            text(
+                """
+                SELECT server_id, hour, sum(calls), sum(errors)
+                FROM mcp_server_rollups
+                WHERE server_id = ANY(:ids) AND hour >= :since
+                GROUP BY server_id, hour
+                """
+            ),
+            params,
+        )
+    ).all():
+        i = index.get(hour.astimezone(UTC).replace(minute=0, second=0, microsecond=0))
+        if i is not None:
+            servers[str(sid)]["series"][i]["calls"] += int(calls)
+            servers[str(sid)]["series"][i]["errors"] += int(errors)
+    for server in servers.values():
+        server["tools"] = server["tools"][:20]
+        server["clients"] = server["clients"][:10]
+    return {"window": window, "servers": list(servers.values())}

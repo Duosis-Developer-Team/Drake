@@ -40,8 +40,10 @@ class FakeStore:
         rollups: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         edges: list[dict[str, Any]] | None = None,
+        mcp: list[dict[str, Any]] | None = None,
     ) -> None:
         self.rollups, self.tools, self.edges = rollups, tools, edges or []
+        self.mcp = mcp or []
         self.calls = 0
 
     async def query(self, statement: str, parameters: dict[str, str], **_: Any) -> Result:
@@ -51,6 +53,8 @@ class FakeStore:
         end = datetime.fromisoformat(parameters["end"].replace(" ", "T")).replace(tzinfo=UTC)
         if "p_agent_name" in statement:
             source = self.edges
+        elif "user_agent.name'] AS client" in statement:
+            source = self.mcp
         elif "gen_ai.tool.name'] AS tool" in statement:
             source = self.tools
         else:
@@ -208,6 +212,38 @@ async def seed(engine: AsyncEngine, redis: Any) -> dict[str, Any]:
         }.items()
     }
     store.edges = [{**triager, **helper, "hour": HOUR, "calls": 3, "errors": 1}]
+    mcp_row = {"method": "tools/call", "hour": HOUR, "calls": 0, "errors": 0, "duration_ms": 0}
+    store.mcp = [
+        {
+            **mcp_row,
+            **in_catalog,
+            "svc": "hermes-mcp",
+            "tool": "hermes_list_tasks",
+            "client": "claude-ai",
+            "calls": 8,
+            "duration_ms": 400,
+        },
+        {
+            **mcp_row,
+            **in_catalog,
+            "svc": "hermes-mcp",
+            "tool": "hermes_create_task",
+            "client": "Cursor",
+            "calls": 2,
+            "errors": 1,
+            "duration_ms": 300,
+        },
+        {
+            **mcp_row,
+            "svc": "shadow-mcp",
+            "cluster": "",
+            "ns": "lab",
+            "wk": "mcp",
+            "tool": "run_sql",
+            "client": "",
+            "calls": 5,
+        },
+    ]
     report = await discovery.run_once(engine, store, redis, database="otel", now=NOW)  # type: ignore[arg-type]
     assert report.lease_acquired and report.failed_reads == 0
     return {"world": world, "store": store}
@@ -328,6 +364,15 @@ async def test_the_inventory_is_scoped_like_the_catalog(engine: AsyncEngine, red
                 "errors": 1,
             }
         ]
+        mcp = (await client.get("/v1/agents/mcp-servers?window=24h")).json()
+        by_service = {m["service_name"]: m for m in mcp["servers"]}
+        assert set(by_service) == {"hermes-mcp", "shadow-mcp"}
+        hermes = by_service["hermes-mcp"]
+        assert (hermes["calls"], hermes["errors"], hermes["avg_ms"]) == (10, 1, 70)
+        assert [t["name"] for t in hermes["tools"]] == ["hermes_list_tasks", "hermes_create_task"]
+        assert {c["name"]: c["calls"] for c in hermes["clients"]} == {"claude-ai": 8, "Cursor": 2}
+        assert hermes["project"] is not None and len(hermes["series"]) == 24
+        assert sum(p["calls"] for p in hermes["series"]) == 10
         focused = (await client.get(f"/v1/agents/topology?focus={triager['id']}")).json()
         assert {n["label"] for n in focused["nodes"] if n["kind"] == "agent"} == {
             "ticket-triager",
@@ -350,6 +395,9 @@ async def test_the_inventory_is_scoped_like_the_catalog(engine: AsyncEngine, red
         # The helper is outside this caller's scope: no node, and no link to it.
         assert {n["label"] for n in topo["nodes"] if n["kind"] == "agent"} == {"ticket-triager"}
         assert [e for e in topo["edges"] if e["kind"] == "agent"] == []
+        mcp = (await client.get("/v1/agents/mcp-servers")).json()
+        # Only the server bound to this caller's project.
+        assert [m["service_name"] for m in mcp["servers"]] == ["hermes-mcp"]
         helper_id = outside["research-helper"][5]
         assert (await client.get(f"/v1/agents/topology?focus={helper_id}")).status_code == 404
 

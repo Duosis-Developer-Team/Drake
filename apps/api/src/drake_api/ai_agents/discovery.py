@@ -130,10 +130,20 @@ AGENT_OF_TRACE = """
       AND SpanAttributes['gen_ai.operation.name'] = 'invoke_agent'
     GROUP BY TraceId"""
 
-GENAI = """(t.SpanAttributes['gen_ai.operation.name'] != ''
+# The server side of an MCP call (OpenTelemetry MCP conventions: a server
+# span with `mcp.method.name`) belongs to the MCP server the
+# agents call — never to an agent, even when it carries
+# `gen_ai.operation.name = execute_tool` as the conventions suggest.
+MCP_SERVER_SIDE = (
+    "((t.SpanAttributes['mcp.method.name'] != '' AND t.SpanKind = 'Server')"
+    " OR t.SpanAttributes['mcp.tool.name'] != '')"
+)
+
+GENAI = f"""((t.SpanAttributes['gen_ai.operation.name'] != ''
          OR t.SpanAttributes['gen_ai.provider.name'] != ''
          OR t.SpanAttributes['gen_ai.system'] != ''
-         OR t.SpanAttributes['gen_ai.request.model'] != '')"""
+         OR t.SpanAttributes['gen_ai.request.model'] != '')
+        AND NOT {MCP_SERVER_SIDE})"""
 
 OP = "t.SpanAttributes['gen_ai.operation.name']"
 PROVIDER = (
@@ -196,6 +206,7 @@ FROM __DATABASE__.otel_traces AS t
 LEFT JOIN ({AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
 WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
   AND {OP} = 'execute_tool' AND t.SpanAttributes['gen_ai.tool.name'] != ''
+  AND NOT {MCP_SERVER_SIDE}
 GROUP BY svc, cluster, ns, wk, agent_id, agent_name, ingest, tool, server, hour
 LIMIT {{max_rows:UInt16}}"""
 )
@@ -248,12 +259,35 @@ GROUP BY {_PAIR}, hour
 LIMIT {{max_rows:UInt16}}"""  # noqa: S608 - fixed fragments; values are bound parameters
 
 
-def statements(database: str) -> tuple[str, str, str]:
+# MCP servers: the server side of MCP calls, per server workload, hour,
+# method, tool and calling client. `mcp.tool.name` is Hermes MCP's own name
+# for a tool span from before it carried the conventions; it is read as a
+# `tools/call` so the server is visible either way.
+MCP = f"""
+SELECT {SVC} AS svc, {CLUSTER} AS cluster, {NAMESPACE} AS ns, {WORKLOAD} AS wk,
+       if(t.SpanAttributes['mcp.method.name'] != '', t.SpanAttributes['mcp.method.name'],
+          'tools/call') AS method,
+       if(t.SpanAttributes['gen_ai.tool.name'] != '', t.SpanAttributes['gen_ai.tool.name'],
+          t.SpanAttributes['mcp.tool.name']) AS tool,
+       t.SpanAttributes['user_agent.name'] AS client,
+       toUnixTimestamp(toStartOfHour(t.Timestamp)) AS hour,
+       count() AS calls,
+       countIf(t.StatusCode = 'Error') AS errors,
+       toUInt64(sum(t.Duration) / 1000000) AS duration_ms
+FROM __DATABASE__.otel_traces AS t
+WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
+  AND {MCP_SERVER_SIDE}
+GROUP BY svc, cluster, ns, wk, method, tool, client, hour
+LIMIT {{max_rows:UInt16}}"""  # noqa: S608 - fixed fragments; values are bound parameters
+
+
+def statements(database: str) -> tuple[str, str, str, str]:
     db = safe_identifier(database)
     return (
         _ROLLUPS.replace("__DATABASE__", db),
         _TOOLS.replace("__DATABASE__", db),
         EDGES.replace("__DATABASE__", db),
+        MCP.replace("__DATABASE__", db),
     )
 
 
@@ -391,6 +425,9 @@ class Harvest:
     rollups: dict[tuple[str, datetime, str, str], Bucket] = field(default_factory=dict)
     tools: dict[tuple[str, datetime, str, str], list[int]] = field(default_factory=dict)
     edges: dict[tuple[str, str, datetime], list[int]] = field(default_factory=dict)
+    servers: dict[str, dict[str, str]] = field(default_factory=dict)
+    server_seen: dict[str, tuple[datetime, datetime]] = field(default_factory=dict)
+    mcp: dict[tuple[str, datetime, str, str, str], list[int]] = field(default_factory=dict)
 
     def _see(self, ident: Identity, hour: datetime) -> None:
         self.identities.setdefault(ident.key, ident)
@@ -422,6 +459,26 @@ class Harvest:
                 str(row.get("server") or "")[:256],
             )
             agg = self.tools.setdefault(key, [0, 0, 0])
+            agg[0] += _int(row.get("calls"))
+            agg[1] += _int(row.get("errors"))
+            agg[2] += _int(row.get("duration_ms"))
+
+    def take_mcp(self, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            place = {k: str(row.get(k) or "") for k in ("svc", "cluster", "ns", "wk")}
+            key = f"mcp:{place['svc']}:{place['cluster']}/{place['ns']}/{place['wk']}"[:512]
+            hour = datetime.fromtimestamp(_int(row.get("hour")), tz=UTC)
+            self.servers.setdefault(key, place)
+            first, last = self.server_seen.get(key, (hour, hour))
+            self.server_seen[key] = (min(first, hour), max(last, hour))
+            bucket = (
+                key,
+                hour,
+                str(row.get("method") or "")[:64],
+                str(row.get("tool") or "")[:128],
+                str(row.get("client") or "")[:64],
+            )
+            agg = self.mcp.setdefault(bucket, [0, 0, 0])
             agg[0] += _int(row.get("calls"))
             agg[1] += _int(row.get("errors"))
             agg[2] += _int(row.get("duration_ms"))
@@ -464,7 +521,7 @@ async def _bindings(
 
 async def store(engine: AsyncEngine, harvest: Harvest) -> int:
     """Upsert the agents first seen or seen again, then replace the hours read."""
-    if not harvest.identities:
+    if not harvest.identities and not harvest.servers:
         return 0
     async with engine.begin() as connection:
         bindings = await _bindings(connection)
@@ -594,7 +651,80 @@ async def store(engine: AsyncEngine, harvest: Harvest) -> int:
                     for (caller, callee, hour), v in harvest.edges.items()
                 ],
             )
+        if harvest.servers:
+            await _store_mcp(connection, harvest, bindings)
     return len(harvest.identities)
+
+
+async def _store_mcp(
+    connection: AsyncConnection,
+    harvest: Harvest,
+    bindings: dict[tuple[str, str, str], tuple[Any, Any, Any]],
+) -> None:
+    server_ids: dict[str, uuid.UUID] = {}
+    for key, place in harvest.servers.items():
+        first, last = harvest.server_seen[key]
+        bound = bindings.get((place["cluster"], place["ns"], place["wk"]))
+        row = (
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO mcp_servers
+                        (identity_key, service_name, cluster_ref, namespace, workload,
+                         binding_id, project_id, environment_id, first_seen_at, last_seen_at)
+                    VALUES (:key, :svc, :cluster, :ns, :wk, :binding, :project, :environment,
+                            :first, :last)
+                    ON CONFLICT (identity_key) DO UPDATE SET
+                        first_seen_at = least(mcp_servers.first_seen_at, EXCLUDED.first_seen_at),
+                        last_seen_at = greatest(mcp_servers.last_seen_at, EXCLUDED.last_seen_at),
+                        binding_id = coalesce(EXCLUDED.binding_id, mcp_servers.binding_id),
+                        project_id = coalesce(EXCLUDED.project_id, mcp_servers.project_id),
+                        environment_id = coalesce(EXCLUDED.environment_id,
+                                                  mcp_servers.environment_id),
+                        updated_at = now()
+                    RETURNING id
+                    """
+                ),
+                {
+                    "key": key,
+                    "svc": place["svc"][:256],
+                    "cluster": place["cluster"][:128],
+                    "ns": place["ns"][:128],
+                    "wk": place["wk"][:256],
+                    "binding": bound[0] if bound else None,
+                    "project": bound[1] if bound else None,
+                    "environment": bound[2] if bound else None,
+                    "first": first,
+                    "last": last + timedelta(minutes=59, seconds=59),
+                },
+            )
+        ).one()
+        server_ids[key] = uuid.UUID(str(row[0]))
+    await connection.execute(
+        text(
+            """
+            INSERT INTO mcp_server_rollups
+                (server_id, hour, method, tool_name, client, calls, errors, duration_ms)
+            VALUES (:server, :hour, :method, :tool, :client, :calls, :errors, :duration)
+            ON CONFLICT (server_id, hour, method, tool_name, client) DO UPDATE SET
+                calls = EXCLUDED.calls, errors = EXCLUDED.errors,
+                duration_ms = EXCLUDED.duration_ms
+            """
+        ),
+        [
+            {
+                "server": server_ids[key],
+                "hour": hour,
+                "method": method,
+                "tool": tool,
+                "client": client,
+                "calls": v[0],
+                "errors": v[1],
+                "duration": v[2],
+            }
+            for (key, hour, method, tool, client), v in harvest.mcp.items()
+        ],
+    )
 
 
 @dataclass
@@ -633,7 +763,7 @@ async def run_once(
         # Whole hours are re-read and replaced: the previous one (closing)
         # and the current one; on a first run, everything the store holds.
         start = floor_hour(end) - timedelta(hours=1) if known else floor_hour(end - BACKFILL)
-        rollups_sql, tools_sql, edges_sql = statements(database)
+        rollups_sql, tools_sql, edges_sql, mcp_sql = statements(database)
         harvest = Harvest()
         chunk = start
         while chunk < end:
@@ -647,6 +777,7 @@ async def run_once(
                 (rollups_sql, harvest.take_rollups),
                 (tools_sql, harvest.take_tools),
                 (edges_sql, harvest.take_edges),
+                (mcp_sql, harvest.take_mcp),
             ):
                 report.reads += 1
                 try:
