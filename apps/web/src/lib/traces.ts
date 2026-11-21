@@ -212,3 +212,46 @@ export function formatDuration(ms: number | null): string {
   if (ms < 1000) return `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
+
+/**
+ * The critical path: the spans the request actually waited on.
+ *
+ * Walk backwards from the end of the root. Inside any span, the child that
+ * finished last before the cursor is what the parent was waiting for; take
+ * it (and, recursively, its own critical children), move the cursor to that
+ * child's start, and repeat. Children that ran alongside a chosen one and
+ * finished earlier held nothing up and stay off the path. Gaps between
+ * chosen children are the parent's own work.
+ *
+ * Returned as span ids, for the waterfall to draw in gold.
+ */
+export function criticalPath(rows: WaterfallRow[]): Set<string> {
+  const path = new Set<string>();
+  if (rows.length === 0) return path;
+  const startOf = (span: Span) => new Date(span.timestamp).getTime();
+  const endOf = (span: Span) => startOf(span) + (span.duration_ms ?? 0);
+  const EPSILON_MS = 1;
+  const children = new Map<string, Span[]>();
+  for (const row of rows) {
+    const parent = row.span.parent_span_id;
+    if (parent) children.set(parent, [...(children.get(parent) ?? []), row.span]);
+  }
+  const walk = (span: Span) => {
+    if (path.has(span.span_id)) return; // a parent cycle must not spin
+    path.add(span.span_id);
+    let cursor = endOf(span);
+    for (;;) {
+      const next = (children.get(span.span_id) ?? [])
+        .filter((child) => !path.has(child.span_id) && endOf(child) <= cursor + EPSILON_MS)
+        .reduce<Span | null>((best, child) => (!best || endOf(child) > endOf(best) ? child : best), null);
+      if (!next) break;
+      walk(next);
+      cursor = startOf(next);
+    }
+  };
+  // The root that ended last is the request the user waited for.
+  const roots = rows.filter((row) => row.depth === 0).map((row) => row.span);
+  const root = roots.reduce<Span | null>((best, span) => (!best || endOf(span) > endOf(best) ? span : best), null);
+  if (root) walk(root);
+  return path;
+}

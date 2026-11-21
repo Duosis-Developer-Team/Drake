@@ -37,6 +37,7 @@ import {
   TRACE_RANGES,
   formatDuration,
   layoutWaterfall,
+  criticalPath,
   summarizeTrace,
   type TraceSummary,
   traceDetailPath,
@@ -580,6 +581,14 @@ function TraceWaterfall({ bindingId, traceId }: { bindingId: string; traceId: st
   const rows = useMemo(() => (detail ? layoutWaterfall(detail.spans) : []), [detail]);
   const total = rows.length > 0 ? Math.max(...rows.map((row) => row.span.duration_ms ?? 0)) : null;
   const summary = useMemo(() => summarizeTrace(rows), [rows]);
+  const critical = useMemo(() => criticalPath(rows), [rows]);
+  // The whole trace's span, for the time axis above the bars.
+  const spanMs = useMemo(() => {
+    if (rows.length === 0) return null;
+    const starts = rows.map((row) => new Date(row.span.timestamp).getTime());
+    const ends = rows.map((row, i) => starts[i] + (row.span.duration_ms ?? 0));
+    return Math.max(...ends) - Math.min(...starts);
+  }, [rows]);
 
   return (
     <div className="space-y-3 border-t border-border bg-surface-2 px-4 py-4" data-testid="trace-waterfall">
@@ -598,10 +607,34 @@ function TraceWaterfall({ bindingId, traceId }: { bindingId: string; traceId: st
         <p className="text-caption text-critical">{t("state.unavailable.title")}</p>
       ) : null}
       {state === "ok" && summary ? <TraceSummaryLine summary={summary} /> : null}
+      {state === "ok" && spanMs !== null ? (
+        <div
+          aria-hidden
+          className="grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)_4.5rem] items-end gap-3 px-2 font-mono text-[0.6875rem] text-ink-muted"
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-4 rounded-full bg-gold" />
+            {t("trace.criticalPath")}
+          </span>
+          <span className="relative h-4">
+            {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+              <span
+                key={f}
+                className="absolute bottom-0 whitespace-nowrap"
+                style={{ left: `${f * 100}%`, transform: f === 0 ? "none" : f === 1 ? "translateX(-100%)" : "translateX(-50%)" }}
+              >
+                {f === 0 ? "0" : formatDuration(spanMs * f)}
+              </span>
+            ))}
+          </span>
+          <span />
+        </div>
+      ) : null}
       {state === "ok" ? (
         <ol className="space-y-1" aria-label={t("trace.title")}>
           {rows.map((row) => {
             const isOpen = selected === row.span.span_id;
+            const onPath = critical.has(row.span.span_id);
             const kind = t.dyn("trace.kind", row.span.kind, row.span.kind);
             return (
               <li key={row.span.span_id}>
@@ -612,19 +645,23 @@ function TraceWaterfall({ bindingId, traceId }: { bindingId: string; traceId: st
                   className="grid w-full grid-cols-[minmax(0,14rem)_minmax(0,1fr)_4.5rem] items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-surface-hover"
                 >
                   <span
-                    className="truncate font-mono text-micro text-ink"
+                    className={`truncate font-mono text-micro ${onPath ? "font-semibold text-gold" : "text-ink"}`}
                     style={{ paddingLeft: `${Math.min(row.depth, 8) * 0.75}rem` }}
-                    title={`${row.span.name} · ${kind}`}
+                    title={`${row.span.name} · ${kind}${onPath ? ` · ${t("trace.criticalPath")}` : ""}`}
                   >
                     {row.span.name}
                   </span>
                   <span className="relative h-3 rounded-full bg-surface" aria-hidden>
+                    {[0.25, 0.5, 0.75].map((f) => (
+                      <span key={f} className="absolute inset-y-0 w-px bg-border" style={{ left: `${f * 100}%` }} />
+                    ))}
                     <span
-                      className={`absolute top-0 h-full rounded-full ${row.span.error ? "bg-critical" : row.span.kind === "Client" ? "bg-info" : "bg-brand"}`}
+                      data-critical={onPath || undefined}
+                      className={`absolute top-0 h-full rounded-full ${row.span.error ? "bg-critical" : onPath ? "bg-gold" : row.span.kind === "Client" ? "bg-info" : "bg-brand"}`}
                       style={{ left: `${row.offset * 100}%`, width: `${Math.max(0.6, row.width * 100)}%` }}
                     />
                   </span>
-                  <span data-tabular className="text-right font-mono text-micro text-ink-secondary">
+                  <span data-tabular className={`text-right font-mono text-micro ${onPath ? "font-semibold text-gold" : "text-ink-secondary"}`}>
                     {formatDuration(row.span.duration_ms)}
                   </span>
                 </button>
