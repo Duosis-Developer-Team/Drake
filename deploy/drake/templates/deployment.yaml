@@ -143,6 +143,16 @@ spec:
             - name: DRAKE_NOTIFICATION_EMAILS
               value: {{ include "drake.emailDestinations" . | quote }}
             {{- end }}
+            # Stated in both states. Judges every backup policy on a timer and
+            # creates the policies declared for each registered reporter.
+            - name: DRAKE_PROTECTION_EVALUATION_ENABLED
+              value: {{ (.Values.protection).evaluationEnabled | default false | quote }}
+            - name: DRAKE_PROTECTION_EVALUATION_INTERVAL_SECONDS
+              value: {{ (.Values.protection).evaluationIntervalSeconds | default 300 | quote }}
+            {{- if (.Values.protection).connectors }}
+            - name: DRAKE_PROTECTION_CONNECTORS
+              value: {{ include "drake.protectionConnectors" . | quote }}
+            {{- end }}
             - name: DRAKE_OBSERVABILITY_LOGS_ENABLED
               value: {{ (.Values.observability).logsEnabled | default false | quote }}
             - name: DRAKE_OBSERVABILITY_TRACES_ENABLED
@@ -157,7 +167,8 @@ spec:
                 name: {{ .Values.api.existingSecret | default (printf "%s-api" (include "drake.name" .)) }}
           {{- $observability := or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
           {{- $emailMount := $emailSender }}
-          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability $emailMount }}
+          {{- $reporters := (.Values.protection).connectors }}
+          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability $emailMount $reporters }}
           {{- if $secretVolumes }}
           volumeMounts:
             {{- if $observability }}
@@ -168,6 +179,11 @@ spec:
             {{- if .Values.github.enabled }}
             - name: github-app
               mountPath: {{ .Values.github.secretMountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- range $key, $connector := $reporters }}
+            - name: {{ printf "protection-%s" $key | trunc 63 | trimSuffix "-" }}
+              mountPath: {{ printf "%s/%s" ($.Values.protection.secretMountPath | default "/etc/drake/protection") $key | quote }}
               readOnly: true
             {{- end }}
             {{- if (.Values.alerting).existingSecret }}
@@ -200,6 +216,14 @@ spec:
             items:
               - {key: reader-password, path: reader-password}
             # Same 0440 + fsGroup contract as the other credential mounts.
+            defaultMode: 0440
+        {{- end }}
+        {{- range $key, $connector := (.Values.protection).connectors }}
+        - name: {{ printf "protection-%s" $key | trunc 63 | trimSuffix "-" }}
+          secret:
+            secretName: {{ required (printf "protection.connectors.%s.existingSecret is required" $key) $connector.existingSecret }}
+            items:
+              - {key: signing-secret, path: signing-secret}
             defaultMode: 0440
         {{- end }}
         {{- if .Values.github.enabled }}

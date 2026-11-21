@@ -58,6 +58,7 @@ from drake_api.onboarding.gitops import GitOpsWorker, RecordingProvider
 from drake_api.onboarding.router import router as onboarding_router
 from drake_api.protection.router import router as protection_router
 from drake_api.protection.router_ingest import router as protection_ingest_router
+from drake_api.protection.setup import ProtectionEvaluator
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
 from drake_api.service_health.cache import HealthCache
@@ -98,6 +99,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     sli_writer = getattr(app.state, "sli_rollup_writer", None)
     if sli_writer is not None:
         await sli_writer.start()
+    protection_evaluator = getattr(app.state, "protection_evaluator", None)
+    if protection_evaluator is not None:
+        await protection_evaluator.start()
     silence_worker = getattr(app.state, "silence_worker", None)
     if silence_worker is not None:
         await silence_worker.start()
@@ -113,6 +117,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await silence_worker.stop()
         if sli_writer is not None:
             await sli_writer.stop()
+        if protection_evaluator is not None:
+            await protection_evaluator.stop()
         if slo_evaluator is not None:
             await slo_evaluator.stop()
         if ingestor is not None:
@@ -288,6 +294,18 @@ def create_app(
         if settings.slo_evaluator_enabled
         and settings.observability_traces_enabled
         and store_connector is not None
+        else None
+    )
+    # Backup posture is judged on a timer too, so a reporter that falls
+    # silent reads as overdue rather than as its last good report.
+    app.state.protection_evaluator = (
+        ProtectionEvaluator(
+            get_engine(settings),
+            settings,
+            app.state.telemetry_redis,
+            interval_seconds=settings.protection_evaluation_interval_seconds,
+        )
+        if settings.protection_evaluation_enabled
         else None
     )
     # The GitOps worker is the only path through which Drake would WRITE to

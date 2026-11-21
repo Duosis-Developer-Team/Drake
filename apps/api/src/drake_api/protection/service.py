@@ -507,7 +507,7 @@ async def evaluate_policy(
 
 
 async def evaluate_all(
-    engine: AsyncEngine, settings: Settings, *, limit: int = 200
+    engine: AsyncEngine, settings: Settings, *, limit: int = 5000
 ) -> list[EvaluationOutcome]:
     """Evaluate every enabled policy. One failure costs only its policy."""
     async with engine.connect() as connection:
