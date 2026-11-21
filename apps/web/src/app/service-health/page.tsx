@@ -62,7 +62,7 @@ const WARN_P95_MS = 500;
 /* Keyed to the table's own width. Under 60rem a row stacks; from 60rem it is
  * one aligned line per service. */
 const ROW_GRID =
-  "@min-[60rem]/table:grid @min-[60rem]/table:grid-cols-[minmax(12rem,1fr)_9.5rem_4.75rem_4.5rem_4.75rem_4.25rem_5.25rem_4.25rem_4.75rem_2rem] @min-[60rem]/table:items-center @min-[60rem]/table:gap-3";
+  "@min-[60rem]/table:grid @min-[60rem]/table:grid-cols-[minmax(9rem,1fr)_8.5rem_4.5rem_4rem_4.5rem_3.5rem_4.75rem_3.5rem_4.5rem_2rem] @min-[60rem]/table:items-center @min-[60rem]/table:gap-2.5";
 
 type Filters = {
   q: string;
