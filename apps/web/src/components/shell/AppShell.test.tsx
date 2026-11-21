@@ -127,7 +127,7 @@ describe("AppShell (authenticated)", () => {
     // the Command Center:
     expect(screen.queryByRole("group", { name: /time range/i })).not.toBeInTheDocument();
     // Catalog search is a real, enabled control:
-    const searchButtons = screen.getAllByRole("button", { name: /search tracery/i });
+    const searchButtons = screen.getAllByRole("button", { name: /search tracesis/i });
     expect(searchButtons.length).toBeGreaterThan(0);
     expect(searchButtons[0]).toBeEnabled();
   });

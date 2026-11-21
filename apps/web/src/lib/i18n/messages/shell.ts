@@ -62,7 +62,7 @@ export const shell = defineMessages({
       logs: "Logs",
     },
     sidebar: {
-      home: "Tracery home",
+      home: "Tracesis home",
       collapse: "Collapse navigation",
       expand: "Expand navigation",
       primary: "Primary",
@@ -94,8 +94,8 @@ export const shell = defineMessages({
       unread: "Notifications, {count} unread",
     },
     search: {
-      open: "Search Tracery",
-      placeholderShort: "Search Tracery…",
+      open: "Search Tracesis",
+      placeholderShort: "Search Tracesis…",
       placeholder: "Search pages, projects, environments, services, clusters…",
       query: "Search query",
       close: "Close search",
@@ -117,7 +117,7 @@ export const shell = defineMessages({
     },
     signedOut: {
       signedOut: {
-        title: "Sign in to Tracery",
+        title: "Sign in to Tracesis",
         body: "Observability and operations control plane. Sign in with your organization account.",
       },
       expired: {
@@ -138,7 +138,7 @@ export const shell = defineMessages({
       errorGeneric: "That email and password did not match. Please try again.",
       errorRateLimited: "Too many attempts. Please wait a few minutes and try again.",
       errorUnavailable: "Sign-in is unavailable right now. Please try again shortly.",
-      errorNetwork: "Could not reach Tracery. Check your connection and try again.",
+      errorNetwork: "Could not reach Tracesis. Check your connection and try again.",
     },
   },
   tr: {
@@ -195,7 +195,7 @@ export const shell = defineMessages({
       logs: "Loglar",
     },
     sidebar: {
-      home: "Tracery ana sayfa",
+      home: "Tracesis ana sayfa",
       collapse: "Gezinmeyi daralt",
       expand: "Gezinmeyi genişlet",
       primary: "Ana gezinme",
@@ -227,8 +227,8 @@ export const shell = defineMessages({
       unread: "Bildirimler, {count} okunmamış",
     },
     search: {
-      open: "Tracery'de ara",
-      placeholderShort: "Tracery'de ara…",
+      open: "Tracesis'te ara",
+      placeholderShort: "Tracesis'te ara…",
       placeholder: "Sayfa, proje, ortam, servis veya küme ara…",
       query: "Arama sorgusu",
       close: "Aramayı kapat",
@@ -250,7 +250,7 @@ export const shell = defineMessages({
     },
     signedOut: {
       signedOut: {
-        title: "Tracery'ye giriş yapın",
+        title: "Tracesis'e giriş yapın",
         body: "Gözlemlenebilirlik ve operasyon kontrol düzlemi. Kurum hesabınızla giriş yapın.",
       },
       expired: {
@@ -271,7 +271,7 @@ export const shell = defineMessages({
       errorGeneric: "E-posta ve parola eşleşmedi. Lütfen yeniden deneyin.",
       errorRateLimited: "Çok fazla deneme yapıldı. Lütfen birkaç dakika bekleyip yeniden deneyin.",
       errorUnavailable: "Giriş şu anda kullanılamıyor. Lütfen kısa süre sonra yeniden deneyin.",
-      errorNetwork: "Tracery'ye ulaşılamadı. Bağlantınızı kontrol edip yeniden deneyin.",
+      errorNetwork: "Tracesis'e ulaşılamadı. Bağlantınızı kontrol edip yeniden deneyin.",
     },
   },
 });

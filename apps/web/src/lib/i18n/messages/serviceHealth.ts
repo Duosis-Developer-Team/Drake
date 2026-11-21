@@ -184,7 +184,7 @@ export const serviceHealth = defineMessages({
           events: "Events",
         },
         laneState: {
-          not_configured: "Not enabled on this Tracery",
+          not_configured: "Not enabled on this Tracesis",
           denied: "You can't read this signal for this service",
           unavailable: "The store did not answer",
         },
@@ -227,7 +227,7 @@ export const serviceHealth = defineMessages({
         latencyP95: "Latency (p95)",
         noMetrics: "No application metrics",
         noMetricsNote: "No request metrics are published — not counted against its health.",
-        fromTraces: "From Tracery's traces of this workload (no application metrics published)",
+        fromTraces: "From Tracesis's traces of this workload (no application metrics published)",
       },
       why: {
         title: "Why",
@@ -524,7 +524,7 @@ export const serviceHealth = defineMessages({
           events: "Olaylar",
         },
         laneState: {
-          not_configured: "Bu Tracery'de açık değil",
+          not_configured: "Bu Tracesis'te açık değil",
           denied: "Bu servis için bu sinyali okuma yetkin yok",
           unavailable: "Depo yanıt vermedi",
         },
@@ -567,7 +567,7 @@ export const serviceHealth = defineMessages({
         latencyP95: "Gecikme (p95)",
         noMetrics: "Uygulama metriği yok",
         noMetricsNote: "İstek metriği yayımlanmıyor; bu, sağlığına karşı sayılmaz.",
-        fromTraces: "Tracery'nin bu iş yükünden topladığı trace'lerden (uygulama metrik yayınlamıyor)",
+        fromTraces: "Tracesis'in bu iş yükünden topladığı trace'lerden (uygulama metrik yayınlamıyor)",
       },
       why: {
         title: "Neden",

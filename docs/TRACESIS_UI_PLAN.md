@@ -1,4 +1,4 @@
-# Tracery UI plan
+# Tracesis UI plan (named "Tracery" until 2026-11-21)
 
 Status: in progress (2026-11-21). Design source: the "Tracery — Ürün Tasarımı"
 canvas (system + Overview, Services, Service, Traces, Trace detail, Logs),
@@ -47,7 +47,7 @@ picker over the existing per-binding endpoints.
 
 | # | Scope |
 |---|---|
-| 1 | **Foundation.** Tokens (Cathedral dark / Vellum light), fonts (Plus Jakarta Sans, JetBrains Mono), Tracery brand, flat shell, IA regrouping, visible product name. |
+| 1 | **Foundation.** Tokens (Cathedral dark / Vellum light), fonts (Plus Jakarta Sans, JetBrains Mono), Tracesis brand, flat shell, IA regrouping, visible product name. |
 | 2 | **Service map.** Promote the dashboard `TrafficGraphWidget` into a reusable `ServiceMap`: keyboard access, no column overlap, rate-encoded motion, tokens. Show it on the environment page, the service page (neighbourhood), Services ("Map" view) and Overview. |
 | 3 | **Services + service page.** Grouped list (project / environment), "—" for no data, one service page that joins the catalog service and its binding (golden signals, lanes with deploy marker, "why slow" findings, endpoints, dependencies, pods, error logs). |
 | 4 | **Traces and Logs.** Global explorers; trace detail with the critical path in gold and a one-sentence summary; log line → trace link. |
@@ -64,7 +64,7 @@ picker over the existing per-binding endpoints.
 | `/projects` | ProjectRiskMap (a real filter), table | MiniBars per project | 3 |
 | `/projects/[p]` | EnvironmentCard + ServiceTile, telemetry section | capability dots in KPI (repeat the panel) | 3 |
 | `/projects/[p]/environments/[e]` | scheduled jobs | service cards gain health; link to the service map | 2–3 |
-| `/projects/…/services/[s]` | golden signals | KPI tiles that repeat "what Tracery measures"; add link to the binding page | 3 |
+| `/projects/…/services/[s]` | golden signals | KPI tiles that repeat "what Tracesis measures"; add link to the binding page | 3 |
 | `/service-health` | table, SignalBoard, CoverageCard | BreakdownCard (third copy of the tally), bound ring, healthy meter | 3 |
 | `/service-health/[id]` | TimelineStrip, TraceExplorer, LogExplorer, LogPatterns, Why panel, gauges | SignalChart without a time axis, RingProgress beside "3/3", raw ISO times | 3–4 |
 | `/dashboards/[env]` | Overview lanes, services, **traffic graph**, findings, heatmap, endpoints, capacity bars, DB ops, ServiceDrawer | logs donut, pod hexagons; overview failure shown as endless loading | 2 |

@@ -3,10 +3,10 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Tracery design tokens.
+ * Tracesis design tokens.
  *
- * Two themes from one vocabulary (2026-11-21 Tracery redesign, product
- * canvas "Tracery — Ürün Tasarımı"):
+ * Two themes from one vocabulary (2026-11-21 Tracesis redesign, product
+ * canvas "Tracesis — Ürün Tasarımı"):
  *
  *   Cathedral (dark)  canvas #0B0A10  panel #13111A  ink bone #F2EEE6
  *   Vellum   (light)  canvas #F6F4EF  panel #FFFFFF  ink #17151C

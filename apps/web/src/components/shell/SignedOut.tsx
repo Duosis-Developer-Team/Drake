@@ -23,7 +23,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { LocalSignIn } from "@/components/auth/LocalSignIn";
-import { TraceryMark, TraceryWordmark } from "@/components/shell/Brand";
+import { TracesisMark, TracesisWordmark } from "@/components/shell/Brand";
 import { ThemeControl } from "@/components/shell/ThemeControl";
 import { toneSpec } from "@/lib/design/status";
 import { useT } from "@/lib/i18n";
@@ -70,7 +70,7 @@ export function SignedOut({
       data-testid={`screen-${variant}`}
     >
       <header className="flex h-14 items-center justify-between px-5">
-        <TraceryWordmark size={20} />
+        <TracesisWordmark size={20} />
         <ThemeControl compact />
       </header>
 
@@ -81,7 +81,7 @@ export function SignedOut({
               situations are distinguishable before a word is read. */}
           <div className="flex flex-col items-center text-center">
             {/* The product's own mark, at a size that owns the screen. */}
-            <TraceryMark height={64} />
+            <TracesisMark height={64} />
 
             {/* The tone still has to be readable: signed-out, expired and
                 unavailable are three different situations and the mark says

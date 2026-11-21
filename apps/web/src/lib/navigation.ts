@@ -1,5 +1,5 @@
 /**
- * Primary navigation (Tracery information architecture, 2026-11-21).
+ * Primary navigation (Tracesis information architecture, 2026-11-21).
  *
  * Grouped by the question an operator is asking, in the order they ask it:
  *
@@ -9,7 +9,7 @@
  *                  what changed
  *   Infrastructure what it runs on — clusters, resource usage, objectives,
  *                  backups
- *   Settings       how Tracery is set up — onboarding, integrations,
+ *   Settings       how Tracesis is set up — onboarding, integrations,
  *                  notification routing, access
  *
  * Every entry points at a route that exists; no module was dropped in the
