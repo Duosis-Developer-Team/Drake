@@ -198,8 +198,11 @@ async def _open_incident(
 
 
 async def _resolve_incident(
-    connection: AsyncConnection, incident_id: uuid.UUID, at: datetime
-) -> None:
+    connection: AsyncConnection,
+    incident_id: uuid.UUID,
+    at: datetime,
+    reason: str | None = None,
+) -> bool:
     updated = (
         await connection.execute(
             text(
@@ -214,8 +217,40 @@ async def _resolve_incident(
             {"id": incident_id, "at": at},
         )
     ).first()
-    if updated is not None:
-        await _incident_event(connection, incident_id, "auto_resolved", at, {"source": "rule"})
+    if updated is None:
+        return False
+    detail: dict[str, Any] = {"source": "rule"}
+    if reason is not None:
+        detail["reason"] = reason
+    await _incident_event(connection, incident_id, "auto_resolved", at, detail)
+    return True
+
+
+async def close_rule_incidents(
+    connection: AsyncConnection, rule_id: uuid.UUID, at: datetime, reason: str
+) -> int:
+    """Resolve every incident this rule still holds open.
+
+    A rule that is disabled or deleted is never evaluated again, so nothing
+    else would ever close what it opened: the incident stayed open (and
+    paged) for a condition nobody watches any more. The resolution says
+    why — `reason` is `rule_disabled` or `rule_deleted` — and goes out as
+    the ordinary `auto_resolved` event, so whoever was paged hears it end.
+    """
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT id FROM incidents WHERE source = 'rule' "
+                "AND correlation_key LIKE :prefix AND state IN ('open', 'acknowledged')"
+            ),
+            {"prefix": f"rule:{rule_id}:%"},
+        )
+    ).all()
+    closed = 0
+    for row in rows:
+        if await _resolve_incident(connection, uuid.UUID(str(row[0])), at, reason):
+            closed += 1
+    return closed
 
 
 async def record_and_evaluate(

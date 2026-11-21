@@ -58,6 +58,11 @@ LEASE_KEY = "incidents:evaluation:cycle"
 MAX_EVALUATION_CONCURRENCY = max(1, PRINCIPAL_CONCURRENCY // MAX_CONCURRENT_QUERIES)
 
 
+# A ceiling, not a page: a cycle walks every due binding a page at a time,
+# and stops here only so a runaway catalogue cannot hold the lease forever.
+MAX_BINDINGS_PER_CYCLE = 5000
+
+
 def bounded_concurrency(requested: int) -> int:
     """A requested concurrency, held inside the principal's query budget."""
     return max(1, min(requested, MAX_EVALUATION_CONCURRENCY))
@@ -232,6 +237,7 @@ async def run_cycle(
     batch_size: int = 25,
     concurrency: int = MAX_EVALUATION_CONCURRENCY,
     lease_seconds: int = 120,
+    max_bindings: int = MAX_BINDINGS_PER_CYCLE,
     principal: Principal | None = None,
     sampler: TelemetrySampler | None = None,
 ) -> CycleReport:
@@ -294,8 +300,11 @@ async def run_cycle(
                 return None
 
     try:
+        # `batch_size` is the page, not the cycle: every due binding is
+        # evaluated, a page at a time. (It used to be both, so the 26th
+        # binding was never evaluated — no incident, no rule — ever.)
         cursor: uuid.UUID | None = None
-        remaining = batch_size
+        remaining = max(1, max_bindings)
         while remaining > 0 and not report.lease_lost:
             page = await _due_bindings(engine, min(remaining, batch_size), cursor)
             if not page:
@@ -333,6 +342,13 @@ async def run_cycle(
                     report.incidents_resolved += 1
             cursor = page[-1][0]
             remaining -= len(page)
+            if len(page) < batch_size:
+                break
+        if remaining <= 0:
+            logger.warning(
+                "incident runner: cycle stopped at %d bindings; the rest wait for the next cycle",
+                max_bindings,
+            )
     finally:
         # Release our own token on every exit path, including cancellation,
         # so a shutdown does not leave the next cycle waiting out the TTL.
