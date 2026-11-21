@@ -20,6 +20,10 @@ import { useEffect, useState } from "react";
 
 import { ConfidenceBadge } from "@/components/agents/AgentCard";
 import { AgentConnections } from "@/components/agents/AgentMap";
+import {
+  GovernancePanel,
+  LifecycleBadge,
+} from "@/components/agents/Governance";
 import { GuardrailsPanel } from "@/components/agents/GuardrailsPanel";
 import { RunsPanel } from "@/components/agents/RunsPanel";
 import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
@@ -150,6 +154,7 @@ export default function AgentPage() {
         status={
           <span className="flex flex-wrap items-center gap-1.5">
             <ConfidenceBadge confidence={a.confidence} />
+            <LifecycleBadge agent={a} />
             {a.ingest === "external" ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-2 py-0.5 text-micro font-medium text-ink-secondary">
                 <Globe aria-hidden className="h-3 w-3" />
@@ -449,60 +454,66 @@ export default function AgentPage() {
               </ul>
             )}
           </Panel>
-          <Panel>
-            <PanelHeader title={t("detail.identity")} />
-            <div className="mb-4 flex items-start gap-3 rounded-control bg-surface-2 px-3.5 py-3">
-              <span className="shrink-0 whitespace-nowrap">
-                <ConfidenceBadge confidence={a.confidence} />
-              </span>
-              <p className="text-micro text-ink-secondary">
-                {t.dyn("confidence", `${a.confidence}Hint`, a.confidence)}
-              </p>
-            </div>
-            <dl className="space-y-3" data-testid="agent-identity">
-              {(
-                [
-                  [t("detail.externalId"), a.agent_external_id, true],
-                  [t("detail.service"), a.service_name, true],
+          <div className="space-y-6">
+            <GovernancePanel
+              agent={a}
+              onChange={(next) => setState({ kind: "ready", agent: next })}
+            />
+            <Panel>
+              <PanelHeader title={t("detail.identity")} />
+              <div className="mb-4 flex items-start gap-3 rounded-control bg-surface-2 px-3.5 py-3">
+                <span className="shrink-0 whitespace-nowrap">
+                  <ConfidenceBadge confidence={a.confidence} />
+                </span>
+                <p className="text-micro text-ink-secondary">
+                  {t.dyn("confidence", `${a.confidence}Hint`, a.confidence)}
+                </p>
+              </div>
+              <dl className="space-y-3" data-testid="agent-identity">
+                {(
                   [
-                    t("detail.workload"),
-                    a.workload
-                      ? `${a.namespace ?? ""}/${a.workload}`
-                      : a.namespace,
-                    true,
-                  ],
-                  [t("detail.cluster"), a.cluster_ref, true],
-                  [
-                    t("detail.project"),
-                    a.project
-                      ? `${a.project.name}${a.environment ? ` · ${a.environment.key}` : ""}`
-                      : t("detail.outside"),
-                    false,
-                  ],
-                  [
-                    t("detail.ingest"),
-                    a.ingest === "external"
-                      ? t("detail.ingestExternal")
-                      : t("detail.ingestCluster"),
-                    false,
-                  ],
-                  [t("detail.firstSeen"), fmt.utc(a.first_seen_at), false],
-                  [t("detail.lastSeen"), fmt.utc(a.last_seen_at), false],
-                ] as const
-              )
-                .filter(([, v]) => v)
-                .map(([k, v, mono]) => (
-                  <div key={k}>
-                    <dt className="text-micro text-ink-muted">{k}</dt>
-                    <dd
-                      className={`break-all text-caption font-medium text-ink ${mono ? "font-mono" : ""}`}
-                    >
-                      {v}
-                    </dd>
-                  </div>
-                ))}
-            </dl>
-          </Panel>
+                    [t("detail.externalId"), a.agent_external_id, true],
+                    [t("detail.service"), a.service_name, true],
+                    [
+                      t("detail.workload"),
+                      a.workload
+                        ? `${a.namespace ?? ""}/${a.workload}`
+                        : a.namespace,
+                      true,
+                    ],
+                    [t("detail.cluster"), a.cluster_ref, true],
+                    [
+                      t("detail.project"),
+                      a.project
+                        ? `${a.project.name}${a.environment ? ` · ${a.environment.key}` : ""}`
+                        : t("detail.outside"),
+                      false,
+                    ],
+                    [
+                      t("detail.ingest"),
+                      a.ingest === "external"
+                        ? t("detail.ingestExternal")
+                        : t("detail.ingestCluster"),
+                      false,
+                    ],
+                    [t("detail.firstSeen"), fmt.utc(a.first_seen_at), false],
+                    [t("detail.lastSeen"), fmt.utc(a.last_seen_at), false],
+                  ] as const
+                )
+                  .filter(([, v]) => v)
+                  .map(([k, v, mono]) => (
+                    <div key={k}>
+                      <dt className="text-micro text-ink-muted">{k}</dt>
+                      <dd
+                        className={`break-all text-caption font-medium text-ink ${mono ? "font-mono" : ""}`}
+                      >
+                        {v}
+                      </dd>
+                    </div>
+                  ))}
+              </dl>
+            </Panel>
+          </div>
         </div>
       </div>
     </PageFrame>

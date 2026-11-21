@@ -33,11 +33,14 @@ router = APIRouter(prefix="/v1", tags=["agents"])
 async def list_agents(
     request: Request,
     window: str = Query("24h", pattern="^(24h|7d)$"),
+    lifecycle: str = Query("active", pattern="^(active|all)$"),
     auth: AuthContext = Depends(require_auth),
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     async with get_engine(settings).connect() as connection:
-        body = await repo.list_agents(connection, auth.principal, window=window)
+        body = await repo.list_agents(
+            connection, auth.principal, window=window, include_retired=lifecycle == "all"
+        )
     return {**body, "discovering": bool(getattr(request.app.state, "agent_discovery", None))}
 
 
@@ -346,3 +349,52 @@ async def delete_guardrail(
             )
         body = await guard.read(connection, auth.principal, agent_id)
     return body or {}
+
+
+class GovernanceSet(BaseModel):
+    lifecycle: str | None = Field(default=None, pattern="^(observed|approved|retired)$")
+    owner: str | None = Field(default=None, pattern="^(me|none)$")
+    purpose: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/agents/{agent_id}/governance")
+async def set_governance(
+    request: Request,
+    agent_id: uuid.UUID,
+    payload: GovernanceSet,
+    auth: AuthContext = Depends(require_csrf),
+) -> dict[str, Any]:
+    """Approve, retire or send back to review; take or give up ownership;
+    say what the agent is for."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).begin() as connection:
+        try:
+            result = await repo.set_governance(
+                connection,
+                auth.principal,
+                agent_id,
+                actor=uuid.UUID(auth.session.identity_id),
+                lifecycle=payload.lifecycle,
+                owner=payload.owner,
+                purpose=(payload.purpose or "") if "purpose" in payload.model_fields_set else None,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="invalid_governance") from error
+        if result is None:
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
+        if result["changed"]:
+            await record_audit_event_in(
+                connection,
+                _guard_audit(
+                    auth,
+                    "agent.governance.set",
+                    agent_id,
+                    {
+                        "changed": result["changed"],
+                        "lifecycle": payload.lifecycle,
+                        "owner": payload.owner,
+                    },
+                ),
+            )
+        agent = await repo.get_agent(connection, auth.principal, agent_id, window="7d")
+    return agent or {}

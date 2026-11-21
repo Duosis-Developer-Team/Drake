@@ -70,6 +70,13 @@ export interface Agent {
   cost_usd: number;
   unpriced_tokens: number;
   guardrails_firing?: number;
+  purpose?: string | null;
+  owner?: { id: string; name: string | null } | null;
+  lifecycle_changed_at?: string | null;
+  lifecycle_changed_by?: string | null;
+  shadow?: boolean;
+  seen_after_retirement?: boolean;
+  can_manage?: boolean;
   providers: { provider: string; calls: number }[];
   models: AgentModel[];
   series: AgentPoint[];
@@ -116,6 +123,15 @@ export interface AgentInventory {
     cost_usd: number;
     unpriced_tokens: number;
     guardrails_firing?: number;
+    governance?: {
+      approved: number;
+      review: number;
+      retired: number;
+      shadow: number;
+      no_owner: number;
+      seen_after_retirement: number;
+    };
+    can_manage?: boolean;
   };
 }
 
@@ -126,8 +142,13 @@ export interface AgentConnect {
   content_capture: string;
 }
 
-export const fetchAgents = (window: Window) =>
-  apiGet<AgentInventory>(`/v1/agents?window=${window}`);
+export const fetchAgents = (
+  window: Window,
+  lifecycle: "active" | "all" = "active",
+) =>
+  apiGet<AgentInventory>(
+    `/v1/agents?window=${window}${lifecycle === "all" ? "&lifecycle=all" : ""}`,
+  );
 export const fetchAgent = (id: string, window: Window = "7d") =>
   apiGet<AgentDetail>(`/v1/agents/${encodeURIComponent(id)}?window=${window}`);
 export const fetchConnect = () => apiGet<AgentConnect>("/v1/agents/connect");
@@ -753,3 +774,17 @@ export const toInput = (kind: GuardKind, threshold: number) =>
   kind === "failure_ratio" ? Math.round(threshold * 10000) / 100 : threshold;
 export const fromInput = (kind: GuardKind, value: number) =>
   kind === "failure_ratio" ? value / 100 : value;
+
+// --- governance (phase 5) ----------------------------------------------------
+
+export type Lifecycle = "observed" | "approved" | "retired";
+
+export const setGovernance = (
+  csrfToken: string,
+  id: string,
+  body: { lifecycle?: Lifecycle; owner?: "me" | "none"; purpose?: string },
+) =>
+  apiMutate<AgentDetail>(`/v1/agents/${encodeURIComponent(id)}/governance`, {
+    csrfToken,
+    body,
+  });

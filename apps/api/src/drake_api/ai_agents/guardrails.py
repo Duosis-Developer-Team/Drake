@@ -35,7 +35,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from drake_api.ai_agents import repository as repo
-from drake_api.catalog.authz import visible_scope_ids
 from drake_api.rbac.service import Principal
 
 logger = logging.getLogger(__name__)
@@ -392,31 +391,6 @@ class GuardrailEvaluator:
 # --- reading and setting -----------------------------------------------------------
 
 
-async def _may_manage(
-    connection: AsyncConnection, principal: Principal, project_id: uuid.UUID | None
-) -> bool:
-    scopes = set(await visible_scope_ids(connection, principal, MANAGE))
-    if not scopes:
-        return False
-    if project_id is None:
-        root = (
-            await connection.execute(
-                text(
-                    "SELECT id FROM scopes "
-                    "WHERE scope_type = 'organization' AND external_ref = 'root'"
-                )
-            )
-        ).scalar_one_or_none()
-        return root is not None and root in scopes
-    projects = set(await visible_scope_ids(connection, principal, "project.view"))
-    scope = (
-        await connection.execute(
-            text("SELECT scope_id FROM projects WHERE id = :p"), {"p": project_id}
-        )
-    ).scalar_one_or_none()
-    return scope is not None and scope in scopes and scope in projects
-
-
 async def read(
     connection: AsyncConnection, principal: Principal, agent_id: uuid.UUID
 ) -> dict[str, Any] | None:
@@ -467,7 +441,7 @@ async def read(
         )
     return {
         "agent_id": str(agent_id),
-        "can_manage": await _may_manage(connection, principal, project[0]),
+        "can_manage": await repo.may_manage(connection, principal, project[0]),
         "pages": project[0] is not None and project[1] is not None,
         "min_calls": MIN_CALLS,
         "items": items,
@@ -493,7 +467,7 @@ async def put(
             text("SELECT project_id FROM agents WHERE id = :id"), {"id": agent_id}
         )
     ).scalar_one_or_none()
-    if not await _may_manage(connection, principal, project_id):
+    if not await repo.may_manage(connection, principal, project_id):
         raise GuardrailError("not_found", 404)
     check(kind, threshold, severity)
     await connection.execute(
@@ -529,7 +503,7 @@ async def remove(
             text("SELECT project_id FROM agents WHERE id = :id"), {"id": agent_id}
         )
     ).scalar_one_or_none()
-    if not await _may_manage(connection, principal, project_id):
+    if not await repo.may_manage(connection, principal, project_id):
         raise GuardrailError("not_found", 404)
     row = (
         await connection.execute(
