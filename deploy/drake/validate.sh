@@ -313,11 +313,41 @@ for svc in kinds.get("Service", []):
 # The application Ingress, plus — when agentIngest is on — the agents' OTLP
 # door: same host, class and certificate, one path, nothing else.
 ingresses = kinds.get("Ingress", [])
-app = [i for i in ingresses if i["metadata"]["name"] != "drake-otlp"]
+AUX = ("drake-otlp", "drake-redirect", "drake-redirect-keep")
+app = [i for i in ingresses if i["metadata"]["name"] not in AUX]
 otlp = [i for i in ingresses if i["metadata"]["name"] == "drake-otlp"]
 if len(app) != 1:
     die(f"expected exactly one application Ingress, found {len(app)}")
 ing = app[0]
+# Former names: a 308 to the public origin, and nothing else — except the
+# kept paths, which may only reach the API.
+canonical = ing["spec"]["rules"][0]["host"]
+app_secret = (ing["spec"].get("tls") or [{}])[0].get("secretName")
+for name in ("drake-redirect", "drake-redirect-keep"):
+    for aux in [i for i in ingresses if i["metadata"]["name"] == name]:
+        if aux["spec"].get("ingressClassName") != "drake-nginx":
+            die(f"{name} must use Drake's own class")
+        if (aux["spec"].get("tls") or [{}])[0].get("secretName") != app_secret:
+            die(f"{name} must use the application certificate")
+        hosts = [r["host"] for r in aux["spec"]["rules"]]
+        if canonical in hosts:
+            die(f"{name} must not claim the public name")
+        notes = aux["metadata"].get("annotations") or {}
+        if "nginx.ingress.kubernetes.io/rewrite-target" in notes:
+            die(f"{name} must not rewrite paths")
+        if name == "drake-redirect":
+            if notes.get("nginx.ingress.kubernetes.io/permanent-redirect") != f"https://{canonical}:30773$request_uri":
+                die("drake-redirect must send former names to the public origin, path kept")
+            if notes.get("nginx.ingress.kubernetes.io/permanent-redirect-code") != "308":
+                die("drake-redirect must be a permanent 308")
+        else:
+            backends = {
+                p["backend"]["service"]["name"]
+                for r in aux["spec"]["rules"]
+                for p in r["http"]["paths"]
+            }
+            if backends != {"drake-api"}:
+                die("kept paths on former names may only reach the API")
 for door in otlp:
     rule = door["spec"]["rules"][0]
     if rule["host"] != ing["spec"]["rules"][0]["host"]:

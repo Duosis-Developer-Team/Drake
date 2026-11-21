@@ -2,7 +2,8 @@
 # only reference a TLS Secret in its own namespace, and the chart names
 # this Secret in `ingress.tls.secretName`.
 #
-# One name, matching `ingress.host` and `publicOrigin` exactly. A
+# The public name first, matching `ingress.host` and `publicOrigin`
+# exactly; then the former names in `ingress.redirectHosts`. A
 # certificate for a name the deployment does not serve proves nothing, and
 # a name served without a certificate is what kept the catalog empty.
 apiVersion: cert-manager.io/v1
@@ -13,6 +14,8 @@ metadata:
 spec:
   secretName: drake-edge-tls
   dnsNames:
+    - tracesis-84-247-180-173.sslip.io
+    # The former name, still served: it redirects to the one above.
     - drake-84-247-180-173.sslip.io
   issuerRef:
     name: letsencrypt-prod

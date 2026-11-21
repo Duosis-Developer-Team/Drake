@@ -62,7 +62,8 @@ def by_kind(docs: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
 
 def app_ingress(docs: list[dict[str, Any]]) -> dict[str, Any]:
     """The application's Ingress; the agents' `/otlp` door is a separate one."""
-    (ingress,) = [i for i in by_kind(docs, "Ingress") if i["metadata"]["name"] != "drake-otlp"]
+    aux = ("drake-otlp", "drake-redirect", "drake-redirect-keep")
+    (ingress,) = [i for i in by_kind(docs, "Ingress") if i["metadata"]["name"] not in aux]
     return ingress
 
 
@@ -1582,7 +1583,7 @@ def test_the_ingress_host_carries_no_port() -> None:
     ingress = app_ingress(render_prod())
     host = ingress["spec"]["rules"][0]["host"]
     assert ":" not in host
-    assert host == "drake-84-247-180-173.sslip.io"
+    assert host == "tracesis-84-247-180-173.sslip.io"
 
 
 def test_production_serves_a_real_certificate_for_the_host_it_answers_on() -> None:
@@ -1610,7 +1611,7 @@ def test_the_public_origin_keeps_its_port() -> None:
     env = {
         e["name"]: e.get("value") for e in api["spec"]["template"]["spec"]["containers"][0]["env"]
     }
-    origin = "https://drake-84-247-180-173.sslip.io:30773"
+    origin = "https://tracesis-84-247-180-173.sslip.io:30773"
     assert env["DRAKE_PUBLIC_ORIGIN"] == origin
     assert env["DRAKE_ALLOWED_WEB_ORIGINS"] == f'["{origin}"]'
     assert env["DRAKE_OIDC_REDIRECT_URL"] == f"{origin}/v1/auth/callback"
@@ -1618,9 +1619,7 @@ def test_the_public_origin_keeps_its_port() -> None:
 
 
 def test_one_origin_routes_v1_to_the_api_and_everything_else_to_the_web() -> None:
-    (ingress,) = [
-        i for i in by_kind(render_prod(), "Ingress") if i["metadata"]["name"] != "drake-otlp"
-    ]
+    ingress = app_ingress(render_prod())
     paths = {
         p["path"]: (p["pathType"], p["backend"]["service"]["name"])
         for p in ingress["spec"]["rules"][0]["http"]["paths"]
@@ -2100,7 +2099,7 @@ def test_every_application_workload_carries_the_runtime_security_env(
     """Rendered, per container — not "the helper exists"."""
     docs = render_listener()
     env = _env_of(docs, workload, container)
-    origin = "https://drake-84-247-180-173.sslip.io:30773"
+    origin = "https://tracesis-84-247-180-173.sslip.io:30773"
 
     for name in _RUNTIME_SECURITY_ENV:
         assert name in env, f"{workload}/{container} is missing {name}"
@@ -2127,7 +2126,7 @@ def test_the_listener_env_actually_satisfies_the_production_validator() -> None:
     from drake_api.settings import Settings
 
     docs = render_listener()
-    origin = "https://drake-84-247-180-173.sslip.io:30773"
+    origin = "https://tracesis-84-247-180-173.sslip.io:30773"
 
     for container in ("enroll", "ingest"):
         env = {
@@ -2159,7 +2158,7 @@ def test_dropping_either_variable_reproduces_the_production_failure(dropped: str
     """
     from drake_api.settings import Settings
 
-    origin = "https://drake-84-247-180-173.sslip.io:30773"
+    origin = "https://tracesis-84-247-180-173.sslip.io:30773"
     complete = {
         "env": "production",
         "public_origin": origin,
@@ -2450,3 +2449,27 @@ def test_the_agent_door_routes_otlp_to_the_gateway_unrewritten() -> None:
     # The API's own route is untouched.
     main = next(doc for doc in by_kind(docs, "Ingress") if doc["metadata"]["name"] == "drake")
     assert {p["path"] for p in main["spec"]["rules"][0]["http"]["paths"]} == {"/v1", "/"}
+
+
+def test_the_former_name_redirects_and_keeps_only_the_webhook_path() -> None:
+    """Renamed to Tracesis: the old sslip.io name is a 308 to the new
+    origin, path kept — except GitHub's webhook path, which GitHub will
+    not follow through a redirect."""
+    docs = render_prod()
+    by_name = {i["metadata"]["name"]: i for i in by_kind(docs, "Ingress")}
+    redirect, keep = by_name["drake-redirect"], by_name["drake-redirect-keep"]
+    notes = redirect["metadata"]["annotations"]
+    assert notes["nginx.ingress.kubernetes.io/permanent-redirect"] == (
+        "https://tracesis-84-247-180-173.sslip.io:30773$request_uri"
+    )
+    assert notes["nginx.ingress.kubernetes.io/permanent-redirect-code"] == "308"
+    for aux in (redirect, keep):
+        assert [r["host"] for r in aux["spec"]["rules"]] == ["drake-84-247-180-173.sslip.io"]
+        assert aux["spec"]["tls"][0]["secretName"] == "drake-edge-tls"
+        assert aux["spec"]["ingressClassName"] == "drake-nginx"
+    kept = [
+        (p["path"], p["backend"]["service"]["name"])
+        for r in keep["spec"]["rules"]
+        for p in r["http"]["paths"]
+    ]
+    assert kept == [("/v1/github/", "drake-api")]
