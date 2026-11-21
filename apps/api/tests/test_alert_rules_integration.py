@@ -606,3 +606,64 @@ async def test_rules_are_invisible_and_unwritable_without_a_grant(engine: AsyncE
         assert create.status_code == 404
         # Writes need CSRF before anything else is considered.
         assert (await client.delete(f"/v1/alert-rules/{rule}")).status_code in (401, 403)
+
+
+async def test_disabling_or_deleting_a_firing_rule_closes_its_incident(
+    engine: AsyncEngine,
+) -> None:
+    """A rule nobody evaluates any more must not leave its incident open.
+
+    Disabled or deleted, the rule is never judged again, so nothing else
+    would ever resolve what it opened: the page stayed open for a condition
+    nobody watches.
+    """
+    harness = harness_with_users()
+    world = await make_world(engine)
+    disabled = await make_rule(engine, world, for_seconds=0)
+    deleted = await make_rule(engine, world, for_seconds=0, scope="environment")
+    await feed(engine, world, [0.4], NOW - timedelta(minutes=5))
+    assert [i[1] for i in await rule_incidents(engine, disabled)] == ["open"]
+    assert [i[1] for i in await rule_incidents(engine, deleted)] == ["open"]
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+        async with engine.connect() as connection:
+            version = (
+                await connection.execute(
+                    text("SELECT version FROM alert_rules WHERE id = :r"), {"r": disabled}
+                )
+            ).scalar_one()
+        off = await client.post(
+            f"/v1/alert-rules/{disabled}",
+            json={"enabled": False, "expected_version": version},
+            headers=await _csrf(client),
+        )
+        assert off.status_code == 200, off.text
+        gone = await client.delete(f"/v1/alert-rules/{deleted}", headers=await _csrf(client))
+        assert gone.status_code in (200, 204), gone.text
+
+    for rule, reason in ((disabled, "rule_disabled"), (deleted, "rule_deleted")):
+        incidents = await rule_incidents(engine, rule)
+        assert [i[1:] for i in incidents] == [("resolved", "rule", "rule_resolved")]
+        async with engine.connect() as connection:
+            detail = (
+                await connection.execute(
+                    text(
+                        "SELECT detail FROM incident_events "
+                        "WHERE incident_id = :i AND event_type = 'auto_resolved'"
+                    ),
+                    {"i": incidents[0][0]},
+                )
+            ).scalar_one()
+        assert detail == {"source": "rule", "reason": reason}
+
+    # Disabled, the rule holds nothing: re-enabled, it starts from ok.
+    async with engine.connect() as connection:
+        state = (
+            await connection.execute(
+                text("SELECT state, incident_id FROM alert_rule_states WHERE rule_id = :r"),
+                {"r": disabled},
+            )
+        ).one()
+    assert tuple(state) == ("ok", None)

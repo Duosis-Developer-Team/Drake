@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 
 from drake_api.settings import ObservabilityStoreConnector, Settings
-from drake_api.telemetry.provider import validate_connector
+from drake_api.telemetry.provider import ConnectorRefusedError, validate_connector
 
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
@@ -95,7 +95,12 @@ class ClickHouseStore:
         connector = self.connector
         if connector is None:
             raise StoreUnavailableError("store_not_configured")
-        base_url = await validate_connector(connector, self._settings)
+        try:
+            base_url = await validate_connector(connector, self._settings)
+        except ConnectorRefusedError as error:
+            # The SSRF boundary refused the target: for every caller that is
+            # "the store cannot be reached", never an unhandled 500.
+            raise StoreUnavailableError(error.code) from error
         timeout_seconds = min(timeout_seconds, connector.timeout_seconds)
 
         params: dict[str, str] = {f"param_{key}": value for key, value in parameters.items()}

@@ -14,12 +14,13 @@ No read here queries the metrics provider.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from drake_api.alert_rules.evaluator import close_rule_incidents
 from drake_api.alert_rules.model import (
     ANOMALY_OPERATORS,
     BASELINE_DAYS,
@@ -420,6 +421,16 @@ async def update_rule(
     # A changed condition starts from a clean slate: a half-held breach of
     # the old threshold says nothing about the new one.
     condition_keys = ("signal", "operator", "threshold", "for_seconds", "log_contains", "route")
+    if current["enabled"] and not merged["enabled"]:
+        # Disabled: never evaluated again, so it lets go of what it holds.
+        await close_rule_incidents(connection, rule_id, datetime.now(UTC), "rule_disabled")
+        await connection.execute(
+            text(
+                "UPDATE alert_rule_states SET state = 'ok', breach_since = NULL, "
+                "firing_since = NULL, incident_id = NULL WHERE rule_id = :id"
+            ),
+            {"id": rule_id},
+        )
     if any(merged[k] != current[k] for k in condition_keys):
         await connection.execute(
             text(
@@ -457,6 +468,7 @@ async def delete_rule(
     connection: AsyncConnection, principal: Principal, rule_id: uuid.UUID
 ) -> None:
     await get_rule(connection, principal, rule_id, MANAGE_PERMISSION)
+    await close_rule_incidents(connection, rule_id, datetime.now(UTC), "rule_deleted")
     await connection.execute(text("DELETE FROM alert_rules WHERE id = :id"), {"id": rule_id})
 
 

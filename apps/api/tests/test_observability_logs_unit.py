@@ -339,3 +339,23 @@ def test_logs_view_is_a_distinct_permission_held_only_by_the_owner_template() ->
     assert "logs.view" in PERMISSIONS
     holders = [name for name, (_, keys) in ROLE_TEMPLATES.items() if "logs.view" in keys]
     assert holders == ["Platform Owner"]
+
+
+def test_a_refused_connector_target_reads_as_unavailable(tmp_path: Path) -> None:
+    """The SSRF boundary's refusal is the store being unreachable.
+
+    It used to escape as ConnectorRefusedError, which no route caught, so
+    the caller got a bare 500 instead of the `unavailable` state.
+    """
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, json={"data": []})
+
+    # Link-local (the cloud metadata range) is refused in every environment.
+    settings = _settings(tmp_path, url="http://169.254.169.254:8123")
+    with pytest.raises(StoreUnavailableError) as raised:
+        _store_query(settings, handler)
+    assert raised.value.code == "connector_target_refused"
+    assert calls == []
