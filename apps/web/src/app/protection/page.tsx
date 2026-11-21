@@ -52,6 +52,7 @@ import {
   type RecoverabilityState,
 } from "@/lib/protection";
 import { formatWindowWith } from "@/components/protection/format";
+import { ReporterSetup } from "@/components/protection/ReporterSetup";
 
 const BACKUP_STATES: BackupState[] = [
   "protected",
@@ -299,7 +300,9 @@ function PolicyRow({ policy }: { policy: ProtectionPolicy }) {
             )}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="text-micro text-ink-muted">{t("row.restore")}</span>
+            <span className="text-micro text-ink-muted">
+              {t("row.restore")}
+            </span>
             {evaluation ? (
               <RecoverabilityBadge state={evaluation.recoverability_state} />
             ) : (
@@ -469,9 +472,14 @@ function ProtectionTable() {
 
   return (
     <div className="flex flex-col gap-6">
-      {summary.state === "ready" ? (
+      {summary.state === "ready" && summary.data.total_policies > 0 ? (
         <SummaryStats summary={summary.data} />
       ) : null}
+      <ReporterSetup
+        emphasis={
+          summary.state === "ready" && summary.data.total_policies === 0
+        }
+      />
       {summary.state === "ready" ? (
         <div className="page-split">
           {list}
@@ -488,10 +496,7 @@ export default function ProtectionPage() {
   const t = useT("protection");
   return (
     <PageFrame>
-      <PageHeader
-        title={t("page.title")}
-        description={t("page.description")}
-      />
+      <PageHeader title={t("page.title")} description={t("page.description")} />
       <Suspense fallback={<DataState kind="loading" />}>
         <ProtectionTable />
       </Suspense>

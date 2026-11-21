@@ -245,3 +245,43 @@ export function formatWindow(seconds: number | null): string {
   if (seconds % 3600 === 0) return `${seconds / 3600}h`;
   return `${Math.round(seconds / 60)}m`;
 }
+
+export interface ReporterPolicy {
+  policy_key: string;
+  display_name: string;
+  environment_key: string | null;
+  store_kind: string | null;
+  schedule: string | null;
+  rpo_seconds: number | null;
+  requires_offsite: boolean;
+  requires_integrity_check: boolean;
+  /** Whether the policy exists in this deployment yet. */
+  created: boolean;
+}
+
+export interface ReporterStatus {
+  connector_key: string;
+  display_name: string;
+  project_key: string;
+  project_id: string | null;
+  registered: boolean;
+  secret_present: boolean;
+  last_seen_at: string | null;
+  state: "reporting" | "waiting" | "not_registered";
+  policies: ReporterPolicy[];
+}
+
+export interface ConnectorStatus {
+  evaluating: boolean;
+  reporters: ReporterStatus[];
+  signing: {
+    connector_header: string;
+    timestamp_header: string;
+    signature_header: string;
+    algorithm: string;
+    signed_material: string;
+    signature_format: string;
+    endpoint: string;
+    event_types: string[];
+  };
+}

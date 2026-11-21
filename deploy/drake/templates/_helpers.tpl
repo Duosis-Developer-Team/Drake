@@ -76,6 +76,20 @@ imagePullSecrets:
       "password_file" (printf "%s/reader-password" .Values.observability.secretMountPath)) -}}
 {{- end -}}
 
+{{/* Backup reporters registered in this deployment, as the settings model
+expects them. Each signing secret is a FILE reference into its own Secret
+mount; the value never becomes an environment variable. */}}
+{{- define "drake.protectionConnectors" -}}
+{{- $out := dict -}}
+{{- range $key, $connector := (.Values.protection).connectors -}}
+{{- $_ := set $out $key (dict
+      "project_key" (required (printf "protection.connectors.%s.projectKey is required" $key) $connector.projectKey)
+      "display_name" (default $key $connector.displayName)
+      "signing_secret_file" (printf "%s/%s/signing-secret" ($.Values.protection.secretMountPath | default "/etc/drake/protection") $key)) -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
 {{/* Alertmanager integrations, as the settings model expects them.
 
      Same translation as the telemetry connectors: camelCase in values,

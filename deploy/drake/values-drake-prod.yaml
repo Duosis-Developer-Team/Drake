@@ -425,6 +425,15 @@ incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
 
+# Backup posture (2026-11-21). Judged on a timer so silence reads as
+# overdue. No reporter is registered yet: each team adds theirs here with
+# its own Secret (see the Protection screen's setup guide), and only then
+# are its declared policies created.
+protection:
+  evaluationEnabled: true
+  evaluationIntervalSeconds: 300
+  connectors: {}
+
 # Notification policies (ADR-0024), inside Drake only (2026-11-20). The
 # planner turns incident events into in-app notifications for the people a
 # policy names; that is the whole effect, and only once a policy exists.
