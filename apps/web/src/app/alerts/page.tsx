@@ -19,14 +19,11 @@ import {
   BellOff,
   BellRing,
   CheckCircle2,
-  Link2Off,
   Siren,
   VolumeX,
-  Zap,
-  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import {
@@ -36,14 +33,13 @@ import {
   StatusPill,
 } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
+import { CountTile, ListFooter, useCursorList, useUrlFilters } from "@/components/ops/ListKit";
 import {
   CardTitle,
   EmptyHero,
   FactPill,
-  KpiTile,
   PillSelect,
   RowBubble,
-  ShareBar,
   StatePad,
   Toolbar,
 } from "@/components/incidents/OpsKit";
@@ -57,10 +53,8 @@ import {
   type AlertInstance,
   type AlertStatus,
   type AlertSummary,
-  type Page,
   type Priority,
 } from "@/lib/alerting";
-import { toneSpec, type StatusTone } from "@/lib/design/status";
 import { useFormat, useT } from "@/lib/i18n";
 
 const STATUSES: AlertStatus[] = ["firing", "resolved"];
@@ -155,89 +149,28 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
   );
 }
 
-/** One priority lane in the side breakdown: label, bar, count. */
-function PriorityLane({
-  label,
-  count,
-  total,
-  tone,
-}: {
-  label: string;
-  count: number;
-  total: number;
-  tone: StatusTone;
-}) {
-  return (
-    <li className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2 text-caption font-medium text-ink-secondary">
-          <span
-            aria-hidden
-            className={`h-2 w-2 shrink-0 rounded-full ${toneSpec(tone).dot}`}
-          />
-          <span className="truncate">{label}</span>
-        </span>
-        <span data-tabular className="text-body font-semibold text-ink">
-          {count}
-        </span>
-      </div>
-      <ShareBar
-        share={total > 0 ? count / total : null}
-        tone={tone}
-        className="h-2"
-      />
-    </li>
-  );
-}
 
-function MiniStat({
-  icon: Icon,
-  label,
-  count,
-  tone,
-  "data-testid": testId,
-}: {
-  icon: LucideIcon;
-  label: string;
-  count: number;
-  tone: StatusTone;
-  "data-testid": string;
-}) {
-  return (
-    <div
-      data-testid={testId}
-      className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 px-4 py-3"
-    >
-      <span
-        aria-hidden
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-          count > 0 ? toneSpec(tone).chip : "bg-surface-3 text-ink-muted"
-        }`}
-      >
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-caption text-ink-secondary">
-        {label}
-      </span>
-      <span data-tabular className="text-title font-semibold text-ink">
-        {count}
-      </span>
-    </div>
-  );
-}
+
+const FILTER_KEYS = ["status", "priority", "mapping_state"] as const;
 
 function AlertsInner() {
   const t = useT("alerting");
-  const [status, setStatus] = useState<string>("firing");
-  const [priority, setPriority] = useState<string>("");
+  const [filters, update] = useUrlFilters(FILTER_KEYS);
+  // Firing is the default view; "any" is an explicit choice in the URL.
+  const status = filters.status === "any" ? "" : (STATUSES as readonly string[]).includes(filters.status) ? filters.status : "firing";
+  const priority = (PRIORITIES as readonly string[]).includes(filters.priority) ? filters.priority : "";
+  const mapping = filters.mapping_state === "unmapped" ? "unmapped" : "";
   const [summary] = useApi<AlertSummary>("/v1/alerts/summary");
-  const [page, retry] = useApi<Page<AlertInstance>>(
-    alertListPath({ status, priority }),
+  const [list, retry] = useCursorList<AlertInstance>(
+    alertListPath({ status, priority, mapping_state: mapping }),
+    { paging: "offset" },
   );
 
   const firing = summary.state === "ready" ? summary.data.firing : 0;
-  const shareOfFiring = (count: number) => (firing > 0 ? count / firing : null);
   const ofFiring = firing > 0 ? t("list.kpi.ofFiring", { count: firing }) : t("list.kpi.nothingFiring");
+  const firingOnly = status === "firing" && !priority && !mapping;
+  const pick = (patch: { priority?: string; mapping_state?: string }) =>
+    update({ status: "firing", priority: "", mapping_state: "", ...patch });
 
   return (
     <PageFrame>
@@ -255,46 +188,61 @@ function AlertsInner() {
             <DataState kind="error" description={summary.message} />
           </Panel>
         ) : (
-          <div
-            className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
-            data-testid="alerts-now"
-          >
-            <KpiTile
-              data-testid="alerting-kpi-firing"
-              label={t("list.kpi.firing")}
-              value={summary.data.firing}
-              icon={BellRing}
-              tone="critical"
-              share={firing > 0 ? summary.data.with_incident / firing : null}
-              caption={t("list.kpi.firingCaption", { count: summary.data.with_incident })}
-            />
-            <KpiTile
-              data-testid="alerting-kpi-p1"
-              label={t("list.kpi.p1")}
-              value={summary.data.p1}
-              icon={Zap}
-              tone="critical"
-              share={shareOfFiring(summary.data.p1)}
-              caption={ofFiring}
-            />
-            <KpiTile
-              data-testid="alerting-kpi-p2"
-              label={t("list.kpi.p2")}
-              value={summary.data.p2}
-              icon={Siren}
-              tone="warning"
-              share={shareOfFiring(summary.data.p2)}
-              caption={ofFiring}
-            />
-            <KpiTile
-              data-testid="alerting-kpi-unmapped"
-              label={t("list.kpi.unmapped")}
-              value={summary.data.unmapped}
-              icon={Link2Off}
-              tone="warning"
-              share={shareOfFiring(summary.data.unmapped)}
-              caption={t("list.kpi.unmappedCaption")}
-            />
+          <div data-testid="alerts-now" className="flex flex-col gap-2">
+            <div data-testid="alert-summary" className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <CountTile
+                  data-testid="alerting-kpi-firing"
+                  label={t("list.kpi.firing")}
+                  value={summary.data.firing}
+                  tone="critical"
+                  active={firingOnly}
+                  onClick={() => pick({})}
+                  caption={t("list.kpi.firingCaption", { count: summary.data.with_incident })}
+                />
+                <CountTile
+                  data-testid="alerting-kpi-p1"
+                  label={t("list.kpi.p1")}
+                  value={summary.data.p1}
+                  tone="critical"
+                  active={priority === "P1"}
+                  onClick={() => pick({ priority: priority === "P1" ? "" : "P1" })}
+                  caption={ofFiring}
+                />
+                <CountTile
+                  data-testid="alerting-kpi-p2"
+                  label={t("list.kpi.p2")}
+                  value={summary.data.p2}
+                  tone="warning"
+                  active={priority === "P2"}
+                  onClick={() => pick({ priority: priority === "P2" ? "" : "P2" })}
+                  caption={ofFiring}
+                />
+                <CountTile
+                  data-testid="alerting-kpi-unmapped"
+                  label={t("list.kpi.unmapped")}
+                  value={summary.data.unmapped}
+                  tone="warning"
+                  active={mapping === "unmapped"}
+                  onClick={() => pick({ mapping_state: mapping ? "" : "unmapped" })}
+                  caption={t("list.kpi.unmappedCaption")}
+                />
+              </div>
+              <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-caption text-ink-muted">
+                <span data-testid="count-silenced" className="inline-flex items-center gap-1.5">
+                  <VolumeX className="h-3.5 w-3.5" aria-hidden />
+                  {t("list.now.silenced")} <b className="font-semibold text-ink">{summary.data.silenced}</b>
+                </span>
+                <span data-testid="count-with-incident" className="inline-flex items-center gap-1.5">
+                  <Siren className="h-3.5 w-3.5" aria-hidden />
+                  {t("list.now.withIncident")} <b className="font-semibold text-ink">{summary.data.with_incident}</b>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  {t("list.now.other")}{" "}
+                  <b className="font-semibold text-ink">{Math.max(0, firing - summary.data.p1 - summary.data.p2)}</b>
+                </span>
+              </p>
+            </div>
           </div>
         )}
 
@@ -302,8 +250,8 @@ function AlertsInner() {
             no way to type a matcher, a regex or a PromQL fragment. */}
         <Toolbar
           summary={
-            page.state === "ready"
-              ? t("list.shown", { shown: page.data.items.length, total: page.data.total })
+            list.state === "ready" && list.total !== null
+              ? t("list.shown", { shown: list.items.length, total: list.total })
               : undefined
           }
         >
@@ -312,19 +260,19 @@ function AlertsInner() {
             value={status}
             placeholder={t("list.filter.anyStatus")}
             options={STATUSES.map((value) => ({ value, label: t.dyn("status", value, value) }))}
-            onChange={setStatus}
+            onChange={(value) => update({ status: value || "any" })}
           />
           <PillSelect
             label={t("list.filter.priority")}
             value={priority}
             placeholder={t("list.filter.anyPriority")}
             options={PRIORITIES.map((value) => ({ value, label: PRIORITY_LABELS[value] }))}
-            onChange={setPriority}
+            onChange={(value) => update({ priority: value })}
           />
         </Toolbar>
 
-        <div className="page-split">
-          <div className="page-main">
+        <div>
+          <div>
             <Panel
               flush
               className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
@@ -341,23 +289,19 @@ function AlertsInner() {
                 }
                 description={t("list.heading.description")}
               />
-              {page.state === "loading" ? (
+              {list.state === "loading" ? (
                 <StatePad>
                   <DataState kind="loading" />
                 </StatePad>
-              ) : page.state === "error" ? (
+              ) : list.state === "error" ? (
                 <StatePad>
-                  {page.notFound ? (
+                  {list.denied ? (
                     <DataState kind="permission-denied" />
                   ) : (
-                    <DataState
-                      kind="error"
-                      description={page.message}
-                      onRetry={retry}
-                    />
+                    <DataState kind="error" description={list.message} onRetry={retry} />
                   )}
                 </StatePad>
-              ) : page.data.items.length === 0 ? (
+              ) : list.items.length === 0 ? (
                 <EmptyHero
                   icon={BellOff}
                   title={t("list.empty.title")}
@@ -375,11 +319,11 @@ function AlertsInner() {
               ) : (
                 <>
                   <ul className="divide-y divide-border">
-                    {page.data.items.map((alert) => (
+                    {list.items.map((alert) => (
                       <AlertRow key={alert.id} alert={alert} />
                     ))}
                   </ul>
-                  {page.data.items.some(
+                  {list.items.some(
                     (alert) => alert.mapping_state !== "mapped",
                   ) ? (
                     <div
@@ -389,7 +333,7 @@ function AlertsInner() {
                       <p className="text-caption font-semibold text-ink">
                         {t("list.unmapped.title")}
                       </p>
-                      {page.data.items
+                      {list.items
                         .filter((alert) => alert.mapping_state !== "mapped")
                         .map((alert) => (
                           <div
@@ -409,78 +353,22 @@ function AlertsInner() {
                         ))}
                     </div>
                   ) : null}
+                  <ListFooter
+                    shown={list.items.length}
+                    summary={t("list.shown", { shown: list.items.length, total: list.total ?? list.items.length })}
+                    hasMore={list.hasMore}
+                    loadingMore={list.loadingMore}
+                    moreError={list.moreError}
+                    onMore={list.loadMore}
+                    moreLabel={t("list.more")}
+                    loadingLabel={t("list.loadingMore")}
+                    errorLabel={t("list.moreError")}
+                  />
                 </>
               )}
             </Panel>
           </div>
 
-          {summary.state === "ready" ? (
-            <div className="page-aside">
-              <Panel className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
-                <CardTitle
-                  icon={Siren}
-                  title={t("list.now.title")}
-                  description={t("list.now.description")}
-                />
-                <div
-                  data-testid="alert-summary"
-                  className="flex flex-col gap-6"
-                >
-                  {/* Priority is ordered, so it reads top to bottom. "Other" is
-                    what is firing outside P1/P2 — computed, never negative. */}
-                  <ul
-                    className="space-y-4"
-                    aria-label={t("list.now.ringLabel")}
-                  >
-                    <PriorityLane
-                      label={PRIORITY_LABELS.P1}
-                      count={summary.data.p1}
-                      total={firing}
-                      tone="critical"
-                    />
-                    <PriorityLane
-                      label={PRIORITY_LABELS.P2}
-                      count={summary.data.p2}
-                      total={firing}
-                      tone="warning"
-                    />
-                    <PriorityLane
-                      label={t("list.now.other")}
-                      count={Math.max(
-                        0,
-                        firing - summary.data.p1 - summary.data.p2,
-                      )}
-                      total={firing}
-                      tone="info"
-                    />
-                  </ul>
-                  <div className="grid gap-2.5">
-                    <MiniStat
-                      data-testid="count-silenced"
-                      icon={VolumeX}
-                      label={t("list.now.silenced")}
-                      count={summary.data.silenced}
-                      tone="neutral"
-                    />
-                    <MiniStat
-                      data-testid="count-unmapped"
-                      icon={Link2Off}
-                      label={t("list.now.unmapped")}
-                      count={summary.data.unmapped}
-                      tone="warning"
-                    />
-                    <MiniStat
-                      data-testid="count-with-incident"
-                      icon={Siren}
-                      label={t("list.now.withIncident")}
-                      count={summary.data.with_incident}
-                      tone="info"
-                    />
-                  </div>
-                </div>
-              </Panel>
-            </div>
-          ) : null}
         </div>
       </div>
     </PageFrame>

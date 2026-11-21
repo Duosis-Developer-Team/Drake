@@ -131,10 +131,10 @@ export default function DeploymentDetailPage() {
   const [deployment, retry] = useApi<DeploymentRow>(
     `/v1/deployments/${deploymentId}`,
   );
-  const [revisions] = useApi<{ revisions: RevisionEntry[] }>(
+  const [revisions, retryRevisions] = useApi<{ revisions: RevisionEntry[] }>(
     `/v1/deployments/${deploymentId}/revisions`,
   );
-  const [incidents] = useApi<{ incidents: RelatedIncident[] }>(
+  const [incidents, retryIncidents] = useApi<{ incidents: RelatedIncident[] }>(
     `/v1/deployments/${deploymentId}/incidents`,
   );
 
@@ -492,7 +492,7 @@ export default function DeploymentDetailPage() {
                   className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
                 >
                   <PanelHeader flush title={t("detail.revisions.title")} />
-                  <LoadGate value={revisions} retry={() => undefined}>
+                  <LoadGate value={revisions} retry={retryRevisions}>
                     {(payload) =>
                       payload.revisions.length === 0 ? (
                         <div className="px-7 py-8">
@@ -520,7 +520,7 @@ export default function DeploymentDetailPage() {
                   className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:100ms]"
                 >
                   <PanelHeader flush title={t("detail.incidents.title")} />
-                  <LoadGate value={incidents} retry={() => undefined}>
+                  <LoadGate value={incidents} retry={retryIncidents}>
                     {(payload) =>
                       payload.incidents.length === 0 ? (
                         <div className="px-7 py-8">

@@ -16,22 +16,18 @@ import {
   Eye,
   HeartPulse,
   Inbox,
-  Layers,
   Siren,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
-import { useApi } from "@/components/catalog/primitives";
+import { CountTile, ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
 import {
-  BreakdownRing,
   CardTitle,
   EmptyHero,
   FactPill,
-  KpiTile,
   PillSelect,
   RowBubble,
   StatePad,
@@ -53,7 +49,6 @@ import {
   STATE_LABELS,
   durationSeconds,
   incidentListPath,
-  type IncidentPage,
   type IncidentState,
   type IncidentSummary,
   type OpenedWindow,
@@ -80,7 +75,7 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
   return (
     <li
       data-testid={`incident-row-${incident.service_key}`}
-      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-7 py-4 transition-colors hover:bg-surface-hover md:grid-cols-[auto_minmax(0,1fr)_auto]"
+      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-5 py-3.5 transition-colors hover:bg-surface-hover md:grid-cols-[auto_minmax(0,1fr)_auto]"
     >
       <RowBubble icon={visual.icon} tone={visual.tone} />
       <div className="min-w-0">
@@ -111,7 +106,9 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
           {incident.acknowledged_at ? (
             <span className="text-micro text-ink-muted">
               {t("row.acknowledged")}{" "}
-              <time className="font-mono">{incident.acknowledged_at}</time>
+              <time dateTime={incident.acknowledged_at} title={fmt.utc(incident.acknowledged_at)}>
+                {fmt.relative(incident.acknowledged_at)}
+              </time>
             </span>
           ) : null}
         </div>
@@ -127,7 +124,10 @@ function IncidentRow({ incident }: { incident: IncidentSummary }) {
             {fmt.duration(durationSeconds(incident.opened_at, incident.resolved_at))}
           </div>
           <div>
-            {t("row.opened")} <time className="font-mono">{incident.opened_at}</time>
+            {t("row.opened")}{" "}
+            <time dateTime={incident.opened_at} title={fmt.utc(incident.opened_at)}>
+              {fmt.relative(incident.opened_at)}
+            </time>
           </div>
         </div>
       </div>
@@ -168,8 +168,7 @@ function LifecycleRule() {
     },
   ];
   return (
-    <Panel>
-      <CardTitle icon={Layers} title={t("list.lifecycle.title")} />
+    <div className="space-y-4">
       <ol className="relative space-y-5">
         <span
           aria-hidden
@@ -193,222 +192,180 @@ function LifecycleRule() {
       <p className="rounded-2xl bg-surface-2 px-4 py-3 text-micro text-ink-secondary">
         {t("list.lifecycle.note")}
       </p>
-    </Panel>
+    </div>
   );
 }
 
+const FILTER_KEYS = ["state", "severity", "opened_within", "project_id", "environment_id"] as const;
+
 function IncidentTable() {
   const t = useT("incidents");
-  const params = useSearchParams();
-  const [state, setState] = useState<IncidentState | "">(
-    (params.get("state") as IncidentState) ?? "",
-  );
-  const [openedWithin, setOpenedWithin] = useState<OpenedWindow | "">("");
-  const [severity, setSeverity] = useState<"critical" | "">("");
-
-  const path = incidentListPath({
-    state: state || undefined,
+  const [filters, update] = useUrlFilters(FILTER_KEYS);
+  const state = (INCIDENT_STATES as readonly string[]).includes(filters.state) ? (filters.state as IncidentState) : "";
+  const severity: "critical" | "" = filters.severity === "critical" ? "critical" : "";
+  const openedWithin = (OPENED_WINDOWS as readonly string[]).includes(filters.opened_within)
+    ? (filters.opened_within as OpenedWindow)
+    : "";
+  const scope = {
     severity: severity || undefined,
     openedWithin: openedWithin || undefined,
-    projectId: params.get("project_id") ?? undefined,
-    environmentId: params.get("environment_id") ?? undefined,
-  });
-  const [page, retry] = useApi<IncidentPage>(path);
-
-  const items = page.state === "ready" ? page.data.items : [];
-  const total = items.length;
-  const openCount = items.filter((item) => item.state === "open").length;
-  const ackCount = items.filter((item) => item.state === "acknowledged").length;
-  const resolvedCount = items.filter(
-    (item) => item.state === "resolved",
-  ).length;
-
-  const filters = (
-    <Toolbar
-      summary={
-        page.state === "ready"
-          ? t("list.shown", { shown: total, total: page.data.total })
-          : undefined
-      }
-    >
-      <PillSelect
-        label={t("list.filter.state")}
-        value={state}
-        placeholder={t("list.filter.any")}
-        options={INCIDENT_STATES.map((value) => ({
-          value,
-          label: t.dyn("state", value, STATE_LABELS[value]),
-        }))}
-        onChange={(value) => setState(value as IncidentState | "")}
-      />
-      <PillSelect
-        label={t("list.filter.severity")}
-        value={severity}
-        placeholder={t("list.filter.any")}
-        options={[{ value: "critical" as const, label: t("severity.critical") }]}
-        onChange={(value) => setSeverity(value as "critical" | "")}
-      />
-      <PillSelect
-        label={t("list.filter.openedWithin")}
-        value={openedWithin}
-        placeholder={t("list.filter.anyTime")}
-        options={OPENED_WINDOWS.map((value) => ({
-          value,
-          label: t.dyn("window", value, value),
-        }))}
-        onChange={(value) => setOpenedWithin(value as OpenedWindow | "")}
-      />
-    </Toolbar>
-  );
+    projectId: filters.project_id || undefined,
+    environmentId: filters.environment_id || undefined,
+  };
+  const [list, retry] = useCursorList<IncidentSummary>(incidentListPath({ ...scope, state: state || undefined }));
+  // Server totals for each state under the same filters — not a tally of
+  // whatever page is loaded.
+  const countPath = (value?: IncidentState) => {
+    const path = incidentListPath({ ...scope, state: value });
+    return `${path}${path.includes("?") ? "&" : "?"}limit=1`;
+  };
+  const openTotal = useTotal(countPath("open"));
+  const ackTotal = useTotal(countPath("acknowledged"));
+  const resolvedTotal = useTotal(countPath("resolved"));
+  const allTotal = useTotal(countPath());
+  const toggleState = (value: IncidentState | "") => update({ state: state === value ? "" : value });
 
   return (
-    <div className="flex flex-col gap-6">
-      {page.state === "ready" ? (
-        <div
-          className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]"
-          data-testid="incident-summary"
-        >
-          <KpiTile
-            data-testid="incident-kpi-open"
-            label={t("list.kpi.open")}
-            value={openCount}
-            icon={Siren}
-            tone="critical"
-            share={total > 0 ? openCount / total : null}
-            caption={t("list.kpi.openCaption")}
-          />
-          <KpiTile
-            data-testid="incident-kpi-acknowledged"
-            label={t("list.kpi.acknowledged")}
-            value={ackCount}
-            icon={Eye}
-            tone="warning"
-            share={total > 0 ? ackCount / total : null}
-            caption={t("list.kpi.acknowledgedCaption")}
-          />
-          <KpiTile
-            data-testid="incident-kpi-resolved"
-            label={t("list.kpi.resolved")}
-            value={resolvedCount}
-            icon={CheckCircle2}
-            tone="success"
-            share={total > 0 ? resolvedCount / total : null}
-            caption={t("list.kpi.resolvedCaption")}
-          />
-          <KpiTile
-            data-testid="incident-kpi-shown"
-            label={t("list.kpi.shown")}
-            value={total}
-            icon={Inbox}
-            tone="info"
-            share={page.data.total > 0 ? total / page.data.total : null}
-            caption={t("list.kpi.shownCaption", { total: page.data.total })}
-          />
-        </div>
-      ) : null}
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" data-testid="incident-summary">
+        <CountTile
+          data-testid="incident-kpi-open"
+          label={t("list.kpi.open")}
+          value={openTotal}
+          tone="critical"
+          active={state === "open"}
+          onClick={() => toggleState("open")}
+          caption={t("list.kpi.openCaption")}
+        />
+        <CountTile
+          data-testid="incident-kpi-acknowledged"
+          label={t("list.kpi.acknowledged")}
+          value={ackTotal}
+          tone="warning"
+          active={state === "acknowledged"}
+          onClick={() => toggleState("acknowledged")}
+          caption={t("list.kpi.acknowledgedCaption")}
+        />
+        <CountTile
+          data-testid="incident-kpi-resolved"
+          label={t("list.kpi.resolved")}
+          value={resolvedTotal}
+          tone="success"
+          active={state === "resolved"}
+          onClick={() => toggleState("resolved")}
+          caption={t("list.kpi.resolvedCaption")}
+        />
+        <CountTile
+          data-testid="incident-kpi-all"
+          label={t("list.kpi.all")}
+          value={allTotal}
+          tone="neutral"
+          active={state === ""}
+          onClick={() => update({ state: "" })}
+          caption={t("list.kpi.allCaption")}
+        />
+      </div>
 
-      {filters}
+      <Toolbar summary={list.state === "ready" && list.total !== null ? t("list.shown", { shown: list.items.length, total: list.total }) : undefined}>
+        <PillSelect
+          label={t("list.filter.state")}
+          value={state}
+          placeholder={t("list.filter.any")}
+          options={INCIDENT_STATES.map((value) => ({
+            value,
+            label: t.dyn("state", value, STATE_LABELS[value]),
+          }))}
+          onChange={(value) => update({ state: value })}
+        />
+        <PillSelect
+          label={t("list.filter.severity")}
+          value={severity}
+          placeholder={t("list.filter.any")}
+          options={[{ value: "critical" as const, label: t("severity.critical") }]}
+          onChange={(value) => update({ severity: value })}
+        />
+        <PillSelect
+          label={t("list.filter.openedWithin")}
+          value={openedWithin}
+          placeholder={t("list.filter.anyTime")}
+          options={OPENED_WINDOWS.map((value) => ({
+            value,
+            label: t.dyn("window", value, value),
+          }))}
+          onChange={(value) => update({ opened_within: value })}
+        />
+      </Toolbar>
 
-      <div className="page-split">
-        <div className="page-main">
-          <Panel
-            flush
-            className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
-          >
-            <CardTitle
-              flush
-              icon={Siren}
-              title={t("list.queue.title")}
-              description={t("list.queue.description")}
+      <Panel flush>
+        <CardTitle
+          flush
+          icon={Siren}
+          title={t("list.queue.title")}
+          description={t("list.queue.description")}
+        />
+        {list.state === "loading" ? (
+          <StatePad>
+            <DataState kind="loading" />
+          </StatePad>
+        ) : null}
+        {list.state === "error" ? (
+          <StatePad>
+            {/* Permission denied and "request failed" are different answers
+                and get different screens. */}
+            {list.denied ? (
+              <DataState kind="permission-denied" description={t("list.forbidden")} />
+            ) : (
+              <DataState kind="error" description={list.message} onRetry={retry} />
+            )}
+          </StatePad>
+        ) : null}
+        {list.state === "ready" && list.items.length === 0 ? (
+          <EmptyHero icon={Inbox} title={t("list.empty.title")} description={t("list.empty.description")}>
+            <FactPill>
+              {t("list.empty.state", {
+                value: state ? t.dyn("state", state, STATE_LABELS[state]) : t("list.empty.any"),
+              })}
+            </FactPill>
+            <FactPill>
+              {t("list.empty.severity", {
+                value: severity ? t("severity.critical") : t("list.empty.any"),
+              })}
+            </FactPill>
+            <FactPill>
+              {t("list.empty.opened", {
+                value: openedWithin ? t.dyn("window", openedWithin, openedWithin) : t("list.empty.anyTime"),
+              })}
+            </FactPill>
+          </EmptyHero>
+        ) : null}
+        {list.state === "ready" && list.items.length > 0 ? (
+          <>
+            <ul className="divide-y divide-border" data-testid="incident-table">
+              {list.items.map((incident) => (
+                <IncidentRow key={incident.id} incident={incident} />
+              ))}
+            </ul>
+            <ListFooter
+              shown={list.items.length}
+              summary={t("list.footer", { shown: list.items.length, total: list.total ?? list.items.length })}
+              hasMore={list.hasMore}
+              loadingMore={list.loadingMore}
+              moreError={list.moreError}
+              onMore={list.loadMore}
+              moreLabel={t("list.more")}
+              loadingLabel={t("list.loadingMore")}
+              errorLabel={t("list.moreError")}
             />
-            {page.state === "loading" ? (
-              <StatePad>
-                <DataState kind="loading" />
-              </StatePad>
-            ) : null}
-            {page.state === "error" ? (
-              <StatePad>
-                {/* Permission denied and "request failed" are different answers
-                  and get different screens. */}
-                {page.notFound ? (
-                  <DataState
-                    kind="permission-denied"
-                    description={t("list.forbidden")}
-                  />
-                ) : (
-                  <DataState
-                    kind="error"
-                    description={page.message}
-                    onRetry={retry}
-                  />
-                )}
-              </StatePad>
-            ) : null}
-            {page.state === "ready" && total === 0 ? (
-              <EmptyHero
-                icon={Inbox}
-                title={t("list.empty.title")}
-                description={t("list.empty.description")}
-              >
-                <FactPill>
-                  {t("list.empty.state", {
-                    value: state ? t.dyn("state", state, STATE_LABELS[state]) : t("list.empty.any"),
-                  })}
-                </FactPill>
-                <FactPill>
-                  {t("list.empty.severity", {
-                    value: severity ? t("severity.critical") : t("list.empty.any"),
-                  })}
-                </FactPill>
-                <FactPill>
-                  {t("list.empty.opened", {
-                    value: openedWithin
-                      ? t.dyn("window", openedWithin, openedWithin)
-                      : t("list.empty.anyTime"),
-                  })}
-                </FactPill>
-              </EmptyHero>
-            ) : null}
-            {page.state === "ready" && total > 0 ? (
-              <>
-                <ul
-                  className="divide-y divide-border"
-                  data-testid="incident-table"
-                >
-                  {items.map((incident) => (
-                    <IncidentRow key={incident.id} incident={incident} />
-                  ))}
-                </ul>
-                <p className="border-t border-border px-7 py-4 text-micro text-ink-muted">
-                  {t("list.footer", { shown: items.length, total: page.data.total })}
-                </p>
-              </>
-            ) : null}
-          </Panel>
-        </div>
+          </>
+        ) : null}
+      </Panel>
 
-        <div className="page-aside">
-          {page.state === "ready" ? (
-            <Panel className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]">
-              <CardTitle
-                icon={Activity}
-                title={t("list.byState.title")}
-                description={t("list.byState.description")}
-              />
-              <BreakdownRing
-                label={t("list.byState.ringLabel")}
-                centerCaption={t("list.byState.center")}
-                slices={[
-                  { name: t("state.open"), value: openCount, tone: "critical" },
-                  { name: t("state.acknowledged"), value: ackCount, tone: "warning" },
-                  { name: t("state.resolved"), value: resolvedCount, tone: "success" },
-                ]}
-              />
-            </Panel>
-          ) : null}
+      <details className="rounded-panel border border-border bg-surface px-5 py-3">
+        <summary className="cursor-pointer text-caption font-medium text-ink-secondary">{t("list.lifecycle.title")}</summary>
+        <div className="pt-4">
           <LifecycleRule />
         </div>
-      </div>
+      </details>
     </div>
   );
 }

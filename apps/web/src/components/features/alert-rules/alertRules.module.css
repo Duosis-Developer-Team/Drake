@@ -44,12 +44,13 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 20px;
   align-items: end;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 .h1 {
-  font: 600 40px/1.05 var(--font-sans);
-  letter-spacing: -0.04em;
+  font: 700 1.625rem/2.25rem var(--font-display);
+  letter-spacing: -0.025em;
   margin: 0;
+  color: var(--ink);
 }
 .h1 em {
   font-style: normal;
@@ -57,11 +58,11 @@
   font-weight: 300;
 }
 .lede {
-  margin: 12px 0 0;
-  color: var(--ink-2);
-  max-width: 66ch;
-  font-size: 15px;
-  line-height: 1.55;
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  max-width: 72ch;
+  font-size: 0.84375rem;
+  line-height: 1.5;
 }
 .cta {
   display: flex;
@@ -119,7 +120,7 @@
 /* console */
 .console {
   display: grid;
-  grid-template-columns: minmax(0, 500px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--hair);
   border-radius: 14px;
   background: var(--plate);
