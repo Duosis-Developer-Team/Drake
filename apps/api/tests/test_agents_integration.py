@@ -7,8 +7,10 @@ it, and who may see it.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import redis.asyncio as aioredis
 from drake_api.ai_agents import discovery
@@ -295,3 +297,218 @@ async def test_a_failed_read_keeps_what_was_kept(engine: AsyncEngine, redis: Any
     )  # type: ignore[arg-type]
     assert report.failed_reads == report.reads > 0
     assert await agents_by_name(engine) == {}
+
+
+TRACE = "cd" * 16
+STRANGER = "ef" * 16
+
+
+class RunStore:
+    """The trace store over HTTP, answering the two run statements."""
+
+    def __init__(self, place: tuple[str, str, str]) -> None:
+        self.cluster, self.ns, self.wk = place
+        self.requests: list[httpx.Request] = []
+
+    def span(self, span_id: str, parent: str, start_ms: int, **over: Any) -> dict[str, Any]:
+        base = {
+            "start_ns": str((1_000_000 + start_ms) * 1_000_000),
+            "span_id": span_id,
+            "parent_span_id": parent,
+            "name": span_id,
+            "kind": "Internal",
+            "duration_ns": "100000000",
+            "status": "Unset",
+            "svc": "support-bot",
+            "cluster": self.cluster,
+            "ns": self.ns,
+            "wk": self.wk,
+            "agent_id": "",
+            "agent_name": "ticket-triager",
+            "ingest": "",
+            "ebpf": 0,
+            "genai": 1,
+            "op": "",
+            "inference": 0,
+            "provider": "",
+            "model": "",
+            "input_tokens": "0",
+            "output_tokens": "0",
+            "cache_read_tokens": "0",
+            "reasoning_tokens": "0",
+            "tool": "",
+            "tool_type": "",
+            "mcp_method": "",
+            "server": "",
+            "error_type": "",
+            "http_status": "",
+            "http_route": "",
+        }
+        return {**base, **over}
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        sql = request.content.decode()
+        params = dict(request.url.params)
+        if "GROUP BY t.TraceId" in sql:
+            assert params["param_svc"] == "support-bot"
+            assert params["param_agent_name"] == "ticket-triager"
+            row = {
+                "trace_id": TRACE,
+                "started": "2026-11-21 17:00:00.000000000",
+                "span_ns": "900000000",
+                "agent_ns": "800000000",
+                "invocations": "1",
+                "model_calls": "1",
+                "tool_calls": "1",
+                "errors": "1",
+                "in_inf": "1200",
+                "out_inf": "90",
+                "in_agent": "0",
+                "out_agent": "0",
+                "models": ["claude-sonnet-5"],
+                "tools": ["get_ticket"],
+            }
+            return httpx.Response(200, json={"data": [row]})
+        if params.get("param_trace_id") == TRACE:
+            rows = [
+                self.span("root", "", 0, op="invoke_agent"),
+                self.span(
+                    "chat",
+                    "root",
+                    10,
+                    op="chat",
+                    inference=1,
+                    provider="anthropic",
+                    model="claude-sonnet-5",
+                    input_tokens="1200",
+                    output_tokens="90",
+                ),
+                self.span("billing", "root", 200, svc="billing", genai=0, agent_name=""),
+                self.span(
+                    "tool", "billing", 210, op="execute_tool", tool="get_ticket", status="Error"
+                ),
+                self.span(
+                    "helper",
+                    "root",
+                    400,
+                    svc="laptop-bot",
+                    op="invoke_agent",
+                    agent_name="research-helper",
+                    ingest="external",
+                    cluster="",
+                    ns="",
+                    wk="",
+                ),
+            ]
+            return httpx.Response(200, json={"data": rows})
+        if params.get("param_trace_id") == STRANGER:
+            rows = [
+                self.span(
+                    "x",
+                    "",
+                    0,
+                    svc="laptop-bot",
+                    op="invoke_agent",
+                    agent_name="research-helper",
+                    cluster="",
+                    ns="",
+                    wk="",
+                )
+            ]
+            return httpx.Response(200, json={"data": rows})
+        return httpx.Response(200, json={"data": []})
+
+
+def run_harness(tmp_path: Path, place: tuple[str, str, str]) -> tuple[Any, RunStore]:
+    from drake_api.settings import ObservabilityStoreConnector
+
+    password_file = tmp_path / "reader"
+    password_file.write_text("it-reader", encoding="utf-8")
+    store = RunStore(place)
+    settings = require_it_settings().model_copy(
+        update={
+            "observability_traces_enabled": True,
+            "observability_store": ObservabilityStoreConnector(
+                url="http://127.0.0.1:58199",
+                username="drake_reader",
+                password_file=str(password_file),
+            ),
+        }
+    )
+    harness = build_harness(settings, observability_transport=httpx.MockTransport(store.handler))
+    user_type = type(harness.provider.users["user-owner"])
+    harness.provider.users.setdefault(
+        "user-nobody", user_type("user-nobody", "Nobody", "user-nobody@example.test")
+    )
+    return harness, store
+
+
+async def test_runs_are_read_on_demand_and_shown_within_scope(
+    engine: AsyncEngine, redis: Any, tmp_path: Path
+) -> None:
+    seeded = await seed(engine, redis)
+    place = await binding_place(engine, seeded["world"])
+    harness, store = run_harness(tmp_path, place)
+    await login_all(harness, ["user-nobody"])
+    await make_role(harness, engine, "Agent viewer", ["agent.view", "project.view"])
+    async with engine.connect() as connection:
+        scope_ref = (
+            await connection.execute(
+                text(
+                    "SELECT s.external_ref FROM projects p JOIN scopes s ON s.id = p.scope_id "
+                    "WHERE p.id = :p"
+                ),
+                {"p": seeded["world"]["project_id"]},
+            )
+        ).scalar_one()
+    await grant(engine, harness, "user-nobody", "Agent viewer", "project", scope_ref)
+    agents = await agents_by_name(engine)
+    triager, helper = agents["ticket-triager"][5], agents["research-helper"][5]
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+        body = (await client.get(f"/v1/agents/{triager}/runs?window=7d&status=error")).json()
+        assert body["state"] == "ok"
+        (run,) = body["runs"]
+        assert (run["trace_id"], run["duration_ms"], run["input_tokens"]) == (TRACE, 800.0, 1200)
+        assert "HAVING errors > 0" in store.requests[-1].content.decode()
+
+        detail = (await client.get(f"/v1/agents/{triager}/runs/{TRACE.upper()}")).json()
+        steps = {s["span_id"]: s for s in detail["spans"]}
+        # The owner sees every agent: the helper is named; billing is not an agent.
+        assert set(steps) == {"root", "chat", "tool", "helper"}
+        assert detail["hidden_spans"] == 1
+        assert steps["tool"]["parent_id"] == "root" and steps["tool"]["status"] == "error"
+        assert steps["helper"]["agent"]["name"] == "research-helper"
+        assert steps["chat"]["agent"]["self"] is True
+
+        missing = await client.get(f"/v1/agents/{triager}/runs/{STRANGER}")
+        assert missing.status_code == 404
+        assert (await client.get(f"/v1/agents/{triager}/runs/not-a-trace")).status_code == 404
+
+    async with harness.api_client() as client:
+        await harness.login(client, "user-nobody")
+        detail = (await client.get(f"/v1/agents/{triager}/runs/{TRACE}")).json()
+        # An agent outside the catalog is not this caller's to see.
+        assert {s["span_id"] for s in detail["spans"]} == {"root", "chat", "tool"}
+        assert detail["hidden_spans"] == 2
+        assert (await client.get(f"/v1/agents/{helper}/runs")).status_code == 404
+
+
+async def test_without_a_trace_store_runs_say_so(engine: AsyncEngine, redis: Any) -> None:
+    await seed(engine, redis)
+    triager = (await agents_by_name(engine))["ticket-triager"][5]
+    harness = build_harness(require_it_settings())
+    async with harness.api_client() as client:
+        await harness.login(client, "user-owner")
+        await grant_platform_owner(engine, harness.provider.issuer, "user-owner")
+        body = (await client.get(f"/v1/agents/{triager}/runs")).json()
+        assert body == {
+            "agent_id": str(triager),
+            "window": "24h",
+            "status": "any",
+            "state": "not_configured",
+            "runs": [],
+        }
