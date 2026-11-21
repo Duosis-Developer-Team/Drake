@@ -18,6 +18,12 @@ export const explore = defineMessages({
     },
     pick: "Service",
     choose: "Choose a service",
+    cascade: {
+      application: "Application",
+      environment: "Environment",
+      pickApplication: "Choose an application first",
+      pickEnvironment: "Choose an environment",
+    },
     none: "No service is bound to a workload yet, so there is nothing to read.",
     openService: "Service page",
     stats: {
@@ -41,6 +47,12 @@ export const explore = defineMessages({
     },
     pick: "Servis",
     choose: "Bir servis seçin",
+    cascade: {
+      application: "Uygulama",
+      environment: "Ortam",
+      pickApplication: "Önce bir uygulama seçin",
+      pickEnvironment: "Bir ortam seçin",
+    },
     none: "Henüz bir iş yüküne bağlı servis yok, o yüzden okunacak bir şey yok.",
     openService: "Servis sayfası",
     stats: {
