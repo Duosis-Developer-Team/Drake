@@ -88,6 +88,8 @@ INCIDENT_TITLES: dict[str, str] = {
     GENERIC_CRITICAL_REASON: "Service health critical",
     # A critical alert rule (ADR-0031); the incident title names the rule.
     "rule_firing": "An alert rule fired",
+    # A service objective burning its budget at a paging rate (migration 0031).
+    "slo_burn": "Error budget burning",
 }
 
 TITLE_MAX_LENGTH = 200

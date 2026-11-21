@@ -44,5 +44,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_inventory_missing_since")
+    # Inside the migration's transaction, not an autocommit block: an
+    # autocommit block commits everything downgraded before it, so a later
+    # migration that refuses its downgrade would leave the revision and the
+    # schema disagreeing. A downgrade is not a hot path; the brief lock of a
+    # plain DROP INDEX is the price of it being all-or-nothing.
+    op.execute("DROP INDEX IF EXISTS ix_inventory_missing_since")

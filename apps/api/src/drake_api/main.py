@@ -16,6 +16,7 @@ from drake_api.alert_rules.telemetry import TelemetrySampler
 from drake_api.alerting.router import router as alerting_router
 from drake_api.alerting.router_webhook import router as alertmanager_webhook_router
 from drake_api.alerting.silences import SilenceWorker
+from drake_api.alerting.sli_rollups import SliRollupWriter
 from drake_api.alerting.slo_service import SloEvaluator
 from drake_api.audit.router import router as audit_router
 from drake_api.auth.flows import AuthFlows
@@ -94,6 +95,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     slo_evaluator = getattr(app.state, "slo_evaluator", None)
     if slo_evaluator is not None:
         await slo_evaluator.start()
+    sli_writer = getattr(app.state, "sli_rollup_writer", None)
+    if sli_writer is not None:
+        await sli_writer.start()
     silence_worker = getattr(app.state, "silence_worker", None)
     if silence_worker is not None:
         await silence_worker.start()
@@ -107,6 +111,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await gitops_worker.stop()
         if silence_worker is not None:
             await silence_worker.stop()
+        if sli_writer is not None:
+            await sli_writer.stop()
         if slo_evaluator is not None:
             await slo_evaluator.stop()
         if ingestor is not None:
@@ -267,6 +273,21 @@ def create_app(
             lease_seconds=settings.slo_evaluator_lease_seconds,
         )
         if settings.slo_evaluator_enabled
+        else None
+    )
+    # Objectives on stored requests need the five-minute counts kept: the
+    # writer runs with the evaluator, and only when traces are read at all.
+    store_connector = settings.observability_store
+    app.state.sli_rollup_writer = (
+        SliRollupWriter(
+            get_engine(settings),
+            app.state.observability_store,
+            app.state.telemetry_redis,
+            database=store_connector.database,
+        )
+        if settings.slo_evaluator_enabled
+        and settings.observability_traces_enabled
+        and store_connector is not None
         else None
     )
     # The GitOps worker is the only path through which Drake would WRITE to

@@ -25,6 +25,7 @@ the measurement method rather than hidden behind a percentage.
 
 import asyncio
 import contextlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -34,8 +35,10 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import HTTPException
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from drake_api.alerting import sli_rollups
 from drake_api.alerting.contracts import latency_threshold_seconds
 from drake_api.alerting.slo import (
     BURN_PROFILES,
@@ -58,6 +61,26 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+
+# Objectives measured from the requests Tracesis stores (traces), through
+# the five-minute counts kept in `sli_rollups` (migration 0031). A latency
+# objective's `threshold_profile_key` names one of the fixed thresholds,
+# `traces.over_<ms>ms`.
+TRACE_AVAILABILITY = "traces.availability.v1"
+TRACE_LATENCY = "traces.latency.v1"
+TRACE_TEMPLATES = frozenset({TRACE_AVAILABILITY, TRACE_LATENCY})
+
+
+def trace_threshold_ms(profile_key: str | None) -> int | None:
+    """`traces.over_500ms` -> 500, for the fixed thresholds only."""
+    if not profile_key or not profile_key.startswith("traces.over_"):
+        return None
+    try:
+        value = int(profile_key.removeprefix("traces.over_").removesuffix("ms"))
+    except ValueError:
+        return None
+    return value if value in sli_rollups.THRESHOLDS_MS else None
+
 
 # The rate template that supplies the weighting for an availability SLO.
 # Server-controlled, exactly like the SLI template itself.
@@ -226,14 +249,92 @@ def _latency_window(
     )
 
 
+async def _measure_traces(
+    engine: AsyncEngine, definition: SloDefinitionRow, *, now: datetime
+) -> tuple[SloVerdict, datetime, datetime]:
+    """An objective judged on the stored five-minute request counts."""
+    window_end = sli_rollups.align(now - sli_rollups.SETTLE)
+    window_start = window_end - timedelta(seconds=definition.window_seconds)
+
+    def empty() -> tuple[SloVerdict, datetime, datetime]:
+        verdict = evaluate_slo(
+            objective_ratio=definition.objective_ratio,
+            window=None,
+            profile_key=definition.burn_profile_key,
+            evaluated_at=now,
+            not_configured=True,
+        )
+        return verdict, window_start, window_end
+
+    threshold = trace_threshold_ms(definition.threshold_profile_key)
+    if definition.environment_service_id is None or (
+        definition.sli_template_key == TRACE_LATENCY and threshold is None
+    ):
+        return empty()
+
+    def observe(window: sli_rollups.Window, seconds: int) -> WindowObservation | None:
+        if window.observed_buckets == 0:
+            return None
+        if definition.sli_template_key == TRACE_LATENCY:
+            total, bad = window.timed, window.over[threshold or 0]
+        else:
+            total, bad = window.requests, window.errors
+        return WindowObservation(
+            seconds=seconds,
+            good=float(total - bad),
+            bad=float(bad),
+            samples=window.busy_buckets,
+            partial=window.observed_buckets < window.expected_buckets,
+        )
+
+    async with engine.connect() as connection:
+        ids = [
+            uuid.UUID(str(r[0]))
+            for r in (
+                await connection.execute(
+                    text(
+                        "SELECT id FROM service_workload_bindings "
+                        "WHERE environment_service_id = :es AND lifecycle = 'active'"
+                    ),
+                    {"es": definition.environment_service_id},
+                )
+            ).all()
+        ]
+        if not ids:
+            return empty()
+        main = await sli_rollups.read_window(connection, ids, window_start, window_end)
+        levels = BURN_PROFILES.get(definition.burn_profile_key, BURN_PROFILES[DEFAULT_BURN_PROFILE])
+        burn_windows: dict[int, WindowObservation] = {}
+        for seconds in sorted({x for lv in levels for x in (lv.long_seconds, lv.short_seconds)}):
+            read = await sli_rollups.read_window(
+                connection, ids, window_end - timedelta(seconds=seconds), window_end
+            )
+            observation = observe(read, seconds)
+            if observation is not None:
+                burn_windows[seconds] = observation
+
+    verdict = evaluate_slo(
+        objective_ratio=definition.objective_ratio,
+        window=observe(main, definition.window_seconds),
+        burn_windows=burn_windows,
+        profile_key=definition.burn_profile_key,
+        evaluated_at=now,
+        data_as_of=main.newest,
+    )
+    return verdict, window_start, window_end
+
+
 async def measure(
     broker: TelemetryBroker,
     principal: Principal,
     definition: SloDefinitionRow,
     *,
     now: datetime,
+    engine: AsyncEngine | None = None,
 ) -> tuple[SloVerdict, datetime, datetime]:
     """Read every window this definition needs and produce one verdict."""
+    if definition.sli_template_key in TRACE_TEMPLATES and engine is not None:
+        return await _measure_traces(engine, definition, now=now)
     window_end = _align(now)
     window_start = window_end - timedelta(seconds=definition.window_seconds)
 
@@ -443,7 +544,9 @@ async def evaluate_definition(
     now: datetime | None = None,
 ) -> SloVerdict:
     moment = now or datetime.now(UTC)
-    verdict, window_start, window_end = await measure(broker, principal, definition, now=moment)
+    verdict, window_start, window_end = await measure(
+        broker, principal, definition, now=moment, engine=engine
+    )
     await store_evaluation(
         engine,
         definition,
@@ -452,7 +555,137 @@ async def evaluate_definition(
         window_end=window_end,
         evaluated_for=_align(moment),
     )
+    await sync_incident(engine, definition.id, verdict, moment)
     return verdict
+
+
+# A ceiling, not a page: a cycle evaluates every enabled objective.
+MAX_DEFINITIONS_PER_CYCLE = 2000
+
+# Statuses that are a real measurement. Anything else (could not look, no
+# traffic, old data) neither opens nor closes an incident.
+_MEASURED = frozenset({"healthy", "warning", "critical", "exhausted"})
+
+
+async def _incident_event(
+    connection: Any, incident_id: uuid.UUID, kind: str, at: datetime, detail: dict[str, Any]
+) -> None:
+    await connection.execute(
+        text(
+            "INSERT INTO incident_events (incident_id, event_type, occurred_at, detail) "
+            "VALUES (:incident, :type, :at, CAST(:detail AS jsonb))"
+        ),
+        {"incident": incident_id, "type": kind, "at": at, "detail": json.dumps(detail)},
+    )
+
+
+async def resolve_slo_incidents(
+    connection: Any, definition_id: uuid.UUID, at: datetime, reason: str | None = None
+) -> int:
+    """Close the incident this objective holds open, if any."""
+    rows = (
+        await connection.execute(
+            text(
+                """
+                UPDATE incidents
+                SET state = 'resolved', resolved_at = :at, resolution_source = 'slo_recovered',
+                    version = version + 1, updated_at = now()
+                WHERE source = 'slo' AND correlation_key = :key
+                  AND state IN ('open', 'acknowledged')
+                RETURNING id
+                """
+            ),
+            {"key": f"slo:{definition_id}", "at": at},
+        )
+    ).all()
+    detail: dict[str, Any] = {"source": "slo"}
+    if reason is not None:
+        detail["reason"] = reason
+    for row in rows:
+        await _incident_event(connection, uuid.UUID(str(row[0])), "auto_resolved", at, detail)
+    return len(rows)
+
+
+async def sync_incident(
+    engine: AsyncEngine, definition_id: uuid.UUID, verdict: SloVerdict, at: datetime
+) -> None:
+    """Open an incident while a paging burn level is active; close it once
+    a real measurement shows none. Keyed by objective, so it is opened once
+    and never twice at a time."""
+    burning = verdict.active_burn
+    paging = (
+        burning is not None
+        and burning.severity == "critical"
+        and verdict.data_quality in ("ok", "partial")
+    )
+    async with engine.begin() as connection:
+        if not paging:
+            if verdict.status in _MEASURED:
+                await resolve_slo_incidents(connection, definition_id, at)
+            return
+        assert burning is not None
+        target = (
+            await connection.execute(
+                text(
+                    "SELECT d.project_id, d.environment_id, d.service_id, "
+                    "d.environment_service_id, d.display_name, sd.service_key "
+                    "FROM slo_definitions d "
+                    "LEFT JOIN service_definitions sd ON sd.id = d.service_id "
+                    "WHERE d.id = :id"
+                ),
+                {"id": definition_id},
+            )
+        ).first()
+        if target is None or target[3] is None:
+            return
+        savepoint = await connection.begin_nested()
+        try:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO incidents
+                            (source, correlation_key, binding_id, environment_service_id,
+                             project_id, environment_id, service_id, state, severity, priority,
+                             title, primary_reason, opening_reasons, binding_revision,
+                             opened_at, last_critical_at)
+                        VALUES ('slo', :key, NULL, :es, :project, :environment, :service,
+                                'open', 'critical', 'P1', :title, 'slo_burn',
+                                CAST(:reasons AS jsonb), 1, :at, :at)
+                        RETURNING id
+                        """
+                    ),
+                    {
+                        "key": f"slo:{definition_id}",
+                        "es": target[3],
+                        "project": target[0],
+                        "environment": target[1],
+                        "service": target[2],
+                        "title": f"{target[4]} · {target[5] or 'service'}"[:200],
+                        "reasons": json.dumps(["slo_burn"]),
+                        "at": at,
+                    },
+                )
+            ).first()
+        except IntegrityError:
+            # Already open for this objective: the outcome we wanted.
+            await savepoint.rollback()
+            return
+        await savepoint.commit()
+        if row is not None:
+            await _incident_event(
+                connection,
+                uuid.UUID(str(row[0])),
+                "opened",
+                at,
+                {
+                    "source": "slo",
+                    "slo_id": str(definition_id),
+                    "burn": burning.name,
+                    "long_burn_rate": burning.long_burn,
+                    "short_burn_rate": burning.short_burn,
+                },
+            )
 
 
 async def run_cycle(
@@ -482,7 +715,9 @@ async def run_cycle(
     actor = principal or await ensure_system_evaluator(engine)
     evaluated = 0
     try:
-        for definition in await load_definitions(engine, limit=batch_size):
+        # `batch_size` is a page, not the cycle: every enabled definition is
+        # evaluated (it used to stop at the first 25, forever).
+        for definition in await load_definitions(engine, limit=MAX_DEFINITIONS_PER_CYCLE):
             try:
                 await evaluate_definition(engine, broker, actor, definition)
                 evaluated += 1

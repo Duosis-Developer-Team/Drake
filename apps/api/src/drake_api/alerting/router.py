@@ -26,9 +26,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from drake_api.alerting import repository as repo
-from drake_api.alerting import silences
+from drake_api.alerting import silences, slo_manage
 from drake_api.alerting.contracts import silence_reason_codes
-from drake_api.audit.service import AuditEventData, record_audit_event
+from drake_api.audit.service import AuditEventData, record_audit_event, record_audit_event_in
 from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.correlation import correlation_id_var
 from drake_api.db import get_engine
@@ -190,6 +190,115 @@ async def list_slos(
             )
         except repo.FilterError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class SloCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    environment_service_id: uuid.UUID
+    display_name: str = Field(min_length=1, max_length=120)
+    indicator: str = Field(pattern="^(availability|latency)$")
+    objective_ratio: float = Field(gt=0, le=1)
+    window_seconds: int = Field(ge=3600, le=7776000)
+    threshold_ms: int | None = Field(default=None, ge=1, le=60000)
+
+
+class SloUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    objective_ratio: float | None = Field(default=None, gt=0, le=1)
+    window_seconds: int | None = Field(default=None, ge=3600, le=7776000)
+    threshold_ms: int | None = Field(default=None, ge=1, le=60000)
+    enabled: bool | None = None
+
+
+def _slo_audit(
+    auth: AuthContext, action: str, slo_id: str, metadata: dict[str, Any]
+) -> AuditEventData:
+    return AuditEventData(
+        actor_type="user",
+        actor_id=auth.session.identity_id,
+        action=action,
+        result="success",
+        target_type="slo",
+        target_id=slo_id,
+        correlation_id=correlation_id_var.get(),
+        metadata=metadata,
+    )
+
+
+def _slo_fail(error: slo_manage.SloManageError) -> HTTPException:
+    detail = _NOT_FOUND if error.status == 404 else {"code": error.code, "message": str(error)}
+    return HTTPException(status_code=error.status, detail=detail)
+
+
+@router.get("/slo/options")
+async def slo_options(
+    request: Request, auth: AuthContext = Depends(require_auth)
+) -> dict[str, Any]:
+    """What the caller may set objectives for, and the fixed choices."""
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).connect() as connection:
+        body = await slo_manage.options(connection, auth.principal)
+    return {**body, "measuring": bool(getattr(request.app.state, "sli_rollup_writer", None))}
+
+
+@router.post("/slo", status_code=201)
+async def create_slo(
+    request: Request, payload: SloCreate, auth: AuthContext = Depends(require_csrf)
+) -> dict[str, Any]:
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).begin() as connection:
+        try:
+            created = await slo_manage.create(connection, auth.principal, payload.model_dump())
+        except slo_manage.SloManageError as error:
+            raise _slo_fail(error) from error
+        await record_audit_event_in(
+            connection,
+            _slo_audit(
+                auth,
+                "slo.create",
+                created["id"],
+                {"indicator": payload.indicator, "objective_ratio": payload.objective_ratio},
+            ),
+        )
+    return created
+
+
+@router.post("/slo/{slo_id}")
+async def update_slo(
+    request: Request,
+    slo_id: uuid.UUID,
+    payload: SloUpdate,
+    auth: AuthContext = Depends(require_csrf),
+) -> dict[str, Any]:
+    settings: Settings = request.app.state.settings
+    changes = payload.model_dump(exclude_unset=True, exclude={"expected_version"})
+    async with get_engine(settings).begin() as connection:
+        try:
+            updated = await slo_manage.update(
+                connection, auth.principal, slo_id, changes, payload.expected_version
+            )
+        except slo_manage.SloManageError as error:
+            raise _slo_fail(error) from error
+        await record_audit_event_in(
+            connection, _slo_audit(auth, "slo.update", str(slo_id), {"fields": sorted(changes)})
+        )
+    return updated
+
+
+@router.delete("/slo/{slo_id}")
+async def delete_slo(
+    request: Request, slo_id: uuid.UUID, auth: AuthContext = Depends(require_csrf)
+) -> dict[str, str]:
+    settings: Settings = request.app.state.settings
+    async with get_engine(settings).begin() as connection:
+        try:
+            await slo_manage.delete(connection, auth.principal, slo_id)
+        except slo_manage.SloManageError as error:
+            raise _slo_fail(error) from error
+        await record_audit_event_in(connection, _slo_audit(auth, "slo.delete", str(slo_id), {}))
+    return {"deleted": str(slo_id)}
 
 
 @router.get("/slo/{slo_id}")

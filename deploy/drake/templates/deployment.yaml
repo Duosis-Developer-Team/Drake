@@ -122,6 +122,12 @@ spec:
               value: {{ (.Values.incidents).runnerEnabled | default false | quote }}
             - name: DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS
               value: {{ (.Values.incidents).runnerIntervalSeconds | default 120 | quote }}
+            # Stated in both states. With traces on, it also keeps the
+            # five-minute request counts objectives are judged on.
+            - name: DRAKE_SLO_EVALUATOR_ENABLED
+              value: {{ (.Values.slo).evaluatorEnabled | default false | quote }}
+            - name: DRAKE_SLO_EVALUATOR_INTERVAL_SECONDS
+              value: {{ (.Values.slo).evaluatorIntervalSeconds | default 300 | quote }}
             # Stated in both states, like the incident runner.
             - name: DRAKE_NOTIFICATION_PLANNER_ENABLED
               value: {{ (.Values.notifications).plannerEnabled | default false | quote }}
