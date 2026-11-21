@@ -29,7 +29,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 
 import { useApi, provenanceProps } from "@/components/catalog/primitives";
-import { Countdown, Donut, ToneCounters } from "@/components/charts/visuals";
+import { Countdown, ToneCounters } from "@/components/charts/visuals";
 import {
   DefinitionGrid,
   IconBubble,
@@ -136,12 +136,14 @@ function RollupCard({
       >
         <div className="min-w-0 flex-1">
           {rollup.total > 0 ? (
-            <Donut
-              size={120}
-              thickness={13}
+            <SegmentBar
               label={t("detail.sweep.byHealth", { title })}
-              centerLabel={`${rollup.total}`}
-              slices={healthSlices(t, rollup)}
+              segments={healthSlices(t, rollup).map((slice) => ({
+                key: slice.tone,
+                label: slice.name,
+                value: slice.value,
+                tone: slice.tone,
+              }))}
             />
           ) : (
             <div className="flex items-center gap-4 rounded-[0.625rem] bg-surface-2 px-5 py-4">

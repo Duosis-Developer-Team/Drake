@@ -180,20 +180,20 @@ export function CountTile({
   value: number | null;
   tone: StatusTone;
   active: boolean;
-  onClick: () => void;
+  /** Absent when no single filter selects exactly this count. */
+  onClick?: () => void;
   caption?: string;
   "data-testid"?: string;
 }) {
   const fmt = useFormat();
   const spec = toneSpec(tone);
+  const Tag = onClick ? "button" : "div";
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
+    <Tag
+      {...(onClick ? { type: "button" as const, "aria-pressed": active, onClick } : {})}
       data-testid={testId}
       className={`flex min-w-0 flex-col gap-1.5 rounded-panel border bg-surface px-4 py-3.5 text-left shadow-panel transition-colors ${
-        active ? "border-brand ring-2 ring-brand-soft" : "border-border hover:border-border-strong"
+        active ? "border-brand ring-2 ring-brand-soft" : onClick ? "border-border hover:border-border-strong" : "border-border"
       }`}
     >
       <span className="flex items-center gap-2 text-caption text-ink-muted">
@@ -209,7 +209,7 @@ export function CountTile({
         {value === null ? "—" : fmt.number(value)}
       </span>
       {caption ? <span className="text-micro text-ink-muted">{caption}</span> : null}
-    </button>
+    </Tag>
   );
 }
 

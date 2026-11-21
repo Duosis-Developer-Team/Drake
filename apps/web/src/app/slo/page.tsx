@@ -13,19 +13,17 @@
  * answers and this screen keeps them apart.
  */
 
-import { CircleCheck, Flame, HelpCircle, Target, XCircle } from "lucide-react";
+import { Target } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { SloBadge } from "@/components/alerting/primitives";
-import { useApi } from "@/components/catalog/primitives";
+import { CountTile, ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
 import {
-  BreakdownRing,
   CardTitle,
   EmptyHero,
   FactPill,
-  KpiTile,
   PillSelect,
   RowBubble,
   ShareBar,
@@ -43,7 +41,6 @@ import {
   formatBudget,
   formatRatio,
   sloListPath,
-  type Page,
   type Slo,
   type SloStatus,
 } from "@/lib/alerting";
@@ -170,33 +167,35 @@ function SloRow({ slo }: { slo: Slo }) {
   );
 }
 
+const FILTER_KEYS = ["status"] as const;
+
+function withLimit(path: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}limit=1`;
+}
+
 function SloInner() {
   const t = useT("alerting");
-  const [status, setStatus] = useState<string>("");
-  const [page, retry] = useApi<Page<Slo>>(sloListPath({ status }));
+  const [filters, update] = useUrlFilters(FILTER_KEYS);
+  const status = (STATES as string[]).includes(filters.status) ? filters.status : "";
+  const [list, retry] = useCursorList<Slo>(sloListPath({ status }), { paging: "offset" });
+  const items = list.state === "ready" ? list.items : [];
 
-  const items = page.state === "ready" ? page.data.items : [];
-  const total = items.length;
-  const meeting = items.filter(
-    (slo) => slo.evaluation?.status === "healthy",
-  ).length;
-  const burning = items.filter(
-    (slo) => slo.evaluation?.status === "warning",
-  ).length;
-  const breached = items.filter((slo) =>
-    ["critical", "exhausted", "query_failed"].includes(
-      slo.evaluation?.status ?? "",
-    ),
-  ).length;
-  const stale = items.filter(
-    (slo) => slo.evaluation?.status === "stale",
-  ).length;
-  const neverMeasured = items.filter(
-    (slo) =>
-      !slo.evaluation ||
-      ["insufficient_data", "not_configured"].includes(slo.evaluation.status),
-  ).length;
-  const share = (count: number) => (total > 0 ? count / total : null);
+  // Server totals, not a tally of the loaded page. Breached spans three
+  // states, so it is a sum; "never measured" also covers objectives with no
+  // evaluation at all, so it is what remains of the whole.
+  const all = useTotal(withLimit(sloListPath({})));
+  const meeting = useTotal(withLimit(sloListPath({ status: "healthy" })));
+  const burning = useTotal(withLimit(sloListPath({ status: "warning" })));
+  const critical = useTotal(withLimit(sloListPath({ status: "critical" })));
+  const exhausted = useTotal(withLimit(sloListPath({ status: "exhausted" })));
+  const failed = useTotal(withLimit(sloListPath({ status: "query_failed" })));
+  const stale = useTotal(withLimit(sloListPath({ status: "stale" })));
+  const sum = (values: (number | null)[]) =>
+    values.some((v) => v === null) ? null : values.reduce<number>((a, v) => a + (v ?? 0), 0);
+  const breached = sum([critical, exhausted, failed]);
+  const known = sum([meeting, burning, breached, stale]);
+  const neverMeasured = all === null || known === null ? null : Math.max(0, all - known);
+  const toggle = (value: string) => update({ status: status === value ? "" : value });
 
   return (
     <PageFrame>
@@ -204,53 +203,49 @@ function SloInner() {
         title={t("sloList.title")}
         description={t("sloList.description")}
       />
-      <div className="flex flex-col gap-6">
-        {page.state === "ready" ? (
-          <div className="page-grid motion-safe:animate-[fade-in_360ms_var(--ease-entrance)_backwards]">
-            <KpiTile
-              data-testid="alerting-kpi-meeting"
-              label={t("sloList.kpi.meeting")}
-              value={meeting}
-              icon={CircleCheck}
-              tone="success"
-              share={share(meeting)}
-              caption={t("sloList.kpi.meetingCaption")}
-            />
-            <KpiTile
-              data-testid="alerting-kpi-burning-fast"
-              label={t("sloList.kpi.burning")}
-              value={burning}
-              icon={Flame}
-              tone="warning"
-              share={share(burning)}
-              caption={t("sloList.kpi.burningCaption")}
-            />
-            <KpiTile
-              data-testid="alerting-kpi-breached"
-              label={t("sloList.kpi.breached")}
-              value={breached}
-              icon={XCircle}
-              tone="critical"
-              share={share(breached)}
-              caption={t("sloList.kpi.breachedCaption")}
-            />
-            <KpiTile
-              data-testid="alerting-kpi-never-measured"
-              label={t("sloList.kpi.neverMeasured")}
-              value={neverMeasured}
-              icon={HelpCircle}
-              tone="unknown"
-              share={share(neverMeasured)}
-              caption={t("sloList.kpi.neverMeasuredCaption")}
-            />
-          </div>
-        ) : null}
+      <div className="flex flex-col gap-5">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <CountTile
+            data-testid="alerting-kpi-meeting"
+            label={t("sloList.kpi.meeting")}
+            value={meeting}
+            tone="success"
+            active={status === "healthy"}
+            onClick={() => toggle("healthy")}
+            caption={t("sloList.kpi.meetingCaption")}
+          />
+          <CountTile
+            data-testid="alerting-kpi-burning-fast"
+            label={t("sloList.kpi.burning")}
+            value={burning}
+            tone="warning"
+            active={status === "warning"}
+            onClick={() => toggle("warning")}
+            caption={t("sloList.kpi.burningCaption")}
+          />
+          <CountTile
+            data-testid="alerting-kpi-breached"
+            label={t("sloList.kpi.breached")}
+            value={breached}
+            tone="critical"
+            active={false}
+            caption={t("sloList.kpi.breachedCaption")}
+          />
+          <CountTile
+            data-testid="alerting-kpi-never-measured"
+            label={t("sloList.kpi.neverMeasured")}
+            value={neverMeasured}
+            tone="unknown"
+            active={false}
+            caption={t("sloList.kpi.neverMeasuredCaption")}
+          />
+        </div>
 
         <Toolbar
           data-testid="slo-filters"
           summary={
-            page.state === "ready"
-              ? t("sloList.shown", { shown: total, total: page.data.total })
+            list.state === "ready" && list.total !== null
+              ? t("sloList.shown", { shown: list.items.length, total: list.total })
               : undefined
           }
         >
@@ -262,12 +257,12 @@ function SloInner() {
               value,
               label: t.dyn("slo", value, SLO_LABELS[value]),
             }))}
-            onChange={setStatus}
+            onChange={(value) => update({ status: value })}
           />
         </Toolbar>
 
-        <div className="page-split">
-          <div className="page-main">
+        <div>
+          <div>
             <Panel
               flush
               className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
@@ -278,23 +273,19 @@ function SloInner() {
                 title={t("sloList.heading.title")}
                 description={t("sloList.heading.description")}
               />
-              {page.state === "loading" ? (
+              {list.state === "loading" ? (
                 <StatePad>
                   <DataState kind="loading" />
                 </StatePad>
-              ) : page.state === "error" ? (
+              ) : list.state === "error" ? (
                 <StatePad>
-                  {page.notFound ? (
+                  {list.denied ? (
                     <DataState kind="permission-denied" />
                   ) : (
-                    <DataState
-                      kind="error"
-                      description={page.message}
-                      onRetry={retry}
-                    />
+                    <DataState kind="error" description={list.message} onRetry={retry} />
                   )}
                 </StatePad>
-              ) : total === 0 ? (
+              ) : items.length === 0 ? (
                 <EmptyHero
                   icon={Target}
                   title={t("sloList.empty.title")}
@@ -315,6 +306,17 @@ function SloInner() {
                       <SloRow key={slo.id} slo={slo} />
                     ))}
                   </ul>
+                  <ListFooter
+                    shown={items.length}
+                    summary={t("sloList.shown", { shown: items.length, total: list.state === "ready" ? (list.total ?? items.length) : items.length })}
+                    hasMore={list.state === "ready" && list.hasMore}
+                    loadingMore={list.state === "ready" && list.loadingMore}
+                    moreError={list.state === "ready" && list.moreError}
+                    onMore={() => list.state === "ready" && list.loadMore()}
+                    moreLabel={t("list.more")}
+                    loadingLabel={t("list.loadingMore")}
+                    errorLabel={t("list.moreError")}
+                  />
 
                   {/* Anything that is not a measurement is explained in words, so
                     nobody reads a dash as a zero. */}
@@ -371,38 +373,6 @@ function SloInner() {
             </Panel>
           </div>
 
-          {page.state === "ready" ? (
-            /* insufficient_data and not_configured stay OUT of the healthy
-               bucket: nothing was measured, and a green slice for an
-               unmeasured objective is the most misleading thing here. */
-            <div className="page-aside">
-              <Panel
-                data-testid="slo-overview"
-                className="motion-safe:animate-[fade-in_440ms_var(--ease-entrance)_backwards] [animation-delay:80ms]"
-              >
-                <CardTitle
-                  icon={Target}
-                  title={t("sloList.byVerdict.title")}
-                  description={t("sloList.byVerdict.description")}
-                />
-                <BreakdownRing
-                  label={t("sloList.byVerdict.ringLabel")}
-                  centerCaption={t("sloList.byVerdict.center")}
-                  slices={[
-                    { name: t("sloList.byVerdict.meeting"), value: meeting, tone: "success" },
-                    { name: t("sloList.byVerdict.burning"), value: burning, tone: "warning" },
-                    { name: t("sloList.byVerdict.breached"), value: breached, tone: "critical" },
-                    { name: t("sloList.byVerdict.stale"), value: stale, tone: "stale" },
-                    {
-                      name: t("sloList.byVerdict.neverMeasured"),
-                      value: neverMeasured,
-                      tone: "unknown",
-                    },
-                  ]}
-                />
-              </Panel>
-            </div>
-          ) : null}
         </div>
       </div>
     </PageFrame>
