@@ -238,7 +238,7 @@ describe("service health launcher", () => {
     nav.search = "";
     installFetchMock({
       "/v1/service-health/services": { status: 200, body: listBody([BOUND_ROW, UNBOUND_ROW]) },
-      "/v1/projects": { status: 200, body: { items: [{ id: "p1", display_name: "Pilot" }], next_cursor: null } },
+      "/v1/projects": { status: 200, body: { projects: [{ id: "p1", display_name: "Pilot" }], next_cursor: null } },
     });
     render(<ServiceHealthPage />);
 

@@ -128,7 +128,7 @@ function serviceRow(status: string) {
 
 describe("catalog screens", () => {
   beforeEach(() => {
-    routerState.params = new URLSearchParams();
+    routerState.params = new URLSearchParams("view=list");
     routerPush.mockClear();
     routerReplace.mockClear();
   });
@@ -185,6 +185,25 @@ describe("catalog screens", () => {
     await waitFor(() => expect(screen.getByTestId("state-error")).toBeInTheDocument());
     expect(screen.getByText(/corr-cat-123/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("projects open on the apps, the same launcher as Services, with a way into the project", async () => {
+    routerState.params = new URLSearchParams();
+    installFetchMock({
+      "/v1/projects": {
+        status: 200,
+        body: { projects: [PROJECT], next_cursor: null, as_of: "now" },
+      },
+      "/v1/service-health/services": {
+        status: 200,
+        body: { items: [serviceRow("critical")], total: 1, limit: 100, offset: 0 },
+      },
+    });
+    render(<ProjectsPage />);
+    expect(await screen.findByTestId("app-grid")).toBeInTheDocument();
+    // One app: its shelf is open, and it links to the project's own page.
+    expect(await screen.findByRole("link", { name: /open project/i })).toHaveAttribute("href", "/projects/p1");
+    expect(screen.queryByTestId("project-list")).not.toBeInTheDocument();
   });
 
   it("project list: recorded criticality and observed health are shown independently, never conflated", async () => {

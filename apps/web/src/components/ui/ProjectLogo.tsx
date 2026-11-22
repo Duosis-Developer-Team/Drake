@@ -32,7 +32,7 @@ import { useEffect, useState } from "react";
 
 import { useResolvedTheme } from "@/components/shell/ThemeControl";
 
-type Size = "sm" | "md" | "lg" | "icon";
+type Size = "sm" | "md" | "lg" | "icon" | "hero";
 
 type Variant = "wordmark" | "mark";
 
@@ -64,6 +64,14 @@ const SIZES: Record<
     pad: "p-0",
     img: "h-14 max-w-[14rem]",
     text: "text-[1.375rem]",
+    frame: "",
+  },
+  /* The launcher's app icon: the mark large, centred in its tile. */
+  hero: {
+    box: "h-24 w-24 rounded-[22px]",
+    pad: "p-0",
+    img: "h-24 max-w-[16rem]",
+    text: "text-[2rem]",
     frame: "",
   },
 };

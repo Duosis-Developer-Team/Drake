@@ -18,7 +18,8 @@ import { installFetchMock } from "@/test/mock-api";
 vi.mock("next/navigation", () => ({
   usePathname: () => "/projects",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  // The list's own strings; the apps view has its own catalogue.
+  useSearchParams: () => new URLSearchParams("view=list"),
   useParams: () => ({ projectId: "p1" }),
 }));
 

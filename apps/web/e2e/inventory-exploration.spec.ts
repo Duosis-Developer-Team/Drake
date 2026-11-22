@@ -98,7 +98,7 @@ test("collect fixture ids", async ({ page }) => {
 });
 
 const WAVE3A_SCREENS = [
-  { name: "projects portfolio", path: () => "/projects", ready: "project-list" },
+  { name: "projects portfolio", path: () => "/projects?view=list", ready: "project-list" },
   {
     name: "project topology",
     path: () => `/projects/${alphaProjectId}`,
