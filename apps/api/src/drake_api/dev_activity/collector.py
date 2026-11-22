@@ -18,7 +18,12 @@ Two harvests per cycle, under one lease, each independent of the other:
    session is kept only when it says which repository it worked on: a
    `tracesis.project` resource attribute naming a project key, or repository
    attributes (`vcs.*`) naming a catalog repository or a repository of a
-   watched organisation. Everything else is left out.
+   watched organisation. Everything else is left out. A clone made before a
+   repository was renamed still reports the old name; GitHub is asked once
+   which repository that name now is (`Renames`).
+
+Usage a developer imported from their own Claude Code history
+(`usage_import`, identity `backfill:<account>`) is never replaced here.
 
 A repository behind an open manual security gate is never read from GitHub.
 Nothing here writes anywhere but Tracesis's own tables.
@@ -30,12 +35,13 @@ import asyncio
 import contextlib
 import logging
 import re
+import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 import redis.asyncio as aioredis
 from sqlalchemy import text
@@ -64,6 +70,10 @@ MAX_USAGE_ROWS = SIGNAL_MAX_GROUPS
 # Reads are paged at that ceiling, so a team's week is read whole however
 # large it grows; this bounds one cycle (50 pages = 50000 grouped rows).
 MAX_USAGE_PAGES = 50
+# Usage a developer imported from their own Claude Code history is kept
+# under `backfill:<account uuid>`; telemetry never writes that prefix.
+BACKFILL_PREFIX = "backfill:"
+BACKFILL_LIKE = "backfill:%"
 
 
 class CommitSource(Protocol):
@@ -572,11 +582,33 @@ class Resolver:
         self._by_key = {p.key.lower(): p for p in projects}
         self._by_repo = {p.repo.lower(): p for p in projects}
         self._known = known
+        self._by_id = {external: full for full, external in known.items()}
         self._orgs = set(_orgs(orgs))
+        # Old names GitHub has moved (a clone made before a rename keeps
+        # reporting the old one), mapped to the repository's current name.
+        self._aliases: dict[str, str] = {}
 
     def _of(self, project: Project) -> Repository:
         full = project.repo.lower()
         return Repository(full, self._known.get(full), project.id)
+
+    def unknown(self, *, owner: str = "", name: str = "", url: str = "") -> str | None:
+        """A repository name worth asking GitHub about: owned by a watched
+        organisation (or a catalog project's owner) but known by no project,
+        no repository row and no alias. None for everything else."""
+        full = repository_of(owner, name, url)
+        if full is None or full in self._by_repo or full in self._known or full in self._aliases:
+            return None
+        owners = self._orgs | {p.repo.lower().partition("/")[0] for p in self._projects}
+        return full if full.partition("/")[0] in owners else None
+
+    def alias(self, old: str, external_id: int) -> bool:
+        """Teach that `old` is the repository GitHub knows as `external_id` now."""
+        current = self._by_id.get(external_id)
+        if current is None or current == old:
+            return False
+        self._aliases[old] = current
+        return True
 
     def __call__(
         self, *, tag: str = "", vcs: str = "", owner: str = "", name: str = "", url: str = ""
@@ -586,6 +618,7 @@ class Resolver:
             return self._of(self._by_key[tag])
         full = repository_of(owner, name, url)
         if full is not None:
+            full = self._aliases.get(full, full)
             if full in self._by_repo:
                 return self._of(self._by_repo[full])
             if full.partition("/")[0] in self._orgs:
@@ -632,6 +665,103 @@ async def _resolver(engine: AsyncEngine, orgs: Iterable[str]) -> Resolver:
     )
 
 
+class RenameSource(Protocol):
+    """What rename lookups need from GitHub (GitHubClient, or a test double)."""
+
+    async def installation_token(
+        self,
+        installation_id: int,
+        *,
+        repository_ids: list[int] | None = None,
+        permissions: dict[str, str] | None = None,
+    ) -> Any: ...
+
+    async def repository_id(self, token: Any, owner: str, repo: str) -> int | None: ...
+
+
+class Renames:
+    """Old repository names, looked up once through GitHub and remembered.
+
+    A clone made before a repository was renamed keeps reporting the old
+    name in Claude Code's `vcs.*` attributes. GitHub still answers that name
+    (with a redirect to the repository's id), and the id matches a
+    repository Tracesis knows. Answers are kept in this process: a found
+    name for a day, a name GitHub does not know for an hour. A cycle asks
+    about at most MAX_LOOKUPS names, and never about a gated repository.
+    """
+
+    MAX_LOOKUPS = 20
+    FOUND_SECONDS = 24 * 3600.0
+    MISSING_SECONDS = 3600.0
+    PERMISSIONS: ClassVar[dict[str, str]] = {"metadata": "read"}
+
+    def __init__(self, source: Any, clock: Callable[[], float] = time.monotonic) -> None:
+        self._source = source if hasattr(source, "repository_id") else None
+        self._clock = clock
+        self._cache: dict[str, tuple[int | None, float]] = {}
+        self.calls = 0
+
+    async def _installation(self, engine: AsyncEngine, owner: str) -> int | None:
+        async with engine.connect() as connection:
+            found = (
+                await connection.execute(
+                    text(
+                        "SELECT external_id FROM github_installations "
+                        "WHERE lower(account_login) = :owner AND state = 'active' "
+                        "AND suspended_at IS NULL ORDER BY external_id LIMIT 1"
+                    ),
+                    {"owner": owner},
+                )
+            ).scalar_one_or_none()
+        return int(found) if found is not None else None
+
+    async def teach(self, engine: AsyncEngine, resolver: Resolver, names: Iterable[str]) -> None:
+        """Teach `resolver` every name in `names` that GitHub says has moved."""
+        asked = 0
+        for full in sorted({n for n in names if n}):
+            now = self._clock()
+            cached = self._cache.get(full)
+            if cached is not None and cached[1] > now:
+                if cached[0] is not None:
+                    resolver.alias(full, cached[0])
+                continue
+            if self._source is None or security_gate_for(full) or asked >= self.MAX_LOOKUPS:
+                continue
+            owner, _, name = full.partition("/")
+            asked += 1
+            try:
+                installation = await self._installation(engine, owner)
+                found: int | None = None
+                if installation is not None:
+                    token = await self._source.installation_token(
+                        installation, permissions=self.PERMISSIONS
+                    )
+                    self.calls += 1
+                    found = await self._source.repository_id(token, owner, name)
+            except Exception as error:
+                # Not cached: GitHub could not answer, which says nothing
+                # about the name.
+                logger.warning("dev activity: rename lookup failed: %s", type(error).__name__)
+                continue
+            ttl = self.FOUND_SECONDS if found is not None else self.MISSING_SECONDS
+            self._cache[full] = (found, now + ttl)
+            if found is not None:
+                resolver.alias(full, found)
+
+
+def _unknown_names(resolver: Resolver, rows: Iterable[dict[str, Any]]) -> set[str]:
+    found: set[str] = set()
+    for row in rows:
+        name = resolver.unknown(
+            owner=str(row.get("vcs_owner") or ""),
+            name=str(row.get("vcs_name") or ""),
+            url=str(row.get("vcs_url") or ""),
+        )
+        if name:
+            found.add(name)
+    return found
+
+
 def _resolve(resolver: Resolver, row: dict[str, Any]) -> Repository | None:
     return resolver(
         tag=str(row.get("project_tag") or ""),
@@ -644,7 +774,7 @@ def _resolve(resolver: Resolver, row: dict[str, Any]) -> Repository | None:
 
 def _safe_identity(value: Any) -> str | None:
     text_value = str(value or "").strip()
-    if not text_value or "@" in text_value:
+    if not text_value or "@" in text_value or text_value.lower().startswith(BACKFILL_PREFIX):
         return None
     return text_value[:200]
 
@@ -680,10 +810,14 @@ async def harvest_usage(
     database: str,
     now: datetime,
     orgs: Iterable[str] = (),
+    renames: Renames | None = None,
 ) -> None:
     async with engine.connect() as connection:
         known = (
-            await connection.execute(text("SELECT max(day) FROM dev_agent_days"))
+            await connection.execute(
+                text("SELECT max(day) FROM dev_agent_days WHERE identity NOT LIKE :backfill"),
+                {"backfill": BACKFILL_LIKE},
+            )
         ).scalar_one_or_none()
     first_day: date = (now - timedelta(days=1)).date() if known else (now - USAGE_BACKFILL).date()
     start = datetime.combine(first_day, datetime.min.time(), tzinfo=UTC)
@@ -712,6 +846,19 @@ async def harvest_usage(
     if results["days"] is None:
         return
     resolver = await _resolver(engine, orgs)
+    if renames is not None:
+        await renames.teach(
+            engine,
+            resolver,
+            _unknown_names(
+                resolver,
+                [
+                    *(results["days"] or []),
+                    *(results["metrics"] or []),
+                    *(results["breakdown"] or []),
+                ],
+            ),
+        )
     where: dict[str, Repository] = {}
     days: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in results["days"] or []:
@@ -789,15 +936,23 @@ async def harvest_usage(
                 "duration_ms": 0,
             }
     async with engine.begin() as connection:
-        # Whole days are replaced, so a re-read never double counts.
+        # Whole days are replaced, so a re-read never double counts. Rows a
+        # developer imported from their own history (identity `backfill:…`)
+        # are not the store's to replace.
         await connection.execute(
-            text("DELETE FROM dev_agent_days WHERE day >= :d AND tool = 'claude_code'"),
-            {"d": first_day},
+            text(
+                "DELETE FROM dev_agent_days WHERE day >= :d AND tool = 'claude_code' "
+                "AND identity NOT LIKE :backfill"
+            ),
+            {"d": first_day, "backfill": BACKFILL_LIKE},
         )
         if results["breakdown"] is not None:
             await connection.execute(
-                text("DELETE FROM dev_agent_breakdown WHERE day >= :d AND tool = 'claude_code'"),
-                {"d": first_day},
+                text(
+                    "DELETE FROM dev_agent_breakdown WHERE day >= :d AND tool = 'claude_code' "
+                    "AND identity NOT LIKE :backfill"
+                ),
+                {"d": first_day, "backfill": BACKFILL_LIKE},
             )
         for (day_s, full_name, identity), cur in days.items():
             repository = where[full_name]
@@ -892,6 +1047,7 @@ async def run_once(
     now: datetime | None = None,
     lease_seconds: int = 900,
     orgs: Iterable[str] = (),
+    renames: Renames | None = None,
 ) -> Report:
     report = Report()
     token = uuid.uuid4().hex
@@ -909,7 +1065,15 @@ async def run_once(
             await harvest_commits(engine, source, report, now=moment, budget=budget, orgs=orgs)
         if store is not None:
             try:
-                await harvest_usage(engine, store, report, database=database, now=moment, orgs=orgs)
+                await harvest_usage(
+                    engine,
+                    store,
+                    report,
+                    database=database,
+                    now=moment,
+                    orgs=orgs,
+                    renames=renames,
+                )
             except Exception:
                 logger.warning("dev activity: usage harvest failed")
                 report.errors.append("usage")
@@ -954,6 +1118,8 @@ class DevActivity:
         self._interval = max(120.0, interval_seconds)
         self._budget = budget
         self._orgs = tuple(_orgs(orgs))
+        # Kept across cycles, so a moved name is asked about once a day.
+        self._renames = Renames(source)
         self._task: asyncio.Task[None] | None = None
 
     @property
@@ -992,6 +1158,7 @@ class DevActivity:
                     database=self._database,
                     budget=self._budget,
                     orgs=self._orgs,
+                    renames=self._renames,
                 )
             except asyncio.CancelledError:
                 raise

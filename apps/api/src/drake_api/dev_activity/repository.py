@@ -63,13 +63,19 @@ class People:
         return f"name:{name.strip().lower()}" if name.strip() else "unknown"
 
     def of_claude(self, identity: str, hint: str | None) -> tuple[str, bool]:
-        """(person key, linked)."""
-        hit = self.by_alias.get(("claude", identity.lower()))
+        """(person key, linked).
+
+        Usage a developer imported from their own history is kept under
+        `backfill:<account>`; it is the same Claude account as the live rows,
+        so it resolves to the same person.
+        """
+        account = identity[len("backfill:") :] if identity.startswith("backfill:") else identity
+        hit = self.by_alias.get(("claude", account.lower()))
         if hit:
             return hit[0], True
         if hint:
             return self.of_login(hint, ""), True
-        return f"claude:{identity[:12].lower()}", False
+        return f"claude:{account[:12].lower()}", False
 
     def display(self, key: str) -> str | None:
         for (_, _), (person, shown) in self.by_alias.items():

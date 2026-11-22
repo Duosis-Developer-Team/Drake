@@ -36,6 +36,10 @@ _COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 #: `/` or `..` would address a different resource than the one meant.
 _PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
+#: Where a moved repository now lives: GitHub answers a renamed
+#: `/repos/{owner}/{name}` with a 301 to `/repositories/{id}`.
+_MOVED_TO = re.compile(r"/repositories/([0-9]{1,20})(?:[/?#]|$)")
+
 #: The branch names Drake is allowed to create. The prefix is server-owned;
 #: this is the shape check that keeps it that way at the HTTP boundary.
 _BRANCH_NAME = re.compile(r"drake/[a-z0-9][a-z0-9/-]{0,80}")
@@ -407,6 +411,31 @@ class GitHubClient:
         if not isinstance(response.payload, dict):
             raise GitHubContractError("repository response was not an object")
         return response.payload
+
+    async def repository_id(self, token: InstallationToken, owner: str, repo: str) -> int | None:
+        """GitHub's numeric id for `owner/repo`, also under a name it has since moved from.
+
+        A renamed repository answers its old name with a 301 to
+        `/repositories/{id}`. The redirect is not followed (this client never
+        follows one): the id is read from it, and that id is all a caller
+        needs to match the repository it already knows. None when GitHub says
+        there is no such repository, or the answer names none.
+        """
+        path = f"/repos/{self._segment(owner, 'owner')}/{self._segment(repo, 'repository')}"
+        try:
+            response = await self._request("GET", path, token.token)
+        except GitHubNotFoundError:
+            return None
+        payload = response.payload if isinstance(response.payload, dict) else {}
+        if response.status_code == 200:
+            found = payload.get("id")
+            return found if isinstance(found, int) and not isinstance(found, bool) else None
+        if response.status_code in (301, 302, 307, 308):
+            for where in (response.headers.get("location", ""), str(payload.get("url") or "")):
+                moved = _MOVED_TO.search(where)
+                if moved:
+                    return int(moved.group(1))
+        return None
 
     async def get_branch_protection(
         self, token: InstallationToken, owner: str, repo: str, branch: str
