@@ -69,3 +69,5 @@ os.chmod(path, 0o600)
 PY
 
 echo "Done. New Claude Code sessions report to Tracesis as ${login}; the map updates within 15 minutes."
+echo "Your earlier work: python3 scripts/export-claude-code-usage.py --login ${login} > claude-code-usage.json"
+echo "(counts only; see docs/runbooks/CLAUDE_CODE_USAGE.md)"
