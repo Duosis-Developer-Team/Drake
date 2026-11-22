@@ -191,3 +191,29 @@ def test_usage_reads_stay_under_the_reader_ceiling() -> None:
     ]
     assert ceilings, "the reader profile's max_result_rows ceiling must be declared"
     assert 0 < MAX_USAGE_ROWS <= min(ceilings)
+
+
+def test_usage_reads_are_paged_in_a_fixed_order() -> None:
+    from drake_api.dev_activity.collector import usage_statements
+
+    for sql in usage_statements("otel"):
+        assert "ORDER BY" in sql and "OFFSET {offset:UInt32}" in sql
+
+
+def test_usage_pages_read_until_a_short_page() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from drake_api.dev_activity import collector
+
+    offsets: list[str] = []
+
+    class Store:
+        async def query(self, statement, parameters, **_kw):  # type: ignore[no-untyped-def]
+            offsets.append(parameters["offset"])
+            size = collector.MAX_USAGE_ROWS if len(offsets) < 3 else 7
+            return SimpleNamespace(rows=[{"n": i} for i in range(size)])
+
+    rows = asyncio.run(collector._read_pages(Store(), "SELECT 1", {"start": "x"}, "days"))  # type: ignore[arg-type]
+    assert len(rows) == 2 * collector.MAX_USAGE_ROWS + 7
+    assert offsets == ["0", str(collector.MAX_USAGE_ROWS), str(2 * collector.MAX_USAGE_ROWS)]
