@@ -17,6 +17,23 @@ set -euo pipefail
 ENDPOINT="${TRACESIS_OTLP_ENDPOINT:-https://tracesis-84-247-180-173.sslip.io:30773/otlp}"
 SETTINGS="${HOME}/.claude/settings.json"
 
+# A Python that actually runs. On Windows `python3` is often only the
+# Microsoft Store placeholder, which exists on PATH but prints "Python was
+# not found" and fails; the real interpreter is `python` (or `py -3`).
+# Found before anything is asked or written, so a missing Python changes
+# nothing on disk.
+PYTHON=""
+for candidate in python3 python "py -3"; do
+  if $candidate -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+if [ -z "$PYTHON" ]; then
+  echo "Python 3.8 or later is needed (tried python3, python, py -3)." >&2
+  exit 2
+fi
+
 login="${1:-}"
 if [ -z "$login" ]; then
   guess="$(gh api user -q .login 2>/dev/null || true)"
@@ -45,10 +62,10 @@ cp "$SETTINGS" "$backup"
 chmod 600 "$backup"  # a re-run's backup holds the token
 
 TRACESIS_TOKEN="$token" TRACESIS_LOGIN="$login" TRACESIS_ENDPOINT="$ENDPOINT" \
-  python3 - "$SETTINGS" <<'PY'
+  $PYTHON - "$SETTINGS" <<'PY'
 import json, os, sys
 path = sys.argv[1]
-with open(path) as f:
+with open(path, encoding="utf-8") as f:
     data = json.load(f)
 env = data.setdefault("env", {})
 env.update({
@@ -62,7 +79,7 @@ env.update({
     "OTEL_METRICS_INCLUDE_REPOSITORY": "true",
     "OTEL_RESOURCE_ATTRIBUTES": "tracesis.person=" + os.environ["TRACESIS_LOGIN"],
 })
-with open(path, "w") as f:
+with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
 os.chmod(path, 0o600)
