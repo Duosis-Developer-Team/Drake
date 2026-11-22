@@ -100,6 +100,9 @@ export default defineConfig({
         DRAKE_GITHUB_APP_PRIVATE_KEY_FILE: ".e2e-github/app-key.pem",
         DRAKE_GITHUB_WEBHOOK_SECRET_FILE: ".e2e-github/webhook-secret",
         DRAKE_GITHUB_API_BASE_URL: "http://127.0.0.1:59097",
+        // The repository every gate scenario closes, configured exactly as an
+        // operator would (no real repository is gated).
+        DRAKE_GITHUB_GATED_REPOSITORIES: '["Duosis-Developer-Team/Gated-Fixture"]',
       },
     },
     {

@@ -102,8 +102,8 @@ def test_the_allowlist_is_explicit_per_event() -> None:
     ("gate", "installation", "access", "reconciliation", "expected"),
     [
         # A security gate outranks everything below it.
-        ("manual_env_review", "active", "accessible", "complete", "blocked"),
-        ("manual_env_review", "deleted", "removed", "never", "blocked"),
+        ("manual_review", "active", "accessible", "complete", "blocked"),
+        ("manual_review", "deleted", "removed", "never", "blocked"),
         # Then the installation's own state.
         (None, "deleted", "accessible", "complete", "disabled"),
         (None, "suspended", "accessible", "complete", "disabled"),

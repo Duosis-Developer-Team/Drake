@@ -31,7 +31,7 @@ API_ROOT = Path(__file__).resolve().parents[1]
 WEBHOOK_SECRET = "local-only-webhook-secret"
 HERMES_ID = 900001
 LOGISLOT_ID = 900002
-DATALAKE_ID = 900003
+GATED_ID = 900003
 INSTALLATION_ID = 55501
 
 
@@ -593,7 +593,7 @@ async def test_onboarding_lifecycle_rename_transfer_and_removal(
     assert state == "suspended"
 
 
-async def test_datalake_security_gate_blocks_before_any_api_call(
+async def test_a_security_gate_blocks_before_any_api_call(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     harness, fake = github_harness(tmp_path)
@@ -602,9 +602,9 @@ async def test_datalake_security_gate_blocks_before_any_api_call(
     payload = installation_payload(
         repositories=[
             {
-                "id": DATALAKE_ID,
-                "name": "Datalake-Platform-GUI",
-                "full_name": "Duosis-Developer-Team/Datalake-Platform-GUI",
+                "id": GATED_ID,
+                "name": "Gated-Fixture",
+                "full_name": "Duosis-Developer-Team/Gated-Fixture",
                 "private": True,
             }
         ]
@@ -621,12 +621,12 @@ async def test_datalake_security_gate_blocks_before_any_api_call(
                     "SELECT id, onboarding_state, security_gate, state_reason "
                     "FROM github_repositories WHERE external_id = :id"
                 ),
-                {"id": DATALAKE_ID},
+                {"id": GATED_ID},
             )
         ).one()
     assert row[1] == "blocked"
-    assert row[2] == "manual_env_review"
-    assert row[3] == "security_gate_manual_env_review"
+    assert row[2] == "manual_review"
+    assert row[3] == "security_gate_manual_review"
 
     async with harness.api_client() as client:
         me = await harness.login(client, "user-owner")
@@ -961,10 +961,10 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
                     "private": True,
                 },
                 {
-                    "id": DATALAKE_ID,
-                    "node_id": "R_datalake",
-                    "name": "Datalake-Platform-GUI",
-                    "full_name": "Duosis-Developer-Team/Datalake-Platform-GUI",
+                    "id": GATED_ID,
+                    "node_id": "R_gated",
+                    "name": "Gated-Fixture",
+                    "full_name": "Duosis-Developer-Team/Gated-Fixture",
                     "private": True,
                 },
             ]
@@ -997,7 +997,7 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
                             "SELECT external_id, onboarding_state FROM github_repositories "
                             "WHERE external_id = ANY(:ids)"
                         ),
-                        {"ids": [HERMES_ID, DATALAKE_ID]},
+                        {"ids": [HERMES_ID, GATED_ID]},
                     )
                 ).all()
             )
@@ -1006,4 +1006,4 @@ async def test_redelivery_after_reconciliation_does_not_regress_a_ready_reposito
     # DISCOVERED. It DOES leave it degraded: a webhook is a notification,
     # so evidence gathered before it is no longer current (fix gate 4 §3).
     assert rows[HERMES_ID] == "degraded"
-    assert rows[DATALAKE_ID] == "blocked"
+    assert rows[GATED_ID] == "blocked"
