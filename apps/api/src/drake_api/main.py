@@ -36,9 +36,11 @@ from drake_api.dashboards.router import router as dashboards_router
 from drake_api.db import dispose_engines, get_engine
 from drake_api.deployments.router import router as deployments_router
 from drake_api.deployments.worker import DeploymentIngestWorker
+from drake_api.dev_activity.avatars import Avatars
 from drake_api.dev_activity.collector import DevActivity
 from drake_api.dev_activity.router import router as dev_activity_router
 from drake_api.errors import register_error_handlers
+from drake_api.github_app import catalog as github_catalog
 from drake_api.github_app.auth import GitHubAppAuth
 from drake_api.github_app.auth import validate_credentials as validate_github_credentials
 from drake_api.github_app.client import GitHubClient
@@ -186,6 +188,7 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = settings
+    github_catalog.configure_security_gates(settings.github_gated_repositories)
 
     app.add_middleware(CorrelationIdMiddleware)
     if settings.cors_origins:
@@ -368,6 +371,8 @@ def create_app(
         if settings.observability_traces_enabled and store_connector is not None
         else None
     )
+    # People's GitHub pictures for the map, fetched server-side (cached).
+    app.state.dev_avatars = Avatars(github_client if settings.github_app_enabled else None)
     app.state.dev_activity = (
         DevActivity(
             get_engine(settings),
@@ -377,6 +382,7 @@ def create_app(
             database=store_connector.database if store_connector is not None else "otel",
             interval_seconds=settings.dev_activity_interval_seconds,
             budget=settings.dev_activity_commit_budget,
+            orgs=settings.dev_activity_orgs,
         )
         if settings.dev_activity_enabled
         and app.state.telemetry_redis is not None

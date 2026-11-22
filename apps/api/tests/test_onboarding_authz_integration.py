@@ -586,7 +586,7 @@ async def _reconciled(engine: AsyncEngine, repository_id: uuidlib.UUID) -> None:
 @pytest.mark.parametrize(
     ("column", "value", "reason"),
     [
-        ("security_gate", "'manual_env_review'", "security_gate_open"),
+        ("security_gate", "'manual_review'", "security_gate_open"),
         ("archived", "true", "repository_unavailable"),
         ("disabled", "true", "repository_unavailable"),
         ("access_state", "'removed'", "repository_unavailable"),

@@ -17,7 +17,7 @@ from drake_api.rbac.service import Principal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     LOGISLOT_ID,
@@ -459,17 +459,17 @@ async def test_a_gated_repository_is_never_scanned_or_imported(
             installation_payload(
                 repositories=[
                     {
-                        "id": DATALAKE_ID,
+                        "id": GATED_ID,
                         "node_id": "R_dl",
-                        "name": "Datalake-Platform-GUI",
-                        "full_name": f"{OWNER}/Datalake-Platform-GUI",
+                        "name": "Gated-Fixture",
+                        "full_name": f"{OWNER}/Gated-Fixture",
                         "private": True,
                     }
                 ]
             ),
             str(uuidlib.uuid4()),
         )
-    row_id = await _row_id(engine, DATALAKE_ID)
+    row_id = await _row_id(engine, GATED_ID)
     fake.calls.clear()
     fake.token_requests.clear()
 

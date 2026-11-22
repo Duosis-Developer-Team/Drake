@@ -1,11 +1,11 @@
-"""Development agents: the map, a slice of commits, aliases, connecting Claude Code."""
+"""Development agents: the map, a slice of commits, faces, aliases, connecting Claude Code."""
 
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -21,6 +21,7 @@ router = APIRouter(prefix="/v1/agents/dev", tags=["agents"])
 
 _WINDOW = "^(7d|30d|90d)$"
 _AGENT = "^(claude_code|copilot|codex|cursor|devin|other_ai|none)$"
+_REPOSITORY = r"^(gh:[0-9]{1,18}|repo:[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100})$"
 
 
 def _loop(request: Request) -> Any:
@@ -33,7 +34,7 @@ async def dev_map(
     window: str = Query("30d", pattern=_WINDOW),
     auth: AuthContext = Depends(require_auth),
 ) -> dict[str, Any]:
-    """People, the projects and services they changed, and with which agent."""
+    """People, the repositories (and catalog services) they changed, and with which agent."""
     settings: Settings = request.app.state.settings
     loop = _loop(request)
     async with get_engine(settings).connect() as connection:
@@ -43,6 +44,7 @@ async def dev_map(
             window=window,
             reads_commits=bool(loop and loop.reads_commits),
             reads_usage=bool(loop and loop.reads_usage),
+            orgs=settings.dev_activity_orgs,
         )
 
 
@@ -52,12 +54,13 @@ async def dev_commits(
     window: str = Query("30d", pattern=_WINDOW),
     person: str | None = Query(None, max_length=200),
     project: uuid.UUID | None = Query(None),
+    repository: str | None = Query(None, pattern=_REPOSITORY),
     service: str | None = Query(None, max_length=200),
     agent: str | None = Query(None, pattern=_AGENT),
     limit: int = Query(200, ge=1, le=500),
     auth: AuthContext = Depends(require_auth),
 ) -> dict[str, Any]:
-    """The commits behind one arrow, person, project or service."""
+    """The commits behind one arrow, person, repository, project or service."""
     settings: Settings = request.app.state.settings
     async with get_engine(settings).connect() as connection:
         return await repo.dev_commits(
@@ -66,10 +69,71 @@ async def dev_commits(
             window=window,
             person=person,
             project=project,
+            repository=repository,
             service=service,
             agent=agent,
             limit=limit,
         )
+
+
+@router.get("/people/{person_key}/avatar")
+async def person_avatar(
+    request: Request,
+    person_key: str = Path(min_length=1, max_length=100, pattern=r"^[^@\s/]+$"),
+    auth: AuthContext = Depends(require_auth),
+) -> Response:
+    """A person's face: their hand-made portrait, else their GitHub picture.
+
+    Scoped like the map: only a person behind rows this caller may see
+    counts. `X-Tracesis-Avatar` says which it is (`portrait` is shown as is;
+    `github` is redrawn as an arcade character by the browser, which never
+    calls GitHub). 204 means "draw the initials" — someone not visible, no
+    login, a bot, no picture, or one that is not a small PNG/JPEG; it is
+    never a 404, so asking says nothing about who exists.
+    """
+    settings: Settings = request.app.state.settings
+    avatars = getattr(request.app.state, "dev_avatars", None)
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+    }
+    async with get_engine(settings).connect() as connection:
+        people = await repo.visible_people(connection, auth.principal)
+        if person_key not in people:
+            return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
+        # A hand-made portrait, when an operator set one, stands for the person.
+        made = await repo.portrait(connection, person_key)
+        if made is not None:
+            etag = f'"p-{int(made["updated_at"].timestamp() * 1000)}"'
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304, headers={"ETag": etag})
+            return Response(
+                content=made["content"],
+                media_type=made["media_type"],
+                headers={
+                    **headers,
+                    "Cache-Control": "private, max-age=3600",
+                    "ETag": etag,
+                    "X-Tracesis-Avatar": "portrait",
+                },
+            )
+        logins = sorted(people[person_key], key=str.lower)
+        login = next(
+            (x for x in logins if x.lower() == person_key.lower()), logins[0] if logins else None
+        )
+        installation = await repo.avatar_installation(connection) if login and avatars else None
+    avatar = await avatars.of_login(login, installation) if login and avatars is not None else None
+    if avatar is None:
+        return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
+    return Response(
+        content=avatar.content,
+        media_type=avatar.media_type,
+        headers={
+            **headers,
+            "Cache-Control": "private, max-age=86400",
+            "X-Tracesis-Avatar": "github",
+        },
+    )
 
 
 @router.get("/connect")

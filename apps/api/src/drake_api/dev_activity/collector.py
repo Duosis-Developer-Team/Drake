@@ -2,22 +2,30 @@
 
 Two harvests per cycle, under one lease, each independent of the other:
 
-1. **Commits.** For every catalog project whose GitHub repository the App can
-   read, page the default branch's commits since the newest one kept (90 days
+1. **Commits.** For every repository the App can read that is either a
+   catalog project's or belongs to one of the watched GitHub organisations
+   (`dev_activity_orgs`), page the default branch's commits since the newest one kept (90 days
    on a first run), fetch each new commit's detail for its size and changed
    paths, and keep one row: author login and name (never the email), the
-   coding agent the commit names, the services its paths fall under. A
+   coding agent the commit names, the services its paths fall under (a
+   repository nobody has catalogued has no project and no services). A
    per-cycle budget of detail calls keeps a large backfill from crowding the
    App's rate limit; what does not fit is picked up next cycle.
 2. **Claude Code usage.** Claude Code's events and counters arrive through the
    gateway's external door into the store (content already removed there).
    Whole days are re-read — today and yesterday; the store's week on a first
-   run — and replaced in Postgres per day, project and Claude identity. A
-   session is kept only when it says which catalog project it worked on: a
+   run — and replaced in Postgres per day, repository and Claude identity. A
+   session is kept only when it says which repository it worked on: a
    `tracesis.project` resource attribute naming a project key, or repository
-   attributes (`vcs.*`) naming a catalog repository. Everything else is left
-   out.
+   attributes (`vcs.*`) naming a catalog repository or a repository of a
+   watched organisation. Everything else is left out. A clone made before a
+   repository was renamed still reports the old name; GitHub is asked once
+   which repository that name now is (`Renames`).
 
+Usage a developer imported from their own Claude Code history
+(`usage_import`, identity `backfill:<account>`) is never replaced here.
+
+A repository behind an open manual security gate is never read from GitHub.
 Nothing here writes anywhere but Tracesis's own tables.
 """
 
@@ -26,18 +34,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
+import time
 import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 import redis.asyncio as aioredis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from drake_api.dev_activity import classify
+from drake_api.github_app.catalog import security_gate_for
 from drake_api.observability.scope import clickhouse_time
+from drake_api.observability.signals import MAX_GROUPS as SIGNAL_MAX_GROUPS
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +62,18 @@ RETENTION = timedelta(days=90)
 COMMIT_PERMISSIONS = {"metadata": "read", "contents": "read"}
 MAX_COMMIT_PAGES = 10
 USAGE_BACKFILL = timedelta(days=7)
-MAX_USAGE_ROWS = 20000
+# The reader profile refuses any max_result_rows above its ceiling (1000,
+# deploy/otel clickhouse-config): asking for more fails the whole read. The
+# rows are already grouped per day, project, person and tool, so the
+# ceiling holds a week of a team's usage. A unit test pins it.
+MAX_USAGE_ROWS = SIGNAL_MAX_GROUPS
+# Reads are paged at that ceiling, so a team's week is read whole however
+# large it grows; this bounds one cycle (50 pages = 50000 grouped rows).
+MAX_USAGE_PAGES = 50
+# Usage a developer imported from their own Claude Code history is kept
+# under `backfill:<account uuid>`; telemetry never writes that prefix.
+BACKFILL_PREFIX = "backfill:"
+BACKFILL_LIKE = "backfill:%"
 
 
 class CommitSource(Protocol):
@@ -94,12 +118,14 @@ class Report:
 
 @dataclass
 class Target:
-    project_id: uuid.UUID
-    project_key: str
+    """A repository the loop reads; `project_id` is None when it is not catalogued."""
+
+    project_id: uuid.UUID | None
+    project_key: str | None
     owner: str
     name: str
     branch: str
-    repository_external_id: int | None
+    repository_external_id: int
     installation_external_id: int
     services: list[str]
 
@@ -108,26 +134,38 @@ class Target:
         return f"{self.owner}/{self.name}"
 
 
-async def targets(engine: AsyncEngine) -> list[Target]:
-    """Catalog projects whose repository the App can read, with their services."""
+def _orgs(orgs: Iterable[str]) -> list[str]:
+    return sorted({o.strip().lower() for o in orgs if o and o.strip()})
+
+
+async def targets(engine: AsyncEngine, orgs: Iterable[str] = ()) -> list[Target]:
+    """Readable repositories: the catalog's, and every one of the watched orgs.
+
+    A catalogued repository keeps its project (and its services); a gated,
+    archived or disabled one is never a target.
+    """
     async with engine.connect() as connection:
         rows = (
             await connection.execute(
                 text(
                     """
-                    SELECT p.id, p.project_key, p.repo_owner, p.repo_name,
-                           coalesce(nullif(r.default_branch, ''), p.default_branch),
+                    SELECT p.id, p.project_key, r.full_name,
+                           coalesce(nullif(r.default_branch, ''),
+                                    nullif(p.default_branch, ''), 'main'),
                            r.external_id, i.external_id
-                    FROM projects p
-                    JOIN github_repositories r
-                      ON lower(r.full_name) = lower(p.repo_owner || '/' || p.repo_name)
+                    FROM github_repositories r
                     JOIN github_installations i ON i.id = r.installation_id
-                    WHERE p.lifecycle = 'active' AND p.repo_provider = 'github'
-                      AND r.access_state = 'accessible' AND NOT r.archived
-                      AND i.state = 'active'
-                    ORDER BY p.project_key
+                    LEFT JOIN projects p
+                      ON p.lifecycle = 'active' AND p.repo_provider = 'github'
+                     AND lower(r.full_name) = lower(p.repo_owner || '/' || p.repo_name)
+                    WHERE r.access_state = 'accessible' AND NOT r.archived
+                      AND NOT r.disabled AND r.security_gate IS NULL
+                      AND i.state = 'active' AND position('/' in r.full_name) > 1
+                      AND (p.id IS NOT NULL OR lower(r.owner_login) = ANY(:orgs))
+                    ORDER BY p.project_key NULLS LAST, lower(r.full_name), r.external_id
                     """
-                )
+                ),
+                {"orgs": _orgs(orgs)},
             )
         ).all()
         services: dict[uuid.UUID, list[str]] = {}
@@ -137,19 +175,31 @@ async def targets(engine: AsyncEngine) -> list[Target]:
             )
         ).all():
             services.setdefault(uuid.UUID(str(project_id)), []).append(str(key))
-    return [
-        Target(
-            project_id=uuid.UUID(str(r[0])),
-            project_key=str(r[1]),
-            owner=str(r[2]),
-            name=str(r[3]),
-            branch=str(r[4] or "main"),
-            repository_external_id=int(r[5]) if r[5] is not None else None,
-            installation_external_id=int(r[6]),
-            services=services.get(uuid.UUID(str(r[0])), []),
+    found: list[Target] = []
+    seen: set[int] = set()
+    for r in rows:
+        external = int(r[4])
+        full_name = str(r[2])
+        # One repository is read once, under the first project that names it;
+        # the code-level gate list is honoured even before the row carries it.
+        if external in seen or security_gate_for(full_name):
+            continue
+        seen.add(external)
+        owner, _, name = full_name.partition("/")
+        project_id = uuid.UUID(str(r[0])) if r[0] is not None else None
+        found.append(
+            Target(
+                project_id=project_id,
+                project_key=str(r[1]) if r[1] is not None else None,
+                owner=owner,
+                name=name,
+                branch=str(r[3] or "main"),
+                repository_external_id=external,
+                installation_external_id=int(r[5]),
+                services=services.get(project_id, []) if project_id else [],
+            )
         )
-        for r in rows
-    ]
+    return found
 
 
 def _iso(moment: datetime) -> str:
@@ -205,7 +255,11 @@ def commit_row(
         for f in _seq(detail.get("files"))
         if isinstance(f, dict) and isinstance(f.get("filename"), str)
     ]
-    services, unmapped = classify.map_services(paths, target.services, target.project_key)
+    if target.project_id is not None:
+        services, unmapped = classify.map_services(paths, target.services, target.project_key or "")
+    else:
+        # Not catalogued: no services to map onto, and nothing is "unmapped".
+        services, unmapped = [], 0
     # Names and logins only: anything that looks like an address is dropped.
     if "@" in name:
         name = ""
@@ -213,6 +267,7 @@ def commit_row(
         login = None
     return {
         "project_id": target.project_id,
+        "repository_external_id": target.repository_external_id,
         "sha": str(item.get("sha") or ""),
         "repository": target.full_name,
         "authored_at": authored,
@@ -232,13 +287,13 @@ def commit_row(
 
 _INSERT_COMMIT = text(
     """
-    INSERT INTO dev_commits (project_id, sha, repository, authored_at, author_login,
-        author_name, agent, agent_evidence, title, additions, deletions, files_changed,
-        services, unmapped_files, pr_number)
-    VALUES (:project_id, :sha, :repository, :authored_at, :author_login, :author_name,
-        :agent, :agent_evidence, :title, :additions, :deletions, :files_changed,
-        :services, :unmapped_files, :pr_number)
-    ON CONFLICT (project_id, sha) DO NOTHING
+    INSERT INTO dev_commits (project_id, repository_external_id, sha, repository,
+        authored_at, author_login, author_name, agent, agent_evidence, title, additions,
+        deletions, files_changed, services, unmapped_files, pr_number)
+    VALUES (:project_id, :repository_external_id, :sha, :repository, :authored_at,
+        :author_login, :author_name, :agent, :agent_evidence, :title, :additions,
+        :deletions, :files_changed, :services, :unmapped_files, :pr_number)
+    ON CONFLICT (repository_external_id, sha) DO NOTHING
     """
 )
 
@@ -250,8 +305,9 @@ async def harvest_commits(
     *,
     now: datetime,
     budget: int,
+    orgs: Iterable[str] = (),
 ) -> None:
-    for target in await targets(engine):
+    for target in await targets(engine, orgs):
         if report.detail_calls >= budget:
             report.budget_exhausted = True
             return
@@ -273,11 +329,21 @@ async def _harvest_one(
     now: datetime,
     budget: int,
 ) -> None:
-    async with engine.connect() as connection:
+    async with engine.begin() as connection:
+        # Catalogued (or no longer) since the last cycle, or renamed: the rows
+        # follow the repository, which GitHub's id names for good.
+        await connection.execute(
+            text(
+                "UPDATE dev_commits SET project_id = CAST(:p AS uuid), repository = :f "
+                "WHERE repository_external_id = :e "
+                "AND (project_id IS DISTINCT FROM CAST(:p AS uuid) OR repository <> :f)"
+            ),
+            {"p": target.project_id, "f": target.full_name, "e": target.repository_external_id},
+        )
         newest = (
             await connection.execute(
-                text("SELECT max(authored_at) FROM dev_commits WHERE project_id = :p"),
-                {"p": target.project_id},
+                text("SELECT max(authored_at) FROM dev_commits WHERE repository_external_id = :e"),
+                {"e": target.repository_external_id},
             )
         ).scalar_one_or_none()
         known = {
@@ -285,10 +351,13 @@ async def _harvest_one(
             for r in (
                 await connection.execute(
                     text(
-                        "SELECT sha FROM dev_commits WHERE project_id = :p "
+                        "SELECT sha FROM dev_commits WHERE repository_external_id = :e "
                         "AND authored_at >= :since"
                     ),
-                    {"p": target.project_id, "since": (newest or now) - timedelta(days=2)},
+                    {
+                        "e": target.repository_external_id,
+                        "since": (newest or now) - timedelta(days=2),
+                    },
                 )
             ).all()
         }
@@ -297,7 +366,7 @@ async def _harvest_one(
     since = max(now - RETENTION, (newest - timedelta(days=1)) if newest else now - RETENTION)
     token = await source.installation_token(
         target.installation_external_id,
-        repository_ids=[target.repository_external_id] if target.repository_external_id else None,
+        repository_ids=[target.repository_external_id],
         permissions=dict(COMMIT_PERMISSIONS),
     )
     rows: list[dict[str, Any]] = []
@@ -347,13 +416,31 @@ _IDENTITY = (
     "coalesce(nullIf(LogAttributes['user.account_uuid'], ''), "
     "nullIf(LogAttributes['user.id'], ''), '')"
 )
-# Repository attributes are matched by prefix: their exact keys are not
-# documented, and whatever names the repository is enough to match it.
+# Repository attributes are matched by prefix as a fallback: whatever names a
+# catalog repository is enough to match it.
 _VCS = (
     "arrayStringConcat(arrayConcat("
     "mapValues(mapFilter((k, v) -> startsWith(k, 'vcs.'), ResourceAttributes)), "
     "mapValues(mapFilter((k, v) -> startsWith(k, 'vcs.'), LogAttributes))), ' ')"
 )
+
+
+def _attribute(key: str, record: str = "LogAttributes") -> str:
+    """One attribute, from the record first, then from the resource."""
+    return f"coalesce(nullIf({record}['{key}'], ''), nullIf(ResourceAttributes['{key}'], ''), '')"
+
+
+# The repository a session worked in, as Claude Code names it (observed in
+# production on the record: owner, repository name, and its URL).
+_OWNER, _NAME, _URL = "vcs.owner.name", "vcs.repository.name", "vcs.repository.url.full"
+
+
+def _repository_columns(record: str = "LogAttributes") -> str:
+    return (
+        f"{_attribute(_OWNER, record)} AS vcs_owner, "
+        f"{_attribute(_NAME, record)} AS vcs_name, "
+        f"{_attribute(_URL, record)} AS vcs_url"
+    )
 
 
 _EDIT_TOOLS = "('Edit', 'Write', 'MultiEdit', 'NotebookEdit')"
@@ -367,9 +454,11 @@ def usage_statements(database: str) -> tuple[str, str, str]:
         "AND Timestamp >= {start:DateTime64(9, 'UTC')} "
         "AND Timestamp < {end:DateTime64(9, 'UTC')}"
     )
+    repo = _repository_columns()
     days = f"""
         SELECT toString(toDate(Timestamp)) AS day, {_PROJECT_TAG} AS project_tag,
-               {_VCS} AS vcs, {_IDENTITY} AS identity, any({_PERSON_HINT}) AS person_hint,
+               {_VCS} AS vcs, {repo},
+               {_IDENTITY} AS identity, any({_PERSON_HINT}) AS person_hint,
                countIf({_EVENT} = 'api_request') AS api_requests,
                countIf({_EVENT} = 'api_error') AS api_errors,
                countIf({_EVENT} = 'user_prompt') AS prompts,
@@ -389,13 +478,14 @@ def usage_statements(database: str) -> tuple[str, str, str]:
                        AND LogAttributes['tool_name'] IN {_EDIT_TOOLS}) AS edits_rejected
         FROM {logs}
         WHERE {where}
-        GROUP BY day, project_tag, vcs, identity
+        GROUP BY day, project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity
         HAVING identity != ''
-        LIMIT {{max_rows:UInt32}}
+        ORDER BY day, project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity
+        LIMIT {{max_rows:UInt32}} OFFSET {{offset:UInt32}}
     """  # noqa: S608 - fixed fragments; values are bound parameters
     breakdown = f"""
         SELECT toString(toDate(Timestamp)) AS day, {_PROJECT_TAG} AS project_tag,
-               {_VCS} AS vcs, {_IDENTITY} AS identity,
+               {_VCS} AS vcs, {repo}, {_IDENTITY} AS identity,
                if({_EVENT} = 'api_request', 'model', 'tool') AS kind,
                if({_EVENT} = 'api_request', LogAttributes['model'], LogAttributes['tool_name'])
                  AS name,
@@ -409,9 +499,10 @@ def usage_statements(database: str) -> tuple[str, str, str]:
                sum(toUInt64OrZero(LogAttributes['duration_ms'])) AS duration_ms
         FROM {logs}
         WHERE {where} AND {_EVENT} IN ('api_request', 'tool_result')
-        GROUP BY day, project_tag, vcs, identity, kind, name
+        GROUP BY day, project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity, kind, name
         HAVING identity != '' AND name != ''
-        LIMIT {{max_rows:UInt32}}
+        ORDER BY day, project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity, kind, name
+        LIMIT {{max_rows:UInt32}} OFFSET {{offset:UInt32}}
     """  # noqa: S608 - fixed fragments; values are bound parameters
     metrics = f"""
         SELECT toString(toDate(TimeUnix)) AS day,
@@ -420,6 +511,7 @@ def usage_statements(database: str) -> tuple[str, str, str]:
                arrayStringConcat(arrayConcat(
                  mapValues(mapFilter((k, v) -> startsWith(k, 'vcs.'), ResourceAttributes)),
                  mapValues(mapFilter((k, v) -> startsWith(k, 'vcs.'), Attributes))), ' ') AS vcs,
+               {_repository_columns("Attributes")},
                coalesce(nullIf(Attributes['user.account_uuid'], ''),
                         nullIf(Attributes['user.id'], ''), '') AS identity,
                MetricName AS metric, Attributes['type'] AS type,
@@ -432,23 +524,125 @@ def usage_statements(database: str) -> tuple[str, str, str]:
           AND MetricName IN ('claude_code.active_time.total', 'claude_code.lines_of_code.count',
                              'claude_code.commit.count', 'claude_code.pull_request.count',
                              'claude_code.code_edit_tool.decision')
-        GROUP BY day, project_tag, vcs, identity, metric, type, decision, language
+        GROUP BY day, project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity, metric, type,
+                 decision, language
         HAVING identity != ''
-        LIMIT {{max_rows:UInt32}}
+        ORDER BY day, project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity, metric, type,
+                 decision, language
+        LIMIT {{max_rows:UInt32}} OFFSET {{offset:UInt32}}
     """  # noqa: S608 - fixed fragments; values are bound parameters
     return days, breakdown, metrics
 
 
-@dataclass
+@dataclass(frozen=True)
 class Project:
     id: uuid.UUID
     key: str
     repo: str
 
 
-async def _projects(engine: AsyncEngine) -> list[Project]:
+@dataclass(frozen=True)
+class Repository:
+    """Where a session's usage is kept: always a repository, a project when catalogued."""
+
+    full_name: str  # owner/name, lower case
+    external_id: int | None
+    project_id: uuid.UUID | None
+
+
+_PART = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_GITHUB_URL = re.compile(r"github\.com[/:]([^/\s]+)/([^/\s?#]+?)(?:\.git)?/?(?:[?#].*)?$", re.I)
+
+
+def repository_of(owner: str, name: str, url: str) -> str | None:
+    """`owner/name` (lower case) from Claude Code's repository attributes, or None."""
+    o, n = (owner or "").strip(), (name or "").strip()
+    if "/" in n:
+        # Some emitters put the full name in the name attribute.
+        head, _, n = n.rpartition("/")
+        o = o or head.rpartition("/")[2]
+    if n.lower().endswith(".git"):
+        n = n[:-4]
+    if not (o and n):
+        match = _GITHUB_URL.search((url or "").strip())
+        if match:
+            o, n = match.group(1), match.group(2)
+    if o and n and _PART.match(o) and _PART.match(n):
+        return f"{o}/{n}".lower()
+    return None
+
+
+class Resolver:
+    """Which repository (and catalog project) a Claude Code session worked on."""
+
+    def __init__(
+        self, projects: list[Project], known: dict[str, int], orgs: Iterable[str] = ()
+    ) -> None:
+        self._projects = projects
+        self._by_key = {p.key.lower(): p for p in projects}
+        self._by_repo = {p.repo.lower(): p for p in projects}
+        self._known = known
+        self._by_id = {external: full for full, external in known.items()}
+        self._orgs = set(_orgs(orgs))
+        # Old names GitHub has moved (a clone made before a rename keeps
+        # reporting the old one), mapped to the repository's current name.
+        self._aliases: dict[str, str] = {}
+
+    def _of(self, project: Project) -> Repository:
+        full = project.repo.lower()
+        return Repository(full, self._known.get(full), project.id)
+
+    def unknown(self, *, owner: str = "", name: str = "", url: str = "") -> str | None:
+        """A repository name worth asking GitHub about: owned by a watched
+        organisation (or a catalog project's owner) but known by no project,
+        no repository row and no alias. None for everything else."""
+        full = repository_of(owner, name, url)
+        if full is None or full in self._by_repo or full in self._known or full in self._aliases:
+            return None
+        owners = self._orgs | {p.repo.lower().partition("/")[0] for p in self._projects}
+        return full if full.partition("/")[0] in owners else None
+
+    def alias(self, old: str, external_id: int) -> bool:
+        """Teach that `old` is the repository GitHub knows as `external_id` now."""
+        current = self._by_id.get(external_id)
+        if current is None or current == old:
+            return False
+        self._aliases[old] = current
+        return True
+
+    def __call__(
+        self, *, tag: str = "", vcs: str = "", owner: str = "", name: str = "", url: str = ""
+    ) -> Repository | None:
+        tag = (tag or "").strip().lower()
+        if tag and tag in self._by_key:
+            return self._of(self._by_key[tag])
+        full = repository_of(owner, name, url)
+        if full is not None:
+            full = self._aliases.get(full, full)
+            if full in self._by_repo:
+                return self._of(self._by_repo[full])
+            if full.partition("/")[0] in self._orgs:
+                return Repository(full, self._known.get(full), None)
+            # A repository outside the watched organisations: left out.
+            return None
+        haystack = (vcs or "").lower()
+        if haystack:
+            for project in self._projects:
+                repo = project.repo.lower()
+                if repo and (repo in haystack or f"{repo}.git" in haystack):
+                    return self._of(project)
+        return None
+
+
+def resolve_repository(
+    projects: list[Project], known: dict[str, int], orgs: Iterable[str] = (), **attrs: str
+) -> Repository | None:
+    return Resolver(projects, known, orgs)(**attrs)
+
+
+async def _resolver(engine: AsyncEngine, orgs: Iterable[str]) -> Resolver:
     async with engine.connect() as connection:
-        rows = (
+        projects = (
             await connection.execute(
                 text(
                     "SELECT id, project_key, repo_owner || '/' || repo_name FROM projects "
@@ -456,30 +650,156 @@ async def _projects(engine: AsyncEngine) -> list[Project]:
                 )
             )
         ).all()
-    return [Project(uuid.UUID(str(r[0])), str(r[1]), str(r[2])) for r in rows]
+        known = (
+            await connection.execute(
+                text(
+                    "SELECT lower(full_name), external_id FROM github_repositories "
+                    "WHERE position('/' in full_name) > 1 ORDER BY last_reconciled_at NULLS FIRST"
+                )
+            )
+        ).all()
+    return Resolver(
+        [Project(uuid.UUID(str(r[0])), str(r[1]), str(r[2])) for r in projects],
+        {str(r[0]): int(r[1]) for r in known},
+        orgs,
+    )
 
 
-def resolve_project(projects: list[Project], tag: str, vcs: str) -> Project | None:
-    """The catalog project a session worked on, or None to leave it out."""
-    tag = (tag or "").strip().lower()
-    if tag:
-        for project in projects:
-            if project.key.lower() == tag:
-                return project
-    haystack = (vcs or "").lower()
-    if haystack:
-        for project in projects:
-            repo = project.repo.lower()
-            if repo and (repo in haystack or f"{repo}.git" in haystack):
-                return project
-    return None
+class RenameSource(Protocol):
+    """What rename lookups need from GitHub (GitHubClient, or a test double)."""
+
+    async def installation_token(
+        self,
+        installation_id: int,
+        *,
+        repository_ids: list[int] | None = None,
+        permissions: dict[str, str] | None = None,
+    ) -> Any: ...
+
+    async def repository_id(self, token: Any, owner: str, repo: str) -> int | None: ...
+
+
+class Renames:
+    """Old repository names, looked up once through GitHub and remembered.
+
+    A clone made before a repository was renamed keeps reporting the old
+    name in Claude Code's `vcs.*` attributes. GitHub still answers that name
+    (with a redirect to the repository's id), and the id matches a
+    repository Tracesis knows. Answers are kept in this process: a found
+    name for a day, a name GitHub does not know for an hour. A cycle asks
+    about at most MAX_LOOKUPS names, and never about a gated repository.
+    """
+
+    MAX_LOOKUPS = 20
+    FOUND_SECONDS = 24 * 3600.0
+    MISSING_SECONDS = 3600.0
+    PERMISSIONS: ClassVar[dict[str, str]] = {"metadata": "read"}
+
+    def __init__(self, source: Any, clock: Callable[[], float] = time.monotonic) -> None:
+        self._source = source if hasattr(source, "repository_id") else None
+        self._clock = clock
+        self._cache: dict[str, tuple[int | None, float]] = {}
+        self.calls = 0
+
+    async def _installation(self, engine: AsyncEngine, owner: str) -> int | None:
+        async with engine.connect() as connection:
+            found = (
+                await connection.execute(
+                    text(
+                        "SELECT external_id FROM github_installations "
+                        "WHERE lower(account_login) = :owner AND state = 'active' "
+                        "AND suspended_at IS NULL ORDER BY external_id LIMIT 1"
+                    ),
+                    {"owner": owner},
+                )
+            ).scalar_one_or_none()
+        return int(found) if found is not None else None
+
+    async def teach(self, engine: AsyncEngine, resolver: Resolver, names: Iterable[str]) -> None:
+        """Teach `resolver` every name in `names` that GitHub says has moved."""
+        asked = 0
+        for full in sorted({n for n in names if n}):
+            now = self._clock()
+            cached = self._cache.get(full)
+            if cached is not None and cached[1] > now:
+                if cached[0] is not None:
+                    resolver.alias(full, cached[0])
+                continue
+            if self._source is None or security_gate_for(full) or asked >= self.MAX_LOOKUPS:
+                continue
+            owner, _, name = full.partition("/")
+            asked += 1
+            try:
+                installation = await self._installation(engine, owner)
+                found: int | None = None
+                if installation is not None:
+                    token = await self._source.installation_token(
+                        installation, permissions=self.PERMISSIONS
+                    )
+                    self.calls += 1
+                    found = await self._source.repository_id(token, owner, name)
+            except Exception as error:
+                # Not cached: GitHub could not answer, which says nothing
+                # about the name.
+                logger.warning("dev activity: rename lookup failed: %s", type(error).__name__)
+                continue
+            ttl = self.FOUND_SECONDS if found is not None else self.MISSING_SECONDS
+            self._cache[full] = (found, now + ttl)
+            if found is not None:
+                resolver.alias(full, found)
+
+
+def _unknown_names(resolver: Resolver, rows: Iterable[dict[str, Any]]) -> set[str]:
+    found: set[str] = set()
+    for row in rows:
+        name = resolver.unknown(
+            owner=str(row.get("vcs_owner") or ""),
+            name=str(row.get("vcs_name") or ""),
+            url=str(row.get("vcs_url") or ""),
+        )
+        if name:
+            found.add(name)
+    return found
+
+
+def _resolve(resolver: Resolver, row: dict[str, Any]) -> Repository | None:
+    return resolver(
+        tag=str(row.get("project_tag") or ""),
+        vcs=str(row.get("vcs") or ""),
+        owner=str(row.get("vcs_owner") or ""),
+        name=str(row.get("vcs_name") or ""),
+        url=str(row.get("vcs_url") or ""),
+    )
 
 
 def _safe_identity(value: Any) -> str | None:
     text_value = str(value or "").strip()
-    if not text_value or "@" in text_value:
+    if not text_value or "@" in text_value or text_value.lower().startswith(BACKFILL_PREFIX):
         return None
     return text_value[:200]
+
+
+async def _read_pages(
+    store: UsageStore, sql: str, params: dict[str, str], name: str
+) -> list[dict[str, Any]]:
+    """Every row of a grouped read, in pages at the store's row ceiling."""
+    rows: list[dict[str, Any]] = []
+    for page in range(MAX_USAGE_PAGES):
+        result = await store.query(
+            sql,
+            {**params, "offset": str(page * MAX_USAGE_ROWS)},
+            max_rows=MAX_USAGE_ROWS,
+            timeout_seconds=20.0,
+            correlation_id="dev-activity",
+        )
+        batch = result.rows if isinstance(result.rows, list) else []
+        rows.extend(batch)
+        if len(batch) < MAX_USAGE_ROWS:
+            return rows
+    logger.warning(
+        "dev activity: usage read %s stopped at %d pages; the rest waits", name, MAX_USAGE_PAGES
+    )
+    return rows
 
 
 async def harvest_usage(
@@ -489,10 +809,15 @@ async def harvest_usage(
     *,
     database: str,
     now: datetime,
+    orgs: Iterable[str] = (),
+    renames: Renames | None = None,
 ) -> None:
     async with engine.connect() as connection:
         known = (
-            await connection.execute(text("SELECT max(day) FROM dev_agent_days"))
+            await connection.execute(
+                text("SELECT max(day) FROM dev_agent_days WHERE identity NOT LIKE :backfill"),
+                {"backfill": BACKFILL_LIKE},
+            )
         ).scalar_one_or_none()
     first_day: date = (now - timedelta(days=1)).date() if known else (now - USAGE_BACKFILL).date()
     start = datetime.combine(first_day, datetime.min.time(), tzinfo=UTC)
@@ -505,32 +830,44 @@ async def harvest_usage(
     results: dict[str, list[dict[str, Any]] | None] = {}
     for name, sql in (("days", days_sql), ("breakdown", breakdown_sql), ("metrics", metrics_sql)):
         try:
-            result = await store.query(
-                sql,
-                params,
-                max_rows=MAX_USAGE_ROWS,
-                timeout_seconds=20.0,
-                correlation_id="dev-activity",
-            )
-            results[name] = result.rows if isinstance(result.rows, list) else []
-        except Exception:
+            results[name] = await _read_pages(store, sql, params, name)
+        except Exception as error:
             # The metrics table exists only once a counter has arrived; a
-            # failed read keeps what was kept rather than wiping it.
+            # failed read keeps what was kept rather than wiping it. It is
+            # said out loud: a silent failure here once hid every cost.
             report.usage_failed_reads += 1
+            logger.warning(
+                "dev activity: usage read %s failed: %s %s",
+                name,
+                type(error).__name__,
+                getattr(error, "code", "") or str(error)[:200],
+            )
             results[name] = None
     if results["days"] is None:
         return
-    projects = await _projects(engine)
-    key = tuple[str, uuid.UUID, str]
-    days: dict[key, dict[str, Any]] = {}
-    for row in results["days"] or []:
-        project = resolve_project(
-            projects, str(row.get("project_tag") or ""), str(row.get("vcs") or "")
+    resolver = await _resolver(engine, orgs)
+    if renames is not None:
+        await renames.teach(
+            engine,
+            resolver,
+            _unknown_names(
+                resolver,
+                [
+                    *(results["days"] or []),
+                    *(results["metrics"] or []),
+                    *(results["breakdown"] or []),
+                ],
+            ),
         )
+    where: dict[str, Repository] = {}
+    days: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in results["days"] or []:
+        repository = _resolve(resolver, row)
         identity = _safe_identity(row.get("identity"))
-        if project is None or identity is None:
+        if repository is None or identity is None:
             continue
-        k = (str(row["day"]), project.id, identity)
+        where[repository.full_name] = repository
+        k = (str(row["day"]), repository.full_name, identity)
         cur = days.setdefault(k, _empty_day())
         hint = _safe_identity(row.get("person_hint"))
         if hint:
@@ -550,13 +887,12 @@ async def harvest_usage(
             cur[field_name] += int(row.get(field_name) or 0)
         cur["cost_usd"] += Decimal(str(row.get("cost") or 0))
     for row in results["metrics"] or []:
-        project = resolve_project(
-            projects, str(row.get("project_tag") or ""), str(row.get("vcs") or "")
-        )
+        repository = _resolve(resolver, row)
         identity = _safe_identity(row.get("identity"))
-        if project is None or identity is None:
+        if repository is None or identity is None:
             continue
-        cur = days.setdefault((str(row["day"]), project.id, identity), _empty_day())
+        where[repository.full_name] = repository
+        cur = days.setdefault((str(row["day"]), repository.full_name, identity), _empty_day())
         metric, value = str(row.get("metric")), float(row.get("value") or 0)
         if metric == "claude_code.active_time.total":
             cur["active_seconds"] = (cur["active_seconds"] or 0) + value
@@ -570,20 +906,19 @@ async def harvest_usage(
         elif metric == "claude_code.code_edit_tool.decision" and row.get("language"):
             lang = str(row["language"])[:200]
             cur["languages"][lang] = cur["languages"].get(lang, 0) + int(value)
-    breakdown: dict[tuple[str, uuid.UUID, str, str, str], dict[str, Any]] = {}
+    breakdown: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for row in results["breakdown"] or []:
-        project = resolve_project(
-            projects, str(row.get("project_tag") or ""), str(row.get("vcs") or "")
-        )
+        repository = _resolve(resolver, row)
         identity = _safe_identity(row.get("identity"))
         name = str(row.get("name") or "")[:200]
-        if project is None or identity is None or not name:
+        if repository is None or identity is None or not name:
             continue
+        where[repository.full_name] = repository
         kind = str(row.get("kind"))
         if kind == "tool" and name.startswith("mcp__"):
             kind = "mcp"
         b = breakdown.setdefault(
-            (str(row["day"]), project.id, identity, kind, name),
+            (str(row["day"]), repository.full_name, identity, kind, name),
             {"calls": 0, "failures": 0, "cost_usd": Decimal(0), "tokens": 0, "duration_ms": 0},
         )
         b["calls"] += int(row.get("calls") or 0)
@@ -591,9 +926,9 @@ async def harvest_usage(
         b["cost_usd"] += Decimal(str(row.get("cost") or 0))
         b["tokens"] += int(row.get("tokens") or 0)
         b["duration_ms"] += int(row.get("duration_ms") or 0)
-    for (day_s, project_id, identity), cur in days.items():
+    for (day_s, full_name, identity), cur in days.items():
         for lang, count in cur["languages"].items():
-            breakdown[(day_s, project_id, identity, "language", lang)] = {
+            breakdown[(day_s, full_name, identity, "language", lang)] = {
                 "calls": count,
                 "failures": 0,
                 "cost_usd": Decimal(0),
@@ -601,54 +936,70 @@ async def harvest_usage(
                 "duration_ms": 0,
             }
     async with engine.begin() as connection:
-        # Whole days are replaced, so a re-read never double counts.
+        # Whole days are replaced, so a re-read never double counts. Rows a
+        # developer imported from their own history (identity `backfill:…`)
+        # are not the store's to replace.
         await connection.execute(
-            text("DELETE FROM dev_agent_days WHERE day >= :d AND tool = 'claude_code'"),
-            {"d": first_day},
+            text(
+                "DELETE FROM dev_agent_days WHERE day >= :d AND tool = 'claude_code' "
+                "AND identity NOT LIKE :backfill"
+            ),
+            {"d": first_day, "backfill": BACKFILL_LIKE},
         )
         if results["breakdown"] is not None:
             await connection.execute(
-                text("DELETE FROM dev_agent_breakdown WHERE day >= :d AND tool = 'claude_code'"),
-                {"d": first_day},
+                text(
+                    "DELETE FROM dev_agent_breakdown WHERE day >= :d AND tool = 'claude_code' "
+                    "AND identity NOT LIKE :backfill"
+                ),
+                {"d": first_day, "backfill": BACKFILL_LIKE},
             )
-        for (day_s, project_id, identity), cur in days.items():
+        for (day_s, full_name, identity), cur in days.items():
+            repository = where[full_name]
             await connection.execute(
                 text(
                     """
-                    INSERT INTO dev_agent_days (day, project_id, identity, tool, person_hint,
-                        cost_usd, input_tokens, output_tokens, cache_read_tokens,
-                        cache_creation_tokens, api_requests, api_errors, prompts, sessions,
-                        active_seconds, lines_added, lines_removed, commits, pull_requests,
-                        edits_accepted, edits_rejected, updated_at)
-                    VALUES (:day, :p, :i, 'claude_code', :person_hint, :cost_usd, :input_tokens,
-                        :output_tokens, :cache_read_tokens, :cache_creation_tokens,
-                        :api_requests, :api_errors, :prompts, :sessions, :active_seconds,
-                        :lines_added, :lines_removed, :commits, :pull_requests,
-                        :edits_accepted, :edits_rejected, now())
+                    INSERT INTO dev_agent_days (day, repository, repository_external_id,
+                        project_id, identity, tool, person_hint, cost_usd, input_tokens,
+                        output_tokens, cache_read_tokens, cache_creation_tokens, api_requests,
+                        api_errors, prompts, sessions, active_seconds, lines_added,
+                        lines_removed, commits, pull_requests, edits_accepted, edits_rejected,
+                        updated_at)
+                    VALUES (:day, :r, :e, :p, :i, 'claude_code', :person_hint, :cost_usd,
+                        :input_tokens, :output_tokens, :cache_read_tokens,
+                        :cache_creation_tokens, :api_requests, :api_errors, :prompts,
+                        :sessions, :active_seconds, :lines_added, :lines_removed, :commits,
+                        :pull_requests, :edits_accepted, :edits_rejected, now())
                     """
                 ),
                 {
                     "day": date.fromisoformat(day_s),
-                    "p": project_id,
+                    "r": full_name,
+                    "e": repository.external_id,
+                    "p": repository.project_id,
                     "i": identity,
                     **{k: v for k, v in cur.items() if k != "languages"},
                 },
             )
             report.usage_rows += 1
         if results["breakdown"] is not None:
-            for (day_s, project_id, identity, kind, name), b in breakdown.items():
+            for (day_s, full_name, identity, kind, name), b in breakdown.items():
+                repository = where[full_name]
                 await connection.execute(
                     text(
                         """
-                        INSERT INTO dev_agent_breakdown (day, project_id, identity, tool, kind,
-                            name, calls, failures, cost_usd, tokens, duration_ms)
-                        VALUES (:day, :p, :i, 'claude_code', :kind, :name, :calls, :failures,
-                            :cost_usd, :tokens, :duration_ms)
+                        INSERT INTO dev_agent_breakdown (day, repository, repository_external_id,
+                            project_id, identity, tool, kind, name, calls, failures, cost_usd,
+                            tokens, duration_ms)
+                        VALUES (:day, :r, :e, :p, :i, 'claude_code', :kind, :name, :calls,
+                            :failures, :cost_usd, :tokens, :duration_ms)
                         """
                     ),
                     {
                         "day": date.fromisoformat(day_s),
-                        "p": project_id,
+                        "r": full_name,
+                        "e": repository.external_id,
+                        "p": repository.project_id,
                         "i": identity,
                         "kind": kind,
                         "name": name,
@@ -695,6 +1046,8 @@ async def run_once(
     budget: int = 300,
     now: datetime | None = None,
     lease_seconds: int = 900,
+    orgs: Iterable[str] = (),
+    renames: Renames | None = None,
 ) -> Report:
     report = Report()
     token = uuid.uuid4().hex
@@ -709,10 +1062,18 @@ async def run_once(
     moment = now or datetime.now(UTC)
     try:
         if source is not None:
-            await harvest_commits(engine, source, report, now=moment, budget=budget)
+            await harvest_commits(engine, source, report, now=moment, budget=budget, orgs=orgs)
         if store is not None:
             try:
-                await harvest_usage(engine, store, report, database=database, now=moment)
+                await harvest_usage(
+                    engine,
+                    store,
+                    report,
+                    database=database,
+                    now=moment,
+                    orgs=orgs,
+                    renames=renames,
+                )
             except Exception:
                 logger.warning("dev activity: usage harvest failed")
                 report.errors.append("usage")
@@ -747,6 +1108,7 @@ class DevActivity:
         database: str,
         interval_seconds: float = 900.0,
         budget: int = 300,
+        orgs: Iterable[str] = (),
     ) -> None:
         self._engine = engine
         self._redis = redis
@@ -755,6 +1117,9 @@ class DevActivity:
         self._database = database
         self._interval = max(120.0, interval_seconds)
         self._budget = budget
+        self._orgs = tuple(_orgs(orgs))
+        # Kept across cycles, so a moved name is asked about once a day.
+        self._renames = Renames(source)
         self._task: asyncio.Task[None] | None = None
 
     @property
@@ -792,6 +1157,8 @@ class DevActivity:
                     store=self._store,
                     database=self._database,
                     budget=self._budget,
+                    orgs=self._orgs,
+                    renames=self._renames,
                 )
             except asyncio.CancelledError:
                 raise

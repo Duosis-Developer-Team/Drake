@@ -140,6 +140,9 @@ spec:
             # usage from the trace store (both states).
             - name: DRAKE_DEV_ACTIVITY_ENABLED
               value: {{ (.Values.agents).devActivityEnabled | default false | quote }}
+            # Every repository of these GitHub organisations, catalogued or not.
+            - name: DRAKE_DEV_ACTIVITY_ORGS
+              value: {{ (.Values.agents).devActivityOrgs | default list | toJson | quote }}
             - name: DRAKE_SLO_EVALUATOR_ENABLED
               value: {{ (.Values.slo).evaluatorEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_INTERVAL_SECONDS

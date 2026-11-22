@@ -219,11 +219,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit 93b37a20fba736b3fc6b42093dcb15de3f1004c1
+    # Source commit cf583312944de5ae11292927efedb79aaa79a729
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:f9dfa7343b4a256ccb82237eefdf0b9bb79f6c750d6f00586d472909219f0048"
+    digest: "sha256:a7d242391fd4403e31b58942d0617b1728e0bd65119cf3073b1903ae3f821cfe"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -246,8 +246,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit 93b37a20fba736b3fc6b42093dcb15de3f1004c1
-    digest: "sha256:8a19e24329d49e30788810b9fd3e5d89f2d860db1b381677f759e1d00c76aafe"
+    # Source commit cf583312944de5ae11292927efedb79aaa79a729
+    digest: "sha256:e28714a6c8f73f285933f9e86abd097eb7d13a81e1afad9ebcef453c09bdaaf3"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -269,7 +269,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:f9dfa7343b4a256ccb82237eefdf0b9bb79f6c750d6f00586d472909219f0048"
+    digest: "sha256:a7d242391fd4403e31b58942d0617b1728e0bd65119cf3073b1903ae3f821cfe"
   backoffLimit: 0
 
 networkPolicy:
@@ -307,7 +307,9 @@ networkPolicy:
   # because this policy governs egress the cluster can express — and the
   # metrics backend it does need is in-cluster, so it belongs below.
   # Model prices for agent cost: raw.githubusercontent.com (GitHub's CDN
-  # range), HTTPS only, once a day.
+  # range), HTTPS only, once a day. The development map's profile pictures
+  # come from avatars.githubusercontent.com, which resolves into the same
+  # range (185.199.108-111.133, checked 2026-11-22): no new rule.
   apiExternalEgress:
     - cidr: 185.199.108.0/22
       port: 443
@@ -447,6 +449,10 @@ agents:
   pricesEnabled: true
   guardrailsEnabled: true
   devActivityEnabled: true
+  # Every repository of the Duosis org on the development map (2026-11-22),
+  # not only the catalog's: read-only through the App, nothing is written.
+  devActivityOrgs:
+    - Duosis-Developer-Team
 
 # Objectives (migration 0031, 2026-11-21). The evaluator judges enabled
 # objectives every five minutes and keeps the five-minute request counts

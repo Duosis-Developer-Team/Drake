@@ -1,14 +1,16 @@
 /**
- * Strings for Agent Visibility's Development view: who changes the catalog's
- * repositories, with which coding agent, and what Claude Code cost. People,
- * project, service and tool names are data and shown as recorded.
+ * Strings for Agent Visibility's Development view: who changes the
+ * repositories (the catalog's, and the rest of the watched GitHub
+ * organisations), with which coding agent, and what Claude Code cost.
+ * People, repository, project, service and tool names are data and shown as
+ * recorded.
  */
 import { defineMessages } from "../define";
 
 export const devAgents = defineMessages({
   en: {
     title: "Development",
-    lead: "Who changes the catalog's repositories, with which coding agent — and, where Claude Code reports, what it cost and what it did.",
+    lead: "Who changes the repositories — the catalog's and every other one in the GitHub organisation — with which coding agent, and, where Claude Code reports, what it cost and what it did.",
     window: { label: "Window", "7d": "7 days", "30d": "30 days", "90d": "90 days" },
     // Agent products are proper nouns (AGENT_NAME); only these translate.
     agent: {
@@ -17,7 +19,7 @@ export const devAgents = defineMessages({
     },
     summary: {
       commits: "Commits",
-      commitsNote: "on default branches",
+      commitsNote: "{repos, plural, one {# repository} other {# repositories}} · {catalogued} in the catalog",
       withAgent: "With a coding agent",
       withAgentNote: "{count} of {total} commits",
       people: "People",
@@ -31,10 +33,11 @@ export const devAgents = defineMessages({
     },
     map: {
       title: "Who works where",
-      hint: "People on the left, the projects they changed in the middle, the services under them on the right. An arrow is one coding agent; its width is how many commits. Click anything.",
+      hint: "People on the left, the repositories they changed in the middle — the catalog's wear their project — and, for those, the services under them on the right. Each line is one person's work in one repository, in that person's colour; its width is how many commits, its chip the coding agent. Point at or focus a person to follow them; click anything.",
       people: "People",
-      projects: "Projects",
+      repositories: "Repositories",
       services: "Services",
+      notCatalogued: "not in catalog",
       repoLevel: "Repository-wide",
       commits: "{count, plural, one {# commit} other {# commits}}",
       edge: "{agent} · {count}",
@@ -43,7 +46,7 @@ export const devAgents = defineMessages({
     },
     person: {
       tools: "Works with",
-      projects: "Projects",
+      repositories: "Repositories",
       activity: "Commits per day",
       commits: "Commits",
       changes: "Lines changed",
@@ -89,34 +92,48 @@ export const devAgents = defineMessages({
       open: "Open on GitHub",
       more: "{shown} of {total} shown",
     },
-    project: {
+    repository: {
       services: "Where the changes landed",
       people: "Who changed it",
+      cost: "Claude Code cost here: {cost}",
+      notCatalogued: "In the GitHub organisation, not in the catalog: no project or services yet. Its commits and Claude Code usage are shown all the same; catalogue it to see where the changes land.",
+    },
+    scope: {
+      label: "Repositories",
+      all: "All ({count})",
+      catalog: "Catalog ({count})",
+    },
+    legend: {
+      notCatalogued: "Not in the catalog",
+      personColour: "Line colour: the person",
+      solid: "With a coding agent",
+      dashed: "By hand",
+      dotted: "Claude Code sessions, no commit yet",
     },
     empty: {
       title: "No development activity yet",
       notConfigured: "Reading repositories is off in this deployment, and no Claude Code telemetry arrives.",
-      noRepos: "No catalog repository is readable through the GitHub App yet. Add the repository to the App installation and it appears within a few minutes.",
+      noRepos: "No repository is readable through the GitHub App yet. Add the repositories to the App installation and they appear within a few minutes.",
       quiet: "The readable repositories had no commits in this window.",
     },
     note: "An agent is named only when the commit says so: a Co-Authored-By trailer, a “Generated with …” marker, or an agent as the author. Emails are never kept.",
     connect: {
       open: "Connect Claude Code",
       title: "Connect Claude Code",
-      lead: "Claude Code reports its own usage — cost, tokens, sessions, which tools it ran — over OpenTelemetry. Point it at this deployment and name the project it works on.",
+      lead: "Claude Code reports its own usage — cost, tokens, sessions, which tools it ran — over OpenTelemetry, and names the repository it works in. Point it at this deployment.",
       steps: {
         env: "Each developer, once: run scripts/connect-claude-code.sh from the Tracesis repository (it asks for the token without echoing it), or put these in the env block of ~/.claude/settings.json:",
-        project: "Use Claude Code 2.1.269 or later (claude update): it reports the repository, and sessions in {projects} are matched on their own. Set your GitHub login as tracesis.person so the usage joins your commits.",
+        project: "Use Claude Code 2.1.269 or later (claude update): it reports the repository, so sessions in any repository of the organisation — {projects} among them — are matched on their own. Set your GitHub login as tracesis.person so the usage joins your commits.",
         token: "The ingest token comes from an administrator; it is never shown here.",
       },
       off: "The external door is not open in this deployment, so Claude Code cannot report here yet.",
       notCollecting: "Usage collection is off in this deployment: Claude Code can report, but the map will not show it until it is on.",
-      privacy: "Prompts, answers, tool inputs and your email are removed at the gateway. Tracesis keeps cost, token counts, tool names and durations — and only for sessions that name a catalog project.",
+      privacy: "Prompts, answers, tool inputs and your email are removed at the gateway. Tracesis keeps cost, token counts, tool names and durations — and only for sessions in a catalog project or a repository of the organisation.",
     },
   },
   tr: {
     title: "Geliştirme",
-    lead: "Katalogdaki repoları kim, hangi kodlama ajanıyla değiştiriyor — Claude Code raporladığında da neye mal oldu ve ne yaptı.",
+    lead: "Repoları — katalogdakileri ve GitHub organizasyonundaki diğer hepsini — kim, hangi kodlama ajanıyla değiştiriyor; Claude Code raporladığında da neye mal oldu ve ne yaptı.",
     window: { label: "Aralık", "7d": "7 gün", "30d": "30 gün", "90d": "90 gün" },
     // Agent products are proper nouns (AGENT_NAME); only these translate.
     agent: {
@@ -125,7 +142,7 @@ export const devAgents = defineMessages({
     },
     summary: {
       commits: "Commit",
-      commitsNote: "varsayılan dallarda",
+      commitsNote: "{repos, plural, one {# repo} other {# repo}} · {catalogued} tanesi katalogda",
       withAgent: "Kodlama ajanıyla",
       withAgentNote: "{total} commit'in {count} tanesi",
       people: "Kişi",
@@ -139,10 +156,11 @@ export const devAgents = defineMessages({
     },
     map: {
       title: "Kim nerede çalışıyor",
-      hint: "Solda kişiler, ortada değiştirdikleri projeler, sağda altındaki servisler. Her ok bir kodlama ajanı; kalınlığı commit sayısı. Her şeye tıklanabilir.",
+      hint: "Solda kişiler, ortada değiştirdikleri repolar — katalogdakiler projeleriyle görünür — sağda da onların altındaki servisler. Her çizgi bir kişinin bir repodaki işi ve o kişinin renginde; kalınlığı commit sayısı, etiketi kodlama ajanı. Birini takip etmek için üstüne gel ya da odakla; her şeye tıklanabilir.",
       people: "Kişiler",
-      projects: "Projeler",
+      repositories: "Repolar",
       services: "Servisler",
+      notCatalogued: "katalogda değil",
       repoLevel: "Repo geneli",
       commits: "{count, plural, one {# commit} other {# commit}}",
       edge: "{agent} · {count}",
@@ -151,7 +169,7 @@ export const devAgents = defineMessages({
     },
     person: {
       tools: "Kullandıkları",
-      projects: "Projeler",
+      repositories: "Repolar",
       activity: "Günlük commit",
       commits: "Commit",
       changes: "Değişen satır",
@@ -197,29 +215,43 @@ export const devAgents = defineMessages({
       open: "GitHub'da aç",
       more: "{total} içinden {shown} gösteriliyor",
     },
-    project: {
+    repository: {
       services: "Değişiklikler nereye düştü",
       people: "Kim değiştirdi",
+      cost: "Buradaki Claude Code maliyeti: {cost}",
+      notCatalogued: "GitHub organizasyonunda ama katalogda değil: henüz projesi ve servisi yok. Commit'leri ve Claude Code kullanımı yine de gösterilir; değişikliklerin nereye düştüğünü görmek için kataloga al.",
+    },
+    scope: {
+      label: "Repolar",
+      all: "Tümü ({count})",
+      catalog: "Katalog ({count})",
+    },
+    legend: {
+      notCatalogued: "Katalogda değil",
+      personColour: "Çizgi rengi: kişi",
+      solid: "Kodlama ajanıyla",
+      dashed: "Elle",
+      dotted: "Claude Code oturumu, henüz commit yok",
     },
     empty: {
       title: "Henüz geliştirme etkinliği yok",
       notConfigured: "Bu kurulumda repoları okuma kapalı ve Claude Code telemetrisi gelmiyor.",
-      noRepos: "GitHub App üzerinden okunabilen bir katalog reposu henüz yok. Repo App kurulumuna eklenince birkaç dakika içinde görünür.",
+      noRepos: "GitHub App üzerinden okunabilen bir repo henüz yok. Repolar App kurulumuna eklenince birkaç dakika içinde görünür.",
       quiet: "Okunabilen repolarda bu aralıkta commit yok.",
     },
     note: "Ajan yalnızca commit söylediğinde belirtilir: Co-Authored-By izi, “Generated with …” işareti ya da ajanın yazar olması. E-postalar hiç tutulmaz.",
     connect: {
       open: "Claude Code'u bağla",
       title: "Claude Code'u bağla",
-      lead: "Claude Code kendi kullanımını — maliyet, token, oturum, hangi araçları çalıştırdığı — OpenTelemetry ile raporlar. Bu kuruluma yönlendir ve üzerinde çalıştığı projeyi belirt.",
+      lead: "Claude Code kendi kullanımını — maliyet, token, oturum, hangi araçları çalıştırdığı — OpenTelemetry ile raporlar ve çalıştığı repoyu da söyler. Bu kuruluma yönlendir.",
       steps: {
         env: "Her geliştirici bir kez: Tracesis reposunda scripts/connect-claude-code.sh'ı çalıştırsın (token'ı ekrana yazmadan sorar) ya da bunları ~/.claude/settings.json'daki env bloğuna koysun:",
-        project: "Claude Code 2.1.269 veya sonrası gerekli (claude update): repoyu kendisi bildirir, {projects} içindeki oturumlar kendiliğinden eşleşir. Kullanım commit'lerinle birleşsin diye GitHub kullanıcı adını tracesis.person olarak ekle.",
+        project: "Claude Code 2.1.269 veya sonrası gerekli (claude update): repoyu kendisi bildirir; organizasyonun herhangi bir reposundaki — {projects} dahil — oturumlar kendiliğinden eşleşir. Kullanım commit'lerinle birleşsin diye GitHub kullanıcı adını tracesis.person olarak ekle.",
         token: "Giriş token'ı bir yöneticiden gelir; burada hiç gösterilmez.",
       },
       off: "Bu kurulumda dış kapı açık değil; Claude Code henüz buraya raporlayamaz.",
       notCollecting: "Bu kurulumda kullanım toplama kapalı: Claude Code raporlayabilir ama açılana kadar haritada görünmez.",
-      privacy: "Prompt'lar, yanıtlar, araç girdileri ve e-posta adresin kapıda silinir. Tracesis maliyet, token sayısı, araç adı ve süre tutar — yalnızca bir katalog projesini belirten oturumlar için.",
+      privacy: "Prompt'lar, yanıtlar, araç girdileri ve e-posta adresin kapıda silinir. Tracesis maliyet, token sayısı, araç adı ve süre tutar — yalnızca bir katalog projesindeki ya da organizasyonun bir reposundaki oturumlar için.",
     },
   },
 });

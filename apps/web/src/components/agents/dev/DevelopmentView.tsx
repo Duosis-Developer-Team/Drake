@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Agent Visibility → Development: who changes the catalog's repositories,
- * with which coding agent, and what Claude Code cost and did.
+ * Agent Visibility → Development: who changes the repositories — the
+ * catalog's, and every other one of the watched GitHub organisations — with
+ * which coding agent, and what Claude Code cost and did.
  *
  * Commit facts (from the repositories) and Claude Code's own telemetry sit
  * side by side. A person whose Claude Code does not report here reads
@@ -28,17 +29,19 @@ import {
   fetchDevCommits,
   fetchDevConnect,
   fetchDevMap,
+  personColour,
   usd,
   type CodingAgent,
   type DevCommit,
   type DevConnect,
   type DevMap as MapData,
+  type DevRepository,
   type DevTelemetry,
   type DevWindow,
   type UsageItem,
 } from "@/lib/devAgents";
 
-import { Avatar, DevMap, ProjectMark, type Pick } from "./DevMap";
+import { Avatar, DevMap, RepositoryMark, repositoryTitle, type Pick } from "./DevMap";
 
 const MAP_MIN_WIDTH = 860;
 /** Panel `p-5` on both sides plus its 1px border. */
@@ -266,7 +269,7 @@ function CommitList({ path }: { path: string }) {
                   <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-muted">
                     <span className="font-mono">{c.short}</span>
                     <span>{c.author_name || c.author_login}</span>
-                    <span>{c.project_name}</span>
+                    <span>{c.project_name ?? c.repository.split("/")[1] ?? c.repository}</span>
                     {c.services.map((s) => (
                       <span key={s} className="rounded bg-surface-2 px-1 font-mono">{s}</span>
                     ))}
@@ -301,7 +304,7 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
   const t = useT("devAgents");
   const fmt = useFormat();
   const { locale } = useLocale();
-  const projectOf = (id: string) => map.projects.find((p) => p.id === id);
+  const repoOf = (id: string) => map.repositories.find((r) => r.id === id);
 
   if (pick.kind === "person") {
     const person = map.people.find((p) => p.key === pick.key);
@@ -344,14 +347,19 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
           {person.last_at ? <p className="mt-1 text-[11px] text-ink-muted">{t("person.lastSeen", { when: fmt.relative(person.last_at) })}</p> : null}
         </section>
         <section>
-          <h4 className="mb-2 text-micro font-semibold text-ink-secondary">{t("person.projects")}</h4>
+          <h4 className="mb-2 text-micro font-semibold text-ink-secondary">{t("person.repositories")}</h4>
           <ul className="flex flex-wrap gap-2">
-            {person.projects.map((id) => {
-              const p = projectOf(id);
-              return p ? (
-                <li key={id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 py-1 pr-2.5 pl-1">
-                  <ProjectMark id={p.id} projectKey={p.key} name={p.name} size="sm" />
-                  <span className="text-caption text-ink">{p.name}</span>
+            {person.repositories.map((id) => {
+              const r = repoOf(id);
+              return r ? (
+                <li
+                  key={id}
+                  className={`inline-flex items-center gap-1.5 rounded-full border bg-surface-2 py-1 pr-2.5 pl-1.5 ${
+                    r.catalogued ? "border-border" : "border-dashed border-border"
+                  }`}
+                >
+                  <RepositoryMark repo={r} size="sm" />
+                  <span className={`text-caption text-ink ${r.catalogued ? "" : "font-mono"}`}>{repositoryTitle(r)}</span>
                 </li>
               ) : null;
             })}
@@ -371,19 +379,19 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
 
   if (pick.kind === "edge") {
     const person = map.people.find((p) => p.key === pick.person);
-    const project = projectOf(pick.project);
-    const edge = map.edges.find((e) => e.person === pick.person && e.project_id === pick.project && e.agent === pick.agent);
-    if (!person || !project || !edge) return null;
+    const repo = repoOf(pick.repository);
+    const edge = map.edges.find((e) => e.person === pick.person && e.repository === pick.repository && e.agent === pick.agent);
+    if (!person || !repo || !edge) return null;
     return (
       <div className="space-y-6" data-testid="dev-edge-detail">
         <header className="flex items-center gap-3">
           <Avatar person={person} size={44} />
           <span aria-hidden className="h-[3px] w-10 rounded-full" style={{ background: AGENT_COLOUR[edge.agent] }} />
           <span className="grid h-11 w-11 place-items-center rounded-[0.8rem] border border-border bg-surface-2">
-            <ProjectMark id={project.id} projectKey={project.key} name={project.name} />
+            <RepositoryMark repo={repo} />
           </span>
           <div className="min-w-0">
-            <h3 className="truncate text-[1.0625rem] font-semibold text-ink">{person.name} → {project.name}</h3>
+            <h3 className="truncate text-[1.0625rem] font-semibold text-ink">{person.name} → {repositoryTitle(repo)}</h3>
             <p className="text-micro font-semibold" style={{ color: AGENT_COLOUR[edge.agent] }}>{t.dyn("agent", edge.agent, AGENT_NAME[edge.agent])}</p>
           </div>
         </header>
@@ -407,33 +415,66 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
         ) : null}
         <section>
           <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("commits.title")}</h4>
-          <CommitList path={devCommitsPath({ window, person: person.key, project: project.id, agent: edge.agent })} />
+          <CommitList path={devCommitsPath({ window, person: person.key, repository: repo.id, agent: edge.agent })} />
         </section>
       </div>
     );
   }
 
-  if (pick.kind === "project") {
-    const project = projectOf(pick.id);
-    if (!project) return null;
-    const services = map.services.filter((s) => s.project_id === project.id);
-    const people = map.people.filter((p) => p.projects.includes(project.id));
-    const max = Math.max(1, ...services.map((s) => s.commits));
-    return (
-      <div className="space-y-6" data-testid="dev-project-detail">
-        <header className="flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-[0.9rem] border border-border bg-surface-2">
-            <ProjectMark id={project.id} projectKey={project.key} name={project.name} />
-          </span>
-          <div className="min-w-0">
-            <h3 className="truncate font-[family-name:var(--font-display)] text-[1.375rem] font-bold tracking-[-0.02em] text-ink">{project.name}</h3>
-            <a href={project.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono text-micro text-ink-muted hover:text-brand-accent">
-              {project.repository} <ExternalLink aria-hidden className="h-3 w-3" />
-            </a>
-          </div>
-        </header>
+  if (pick.kind === "repository") {
+    const repo = repoOf(pick.id);
+    if (!repo) return null;
+    return <RepositoryDetail map={map} repo={repo} window={window} />;
+  }
+
+  const repo = repoOf(pick.repository);
+  return (
+    <div className="space-y-5" data-testid="dev-service-detail">
+      <h3 className="text-[1.0625rem] font-semibold text-ink">
+        {repo ? repositoryTitle(repo) : ""} · <span className="font-mono">{pick.key ?? t("map.repoLevel")}</span>
+      </h3>
+      {pick.key ? (
+        <CommitList path={devCommitsPath({ window, repository: pick.repository, service: pick.key })} />
+      ) : (
+        <CommitList path={devCommitsPath({ window, repository: pick.repository })} />
+      )}
+    </div>
+  );
+}
+
+function RepositoryDetail({ map, repo, window }: { map: MapData; repo: DevRepository; window: DevWindow }) {
+  const t = useT("devAgents");
+  const { locale } = useLocale();
+  const services = map.services.filter((s) => s.repository === repo.id);
+  const people = map.people.filter((p) => p.repositories.includes(repo.id));
+  const max = Math.max(1, ...services.map((s) => s.commits));
+  return (
+    <div className="space-y-6" data-testid="dev-repo-detail">
+      <header className="flex items-center gap-3">
+        <span className="grid h-12 w-12 place-items-center rounded-[0.9rem] border border-border bg-surface-2">
+          <RepositoryMark repo={repo} size={repo.catalogued ? "md" : "lg"} />
+        </span>
+        <div className="min-w-0">
+          <h3
+            className={`truncate font-bold tracking-[-0.02em] text-ink ${
+              repo.catalogued ? "font-[family-name:var(--font-display)] text-[1.375rem]" : "font-mono text-[1.125rem]"
+            }`}
+          >
+            {repositoryTitle(repo)}
+          </h3>
+          <a href={repo.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono text-micro text-ink-muted hover:text-brand-accent">
+            {repo.full_name} <ExternalLink aria-hidden className="h-3 w-3" />
+          </a>
+        </div>
+      </header>
+      {repo.cost_usd !== null ? (
+        <p className="text-caption text-ink-secondary">
+          {t("repository.cost", { cost: usd(repo.cost_usd, locale) })}
+        </p>
+      ) : null}
+      {repo.catalogued ? (
         <section>
-          <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("project.services")}</h4>
+          <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("repository.services")}</h4>
           <ul className="space-y-1.5">
             {services.map((s) => (
               <li key={String(s.key)} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-2 text-[12px]">
@@ -446,36 +487,26 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
             ))}
           </ul>
         </section>
-        <section>
-          <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("project.people")}</h4>
-          <ul className="flex flex-wrap gap-2">
-            {people.map((p) => (
-              <li key={p.key} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 py-1 pr-3 pl-1">
-                <Avatar person={p} size={24} />
-                <span className="text-caption text-ink">{p.name}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section>
-          <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("commits.title")}</h4>
-          <CommitList path={devCommitsPath({ window, project: project.id })} />
-        </section>
-      </div>
-    );
-  }
-
-  const project = projectOf(pick.project);
-  return (
-    <div className="space-y-5" data-testid="dev-service-detail">
-      <h3 className="text-[1.0625rem] font-semibold text-ink">
-        {project?.name} · <span className="font-mono">{pick.key ?? t("map.repoLevel")}</span>
-      </h3>
-      {pick.key ? (
-        <CommitList path={devCommitsPath({ window, project: pick.project, service: pick.key })} />
       ) : (
-        <CommitList path={devCommitsPath({ window, project: pick.project })} />
+        <p className="rounded-control border border-dashed border-border bg-surface-2 px-3 py-2.5 text-micro text-ink-secondary" data-testid="dev-repo-not-catalogued">
+          {t("repository.notCatalogued")}
+        </p>
       )}
+      <section>
+        <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("repository.people")}</h4>
+        <ul className="flex flex-wrap gap-2">
+          {people.map((p) => (
+            <li key={p.key} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 py-1 pr-3 pl-1">
+              <Avatar person={p} size={24} />
+              <span className="text-caption text-ink">{p.name}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section>
+        <h4 className="mb-2.5 text-micro font-semibold text-ink-secondary">{t("commits.title")}</h4>
+        <CommitList path={devCommitsPath({ window, repository: repo.id })} />
+      </section>
     </div>
   );
 }
@@ -550,13 +581,14 @@ function MobileList({ map, onPick }: { map: MapData; onPick: (p: Pick) => void }
           </button>
           <ul className="mt-2.5 space-y-1.5">
             {map.edges.filter((e) => e.person === person.key).map((e) => {
-              const project = map.projects.find((p) => p.id === e.project_id);
+              const repo = map.repositories.find((r) => r.id === e.repository);
               return (
-                <li key={`${e.project_id}-${e.agent}`}>
-                  <button type="button" onClick={() => onPick({ kind: "edge", person: e.person, project: e.project_id, agent: e.agent })}
+                <li key={`${e.repository}-${e.agent}`}>
+                  <button type="button" onClick={() => onPick({ kind: "edge", person: e.person, repository: e.repository, agent: e.agent })}
                     className="flex w-full items-center gap-2 rounded-control bg-surface-2 px-2.5 py-1.5 text-left text-[12px]">
                     <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: AGENT_COLOUR[e.agent] }} />
-                    <span className="truncate text-ink">{project?.name}</span>
+                    {repo ? <RepositoryMark repo={repo} size="sm" /> : null}
+                    <span className={`truncate text-ink ${repo && !repo.catalogued ? "font-mono" : ""}`}>{repo ? repositoryTitle(repo) : ""}</span>
                     <span className="ml-auto font-mono text-ink-muted">{t("map.edge", { agent: t.dyn("agent", e.agent, AGENT_NAME[e.agent]), count: e.commits })}</span>
                   </button>
                 </li>
@@ -569,6 +601,22 @@ function MobileList({ map, onPick }: { map: MapData; onPick: (p: Pick) => void }
   );
 }
 
+/** The map with only the catalog's repositories (and who worked there). */
+export function catalogOnly(map: MapData): MapData {
+  const keep = new Set(map.repositories.filter((r) => r.catalogued).map((r) => r.id));
+  const edges = map.edges.filter((e) => keep.has(e.repository));
+  const people = new Set(edges.map((e) => e.person));
+  return {
+    ...map,
+    repositories: map.repositories.filter((r) => keep.has(r.id)),
+    services: map.services.filter((s) => keep.has(s.repository)),
+    edges,
+    people: map.people
+      .filter((p) => people.has(p.key))
+      .map((p) => ({ ...p, repositories: p.repositories.filter((id) => keep.has(id)) })),
+  };
+}
+
 export function DevelopmentView() {
   const t = useT("devAgents");
   const fmt = useFormat();
@@ -576,11 +624,14 @@ export function DevelopmentView() {
   const [window, setWindow] = useState<DevWindow>("30d");
   const [state, setState] = useState<{ window: DevWindow; map: MapData | null; failed: boolean } | null>(null);
   const [pick, setPick] = useState<Pick | null>(null);
+  const [scope, setScope] = useState<"all" | "catalog">("all");
   const [connectOpen, setConnectOpen] = useState(false);
   const [connect, setConnect] = useState<DevConnect | null>(null);
   const [ref, width] = useWidth<HTMLDivElement>(0);
   // The map sits inside a padded panel; the root is measured from first render.
   const mapWidth = width - PANEL_PADDING;
+  /** The map draws lines; the narrow list does not, so its legend leaves them out. */
+  const lines = mapWidth >= MAP_MIN_WIDTH;
 
   useEffect(() => {
     let active = true;
@@ -595,12 +646,20 @@ export function DevelopmentView() {
     fetchDevConnect().then(setConnect).catch(() => setConnect(null));
   }, []);
 
-  const map = state?.window === window ? state.map : null;
-  const summary = map?.summary;
+  const loaded = state?.window === window ? state.map : null;
+  const outside = loaded ? loaded.repositories.filter((r) => !r.catalogued).length : 0;
+  const map = useMemo(
+    () => (loaded && scope === "catalog" && outside ? catalogOnly(loaded) : loaded),
+    [loaded, scope, outside],
+  );
+  const summary = loaded?.summary;
   const pickTitle = useMemo(() => {
     if (!map || !pick) return "";
     if (pick.kind === "person") return map.people.find((p) => p.key === pick.key)?.name ?? "";
-    if (pick.kind === "project") return map.projects.find((p) => p.id === pick.id)?.name ?? "";
+    if (pick.kind === "repository") {
+      const repo = map.repositories.find((r) => r.id === pick.id);
+      return repo ? repositoryTitle(repo) : "";
+    }
     if (pick.kind === "edge") return t.dyn("agent", pick.agent, AGENT_NAME[pick.agent]);
     return pick.key ?? t("map.repoLevel");
   }, [map, pick, t]);
@@ -643,7 +702,12 @@ export function DevelopmentView() {
       {map && summary ? (
         <section className="overflow-hidden rounded-panel border border-border bg-surface" aria-label={t("title")}>
           <div className="grid divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
-            <Figure icon={GitCommitHorizontal} label={t("summary.commits")} value={fmt.number(summary.commits)} note={t("summary.commitsNote")} />
+            <Figure
+              icon={GitCommitHorizontal}
+              label={t("summary.commits")}
+              value={fmt.number(summary.commits)}
+              note={t("summary.commitsNote", { repos: summary.repositories, catalogued: summary.catalogued })}
+            />
             <Figure
               icon={Bot}
               label={t("summary.withAgent")}
@@ -680,14 +744,68 @@ export function DevelopmentView() {
 
       {map && !empty ? (
         <Panel className="overflow-hidden">
-          <PanelHeader title={t("map.title")} description={t("map.hint")} />
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted">
-            {CODING_AGENTS.filter((a) => summary?.agents[a]).map((a) => (
+          <PanelHeader
+            title={t("map.title")}
+            description={t("map.hint")}
+            actions={
+              outside ? (
+                <SegmentedControl
+                  label={t("scope.label")}
+                  value={scope}
+                  onChange={(next) => {
+                    setScope(next);
+                    setPick(null);
+                  }}
+                  options={[
+                    { value: "all", label: t("scope.all", { count: loaded?.repositories.length ?? 0 }) },
+                    { value: "catalog", label: t("scope.catalog", { count: loaded?.summary.catalogued ?? 0 }) },
+                  ]}
+                />
+              ) : undefined
+            }
+          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-ink-muted" data-testid="dev-legend">
+            {/* On the map, lines are the person's colour and their pattern says how the work was done. */}
+            {lines ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span aria-hidden className="flex gap-0.5">
+                  {map.people.slice(0, 3).map((p) => (
+                    <span key={p.key} className="h-[3px] w-2 rounded-full" style={{ background: personColour(p.key) }} />
+                  ))}
+                </span>
+                {t("legend.personColour")}
+              </span>
+            ) : null}
+            {lines ? (
+              <span className="inline-flex items-center gap-1.5">
+                <svg aria-hidden width="22" height="6"><path d="M1 3 H21" stroke="currentColor" strokeWidth="2.5" /></svg>
+                {t("legend.solid")}
+              </span>
+            ) : null}
+            {lines && map.edges.some((e) => e.agent === "none" && e.commits) ? (
+              <span className="inline-flex items-center gap-1.5">
+                <svg aria-hidden width="22" height="6"><path d="M1 3 H21" stroke="currentColor" strokeWidth="2.5" strokeDasharray="5 3" /></svg>
+                {t("legend.dashed")}
+              </span>
+            ) : null}
+            {lines && map.edges.some((e) => !e.commits) ? (
+              <span className="inline-flex items-center gap-1.5">
+                <svg aria-hidden width="22" height="6"><path d="M2 3 H21" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="0.5 4" /></svg>
+                {t("legend.dotted")}
+              </span>
+            ) : null}
+            {CODING_AGENTS.filter((a) => a !== "none" && summary?.agents[a]).map((a) => (
               <span key={a} className="inline-flex items-center gap-1.5">
-                <span aria-hidden className="h-[3px] w-5 rounded-full" style={{ background: AGENT_COLOUR[a] }} />
+                <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: AGENT_COLOUR[a] }} />
                 {t.dyn("agent", a, AGENT_NAME[a])}
               </span>
             ))}
+            {outside && scope === "all" ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span aria-hidden className="h-3 w-5 rounded-[4px] border border-dashed border-border-strong" />
+                {t("legend.notCatalogued")}
+              </span>
+            ) : null}
           </div>
           <div className="mt-4">
             {mapWidth >= MAP_MIN_WIDTH ? (

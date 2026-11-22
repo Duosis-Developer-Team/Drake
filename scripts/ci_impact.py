@@ -143,6 +143,7 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
         "apps/api/tests/test_agent_guardrails_integration.py",
         "apps/api/tests/test_agent_governance_integration.py",
         "apps/api/tests/test_dev_activity_integration.py",
+        "apps/api/tests/test_dev_usage_import_integration.py",
         "apps/api/tests/test_incident_processor_integration.py",
         "apps/api/tests/test_incident_api_integration.py",
         "apps/api/tests/test_incident_runner_integration.py",
@@ -170,6 +171,7 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "database_shared": (
         "apps/api/tests/test_migrations_audit_integration.py",
+        "apps/api/tests/test_migration_0041_integration.py",
         "apps/api/tests/test_idempotency_integration.py",
         # Integration tests are not all under apps/api: the worker's queue
         # suite lives with the worker and is collected by the same marker.

@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     LOGISLOT_ID,
@@ -144,15 +144,15 @@ async def test_a_rename_away_from_the_gated_name_is_not_a_licence_to_call(
     """
     harness, fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
-    await _onboard(harness, repositories=[_repo(DATALAKE_ID, "Datalake-Platform-GUI")])
-    assert (await _row(engine, DATALAKE_ID))["security_gate"] == "manual_env_review"
+    await _onboard(harness, repositories=[_repo(GATED_ID, "Gated-Fixture")])
+    assert (await _row(engine, GATED_ID))["security_gate"] == "manual_review"
 
     await _send(
-        harness, "repository", "renamed", repository=_repo(DATALAKE_ID, "totally-ordinary-name")
+        harness, "repository", "renamed", repository=_repo(GATED_ID, "totally-ordinary-name")
     )
-    renamed = await _row(engine, DATALAKE_ID)
+    renamed = await _row(engine, GATED_ID)
     assert renamed["full_name"] == f"{OWNER}/totally-ordinary-name"
-    assert renamed["security_gate"] == "manual_env_review", "the gate must survive the rename"
+    assert renamed["security_gate"] == "manual_review", "the gate must survive the rename"
 
     fake.calls.clear()
     fake.token_requests.clear()
@@ -175,13 +175,13 @@ async def test_the_reconciler_itself_refuses_a_persisted_gate_without_calling(
     """Not only the endpoint: the worker path uses the same contract."""
     harness, fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
-    await _onboard(harness, repositories=[_repo(DATALAKE_ID, "Datalake-Platform-GUI")])
-    await _send(harness, "repository", "renamed", repository=_repo(DATALAKE_ID, "ordinary-again"))
+    await _onboard(harness, repositories=[_repo(GATED_ID, "Gated-Fixture")])
+    await _send(harness, "repository", "renamed", repository=_repo(GATED_ID, "ordinary-again"))
     fake.calls.clear()
     fake.token_requests.clear()
 
     with pytest.raises(service.SecurityGateBlockedError):
-        await _reconcile(harness, engine, DATALAKE_ID)
+        await _reconcile(harness, engine, GATED_ID)
     assert fake.calls == []
     assert fake.token_requests == []
 
@@ -281,10 +281,10 @@ async def test_a_gated_repository_stays_blocked_through_access_changes(
 ) -> None:
     harness, _fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
-    await _onboard(harness, repositories=[_repo(DATALAKE_ID, "Datalake-Platform-GUI")])
+    await _onboard(harness, repositories=[_repo(GATED_ID, "Gated-Fixture")])
     for action in ("suspend", "unsuspend"):
         await _send(harness, "installation", action)
-        assert (await _row(engine, DATALAKE_ID))["onboarding_state"] == "blocked"
+        assert (await _row(engine, GATED_ID))["onboarding_state"] == "blocked"
 
 
 # --- §3 repository upsert is a PATCH -------------------------------------
@@ -379,15 +379,13 @@ async def test_a_webhook_never_loosens_access_or_the_gate(
 ) -> None:
     harness, _fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
-    await _onboard(harness, repositories=[_repo(DATALAKE_ID, "Datalake-Platform-GUI")])
-    await _set_projection(engine, DATALAKE_ID, access_state="removed")
+    await _onboard(harness, repositories=[_repo(GATED_ID, "Gated-Fixture")])
+    await _set_projection(engine, GATED_ID, access_state="removed")
 
-    await _send(
-        harness, "repository", "edited", repository=_repo(DATALAKE_ID, "Datalake-Platform-GUI")
-    )
-    row = await _row(engine, DATALAKE_ID)
+    await _send(harness, "repository", "edited", repository=_repo(GATED_ID, "Gated-Fixture"))
+    row = await _row(engine, GATED_ID)
     assert row["access_state"] == "removed"
-    assert row["security_gate"] == "manual_env_review"
+    assert row["security_gate"] == "manual_review"
 
 
 # --- §4 membership comparison uses the PRE-update snapshot ---------------

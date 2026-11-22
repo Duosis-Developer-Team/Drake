@@ -336,6 +336,22 @@ class Settings(BaseSettings):
     github_app_private_key_file: str = ""
     github_webhook_secret_file: str = ""
     github_api_base_url: str = "https://api.github.com"
+    # Repositories (owner/name) closed by a manual security gate: BLOCKED,
+    # never read, never reconciled. Empty in every deployment today; a gate
+    # is a values change, not a release.
+    github_gated_repositories: list[str] = []
+
+    @field_validator("github_gated_repositories")
+    @classmethod
+    def _github_gated_repositories(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for full_name in value:
+            name = full_name.strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}", name):
+                raise ValueError(f"not an owner/name repository: {full_name!r}")
+            cleaned.append(name)
+        return cleaned
+
     github_http_timeout_seconds: float = 10.0
     # JWT lifetime stays under GitHub's hard 10-minute ceiling.
     github_jwt_ttl_seconds: int = 540
@@ -489,6 +505,22 @@ class Settings(BaseSettings):
     dev_activity_enabled: bool = False
     dev_activity_interval_seconds: float = 900.0
     dev_activity_commit_budget: int = 300
+    # GitHub organisations whose every repository the map covers, catalogued
+    # or not (read through the App installation, never written). Empty: the
+    # catalog's repositories only.
+    dev_activity_orgs: list[str] = []
+
+    @field_validator("dev_activity_orgs")
+    @classmethod
+    def _dev_activity_orgs(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for org in value:
+            name = org.strip()
+            # GitHub's own rule for an organisation login.
+            if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", name):
+                raise ValueError(f"not a GitHub organisation login: {org!r}")
+            cleaned.append(name)
+        return cleaned
 
     slo_evaluator_enabled: bool = False
     slo_evaluator_interval_seconds: float = 300.0
