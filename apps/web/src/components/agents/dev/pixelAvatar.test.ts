@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defaults, layout, readFeatures, render, SAMPLE, SPRITE } from "@/components/agents/dev/arcadeSprite";
-import { avatarUrl, crispSize, loadAvatar, mayHaveAvatar } from "@/components/agents/dev/pixelAvatar";
+import { avatarUrl, crispSize, isPortrait, loadAvatar, mayHaveAvatar } from "@/components/agents/dev/pixelAvatar";
 import { installFetchMock } from "@/test/mock-api";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -92,5 +92,29 @@ describe("arcade avatars", () => {
     expect(await loadAvatar("nopicture")).toBeNull();
     expect(calls).toHaveLength(1); // one load per person per page
     expect(calls[0].path).toBe("/v1/agents/dev/people/nopicture/avatar");
+  });
+
+  it("keeps a hand-made portrait as it is, and says so", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const fetchMock = vi.fn(async () =>
+      new Response(png, { status: 200, headers: { "Content-Type": "image/png", "X-Tracesis-Avatar": "portrait" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const url = await loadAvatar("portrait-person");
+    expect(url).toMatch(/^data:image\/png;base64,/);
+    expect(isPortrait("portrait-person")).toBe(true);
+    expect(isPortrait("someone-else")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never shows a portrait of a type it does not expect", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("<svg/>", { status: 200, headers: { "Content-Type": "image/svg+xml", "X-Tracesis-Avatar": "portrait" } }),
+      ),
+    );
+    expect(await loadAvatar("svg-person")).toBeNull();
+    expect(isPortrait("svg-person")).toBe(false);
   });
 });

@@ -33,7 +33,7 @@ export const devAgents = defineMessages({
     },
     map: {
       title: "Who works where",
-      hint: "People on the left, the repositories they changed in the middle — the catalog's wear their project — and, for those, the services under them on the right. An arrow is one coding agent; its width is how many commits. Click anything.",
+      hint: "People on the left, the repositories they changed in the middle — the catalog's wear their project — and, for those, the services under them on the right. Each line is one person's work in one repository, in that person's colour; its width is how many commits, its chip the coding agent. Point at or focus a person to follow them; click anything.",
       people: "People",
       repositories: "Repositories",
       services: "Services",
@@ -105,6 +105,10 @@ export const devAgents = defineMessages({
     },
     legend: {
       notCatalogued: "Not in the catalog",
+      personColour: "Line colour: the person",
+      solid: "With a coding agent",
+      dashed: "By hand",
+      dotted: "Claude Code sessions, no commit yet",
     },
     empty: {
       title: "No development activity yet",
@@ -152,7 +156,7 @@ export const devAgents = defineMessages({
     },
     map: {
       title: "Kim nerede çalışıyor",
-      hint: "Solda kişiler, ortada değiştirdikleri repolar — katalogdakiler projeleriyle görünür — sağda da onların altındaki servisler. Her ok bir kodlama ajanı; kalınlığı commit sayısı. Her şeye tıklanabilir.",
+      hint: "Solda kişiler, ortada değiştirdikleri repolar — katalogdakiler projeleriyle görünür — sağda da onların altındaki servisler. Her çizgi bir kişinin bir repodaki işi ve o kişinin renginde; kalınlığı commit sayısı, etiketi kodlama ajanı. Birini takip etmek için üstüne gel ya da odakla; her şeye tıklanabilir.",
       people: "Kişiler",
       repositories: "Repolar",
       services: "Servisler",
@@ -224,6 +228,10 @@ export const devAgents = defineMessages({
     },
     legend: {
       notCatalogued: "Katalogda değil",
+      personColour: "Çizgi rengi: kişi",
+      solid: "Kodlama ajanıyla",
+      dashed: "Elle",
+      dotted: "Claude Code oturumu, henüz commit yok",
     },
     empty: {
       title: "Henüz geliştirme etkinliği yok",

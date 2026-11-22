@@ -29,6 +29,7 @@ import {
   fetchDevCommits,
   fetchDevConnect,
   fetchDevMap,
+  personColour,
   usd,
   type CodingAgent,
   type DevCommit,
@@ -629,6 +630,8 @@ export function DevelopmentView() {
   const [ref, width] = useWidth<HTMLDivElement>(0);
   // The map sits inside a padded panel; the root is measured from first render.
   const mapWidth = width - PANEL_PADDING;
+  /** The map draws lines; the narrow list does not, so its legend leaves them out. */
+  const lines = mapWidth >= MAP_MIN_WIDTH;
 
   useEffect(() => {
     let active = true;
@@ -761,10 +764,39 @@ export function DevelopmentView() {
               ) : undefined
             }
           />
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted" data-testid="dev-legend">
-            {CODING_AGENTS.filter((a) => summary?.agents[a]).map((a) => (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-ink-muted" data-testid="dev-legend">
+            {/* On the map, lines are the person's colour and their pattern says how the work was done. */}
+            {lines ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span aria-hidden className="flex gap-0.5">
+                  {map.people.slice(0, 3).map((p) => (
+                    <span key={p.key} className="h-[3px] w-2 rounded-full" style={{ background: personColour(p.key) }} />
+                  ))}
+                </span>
+                {t("legend.personColour")}
+              </span>
+            ) : null}
+            {lines ? (
+              <span className="inline-flex items-center gap-1.5">
+                <svg aria-hidden width="22" height="6"><path d="M1 3 H21" stroke="currentColor" strokeWidth="2.5" /></svg>
+                {t("legend.solid")}
+              </span>
+            ) : null}
+            {lines && map.edges.some((e) => e.agent === "none" && e.commits) ? (
+              <span className="inline-flex items-center gap-1.5">
+                <svg aria-hidden width="22" height="6"><path d="M1 3 H21" stroke="currentColor" strokeWidth="2.5" strokeDasharray="5 3" /></svg>
+                {t("legend.dashed")}
+              </span>
+            ) : null}
+            {lines && map.edges.some((e) => !e.commits) ? (
+              <span className="inline-flex items-center gap-1.5">
+                <svg aria-hidden width="22" height="6"><path d="M2 3 H21" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="0.5 4" /></svg>
+                {t("legend.dotted")}
+              </span>
+            ) : null}
+            {CODING_AGENTS.filter((a) => a !== "none" && summary?.agents[a]).map((a) => (
               <span key={a} className="inline-flex items-center gap-1.5">
-                <span aria-hidden className="h-[3px] w-5 rounded-full" style={{ background: AGENT_COLOUR[a] }} />
+                <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: AGENT_COLOUR[a] }} />
                 {t.dyn("agent", a, AGENT_NAME[a])}
               </span>
             ))}
