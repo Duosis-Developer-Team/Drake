@@ -30,6 +30,7 @@
 
 import { useEffect, useState } from "react";
 
+import { TracesisMark, TracesisWordmark } from "@/components/shell/Brand";
 import { useResolvedTheme } from "@/components/shell/ThemeControl";
 
 type Size = "sm" | "md" | "lg" | "icon" | "hero";
@@ -210,20 +211,51 @@ export function monogram(name: string): string {
   return (words[0][0] + words[1][0]).toLocaleUpperCase();
 }
 
-export function ProjectLogo({
-  projectId,
-  name,
-  size = "sm",
-  variant = "wordmark",
-  className = "",
-}: {
+interface LogoProps {
   projectId: string;
   /** The project's display name or key, for the monogram. */
   name: string;
   size?: Size;
   variant?: Variant;
   className?: string;
-}) {
+}
+
+/** Mark height (px) per box size: the 450 × 200 mark centred in its tile. */
+const TRACESIS_MARK: Record<Size, number> = { sm: 7, md: 10, lg: 14, icon: 20, hero: 34 };
+const TRACESIS_WORDMARK: Record<Size, number> = { sm: 12, md: 15, lg: 20, icon: 24, hero: 36 };
+
+/**
+ * Tracesis is a catalog project too (it watches itself), and its brand is
+ * built in: drawn from theme tokens, so it needs no file in the repository
+ * and follows light and dark. Its mark is 2.25:1, so the "left square" cut
+ * used for repository logos would slice it; it is centred in the tile
+ * instead.
+ */
+function TracesisLogo({ size = "sm", variant = "wordmark", className = "" }: LogoProps) {
+  const spec = SIZES[size];
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center ${className}`}
+      data-testid="project-logo"
+      data-state="image"
+      data-variant={variant}
+    >
+      {variant === "mark" ? (
+        <span className={`inline-flex items-center justify-center ${spec.box} ${spec.frame ?? "border border-border bg-surface-2"}`}>
+          <TracesisMark height={TRACESIS_MARK[size]} />
+        </span>
+      ) : (
+        <TracesisWordmark size={TRACESIS_WORDMARK[size]} />
+      )}
+    </span>
+  );
+}
+
+export function ProjectLogo(props: LogoProps) {
+  return props.name.trim().toLowerCase() === "tracesis" ? <TracesisLogo {...props} /> : <RepositoryLogo {...props} />;
+}
+
+function RepositoryLogo({ projectId, name, size = "sm", variant = "wordmark", className = "" }: LogoProps) {
   const theme = useResolvedTheme();
   const src = logoUrl(projectId, theme);
   const [result, setResult] = useState<{ src: string; cut: Cut | null } | null>(
