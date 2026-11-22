@@ -127,6 +127,23 @@ export const protection = defineMessages({
       needsAttentionCaption: "At risk, overdue or failed",
       neverTested: "Never restore-tested",
       neverTestedCaption: "A backup nobody restored is unproven",
+      verifiedLabel: "Restore proven",
+    },
+    board: {
+      headline: "{usable} of {total} have a usable copy; {provable} proven restorable",
+      headlineNone: "No store reports its backups here yet",
+      headlineHint: "A backup and a proven restore are two different claims, so they are counted apart.",
+      noBackupYet: "no backup yet",
+      rpoMeter: "Age of the last good backup against its RPO",
+      now: "now",
+      expected: "Expected",
+      awaiting: {
+        reporting: "Reporting; this policy has not been created yet",
+        waiting: "Waiting for the reporter's first report",
+        not_registered: "Its reporter is not registered in this deployment",
+      },
+      groupMeta:
+        "{count, plural, one {# policy} other {# policies}} · {restorable} proven restorable · {expected} expected",
     },
     breakdown: {
       backupTitle: "Backup state",
@@ -391,6 +408,23 @@ export const protection = defineMessages({
       needsAttentionCaption: "Risk altında, gecikmiş veya başarısız",
       neverTested: "Geri yükleme hiç sınanmadı",
       neverTestedCaption: "Kimsenin geri yüklemediği bir yedek kanıtlanmamıştır",
+      verifiedLabel: "Geri yükleme kanıtlı",
+    },
+    board: {
+      headline: "{total} politikadan {usable} tanesinin kullanılabilir kopyası var; {provable} tanesi geri yüklenebilir olarak kanıtlandı",
+      headlineNone: "Henüz hiçbir depo yedeklerini buraya bildirmiyor",
+      headlineHint: "Yedek ve kanıtlanmış geri yükleme iki ayrı iddiadır; bu yüzden ayrı sayılır.",
+      noBackupYet: "henüz yedek yok",
+      rpoMeter: "Son başarılı yedeğin RPO'ya göre yaşı",
+      now: "şimdi",
+      expected: "Bekleniyor",
+      awaiting: {
+        reporting: "Raporluyor; bu politika henüz oluşturulmadı",
+        waiting: "Raporlayıcının ilk raporu bekleniyor",
+        not_registered: "Raporlayıcısı bu kurulumda kayıtlı değil",
+      },
+      groupMeta:
+        "{count, plural, one {# politika} other {# politika}} · {restorable} kanıtlı geri yükleme · {expected} bekleniyor",
     },
     breakdown: {
       backupTitle: "Yedek durumu",

@@ -11,7 +11,7 @@
  * report. The how-to below is the same for every team.
  */
 
-import { CheckCircle2, CircleDashed, KeyRound, Radio } from "lucide-react";
+import { CheckCircle2, KeyRound, Radio } from "lucide-react";
 import { useState } from "react";
 
 import { useApi } from "@/components/catalog/primitives";
@@ -38,9 +38,21 @@ function Reporter({
 }) {
   const t = useT("protection");
   const fmt = useFormat();
+  const steps = [
+    { done: reporter.registered, icon: Radio, label: t("setup.step.registered") },
+    { done: reporter.secret_present, icon: KeyRound, label: t("setup.step.secret") },
+    {
+      done: reporter.last_seen_at !== null,
+      icon: CheckCircle2,
+      label: reporter.last_seen_at
+        ? t("setup.step.seen", { when: fmt.relative(reporter.last_seen_at) })
+        : t("setup.step.firstReport"),
+    },
+  ];
+  const doneCount = steps.filter((s) => s.done).length;
   return (
     <li
-      className="px-7 py-4"
+      className="px-5 py-4 sm:px-7"
       data-testid={`reporter-${reporter.connector_key}`}
     >
       <button
@@ -64,6 +76,18 @@ function Reporter({
             {t("setup.policies", { count: reporter.policies.length })}
           </span>
         </span>
+        {/* Three steps to reporting, as a track that fills. */}
+        <span aria-hidden className="hidden items-center gap-1 sm:flex">
+          {steps.map((s, i) => (
+            <span
+              key={i}
+              className={`h-1.5 w-8 rounded-full ${s.done ? "bg-[var(--status-success)]" : "bg-surface-3"}`}
+            />
+          ))}
+          <span data-tabular className="ml-1.5 font-mono text-micro text-ink-muted">
+            {doneCount}/3
+          </span>
+        </span>
         <StatusBadge
           status={STATE_TONE[reporter.state]}
           label={t.dyn("setup.state", reporter.state, reporter.state)}
@@ -71,43 +95,27 @@ function Reporter({
         />
       </button>
       {open ? (
-        <div className="mt-3 space-y-3 pl-11">
-          <ol className="flex flex-wrap gap-x-5 gap-y-1.5 text-caption">
-            {[
-              {
-                done: reporter.registered,
-                icon: Radio,
-                label: t("setup.step.registered"),
-              },
-              {
-                done: reporter.secret_present,
-                icon: KeyRound,
-                label: t("setup.step.secret"),
-              },
-              {
-                done: reporter.last_seen_at !== null,
-                icon: CheckCircle2,
-                label: reporter.last_seen_at
-                  ? t("setup.step.seen", {
-                      when: fmt.relative(reporter.last_seen_at),
-                    })
-                  : t("setup.step.firstReport"),
-              },
-            ].map(({ done, icon: Icon, label }) => (
+        <div className="mt-4 space-y-4 sm:pl-11">
+          <ol className="grid gap-2 sm:grid-cols-3">
+            {steps.map(({ done, icon: Icon, label }, i) => (
               <li
                 key={label}
-                className={`inline-flex items-center gap-1.5 ${done ? "text-ink" : "text-ink-muted"}`}
+                className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-caption ${
+                  done ? "border-[var(--status-success)]/40 bg-healthy-soft/50 text-ink" : "border-dashed border-border-strong text-ink-muted"
+                }`}
               >
-                {done ? (
-                  <Icon aria-hidden className="h-3.5 w-3.5 text-success" />
-                ) : (
-                  <CircleDashed aria-hidden className="h-3.5 w-3.5" />
-                )}
-                {label}
+                <span
+                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full font-mono text-[11px] font-semibold ${
+                    done ? "bg-[var(--status-success)] text-ink-inverse" : "border border-border-strong"
+                  }`}
+                >
+                  {done ? <Icon aria-hidden className="h-3.5 w-3.5" /> : i + 1}
+                </span>
+                <span className="min-w-0">{label}</span>
               </li>
             ))}
           </ol>
-          <ul className="divide-y divide-border rounded-control border border-border">
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface-2/40">
             {reporter.policies.map((policy) => (
               <li
                 key={policy.policy_key}
@@ -153,7 +161,7 @@ function HowTo({ status }: { status: ConnectorStatus }) {
   const project = status.reporters[0]?.project_key ?? "<project>";
   return (
     <div
-      className="space-y-3 border-t border-border px-7 py-5"
+      className="space-y-3 border-t border-border bg-surface-2/40 px-5 py-5 sm:px-7"
       data-testid="reporter-howto"
     >
       <p className="text-caption font-semibold text-ink">
