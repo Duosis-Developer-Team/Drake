@@ -187,7 +187,7 @@ describe("catalog screens", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("projects open on the apps, the same launcher as Services, with a way into the project", async () => {
+  it("projects open on a portfolio: each project a card that opens it, with what is open against it", async () => {
     routerState.params = new URLSearchParams();
     installFetchMock({
       "/v1/projects": {
@@ -198,11 +198,19 @@ describe("catalog screens", () => {
         status: 200,
         body: { items: [serviceRow("critical")], total: 1, limit: 100, offset: 0 },
       },
+      "/v1/incidents": {
+        status: 200,
+        body: { items: [{ id: "i1", project_key: "alpha", state: "open", severity: "critical" }], total: 1 },
+      },
     });
     render(<ProjectsPage />);
-    expect(await screen.findByTestId("app-grid")).toBeInTheDocument();
-    // One app: its shelf is open, and it links to the project's own page.
-    expect(await screen.findByRole("link", { name: /open project/i })).toHaveAttribute("href", "/projects/p1");
+    expect(await screen.findByTestId("portfolio")).toBeInTheDocument();
+    const card = await screen.findByTestId("portfolio-alpha");
+    expect(card).toHaveAttribute("href", "/projects/p1");
+    expect(within(card).getByText("High criticality")).toBeInTheDocument();
+    // One open incident is counted; objectives did not answer, so a dash — not 0.
+    await waitFor(() => expect(within(card).getByText("Open incidents").nextSibling).toHaveTextContent("1"));
+    expect(within(card).getByText("Objectives").nextSibling).toHaveTextContent("—");
     expect(screen.queryByTestId("project-list")).not.toBeInTheDocument();
   });
 

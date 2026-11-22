@@ -100,6 +100,47 @@ export function useProjectIndex(): Map<string, ProjectRef> {
   );
 }
 
+/** Where a namespace lives in the catalog: its app and environment. */
+export interface Place {
+  projectKey: string;
+  environmentKey: string;
+}
+
+/**
+ * Namespace → app and environment, per cluster, from each cluster's own
+ * detail read (the environments that reference it). Lets a row that carries
+ * no binding — a rollout of a workload nobody bound to a service — still be
+ * drawn under the app it belongs to. Keys are `${clusterId}/${namespace}`.
+ */
+export function useNamespaceIndex(clusterIds: string[]): Map<string, Place> {
+  const key = [...new Set(clusterIds)].sort().join(",");
+  const [index, setIndex] = useState<{ key: string; map: Map<string, Place> }>({ key: "", map: new Map() });
+  useEffect(() => {
+    if (!key) return;
+    const controller = new AbortController();
+    Promise.all(
+      key.split(",").map((id) =>
+        apiGet<{ referenced_environments?: { project_key: string; environment_key: string; namespace: string | null }[] }>(
+          `/v1/clusters/${encodeURIComponent(id)}`,
+          controller.signal,
+        )
+          .then((body) => [id, body.referenced_environments ?? []] as const)
+          .catch(() => [id, []] as const),
+      ),
+    ).then((pairs) => {
+      if (controller.signal.aborted) return;
+      const map = new Map<string, Place>();
+      for (const [id, envs] of pairs)
+        for (const env of envs)
+          if (env.namespace) map.set(`${id}/${env.namespace}`, { projectKey: env.project_key, environmentKey: env.environment_key });
+      setIndex({ key, map });
+    });
+    return () => controller.abort();
+  }, [key]);
+  return index.key === key ? index.map : NO_PLACES;
+}
+const NO_PLACES = new Map<string, Place>();
+
 /** Start of the local day, as a millisecond timestamp. */
 function dayStart(ms: number): number {
   const d = new Date(ms);
@@ -242,16 +283,21 @@ export function HeatGrid({
   label,
 }: {
   axis: number[];
-  rows: { key: string; label: ReactNode; counts: number[]; bad: boolean[] }[];
+  rows: { key: string; label: ReactNode; counts: number[]; bad: boolean[]; meta?: ReactNode }[];
   label: string;
 }) {
   const fmt = useFormat();
   const peak = Math.max(1, ...rows.flatMap((r) => r.counts));
+  const withMeta = rows.some((r) => r.meta !== undefined);
   const day = (ms: number) => new Date(ms).toLocaleDateString(fmt.tag, { day: "numeric", month: "short" });
   const ticks = [0, Math.floor((axis.length - 1) / 2), axis.length - 1];
   return (
     <figure className="m-0" aria-label={label}>
-      <div className="grid grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5" role="img" aria-label={label}>
+      <div
+        className={`grid items-center gap-x-3 gap-y-1.5 ${withMeta ? "grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)_auto]" : "grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)]"}`}
+        role="img"
+        aria-label={label}
+      >
         {rows.map((row, r) => (
           <div key={row.key} className="contents">
             <div className="min-w-0 truncate">{row.label}</div>
@@ -271,6 +317,11 @@ export function HeatGrid({
                 />
               ))}
             </div>
+            {withMeta ? (
+              <div className="min-w-[2rem] text-right font-mono text-[11px] font-semibold text-ink" data-tabular>
+                {row.meta}
+              </div>
+            ) : null}
           </div>
         ))}
         <div />
@@ -279,10 +330,235 @@ export function HeatGrid({
             <span key={i}>{day(axis[i])}</span>
           ))}
         </div>
+        {withMeta ? <div /> : null}
       </div>
     </figure>
   );
 }
+
+/* ---------------- spans over time ---------------- */
+
+export interface Span {
+  id: string;
+  start: number;
+  /** Null while it is still going on: the bar runs to now, hatched. */
+  end: number | null;
+  colour: string;
+  title: string;
+}
+
+export interface Lane {
+  key: string;
+  label: ReactNode;
+  spans: Span[];
+  /** Short right-hand summary, e.g. "3 · longest 2h". */
+  meta?: ReactNode;
+}
+
+const MAX_TRACKS = 3;
+
+/** Spans into tracks so that overlapping ones sit on separate rows. */
+function pack(spans: Span[], now: number, gap: number): { span: Span; track: number }[] {
+  const ends: number[] = [];
+  return [...spans]
+    .sort((a, b) => a.start - b.start)
+    .map((span) => {
+      let track = ends.findIndex((end) => end + gap <= span.start);
+      if (track < 0) track = ends.length < MAX_TRACKS ? ends.length : MAX_TRACKS - 1;
+      ends[track] = Math.max(ends[track] ?? 0, span.end ?? now);
+      return { span, track };
+    });
+}
+
+/**
+ * One lane per place (an app's environment), each event drawn from when it
+ * started to when it ended — so a lane shows how often AND how long, and a
+ * week with three alerts reads as three marks where they happened rather
+ * than one lonely bar in an empty histogram. Still-open spans run to the
+ * right edge (now), hatched.
+ */
+export function SpanTimeline({
+  from,
+  to,
+  lanes,
+  tickDays,
+  label,
+}: {
+  from: number;
+  to: number;
+  lanes: Lane[];
+  /** A day label every N days. */
+  tickDays: number;
+  label: string;
+}) {
+  const fmt = useFormat();
+  const range = Math.max(1, to - from);
+  const pct = (ms: number) => Math.min(100, Math.max(0, ((ms - from) / range) * 100));
+  const days: number[] = [];
+  const first = new Date(from);
+  first.setHours(0, 0, 0, 0);
+  for (let d = new Date(first); d.getTime() <= to; d.setDate(d.getDate() + 1)) if (d.getTime() >= from) days.push(d.getTime());
+  // A label every `tickDays`, counted back from today; none hugging the left
+  // edge, where a partial first day would crowd the next label.
+  const ticks = days.filter((d, i) => (days.length - 1 - i) % tickDays === 0 && pct(d) > 8);
+  const when = (ms: number) =>
+    new Date(ms).toLocaleString(fmt.tag, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return (
+    <figure className="m-0" aria-label={label}>
+      <div className="grid grid-cols-[minmax(6.5rem,11rem)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2">
+        {lanes.map((lane, l) => {
+          const placed = pack(lane.spans, to, range * 0.006);
+          const tracks = Math.max(1, ...placed.map((p) => p.track + 1));
+          return (
+            <div key={lane.key} className="contents">
+              <div className="min-w-0 truncate">{lane.label}</div>
+              <div
+                className="relative rounded-md bg-surface-2/70"
+                style={{ height: tracks * 10 + 8 }}
+                role="group"
+                aria-label={lane.spans.map((s) => s.title).join("; ")}
+              >
+                {days.map((d) => (
+                  <span key={d} aria-hidden className="absolute inset-y-0 w-px bg-border/60" style={{ left: `${pct(d)}%` }} />
+                ))}
+                {placed.map(({ span, track }, i) => {
+                  const left = pct(span.start);
+                  const right = pct(span.end ?? to);
+                  const open = span.end === null;
+                  return (
+                    <span
+                      key={span.id}
+                      aria-hidden
+                      title={`${span.title}\n${when(span.start)} → ${open ? "…" : when(span.end!)}`}
+                      className="absolute h-2 rounded-full transition-[filter] hover:brightness-125"
+                      style={{
+                        left: `${left}%`,
+                        width: `max(8px, ${right - left}%)`,
+                        top: 4 + track * 10,
+                        background: open
+                          ? `repeating-linear-gradient(135deg, ${span.colour} 0 5px, color-mix(in srgb, ${span.colour} 45%, transparent) 5px 10px)`
+                          : span.colour,
+                        boxShadow: `0 0 0 1px color-mix(in srgb, ${span.colour} 35%, transparent)`,
+                        animation: `fade-in .4s ease-out ${l * 60 + i * 20}ms both`,
+                      }}
+                    />
+                  );
+                })}
+                <span aria-hidden className="absolute inset-y-0 right-0 w-0.5 rounded-full bg-ink-muted/50" />
+              </div>
+              <div className="min-w-[2.5rem] text-right text-micro text-ink-muted" data-tabular>
+                {lane.meta}
+              </div>
+            </div>
+          );
+        })}
+        <div />
+        <div className="relative h-4 font-mono text-[10.5px] text-ink-muted">
+          {ticks.map((d) => (
+            <span key={d} className="absolute -translate-x-1/2 whitespace-nowrap first:translate-x-0" style={{ left: `${pct(d)}%` }}>
+              {new Date(d).toLocaleDateString(fmt.tag, { day: "numeric", month: "short" })}
+            </span>
+          ))}
+        </div>
+        <div />
+      </div>
+    </figure>
+  );
+}
+
+/** Duration edges, in seconds, for "how long did they last". */
+const DURATION_EDGES = [900, 3600, 4 * 3600, 86400];
+
+/**
+ * How long things lasted, in five plain buckets — under 15 minutes up to over
+ * a day. Ongoing ones are counted separately, never folded into a bucket
+ * they have not finished.
+ */
+export function DurationBuckets({
+  seconds,
+  ongoing,
+  colour = "var(--brand-accent)",
+  ongoingLabel,
+}: {
+  seconds: number[];
+  ongoing: number;
+  colour?: string;
+  ongoingLabel: string;
+}) {
+  const fmt = useFormat();
+  const d = (s: number) => fmt.duration(s, { compact: true });
+  const labels = [
+    `< ${d(DURATION_EDGES[0])}`,
+    `${d(DURATION_EDGES[0])}–${d(DURATION_EDGES[1])}`,
+    `${d(DURATION_EDGES[1])}–${d(DURATION_EDGES[2])}`,
+    `${d(DURATION_EDGES[2])}–${d(DURATION_EDGES[3])}`,
+    `> ${d(DURATION_EDGES[3])}`,
+  ];
+  const counts = labels.map(() => 0);
+  for (const s of seconds) {
+    const i = DURATION_EDGES.findIndex((edge) => s < edge);
+    counts[i < 0 ? labels.length - 1 : i] += 1;
+  }
+  const peak = Math.max(1, ...counts, ongoing);
+  const rows = [...labels.map((label, i) => ({ label, count: counts[i], hatched: false })), ...(ongoing ? [{ label: ongoingLabel, count: ongoing, hatched: true }] : [])];
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {rows.map((row) => (
+        <li key={row.label} className="grid grid-cols-[5.5rem_minmax(0,1fr)_2rem] items-center gap-2">
+          <span className="truncate font-mono text-[10.5px] text-ink-muted">{row.label}</span>
+          <span className="block h-2 overflow-hidden rounded-full bg-surface-3">
+            {row.count ? (
+              <span
+                className="block h-full rounded-full"
+                style={{
+                  width: `${Math.max(6, (row.count / peak) * 100)}%`,
+                  background: row.hatched
+                    ? `repeating-linear-gradient(135deg, ${colour} 0 5px, color-mix(in srgb, ${colour} 45%, transparent) 5px 10px)`
+                    : colour,
+                }}
+              />
+            ) : null}
+          </span>
+          <span data-tabular className={`text-right font-mono text-[11px] ${row.count ? "font-semibold text-ink" : "text-ink-muted"}`}>
+            {fmt.number(row.count)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** One bar split by share — "where it came from" — with its legend. */
+export function ShareBar({ segments }: { segments: { key: string; label: ReactNode; colour: string; count: number }[] }) {
+  const fmt = useFormat();
+  const shown = segments.filter((s) => s.count > 0);
+  const total = shown.reduce((a, s) => a + s.count, 0);
+  if (!total) return null;
+  return (
+    <div className="flex flex-col gap-2.5">
+      <span className="flex h-2.5 gap-[2px] overflow-hidden rounded-full">
+        {shown.map((s) => (
+          <span key={s.key} className="h-full first:rounded-l-full last:rounded-r-full" style={{ flexGrow: s.count, background: s.colour }} />
+        ))}
+      </span>
+      <ul className="flex flex-col gap-1.5">
+        {shown.map((s) => (
+          <li key={s.key} className="flex min-w-0 items-center gap-2 text-caption">
+            <span aria-hidden className="h-2 w-2 shrink-0 rounded-[2px]" style={{ background: s.colour }} />
+            <span className="min-w-0 flex-1 truncate text-ink">{s.label}</span>
+            <span data-tabular className="font-mono text-[11px] font-semibold text-ink">{fmt.number(s.count)}</span>
+            <span data-tabular className="w-9 text-right font-mono text-[10.5px] text-ink-muted">
+              {fmt.number((s.count / total) * 100, { maximumFractionDigits: 0 })}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The app palette: one stable colour per app, by order of appearance. */
+export const APP_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-4)", "var(--series-3)", "var(--series-5)", "var(--series-6)"];
 
 export function Legend({ items }: { items: { label: string; colour: string; value?: ReactNode }[] }) {
   return (
@@ -318,7 +594,7 @@ export function Figure({
       <p data-tabular className={`mt-1 font-[family-name:var(--font-display)] text-[1.625rem] leading-none font-bold tracking-[-0.03em] ${colour}`}>
         {value}
       </p>
-      {note ? <p className="mt-1 truncate text-[11px] text-ink-muted">{note}</p> : null}
+      {note ? <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-ink-muted">{note}</p> : null}
     </div>
   );
 }

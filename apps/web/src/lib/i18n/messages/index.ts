@@ -10,6 +10,7 @@ import { agents } from "./agents";
 import { alertRules } from "./alertRules";
 import { alerting } from "./alerting";
 import { apps } from "./apps";
+import { boards } from "./boards";
 import { catalog } from "./catalog";
 import { clusters } from "./clusters";
 import { commandCenter } from "./commandCenter";
@@ -38,6 +39,7 @@ export const MESSAGES = {
   commandCenter,
   dashboards,
   apps,
+  boards,
   catalog,
   clusters,
   incidents,

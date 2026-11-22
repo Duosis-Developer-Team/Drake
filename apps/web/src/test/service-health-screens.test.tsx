@@ -229,12 +229,12 @@ const UNBOUND_ROW = {
   },
 };
 
-describe("service health launcher", () => {
+describe("service health board", () => {
   afterEach(() => {
     nav.search = "view=list";
   });
 
-  it("opens on the apps, and with one app and one environment shows its services as cards", async () => {
+  it("opens on every service as a card — the service is what you pick — with unbound ones listed apart", async () => {
     nav.search = "";
     installFetchMock({
       "/v1/service-health/services": { status: 200, body: listBody([BOUND_ROW, UNBOUND_ROW]) },
@@ -242,11 +242,13 @@ describe("service health launcher", () => {
     });
     render(<ServiceHealthPage />);
 
-    expect(await screen.findByTestId("app-grid")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /^Pilot/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByTestId("services-board")).toBeInTheDocument();
+    // The app is a filter, not a step: it is offered, and nothing is chosen.
+    expect(await screen.findByRole("button", { name: /^Pilot/ })).toHaveAttribute("aria-pressed", "false");
     const card = await screen.findByTestId("service-card-api");
     expect(within(card).getByText("Healthy")).toBeInTheDocument();
-    const unbound = screen.getByTestId("service-card-web");
+    expect(within(card).getByRole("link", { name: "API" })).toHaveAttribute("href", "/service-health/b1");
+    const unbound = screen.getByTestId("service-unbound-web");
     expect(within(unbound).getByRole("link", { name: /bind/i })).toHaveAttribute(
       "href",
       "/service-health/bind?environment_service_id=es2",

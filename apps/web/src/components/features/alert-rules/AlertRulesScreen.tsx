@@ -10,11 +10,27 @@
  * whether a rule fired.
  */
 
+import {
+  BellOff,
+  ChevronDown,
+  Gauge,
+  ListChecks,
+  Plus,
+  ScrollText,
+  ShieldCheck,
+  Siren,
+  TriangleAlert,
+  Waypoints,
+  Workflow,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { kindColour } from "@/components/apps/AppLauncher";
 import { PageFrame } from "@/components/shell/AppShell";
 import { DataState } from "@/components/state/DataState";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import {
   deleteRule,
   fetchRuleHistory,
@@ -23,12 +39,15 @@ import {
   formatSignal,
   muteRule,
   updateRule,
+  SIGNAL_SOURCE,
   type AlertRule,
   type RuleHistory,
   type RuleList,
   type RuleOptions,
+  type SignalSource,
 } from "@/lib/alertRules";
 import { useFormat, useT } from "@/lib/i18n";
+import { useProjectNames } from "@/lib/platform";
 import { useSession } from "@/lib/session";
 
 import s from "./alertRules.module.css";
@@ -47,9 +66,12 @@ import {
   TEMPLATE_KEYS,
   filteredName,
   sentenceFor,
+  templateSignal,
   useDuration,
   type TemplateKey,
 } from "./RuleDrawer";
+
+const SOURCE_ICON: Record<SignalSource, LucideIcon> = { metrics: Gauge, logs: ScrollText, traces: Waypoints };
 
 const REFRESH_MS = 60_000;
 type Filter = "all" | "firing" | "ok" | "muted";
@@ -85,12 +107,6 @@ function firingSince(rule: AlertRule): number | null {
   return times.length ? Math.min(...times) : null;
 }
 
-function scopeText(rule: AlertRule, all: { env: string; svc: string }): string {
-  return [rule.target.project, rule.target.environment ?? all.env, rule.target.service ?? all.svc].join(
-    " / ",
-  );
-}
-
 export function AlertRulesScreen() {
   const t = useT("alertRules");
   const fmt = useFormat();
@@ -112,6 +128,7 @@ export function AlertRulesScreen() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const names = useProjectNames();
 
   const load = useCallback(async () => {
     try {
@@ -248,33 +265,94 @@ export function AlertRulesScreen() {
     (rule) => rule.can_manage && rule.status !== "muted" && rule.status !== "disabled",
   );
 
+  const visible = rules.filter((rule) => matches(rule, filter));
+  const groups = (() => {
+    const byProject = new Map<string, AlertRule[]>();
+    for (const rule of visible) {
+      const list = byProject.get(rule.project_id) ?? [];
+      list.push(rule);
+      byProject.set(rule.project_id, list);
+    }
+    return [...byProject.entries()]
+      .map(([projectId, items]) => ({
+        projectId,
+        key: items[0].target.project,
+        name: names.get(projectId) ?? items[0].target.project,
+        items,
+        firing: items.filter((rule) => rule.status === "firing").length,
+      }))
+      .sort((a, b) => b.firing - a.firing || a.name.localeCompare(b.name));
+  })();
+  const stateSegments = (
+    [
+      ["firing", rules.filter((r) => r.status === "firing").length, "var(--crit)"],
+      ["pending", rules.filter((r) => r.status === "pending").length, "var(--warn)"],
+      ["ok", rules.filter((r) => r.status === "ok").length, "var(--ok)"],
+      ["no_data", rules.filter((r) => r.status === "no_data").length, "var(--track)"],
+      ["muted", rules.filter((r) => r.status === "muted" || r.status === "disabled").length, "var(--mute)"],
+    ] as const
+  ).filter(([, count]) => count > 0);
+  const critical = rules.filter((r) => r.severity === "critical").length;
+  const segmentsOf = (items: AlertRule[]) =>
+    (
+      [
+        ["firing", items.filter((r) => r.status === "firing").length, "var(--crit)"],
+        ["pending", items.filter((r) => r.status === "pending").length, "var(--warn)"],
+        ["ok", items.filter((r) => r.status === "ok").length, "var(--ok)"],
+        ["no_data", items.filter((r) => r.status === "no_data").length, "var(--track)"],
+        ["muted", items.filter((r) => r.status === "muted" || r.status === "disabled").length, "var(--mute)"],
+      ] as const
+    ).filter(([, count]) => count > 0);
+  // Every app's rules by state, from every rule (not the filtered view).
+  const appRows = (() => {
+    const byProject = new Map<string, AlertRule[]>();
+    for (const rule of rules) byProject.set(rule.project_id, [...(byProject.get(rule.project_id) ?? []), rule]);
+    return [...byProject.entries()]
+      .map(([projectId, items]) => ({
+        projectId,
+        name: names.get(projectId) ?? items[0].target.project,
+        total: items.length,
+        firing: items.filter((r) => r.status === "firing").length,
+        segments: segmentsOf(items),
+      }))
+      .sort((a, b) => b.firing - a.firing || b.total - a.total)
+      .slice(0, 5);
+  })();
+  // The day's firings across every rule, newest first.
+  const recent = rules
+    .flatMap((rule) => rule.episodes.map((episode) => ({ rule, episode })))
+    .sort((a, b) => Date.parse(b.episode.fired_at) - Date.parse(a.episode.fired_at))
+    .slice(0, firing.length > 1 ? 3 : 5);
+
   return (
-    <PageFrame>
+    <PageFrame width="wide">
       <div className={s.root}>
-        <section className={s.title}>
-          <div>
+        <section className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
             <h1 className={s.h1}>
               {t("title")} <em>{t("titleWindow")}</em>
             </h1>
-            <p className={s.lede}>{t("lede")}</p>
+            <p className="mt-1.5 max-w-[46rem] text-caption leading-relaxed text-ink-secondary">{t("lede")}</p>
           </div>
           <div className={s.cta}>
             {manageable && csrfToken ? (
               <button
                 type="button"
-                className={s.btn}
+                className={`${s.btn} inline-flex items-center gap-1.5`}
                 disabled={mutingAll !== "idle"}
                 onClick={() => void muteAll()}
               >
+                <BellOff aria-hidden className="h-3.5 w-3.5" />
                 {mutingAll === "done" ? t("mutedAll") : t("muteAll")}
               </button>
             ) : null}
             {canCreate ? (
               <button
                 type="button"
-                className={`${s.btn} ${s.go}`}
+                className={`${s.btn} ${s.go} inline-flex items-center gap-1.5`}
                 onClick={() => setDrawer({ rule: null, template: null })}
               >
+                <Plus aria-hidden className="h-3.5 w-3.5" />
                 {t("create")}
                 <span className={s.kbd} aria-hidden="true">
                   N
@@ -291,40 +369,157 @@ export function AlertRulesScreen() {
             <DataState kind="loading" />
           )
         ) : rules.length === 0 ? (
-            <section className={s.empty}>
-              <h2>{t("empty.title")}</h2>
-              <p>{t("empty.body")}</p>
-              {canCreate ? (
-                <div className={s.tpls}>
-                  {TEMPLATE_KEYS.map((key) => (
+          <section className="rounded-2xl border border-dashed border-border-strong bg-surface px-6 py-10 text-center">
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand-soft text-brand-accent">
+              <Workflow aria-hidden className="h-7 w-7" />
+            </span>
+            <h2 className="mt-4 font-[family-name:var(--font-display)] text-[1.25rem] font-bold tracking-[-0.02em] text-ink">
+              {t("empty.title")}
+            </h2>
+            <p className="mx-auto mt-1.5 max-w-[34rem] text-caption text-ink-secondary">{t("empty.body")}</p>
+            {canCreate ? (
+              <>
+                <p className="mt-6 mb-3 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                  {t("board.starters")}
+                </p>
+                <div className="mx-auto grid max-w-[60rem] gap-2.5 text-left sm:grid-cols-2 lg:grid-cols-3">
+                  {TEMPLATE_KEYS.map((key) => {
+                    const StarterIcon = SOURCE_ICON[SIGNAL_SOURCE[templateSignal(key)]];
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setDrawer({ rule: null, template: key })}
+                        className="group flex items-start gap-3 rounded-xl border border-border bg-surface px-3.5 py-3 text-left transition-[transform,border-color] hover:-translate-y-0.5 hover:border-border-strong focus-visible:ring-2 focus-visible:ring-focus"
+                      >
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-brand-accent">
+                          <StarterIcon aria-hidden className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-caption font-semibold text-ink">{t(`templates.${key}.name`)}</span>
+                          <small className="block font-mono text-[11px] text-ink-muted">{t(`templates.${key}.detail`)}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
+          </section>
+        ) : (
+          <>
+            <section
+              aria-label={t("now.caption")}
+              className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]"
+            >
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="m-0 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                    {t("board.byState")}
+                  </p>
+                  <span className="font-mono text-[11px] text-ink-muted">
+                    {t("now.fired24h", { count: list?.summary.fired_24h ?? 0 })}
+                  </span>
+                </div>
+                <div className="mt-3 flex h-2.5 w-full gap-[3px] overflow-hidden rounded-full" aria-hidden>
+                  {stateSegments.map(([key, count, color]) => (
+                    <span key={key} style={{ flexGrow: count, background: color }} />
+                  ))}
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {(
+                    [
+                      ["firing", counts.firing, "var(--crit)", Siren],
+                      ["ok", counts.ok, "var(--ok)", ShieldCheck],
+                      ["muted", counts.muted, "var(--mute)", BellOff],
+                      ["all", counts.all, "var(--accent)", ListChecks],
+                    ] as const
+                  ).map(([key, count, color, TileIcon]) => (
                     <button
                       key={key}
                       type="button"
-                      className={s.tpl}
-                      onClick={() => setDrawer({ rule: null, template: key })}
+                      aria-pressed={filter === key}
+                      onClick={() => setFilter(key)}
+                      className={`rounded-xl border px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                        filter === key ? "border-border-strong bg-surface-selected" : "border-border hover:bg-surface-hover"
+                      }`}
                     >
-                      {t(`templates.${key}.name`)}
-                      <small>{t(`templates.${key}.detail`)}</small>
+                      <span className="flex items-center gap-1.5 text-micro text-ink-secondary">
+                        <TileIcon aria-hidden className="h-3.5 w-3.5" style={{ color }} />
+                        {t(`tabs.${key}`)}
+                      </span>
+                      <b className="mt-1 block font-[family-name:var(--font-display)] text-[1.625rem] leading-none font-bold tracking-[-0.02em] text-ink tabular-nums">
+                        {count}
+                      </b>
                     </button>
                   ))}
                 </div>
-              ) : null}
-            </section>
-          ) : (
-            <>
-              <section className={s.console} aria-label={t("now.caption")}>
-                <div className={s.now}>
-                  <div className={s.nowHead}>
-                    <span className={s.cap}>{t("now.caption")}</span>
-                    <span className={`${s.cap} ${s.d}`}>{t("now.count", { count: firing.length })}</span>
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border pt-3 text-micro text-ink-secondary">
+                  <span className="font-mono text-[10.5px] tracking-[0.14em] text-ink-muted uppercase">
+                    {t("board.bySeverity")}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="h-2 w-2 rounded-full bg-critical" />
+                    {critical} {t("board.critical")}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="h-2 w-2 rounded-full bg-warning" />
+                    {rules.length - critical} {t("board.warning")}
+                  </span>
+                  <span className="ml-auto">
+                    <b className="text-ink">{t("now.calm", { count: counts.ok })}</b>
+                    {counts.muted ? ` · ${t("now.mutedCount", { count: counts.muted })}` : ""}
+                  </span>
+                </div>
+                <div className="mt-4 border-t border-border pt-3">
+                  <p className="mb-2.5 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                    {t("board.byApp")}
+                  </p>
+                  <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
+                    {appRows.map((row) => (
+                      <li key={row.projectId} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-3">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <ProjectLogo projectId={row.projectId} name={row.name} size="sm" variant="mark" />
+                          <span className="truncate text-caption text-ink">{row.name}</span>
+                        </span>
+                        <span className="flex h-2 gap-[2px] overflow-hidden rounded-full" aria-hidden>
+                          {row.segments.map(([key, count, color]) => (
+                            <span key={key} style={{ flexGrow: count, background: color }} />
+                          ))}
+                        </span>
+                        <span className="font-mono text-[11px] text-ink-muted">
+                          {t("board.groupMeta", { count: row.total, firing: row.firing })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="m-0 flex items-center gap-2 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                    {firing.length ? (
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--status-critical)] opacity-60 motion-reduce:hidden" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--status-critical)]" />
+                      </span>
+                    ) : null}
+                    {t("now.caption")}
+                  </p>
+                  <span className="font-mono text-[11px] text-ink-muted">{t("now.count", { count: firing.length })}</span>
+                </div>
+                {firing.length === 0 ? (
+                  <div className="mt-4 flex items-center gap-3 rounded-xl bg-healthy-soft/60 px-4 py-4">
+                    <ShieldCheck aria-hidden className="h-6 w-6 shrink-0 text-healthy" />
+                    <span>
+                      <b className="block text-body text-ink">{t("now.none")}</b>
+                      <span className="text-caption text-ink-secondary">{t("now.noneHint")}</span>
+                    </span>
                   </div>
-                  {firing.length === 0 ? (
-                    <div className={s.quietNow}>
-                      <b>{t("now.none")}</b>
-                      <span>{t("now.noneHint")}</span>
-                    </div>
-                  ) : (
-                    firing.map((rule) => {
+                ) : (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {firing.map((rule) => {
                       const since = firingSince(rule);
                       const history = histories[rule.id];
                       const series =
@@ -336,189 +531,281 @@ export function AlertRulesScreen() {
                         <button
                           key={rule.id}
                           type="button"
-                          className={s.readout}
-                          style={{ ["--c" as string]: color }}
                           onClick={() => open(rule.id, true)}
+                          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 rounded-xl border px-3.5 py-3 text-left transition-colors outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-focus sm:grid-cols-[minmax(0,1fr)_auto_9rem]"
+                          style={{ borderColor: `color-mix(in srgb, ${color} 45%, transparent)` }}
                         >
-                          <span style={{ display: "block" }}>
-                            <span className={s.since} style={{ display: "block" }}>
-                              {t("now.since", {
-                                severity: t.dyn("severity", rule.severity),
-                                duration: since ? duration((now - since) / 1000) : "—",
-                              })}
-                            </span>
-                            <span className={s.rn} style={{ display: "block" }}>
-                              {rule.name}
-                            </span>
-                            <span className={s.rs} style={{ display: "block" }}>
-                              {scopeText(rule, all)}
+                          <span className="flex min-w-0 items-center gap-3">
+                            <ProjectLogo projectId={rule.project_id} name={rule.target.project} size="md" variant="mark" />
+                            <span className="min-w-0">
+                              <span className="block truncate text-caption font-semibold text-ink">{rule.name}</span>
+                              <span className="block truncate font-mono text-[11px]" style={{ color }}>
+                                {t("now.since", {
+                                  severity: t.dyn("severity", rule.severity),
+                                  duration: since ? duration((now - since) / 1000) : "—",
+                                })}
+                              </span>
                             </span>
                           </span>
-                          <span className={s.rv}>
-                            <b>{show(rule, worstValue(rule))}</b>
-                            <span>{t("now.threshold", { value: show(rule, rule.threshold) })}</span>
+                          <span className="text-right">
+                            <b className="block font-mono text-[1.0625rem] tabular-nums" style={{ color }}>
+                              {show(rule, worstValue(rule))}
+                            </b>
+                            <span className="block font-mono text-[10.5px] text-ink-muted">
+                              {t("now.threshold", { value: show(rule, rule.threshold) })}
+                            </span>
                           </span>
-                          <Spark
-                            points={series?.series ?? []}
-                            threshold={rule.threshold}
-                            color={color}
-                            tall={firing.length <= 2}
-                          />
+                          <span className="col-span-2 sm:col-span-1">
+                            <Spark points={series?.series ?? []} threshold={rule.threshold} color={color} tall={false} />
+                          </span>
                         </button>
                       );
-                    })
-                  )}
-                  <div className={s.calm}>
-                    <span>
-                      <b>{t("now.calm", { count: counts.ok })}</b>
-                      {counts.muted ? ` · ${t("now.mutedCount", { count: counts.muted })}` : ""}
-                    </span>
-                    <span className={s.d}>{t("now.fired24h", { count: list?.summary.fired_24h ?? 0 })}</span>
+                    })}
                   </div>
-                </div>
-              </section>
-
-              <section className={s.reg} aria-label={t("register.title")}>
-                <div className={s.regHead}>
-                  <h2>{t("register.title")}</h2>
-                  <div className={s.tabs} role="group">
-                    {(["all", "firing", "ok", "muted"] as Filter[]).map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        className={s.tab}
-                        aria-pressed={filter === key}
-                        onClick={() => setFilter(key)}
-                      >
-                        {t(`tabs.${key}`)}
-                        <span className={s.tabN}>{counts[key]}</span>
-                      </button>
-                    ))}
+                )}
+                {recent.length ? (
+                  <div className="mt-4 border-t border-border pt-3">
+                    <p className="mb-2 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                      {t("board.recent")}
+                    </p>
+                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                      {recent.map(({ rule, episode }) => {
+                        const fired = Date.parse(episode.fired_at);
+                        const ended = episode.resolved_at ? Date.parse(episode.resolved_at) : null;
+                        return (
+                          <li key={rule.id + episode.binding_id + episode.fired_at}>
+                            <button
+                              type="button"
+                              onClick={() => open(rule.id, true)}
+                              className="grid w-full grid-cols-[3rem_0.5rem_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-caption transition-colors hover:bg-surface-hover"
+                            >
+                              <span className="font-mono text-[11px] text-ink-muted">{time(fired)}</span>
+                              <span
+                                aria-hidden
+                                className="h-2 w-2 rounded-full"
+                                style={{ background: severityTone(rule.severity) }}
+                              />
+                              <span className="min-w-0 truncate text-ink">
+                                {rule.name}
+                                <span className="text-ink-muted"> · {episode.service}</span>
+                              </span>
+                              <span className="font-mono text-[11px] text-ink-secondary">
+                                {ended ? duration((ended - fired) / 1000) : t("board.ongoing")}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
-                </div>
-                <div className={s.cols} aria-hidden="true">
-                  <span />
-                  <span className={s.cap}>{t("register.rule")}</span>
-                  <span className={`${s.cap} ${s.tl}`}>
-                    <span>{time(now - DAY_MS)}</span>
-                    <span>{time(now - 18 * 3600_000)}</span>
-                    <span>{time(now - 12 * 3600_000)}</span>
-                    <span>{time(now - 6 * 3600_000)}</span>
-                    <span>{t("register.timelineNow")}</span>
-                  </span>
-                  <span className={s.cap} style={{ textAlign: "right" }}>
-                    {t("register.nowThreshold")}
-                  </span>
-                  <span />
-                </div>
-                {rules.filter((rule) => matches(rule, filter)).length === 0 ? (
-                  <div className={s.emptyRow}>{t("register.empty")}</div>
                 ) : null}
-                {rules
-                  .filter((rule) => matches(rule, filter))
-                  .map((rule) => {
-                    const color = tone(rule);
-                    const expanded = selected === rule.id;
-                    const current = worstValue(rule);
-                    const mutedFor =
-                      rule.muted_until && Date.parse(rule.muted_until) > now
-                        ? duration((Date.parse(rule.muted_until) - now) / 1000)
-                        : null;
-                    const sub =
-                      rule.status === "muted" && mutedFor
-                        ? t("register.mutedFor", { duration: mutedFor })
-                        : rule.status === "disabled"
-                          ? t("register.disabled")
-                          : rule.status === "no_data"
-                            ? t("register.noData")
-                            : `/ ${show(rule, rule.threshold)}`;
-                    return (
-                      <div key={rule.id}>
-                        <button
-                          type="button"
-                          ref={(element) => {
-                            rowRefs.current[rule.id] = element;
-                          }}
-                          className={s.row}
-                          aria-expanded={expanded}
-                          style={{ ["--c" as string]: color }}
-                          onClick={() => open(expanded ? null : rule.id, false)}
-                        >
-                          <span
-                            className={`${s.st} ${rule.status === "firing" ? s.firingSt : ""}`}
-                            title={t.dyn("status", rule.status)}
-                          />
-                          <span className={s.nm}>
-                            <b>{rule.name}</b>
-                            <span>
-                              {filteredName(t.dyn("signal", rule.signal), rule.log_contains, rule.route)} · {scopeText(rule, all)}
-                            </span>
-                          </span>
-                          <span className={s.lane}>
-                            <Lane
-                              rule={rule}
-                              now={now}
-                              onSegment={(span: Span | null, event) => {
-                                if (!span || !event) return setTip(null);
-                                const peak = span.episode.peak;
-                                showTip(
-                                  event,
-                                  `${time(span.start)}–${span.episode.resolved_at ? time(span.end) : t("register.timelineNow")} · ${duration((span.end - span.start) / 1000)} · ${span.episode.service}${peak !== null ? ` · ${show(rule, peak)}` : ""}`,
-                                );
+              </div>
+            </section>
+
+            <section aria-label={t("register.title")}>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="m-0 font-[family-name:var(--font-display)] text-[1.125rem] font-bold tracking-[-0.02em] text-ink">
+                  {t("register.title")}
+                </h2>
+                <div className="flex flex-wrap gap-1.5" role="group">
+                  {(["all", "firing", "ok", "muted"] as Filter[]).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={filter === key}
+                      onClick={() => setFilter(key)}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-caption font-medium transition-colors ${
+                        filter === key
+                          ? "border-border-strong bg-surface-selected text-ink"
+                          : "border-border bg-surface text-ink-secondary hover:bg-surface-hover"
+                      }`}
+                    >
+                      {t(`tabs.${key}`)}
+                      <span className="font-mono text-micro text-ink-muted">{counts[key]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {visible.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border px-5 py-8 text-center text-caption text-ink-muted">
+                  {t("register.empty")}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-6">
+                {groups.map((group) => (
+                  <div key={group.projectId}>
+                    <div className="mb-3 flex items-center gap-3">
+                      <ProjectLogo projectId={group.projectId} name={group.name} size="md" variant="mark" />
+                      <span>
+                        <b className="block text-body text-ink">{group.name}</b>
+                        <span className="text-micro text-ink-muted">
+                          {t("board.groupMeta", { count: group.items.length, firing: group.firing })}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                      {group.items.map((rule) => {
+                        const color = tone(rule);
+                        const expanded = selected === rule.id;
+                        const current = worstValue(rule);
+                        const mutedFor =
+                          rule.muted_until && Date.parse(rule.muted_until) > now
+                            ? duration((Date.parse(rule.muted_until) - now) / 1000)
+                            : null;
+                        const sub =
+                          rule.status === "muted" && mutedFor
+                            ? t("register.mutedFor", { duration: mutedFor })
+                            : rule.status === "disabled"
+                              ? t("register.disabled")
+                              : rule.status === "no_data"
+                                ? t("register.noData")
+                                : `/ ${show(rule, rule.threshold)}`;
+                        const lastFired = rule.episodes.length
+                          ? Math.max(...rule.episodes.map((e) => Date.parse(e.fired_at)))
+                          : null;
+                        const env = rule.target.environment;
+                        return (
+                          <div key={rule.id} className={expanded ? "md:col-span-2 2xl:col-span-3" : ""}>
+                            <button
+                              type="button"
+                              ref={(element) => {
+                                rowRefs.current[rule.id] = element;
                               }}
-                            />
-                          </span>
-                          <span
-                            className={s.v}
-                            style={{
-                              ["--c2" as string]:
-                                rule.status === "firing" ? severityTone(rule.severity) : "var(--ink)",
-                            }}
-                          >
-                            <b>{show(rule, current)}</b>
-                            <span>{sub}</span>
-                          </span>
-                          <svg className={s.chev} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-                            <path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                          </svg>
-                        </button>
-                        {expanded ? (
-                          <Inspector
-                            rule={rule}
-                            history={histories[rule.id] ?? null}
-                            now={now}
-                            csrfToken={csrfToken}
-                            confirmDelete={confirmDelete === rule.id}
-                            actionError={actionError}
-                            onClose={() => open(null, false)}
-                            onEdit={() => setDrawer({ rule, template: null })}
-                            onMute={(minutes) =>
-                              void act(() => muteRule(csrfToken as string, rule.id, minutes))
-                            }
-                            onToggle={() =>
-                              void act(() =>
-                                updateRule(csrfToken as string, rule.id, {
-                                  enabled: !rule.enabled,
-                                  expected_version: rule.version,
-                                }),
-                              )
-                            }
-                            onAskDelete={() => setConfirmDelete(rule.id)}
-                            onCancelDelete={() => setConfirmDelete(null)}
-                            onDelete={() =>
-                              void act(async () => {
-                                await deleteRule(csrfToken as string, rule.id);
-                                setSelected(null);
-                              })
-                            }
-                          />
-                        ) : null}
-                      </div>
-                    );
-                  })}
-              </section>
-            </>
-          )}
+                              aria-expanded={expanded}
+                              onClick={() => open(expanded ? null : rule.id, false)}
+                              className={`group relative flex w-full flex-col overflow-hidden rounded-2xl border bg-surface p-4 pl-5 text-left transition-[border-color,box-shadow] outline-none hover:border-border-strong focus-visible:ring-2 focus-visible:ring-focus ${
+                                expanded ? "border-border-strong" : "border-border"
+                              }`}
+                            >
+                              <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: color }} />
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-micro font-semibold"
+                                  style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}
+                                >
+                                  <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                                  {t.dyn("status", rule.status)}
+                                </span>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-micro font-medium ${
+                                    rule.severity === "critical" ? "bg-critical-soft text-critical" : "bg-warning-soft text-warning"
+                                  }`}
+                                >
+                                  {t.dyn("severity", rule.severity)}
+                                </span>
+                                <ChevronDown
+                                  aria-hidden
+                                  className={`ml-auto h-4 w-4 text-ink-muted transition-transform ${expanded ? "rotate-180" : ""}`}
+                                />
+                              </span>
+                              <b className="mt-2.5 block truncate text-body text-ink">{rule.name}</b>
+                              <span className="mt-1 flex flex-wrap items-center gap-1.5 text-micro text-ink-secondary">
+                                <span className="truncate">
+                                  {filteredName(t.dyn("signal", rule.signal), rule.log_contains, rule.route)}
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2 py-0.5 font-mono text-[10.5px]">
+                                  {env ? (
+                                    <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: kindColour(env) }} />
+                                  ) : null}
+                                  {env ?? all.env}
+                                  {" / "}
+                                  {rule.target.service ?? all.svc}
+                                </span>
+                              </span>
+                              <span className="mt-3 flex items-end justify-between gap-3">
+                                <span className="min-w-0">
+                                  <b
+                                    className="block font-[family-name:var(--font-display)] text-[1.5rem] leading-none font-bold tracking-[-0.02em] tabular-nums"
+                                    style={{ color: rule.status === "firing" ? severityTone(rule.severity) : "var(--ink)" }}
+                                  >
+                                    {show(rule, current)}
+                                  </b>
+                                  <span className="mt-1 block font-mono text-[11px] text-ink-muted">{sub}</span>
+                                </span>
+                                <span className="text-right text-micro text-ink-muted">
+                                  {lastFired
+                                    ? t("board.lastFired", {
+                                        when: t("board.ago", { duration: duration((now - lastFired) / 1000) }),
+                                      })
+                                    : t("board.neverFired")}
+                                  <span className="block">{t("board.firings", { count: rule.episodes.length })}</span>
+                                </span>
+                              </span>
+                              <span className="mt-3 block [&_svg]:block [&_svg]:h-7 [&_svg]:w-full">
+                                <Lane
+                                  rule={rule}
+                                  now={now}
+                                  onSegment={(span: Span | null, event) => {
+                                    if (!span || !event) return setTip(null);
+                                    const peak = span.episode.peak;
+                                    showTip(
+                                      event,
+                                      `${time(span.start)}–${span.episode.resolved_at ? time(span.end) : t("register.timelineNow")} · ${duration((span.end - span.start) / 1000)} · ${span.episode.service}${peak !== null ? ` · ${show(rule, peak)}` : ""}`,
+                                    );
+                                  }}
+                                />
+                                <span className="mt-1 flex justify-between font-mono text-[10px] text-ink-muted">
+                                  <span>{time(now - DAY_MS)}</span>
+                                  <span>{t("register.timelineNow")}</span>
+                                </span>
+                              </span>
+                              <span className="mt-3 flex items-center gap-1.5 border-t border-border pt-2.5 text-micro text-ink-secondary">
+                                {rule.severity === "critical" ? (
+                                  <Siren aria-hidden className="h-3.5 w-3.5 text-critical" />
+                                ) : (
+                                  <TriangleAlert aria-hidden className="h-3.5 w-3.5 text-warning" />
+                                )}
+                                {t.dyn("board.action", rule.severity)}
+                                <span className="ml-auto font-mono text-[10.5px] text-ink-muted">
+                                  {rule.for_seconds
+                                    ? t("board.held", { duration: duration(rule.for_seconds) })
+                                    : t("board.atOnce")}
+                                </span>
+                              </span>
+                            </button>
+                            {expanded ? (
+                              <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-surface">
+                                <Inspector
+                                  rule={rule}
+                                  history={histories[rule.id] ?? null}
+                                  now={now}
+                                  csrfToken={csrfToken}
+                                  confirmDelete={confirmDelete === rule.id}
+                                  actionError={actionError}
+                                  onClose={() => open(null, false)}
+                                  onEdit={() => setDrawer({ rule, template: null })}
+                                  onMute={(minutes) => void act(() => muteRule(csrfToken as string, rule.id, minutes))}
+                                  onToggle={() =>
+                                    void act(() =>
+                                      updateRule(csrfToken as string, rule.id, {
+                                        enabled: !rule.enabled,
+                                        expected_version: rule.version,
+                                      }),
+                                    )
+                                  }
+                                  onAskDelete={() => setConfirmDelete(rule.id)}
+                                  onCancelDelete={() => setConfirmDelete(null)}
+                                  onDelete={() =>
+                                    void act(async () => {
+                                      await deleteRule(csrfToken as string, rule.id);
+                                      setSelected(null);
+                                    })
+                                  }
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
 
         {tip ? (
           <div className={s.tip} style={{ left: tip.x, top: tip.y }} role="presentation">
