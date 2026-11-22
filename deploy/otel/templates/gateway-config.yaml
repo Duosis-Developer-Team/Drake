@@ -130,6 +130,10 @@ data:
             - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and resource.attributes["k8s.statefulset.name"] != nil and kind == SPAN_KIND_SERVER'
             - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and attributes["db.system"] == "redis"'
             - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and attributes["db.system.name"] == "redis"'
+            # The cluster agent streams inventory all day; each ingest request
+            # runs dozens of statements. The requests stay (their count and
+            # latency are the story); the SQL under them is dropped.
+            - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and resource.attributes["k8s.deployment.name"] == "drake-agent-gateway" and kind == SPAN_KIND_CLIENT'
       {{- end }}
       {{- if .Values.gateway.externalIngest.enabled }}
       # --- Development agents (Agent Visibility: coding agents) ------------
