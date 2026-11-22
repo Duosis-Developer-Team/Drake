@@ -12,3 +12,7 @@
 *.json text
 *.css text
 *.md text
+
+# Shell scripts run under bash on every platform, Git for Windows included,
+# and bash rejects CRLF line endings.
+*.sh text eol=lf
