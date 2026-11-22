@@ -13,6 +13,7 @@ import httpx
 import pytest
 import redis.asyncio as aioredis
 from drake_api.dev_activity import collector
+from drake_api.dev_activity import repository as dev_repo
 from drake_api.dev_activity.avatars import Avatars
 from harness_s1 import build_harness, grant_platform_owner, require_it_settings
 from sqlalchemy import text
@@ -443,6 +444,7 @@ async def test_the_map_is_scoped_like_the_catalog(engine: AsyncEngine, redis: An
 
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+PORTRAIT = b"RIFF\x24\x00\x00\x00WEBPVP8X" + b"\x00" * 24
 
 
 def _png(request: httpx.Request) -> httpx.Response:
@@ -704,10 +706,38 @@ async def test_every_repository_of_a_watched_org_is_on_the_map(
         assert face.status_code == 200 and face.headers["content-type"] == "image/png"
         assert face.content == PNG and "max-age=86400" in face.headers["cache-control"]
         assert face.headers["x-content-type-options"] == "nosniff"
+        assert face.headers["x-tracesis-avatar"] == "github"
         assert (await client.get("/v1/agents/dev/people/orgonly/avatar")).status_code == 200
         for nobody in ("name:enes", "claude:abc", "ghost"):
             none = await client.get(f"/v1/agents/dev/people/{nobody}/avatar")
             assert none.status_code == 204, nobody
+        assert sorted(faces.calls) == ["eneserman", "orgonly"]
+
+        # A hand-made portrait wins over the GitHub picture, as it is.
+        async with engine.begin() as connection:
+            for key in ("eneserman", "orgonly", "ghost"):
+                await dev_repo.set_portrait(
+                    connection,
+                    person_key=key,
+                    media_type="image/webp",
+                    content=PORTRAIT,
+                    width=512,
+                    height=512,
+                )
+        made = await client.get("/v1/agents/dev/people/eneserman/avatar")
+        assert made.status_code == 200 and made.content == PORTRAIT
+        assert made.headers["content-type"] == "image/webp"
+        assert made.headers["x-tracesis-avatar"] == "portrait"
+        assert made.headers["x-content-type-options"] == "nosniff"
+        assert "sandbox" in made.headers["content-security-policy"]
+        assert "max-age=3600" in made.headers["cache-control"]
+        again = await client.get(
+            "/v1/agents/dev/people/eneserman/avatar",
+            headers={"If-None-Match": made.headers["etag"]},
+        )
+        assert again.status_code == 304
+        # A portrait for someone the map does not show reveals nothing.
+        assert (await client.get("/v1/agents/dev/people/ghost/avatar")).status_code == 204
         assert sorted(faces.calls) == ["eneserman", "orgonly"]
 
     # Project scope: the catalog's repository only, never the org's others.
@@ -723,9 +753,21 @@ async def test_every_repository_of_a_watched_org_is_on_the_map(
         assert listed["items"] == []
         everything = (await client.get("/v1/agents/dev/commits?window=7d")).json()
         assert all(c["project_id"] is not None for c in everything["items"])
-        assert (await client.get("/v1/agents/dev/people/eneserman/avatar")).status_code == 200
-        # Seen only in a repository outside the catalog: not this viewer's to see.
+        seen = await client.get("/v1/agents/dev/people/eneserman/avatar")
+        assert seen.status_code == 200 and seen.headers["x-tracesis-avatar"] == "portrait"
+        # Seen only in a repository outside the catalog: not this viewer's to
+        # see, portrait or not.
         assert (await client.get("/v1/agents/dev/people/orgonly/avatar")).status_code == 204
+
+    # Removing the portrait brings the GitHub picture back.
+    async with engine.begin() as connection:
+        assert await dev_repo.delete_portrait(connection, "eneserman")
+        assert not await dev_repo.delete_portrait(connection, "eneserman")
+    async with harness.api_client() as client:
+        await harness.login(client, "user-orgviewer")
+        back = await client.get("/v1/agents/dev/people/eneserman/avatar")
+        assert back.status_code == 200 and back.headers["x-tracesis-avatar"] == "github"
+        assert back.content == PNG
 
     # Catalogued later: the rows already kept follow the repository.
     other = await make_world(engine)
