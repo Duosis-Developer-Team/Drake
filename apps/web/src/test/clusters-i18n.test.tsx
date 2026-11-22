@@ -65,7 +65,7 @@ describe("clusters area in Turkish", () => {
     expect(stale.closest("[data-testid]")).toHaveAttribute("data-testid", "status-stale");
     expect(list.getByText("0 ortam")).toBeInTheDocument();
 
-    // Glossary: Freshness is "Tazelik".
-    expect(screen.getByText("Envanter tazeliği")).toBeInTheDocument();
+    // The fleet strip counts fresh inventories in the same glossary.
+    expect(screen.getByText("Envanter güncel")).toBeInTheDocument();
   });
 });

@@ -13,6 +13,75 @@ import { defineMessages } from "../define";
 
 export const clusters = defineMessages({
   en: {
+    card: {
+      open: "Open {cluster}",
+      agent: "Agent",
+      inventory: "Inventory",
+      cpu: "CPU",
+      memory: "Memory",
+      disk: "Disk",
+      pods: "Pods",
+      coresOf: "{used} of {total} cores",
+      gibOf: "{used} of {total} GiB",
+      podsOf: "{used} of {total}",
+      nodes: "Machines",
+      nodesHealthy: "{healthy} of {total} healthy",
+      apps: "Running here",
+      noApps: "No catalog app runs here yet.",
+      namespaces: "{count, plural, one {# namespace} other {# namespaces}}",
+      projects: "{count, plural, one {# app} other {# apps}}",
+      noMetrics: "Usage is not reported for this cluster.",
+      reading: "Reading usage…",
+      noSweep: "no current sweep",
+      counts: {
+        nodes: "nodes",
+        workloads: "workloads",
+        pods: "pods",
+      },
+      healthyRing: "{what} healthy",
+      sweep: "Last sweep",
+      usageTitle: "In use now",
+    },
+    dash: {
+      apps: {
+        title: "Apps on this cluster",
+        description: "Each app's environments here and what they use. Open one for its dashboard.",
+        empty: "No catalog app runs on this cluster yet.",
+        open: "Dashboard",
+        cpu: "{value} cores",
+        memory: "{value} GiB memory",
+      },
+      capacity: {
+        title: "Capacity",
+        description: "What the machines give, and how much of it is in use now.",
+      },
+      nodes: {
+        title: "Machines",
+        description: "Every node against every resource. Open a cell for its last 24 hours.",
+      },
+      namespaces: {
+        title: "Namespaces by owner",
+        description: "Who runs what here. Open an owner for its namespaces.",
+        pods: "{count, plural, one {# pod} other {# pods}}",
+        restarts: "{count, plural, one {# restart} other {# restarts}} in 24h",
+        open: "Resource usage",
+        cpuShare: "{share} of CPU in use",
+      },
+      kinds: {
+        title: "Resources by kind",
+        description: "Everything the agent's sweep counted, by kind and health. Open a kind to browse it.",
+        total: "{count, plural, one {# resource} other {# resources}}",
+        unhealthy: "{count} unhealthy",
+        other: "{count, plural, one {# more kind} other {# more kinds}}",
+      },
+      health: {
+        title: "Health of the sweep",
+        description: "Healthy over counted, per class of resource.",
+      },
+      status: {
+        title: "Agent and freshness",
+      },
+    },
     enum: {
       agent: {
         not_configured: "Not configured",
@@ -288,6 +357,75 @@ export const clusters = defineMessages({
     },
   },
   tr: {
+    card: {
+      open: "{cluster} kümesini aç",
+      agent: "Ajan",
+      inventory: "Envanter",
+      cpu: "CPU",
+      memory: "Bellek",
+      disk: "Depolama",
+      pods: "Pod",
+      coresOf: "{total} çekirdeğin {used} kadarı",
+      gibOf: "{total} GiB'ın {used} kadarı",
+      podsOf: "{total} içinde {used}",
+      nodes: "Makineler",
+      nodesHealthy: "{total} makineden {healthy} sağlıklı",
+      apps: "Burada çalışanlar",
+      noApps: "Burada henüz katalogdan bir uygulama çalışmıyor.",
+      namespaces: "{count, plural, one {# namespace} other {# namespace}}",
+      projects: "{count, plural, one {# uygulama} other {# uygulama}}",
+      noMetrics: "Bu küme için kullanım raporlanmıyor.",
+      reading: "Kullanım okunuyor…",
+      noSweep: "güncel tarama yok",
+      counts: {
+        nodes: "makine",
+        workloads: "iş yükü",
+        pods: "pod",
+      },
+      healthyRing: "{what} sağlıklı",
+      sweep: "Son tarama",
+      usageTitle: "Şu an kullanımda",
+    },
+    dash: {
+      apps: {
+        title: "Bu kümedeki uygulamalar",
+        description: "Her uygulamanın buradaki ortamları ve ne kullandıkları. Panosu için birini açın.",
+        empty: "Bu kümede henüz katalogdan bir uygulama çalışmıyor.",
+        open: "Pano",
+        cpu: "{value} çekirdek",
+        memory: "{value} GiB bellek",
+      },
+      capacity: {
+        title: "Kapasite",
+        description: "Makinelerin sunduğu ve şu an kullanılan.",
+      },
+      nodes: {
+        title: "Makineler",
+        description: "Her makine, her kaynağa karşı. Son 24 saat için bir hücreyi açın.",
+      },
+      namespaces: {
+        title: "Sahibine göre namespace'ler",
+        description: "Burada kim ne çalıştırıyor. Namespace'leri için bir sahibi açın.",
+        pods: "{count, plural, one {# pod} other {# pod}}",
+        restarts: "24 saatte {count, plural, one {# yeniden başlama} other {# yeniden başlama}}",
+        open: "Kaynak kullanımı",
+        cpuShare: "Kullanılan CPU'nun {share} kadarı",
+      },
+      kinds: {
+        title: "Türe göre kaynaklar",
+        description: "Ajanın taramasının saydığı her şey, türe ve sağlığa göre. Göz atmak için bir türü açın.",
+        total: "{count, plural, one {# kaynak} other {# kaynak}}",
+        unhealthy: "{count} sağlıksız",
+        other: "{count, plural, one {# tür daha} other {# tür daha}}",
+      },
+      health: {
+        title: "Taramanın sağlığı",
+        description: "Kaynak sınıfı başına, sayılanların içinde sağlıklı olanlar.",
+      },
+      status: {
+        title: "Ajan ve güncellik",
+      },
+    },
     enum: {
       agent: {
         not_configured: "Yapılandırılmamış",

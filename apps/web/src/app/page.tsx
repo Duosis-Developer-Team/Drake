@@ -24,11 +24,11 @@
  * most dangerous thing a monitoring product can render.
  */
 
-import { ArrowRight, Server } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
-import { RingProgress } from "@/components/charts/visuals";
+import { ClusterCard } from "@/components/clusters/ClusterCard";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
 import { AppsBoard, PlatformPulse } from "@/components/command-center/Platform";
 import { EvidenceCoverage } from "@/components/command-center/EvidenceCoverage";
@@ -39,9 +39,9 @@ import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { SignalBoard } from "@/components/service-health/SignalBoard";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
-import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Modal } from "@/components/ui/overlay";
-import { FreshnessIndicator, RelativeTime } from "@/components/ui/identifiers";
+import { FreshnessIndicator } from "@/components/ui/identifiers";
 import {
   DeniedState,
   ErrorState,
@@ -522,7 +522,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
   const t = useT("commandCenter");
   const clusters = resource.data?.clusters ?? [];
   return (
-    <div data-testid="fleet-panel" className="flex min-w-0 flex-col">
+    <div data-testid="fleet-panel" className="flex h-full min-w-0 flex-col">
       <PanelHeader
         flush
         title={t("fleet.title")}
@@ -553,124 +553,13 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
           <NotConfiguredState compact title={t("fleet.empty")} />
         </div>
       ) : (
-        <ul className="divide-y divide-border" data-tabular>
+        <ul className="flex flex-1 flex-col gap-4 px-5 pb-5" aria-label={t("fleet.title")}>
           {clusters.map((cluster) => (
-            <li
-              key={cluster.id}
-              className="flex flex-wrap items-center gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
-            >
-              <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink-secondary">
-                <Server className="h-5 w-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <Link
-                  href={`/clusters/${cluster.id}`}
-                  className="font-semibold text-ink hover:text-brand"
-                >
-                  {cluster.display_name || cluster.cluster_ref}
-                </Link>
-                <span className="mt-0.5 block font-mono text-micro text-ink-muted">
-                  {cluster.cluster_ref}
-                </span>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
-                  <span className="text-ink-muted">{t("fleet.agent")}</span>
-                  <StatusDot
-                    status={toneForHealth(cluster.operational?.agent)}
-                    label={t.dyn("token", cluster.operational?.agent ?? "unknown", humanize(cluster.operational?.agent))}
-                  />
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
-                  <span className="text-ink-muted">{t("fleet.inventory")}</span>
-                  <StatusDot
-                    status={toneForHealth(cluster.operational?.inventory)}
-                    label={t.dyn("token", cluster.operational?.inventory ?? "unknown", humanize(cluster.operational?.inventory))}
-                  />
-                  </span>
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
-                <FleetCounts cluster={cluster} />
-                <span className="text-micro text-ink-muted">
-                  <RelativeTime value={cluster.as_of} />
-                </span>
-              </div>
-            </li>
+            <ClusterCard key={cluster.id} cluster={cluster} className="flex-1" />
           ))}
         </ul>
       )}
     </div>
-  );
-}
-
-/**
- * What the agent's last sweep actually counted.
- *
- * Healthy-over-total, per cluster, straight from the summary — never a
- * percentage this component computed and never a bare "healthy".
- *
- * An agent that is not connected has no current view to report, and saying so
- * beats showing its last numbers as if they were now. That is the same rule
- * the freshness column states, applied to the numbers themselves.
- */
-function FleetCounts({ cluster }: { cluster: Cluster }) {
-  const t = useT("commandCenter");
-  const summary = useResource<InventorySummary>(
-    `/v1/clusters/${cluster.id}/inventory/summary`,
-  );
-
-  if (summary.loading && !summary.data) {
-    return <span className="text-micro text-ink-muted">…</span>;
-  }
-  if (!summary.data) {
-    return <span className="text-micro text-ink-muted">—</span>;
-  }
-  if (summary.data.agent.status !== "connected") {
-    // No current view to report. The agent and inventory columns beside this
-    // one already name which half is missing, and showing the last numbers
-    // here would present them as if they were now.
-    return (
-      <span className="text-micro text-ink-muted" data-testid="fleet-counts-unavailable">
-        {t("fleet.noSweep")}
-      </span>
-    );
-  }
-  return (
-    <span className="flex flex-wrap items-center gap-3" data-testid="fleet-counts">
-      {(
-        [
-          ["nodes", summary.data.nodes],
-          ["workloads", summary.data.workloads],
-          ["pods", summary.data.pods],
-        ] as const
-      ).map(([key, rollup]) => {
-        const label = t(`fleet.counts.${key}`);
-        return (
-        <span key={key} className="flex items-center gap-1.5">
-          {/* The ring reads before the digits do; the digits stay exact. */}
-          <RingProgress
-            size={34}
-            label={t("fleet.healthyRing", { what: label })}
-            value={rollup.total > 0 ? (rollup.healthy / rollup.total) * 100 : null}
-            tone={
-              rollup.unhealthy > 0
-                ? "critical"
-                : rollup.degraded > 0 || rollup.unknown > 0
-                  ? "warning"
-                  : "success"
-            }
-          />
-          <span className="text-micro whitespace-nowrap text-ink-secondary">
-            <span data-tabular className="block font-medium text-ink">
-              {rollup.healthy}
-              <span className="text-ink-muted">/{rollup.total}</span>
-            </span>
-            {label}
-          </span>
-        </span>
-        );
-      })}
-    </span>
   );
 }
 

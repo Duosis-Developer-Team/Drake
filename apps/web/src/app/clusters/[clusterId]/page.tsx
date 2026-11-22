@@ -12,14 +12,10 @@
 
 import {
   Boxes,
-  ChevronRight,
   Container,
   Database,
   FolderTree,
   Layers,
-  PackageOpen,
-  Plug,
-  RefreshCw,
   Server,
   ShieldCheck,
   Workflow,
@@ -36,23 +32,30 @@ import {
   PillLink,
   ScreenGate,
   SegmentBar,
-  StatTile,
   StateCard,
 } from "@/components/clusters/primitives";
 import {
   AgentBadge,
-  HealthBadge,
   InventoryStateBadge,
 } from "@/components/inventory/primitives";
 import { Provenance } from "@/components/provenance/Provenance";
+import { ClusterLogo, StateChip, useClusterSnapshot, usableSnapshot } from "@/components/clusters/ClusterCard";
+import {
+  CapacityCard,
+  ClusterApps,
+  DashCard,
+  KindsViz,
+  NamespaceGroups,
+} from "@/components/clusters/ClusterDashboard";
+import { NodeLedger } from "@/components/features/infrastructure/InfrastructureScreen";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DashboardRenderer } from "@/components/telemetry/DashboardRenderer";
 import { LoadGate } from "@/components/catalog/primitives";
 import { Panel, PanelHeader, SectionHeader } from "@/components/ui/Panel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { RelativeTime } from "@/components/ui/identifiers";
 import type { Cluster } from "@/lib/catalog";
-import { humanize, toneForHealth } from "@/lib/design/status";
+import { clusterPicture } from "@/lib/clusterPicture";
+import { humanize } from "@/lib/design/status";
 import { useFormat, useT, type Translator } from "@/lib/i18n";
 import type { HealthRollup, InventorySummary } from "@/lib/inventory";
 import { parseRangePreset } from "@/lib/telemetry";
@@ -65,25 +68,6 @@ function healthSlices(t: Translator<"clusters">, rollup: HealthRollup) {
     { name: t("enum.health.unhealthy"), value: rollup.unhealthy, tone: "critical" as const },
     { name: t("enum.health.unknown"), value: rollup.unknown, tone: "unknown" as const },
   ];
-}
-
-/** A status as the tile's headline — a word, sized to sit where a number would. */
-function StatWord({
-  children,
-  muted = false,
-}: {
-  children: React.ReactNode;
-  muted?: boolean;
-}) {
-  return (
-    <span
-      className={`block truncate text-[1.625rem] leading-none font-semibold tracking-[-0.02em] ${
-        muted ? "text-ink-muted" : "text-ink"
-      }`}
-    >
-      {children}
-    </span>
-  );
 }
 
 /** A mono UTC instant, or an honest dash. */
@@ -168,7 +152,6 @@ function RollupCard({
 
 export default function ClusterDetailPage() {
   const t = useT("clusters");
-  const tc = useT("common");
   const { clusterId } = useParams<{ clusterId: string }>();
   // The same range control the service boards use, read from the URL,
   // so a link to a cluster at 7d opens at 7d.
@@ -177,9 +160,9 @@ export default function ClusterDetailPage() {
   const [summary, retrySummary] = useApi<InventorySummary>(
     `/v1/clusters/${clusterId}/inventory/summary`,
   );
-  const ready = summary.state === "ready" ? summary.data : null;
-  const summaryFallback =
-    summary.state === "error" ? tc("state.unavailable") : t("shared.loadingEllipsis");
+  const ti = useT("infrastructure");
+  const { snap, failed: snapFailed } = useClusterSnapshot(clusterId);
+  const picture = usableSnapshot(snap) ? clusterPicture(snap) : null;
 
   return (
     <PageFrame>
@@ -205,20 +188,8 @@ export default function ClusterDetailPage() {
           const environments = data.referenced_environments ?? [];
           return (
             <>
-              <nav
-                aria-label={t("breadcrumb.label")}
-                className="mb-3 flex items-center gap-1.5 text-micro text-ink-muted"
-              >
-                <Link href="/clusters" className="rounded hover:text-ink">
-                  {t("breadcrumb.clusters")}
-                </Link>
-                <ChevronRight aria-hidden className="h-3 w-3" />
-                <span className="font-mono text-ink-secondary">
-                  {data.cluster_ref}
-                </span>
-              </nav>
-
               <PageHeader
+                leading={<ClusterLogo cluster={data} size="lg" />}
                 title={data.display_name || data.cluster_ref}
                 description={
                   data.site
@@ -230,6 +201,20 @@ export default function ClusterDetailPage() {
                     status={data.lifecycle === "active" ? "success" : "unknown"}
                     label={t.dyn("enum.lifecycle", data.lifecycle, humanize(data.lifecycle))}
                   />
+                }
+                meta={
+                  <>
+                    <StateChip
+                      label={t("card.agent")}
+                      value={data.operational?.agent}
+                      word={t.dyn("enum.agent", data.operational?.agent ?? "unknown", humanize(data.operational?.agent ?? "unknown"))}
+                    />
+                    <StateChip
+                      label={t("card.inventory")}
+                      value={data.operational?.inventory}
+                      word={t.dyn("enum.inventory", data.operational?.inventory ?? "unknown", humanize(data.operational?.inventory ?? "unknown"))}
+                    />
+                  </>
                 }
                 actions={
                   <PillLink
@@ -243,114 +228,30 @@ export default function ClusterDetailPage() {
                 }
               />
 
-              <div className="page-grid mb-6">
-                <StatTile
-                  icon={Plug}
-                  tone={ready ? toneForHealth(ready.agent.status) : null}
-                  label={t("detail.tile.agentConnection")}
-                  value={
-                    <StatWord muted={!ready}>
-                      {ready
-                        ? t.dyn("enum.agent", ready.agent.status, humanize(ready.agent.status))
-                        : summaryFallback}
-                    </StatWord>
-                  }
-                >
-                  <p className="text-micro text-ink-muted">
-                    {t("detail.tile.heartbeat")}{" "}
-                    <span className="text-ink-secondary">
-                      {ready?.agent.last_heartbeat_at ? (
-                        <RelativeTime value={ready.agent.last_heartbeat_at} />
-                      ) : (
-                        t("detail.tile.notReported")
-                      )}
-                    </span>
-                  </p>
-                </StatTile>
-                <StatTile
-                  icon={RefreshCw}
-                  tone={ready ? toneForHealth(ready.inventory.state) : null}
-                  label={t("detail.tile.inventory")}
-                  value={
-                    <StatWord muted={!ready}>
-                      {ready
-                        ? t.dyn(
-                            "enum.inventory",
-                            ready.inventory.state,
-                            humanize(ready.inventory.state),
-                          )
-                        : summaryFallback}
-                    </StatWord>
-                  }
-                >
-                  <p className="text-micro text-ink-muted">
-                    {t("detail.tile.reconciled")}{" "}
-                    <span className="text-ink-secondary">
-                      {ready?.inventory.last_reconcile_at ? (
-                        <RelativeTime
-                          value={ready.inventory.last_reconcile_at}
-                        />
-                      ) : (
-                        t("detail.tile.notReported")
-                      )}
-                    </span>
-                  </p>
-                </StatTile>
-                <StatTile
-                  icon={Boxes}
-                  label={t("detail.tile.resources")}
-                  value={ready ? (ready.inventory.active_resources ?? 0) : "—"}
-                  suffix={t("detail.tile.resourcesSuffix")}
-                >
-                  {ready ? (
-                    <SegmentBar
-                      label={t("shared.resourcesByLifecycle")}
-                      segments={[
-                        {
-                          key: "active",
-                          label: t("enum.resourceLifecycle.active"),
-                          value: ready.inventory.active_resources ?? 0,
-                          tone: "info",
-                        },
-                        {
-                          key: "missing",
-                          label: t("enum.resourceLifecycle.missing"),
-                          value: ready.inventory.missing_resources ?? 0,
-                          tone: "stale",
-                        },
-                      ]}
+              <div className="mb-6 flex flex-col gap-6">
+                {picture ? (
+                  <>
+                    <CapacityCard picture={picture} clusterId={clusterId} />
+                    <ClusterApps picture={picture} />
+                    <DashCard
+                      title={t("dash.nodes.title")}
+                      description={t("dash.nodes.description")}
+                      testId="cluster-nodes"
+                    >
+                      <NodeLedger snap={snap!} />
+                    </DashCard>
+                    <NamespaceGroups
+                      picture={picture}
+                      groupName={(g) =>
+                        g.kind === "project" || g.kind === "unclaimed" ? g.name : ti.dyn("group", g.kind, g.name)
+                      }
                     />
-                  ) : null}
-                </StatTile>
-                <StatTile
-                  icon={Layers}
-                  label={t("detail.tile.environments")}
-                  value={environments.length}
-                  suffix={t("detail.tile.environmentsSuffix")}
-                >
-                  {environments.length > 0 ? (
-                    <ul className="flex flex-wrap gap-1.5">
-                      {environments.slice(0, 3).map((environment) => (
-                        <li
-                          key={`${environment.project_key}/${environment.environment_key}`}
-                          className="rounded-full bg-surface-2 px-2.5 py-1 font-mono text-micro text-ink-secondary"
-                        >
-                          {environment.project_key}/
-                          {environment.environment_key}
-                        </li>
-                      ))}
-                      {environments.length > 3 ? (
-                        <li className="rounded-full bg-surface-2 px-2.5 py-1 text-micro text-ink-muted">
-                          +{environments.length - 3}
-                        </li>
-                      ) : null}
-                    </ul>
-                  ) : (
-                    <p className="text-micro text-ink-muted">
-                      {t("detail.tile.noEnvironments")}
-                    </p>
-                  )}
-                </StatTile>
+                  </>
+                ) : (
+                  <DashCard title={t("card.usageTitle")} description={t("dash.capacity.description")} testId="cluster-capacity">
+                    <p className="text-caption text-ink-muted">{snapFailed || snap ? t("card.noMetrics") : t("card.reading")}</p>
+                  </DashCard>
+                )}
               </div>
 
               <section
@@ -359,13 +260,6 @@ export default function ClusterDetailPage() {
               >
                 <LoadGate value={summary} retry={retrySummary}>
                   {(inventory) => {
-                    const kinds = Object.entries(inventory.by_kind).sort(
-                      ([, a], [, b]) => b.total - a.total,
-                    );
-                    const largest = Math.max(
-                      ...kinds.map(([, rollup]) => rollup.total),
-                      1,
-                    );
                     const classes = [
                       ["nodes", t("detail.sweep.nodes"), Server, inventory.nodes],
                       ["namespaces", t("detail.sweep.namespaces"), FolderTree, inventory.namespaces],
@@ -380,6 +274,8 @@ export default function ClusterDetailPage() {
                     ] as const;
                     return (
                       <div className="space-y-6">
+                        <KindsViz byKind={inventory.by_kind} clusterId={clusterId} />
+                        <SectionHeader title={t("dash.status.title")} />
                         <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
                           <Panel data-testid="agent-card" className="h-full">
                             <PanelHeader
@@ -517,8 +413,8 @@ export default function ClusterDetailPage() {
                         </div>
 
                         <SectionHeader
-                          title={t("shared.sweepTitle")}
-                          description={t("shared.sweepDescription")}
+                          title={t("dash.health.title")}
+                          description={t("dash.health.description")}
                         />
                         {classes.every(([, , , rollup]) => rollup.total === 0) ? (
                           // Nothing recorded in any class: one card of five
@@ -639,78 +535,6 @@ export default function ClusterDetailPage() {
                           </div>
                         )}
 
-                        <Panel flush>
-                          <PanelHeader
-                            flush
-                            title={t("shared.resourcesByKind")}
-                            description={t("detail.kinds.description")}
-                            meta={
-                              kinds.length > 0 ? (
-                                <span data-tabular>{t("detail.kinds.count", { count: kinds.length })}</span>
-                              ) : undefined
-                            }
-                          />
-                          {kinds.length === 0 ? (
-                            <StateCard
-                              compact
-                              testId="kinds-empty"
-                              icon={PackageOpen}
-                              title={t("detail.kinds.emptyTitle")}
-                              description={t("detail.kinds.emptyDescription")}
-                            />
-                          ) : (
-                            <ul className="divide-y divide-border">
-                              {kinds.map(([kind, rollup]) => {
-                                const worst =
-                                  rollup.unhealthy > 0
-                                    ? "unhealthy"
-                                    : rollup.degraded > 0
-                                      ? "degraded"
-                                      : rollup.unknown > 0
-                                        ? "unknown"
-                                        : "healthy";
-                                return (
-                                  <li
-                                    key={kind}
-                                    className="relative flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4 transition-colors hover:bg-surface-hover"
-                                  >
-                                    <IconBubble icon={Boxes} size="small" />
-                                    <Link
-                                      href={`/clusters/${clusterId}/inventory?kind=${kind}`}
-                                      aria-label={t("detail.kinds.browse", { kind })}
-                                      className="w-44 shrink-0 rounded font-mono text-caption font-semibold text-ink after:absolute after:inset-0 after:content-[''] hover:text-brand"
-                                    >
-                                      {kind}
-                                    </Link>
-                                    {/* The bar is the share of the largest kind. */}
-                                    <span
-                                      aria-hidden
-                                      className="block h-2 min-w-[6rem] flex-1 overflow-hidden rounded-full bg-surface-3"
-                                    >
-                                      <span
-                                        className="block h-full rounded-full bg-info"
-                                        style={{
-                                          width: `${(rollup.total / largest) * 100}%`,
-                                        }}
-                                      />
-                                    </span>
-                                    <span
-                                      data-tabular
-                                      className="w-12 text-right text-body font-semibold text-ink"
-                                    >
-                                      {rollup.total}
-                                    </span>
-                                    <HealthBadge health={worst} />
-                                    <ChevronRight
-                                      aria-hidden
-                                      className="h-4 w-4 text-ink-muted"
-                                    />
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-                        </Panel>
                       </div>
                     );
                   }}

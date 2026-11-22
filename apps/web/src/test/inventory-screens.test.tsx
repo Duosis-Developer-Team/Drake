@@ -188,7 +188,7 @@ describe("cluster inventory screens", () => {
     expect(pods.getByText("17")).toBeInTheDocument(); // restarts are real sums
     expect(pods.getByText("CrashLoop")).toBeInTheDocument();
     // Unknown buckets stay visible: node rollup shows unknown=1.
-    expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1 unknown").length).toBeGreaterThan(0);
   });
 
   it("cluster detail: summary error is an error state, not empty data", async () => {
