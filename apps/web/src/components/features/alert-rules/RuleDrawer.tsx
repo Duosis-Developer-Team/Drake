@@ -7,7 +7,33 @@
  * runner will use, not a browser-side estimate.
  */
 
+import {
+  Activity,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  BellRing,
+  FileCheck2,
+  Gauge,
+  History,
+  ScrollText,
+  Send,
+  SlidersHorizontal,
+  Siren,
+  Sparkles,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
+  Waypoints,
+  Workflow,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+import { kindColour } from "@/components/apps/AppLauncher";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 
 import {
   ANOMALY_OPERATORS,
@@ -27,12 +53,21 @@ import {
   type RulePreview,
   type Severity,
   type Signal,
+  type SignalSource,
 } from "@/lib/alertRules";
 import { ApiError } from "@/lib/api";
 import { useFormat, useT } from "@/lib/i18n";
+import { useProjectNames } from "@/lib/platform";
 
 import s from "./alertRules.module.css";
 import { SignalChart, hhmm, severityTone } from "./instruments";
+import { Choice, FieldLabel, FlowNode } from "./workflow";
+
+const SOURCE_ICON: Record<SignalSource, LucideIcon> = { metrics: Gauge, logs: ScrollText, traces: Waypoints };
+
+/** The workflow's steps, each folding on its own. */
+type NodeKey = "start" | "scope" | "signal" | "condition" | "action" | "review";
+const ALL_NODES: NodeKey[] = ["start", "scope", "signal", "condition", "action", "review"];
 
 type TemplateKey =
   | "errors"
@@ -66,6 +101,11 @@ const TEMPLATES: Record<
   unusualLatency: { signal: "latency_p95_seconds", operator: "above_normal", threshold: 3, for_seconds: 600, severity: "warning" },
 };
 const TEMPLATE_KEYS = Object.keys(TEMPLATES) as TemplateKey[];
+
+/** The signal a template watches, for its icon. */
+export function templateSignal(key: TemplateKey): Signal {
+  return TEMPLATES[key].signal;
+}
 
 /** Slider range in the signal's stored unit. */
 const RANGES: Record<Signal, { min: number; max: number; step: number }> = {
@@ -166,7 +206,9 @@ export function RuleDrawer({
   const [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle");
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
-  const firstField = useRef<HTMLInputElement>(null);
+  const sheetRef = useRef<HTMLElement>(null);
+  const [openNodes, setOpenNodes] = useState<Set<NodeKey>>(() => new Set(ALL_NODES));
+  const names = useProjectNames();
 
   // Reset the form whenever the drawer opens.
   useEffect(() => {
@@ -205,7 +247,8 @@ export function RuleDrawer({
       setLogContains("");
       setRoute("");
     }
-    const focus = window.setTimeout(() => firstField.current?.focus(), 0);
+    setOpenNodes(new Set(ALL_NODES));
+    const focus = window.setTimeout(() => sheetRef.current?.focus(), 0);
     return () => window.clearTimeout(focus);
   }, [open, rule, initialTemplate, defaultProjectId, options]);
 
@@ -388,307 +431,521 @@ export function RuleDrawer({
   const seriesEpisodes =
     preview?.series ? preview.episodes.filter((e) => e.binding_id === preview.series?.binding_id) : [];
   const previewTone = preview && preview.count > 0 ? severityTone(severity) : "var(--ok)";
+  const toggle = (key: NodeKey) =>
+    setOpenNodes((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const projectName = (id: string, key: string) => names.get(id) ?? key;
+  const conditionSummary = t(sentenceKey, {
+    signal: signalName,
+    threshold: show(threshold),
+    duration: duration(forSeconds),
+  });
+  const fireBadge =
+    previewState === "error" || !preview ? null : (
+      <span
+        className={`shrink-0 rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold ${
+          preview.count ? "bg-warning-soft text-warning" : "bg-healthy-soft text-healthy"
+        }`}
+      >
+        {t("flow.firedBadge", { count: preview.count })}
+      </span>
+    );
+  let step = 0;
 
   return (
     <>
       <div className={s.scrim} onClick={onClose} aria-hidden="true" />
       <section
-        className={`${s.root} ${s.drawer}`}
+        ref={sheetRef}
+        tabIndex={-1}
+        className={`${s.root} fixed inset-y-0 right-0 z-[51] flex w-[min(1180px,100%)] flex-col border-l border-border bg-canvas shadow-[var(--shadow-overlay)] outline-none`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="alert-rule-drawer-title"
       >
-        <div className={s.dh}>
-          <h2 id="alert-rule-drawer-title">
-            {editing ? t("drawer.editTitle") : t("drawer.createTitle")}
-          </h2>
+        <header className="flex items-center gap-4 border-b border-border bg-surface px-6 py-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-accent">
+            <Workflow aria-hidden className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2
+              id="alert-rule-drawer-title"
+              className="m-0 font-[family-name:var(--font-display)] text-[1.25rem] font-bold tracking-[-0.02em] text-ink"
+            >
+              {editing ? t("drawer.editTitle") : t("drawer.createTitle")}
+            </h2>
+            <p className="m-0 truncate text-caption text-ink-muted">{t("flow.lede")}</p>
+          </div>
           <button type="button" className={s.btn} onClick={onClose}>
             {t("drawer.close")}
           </button>
-        </div>
-        <div className={s.db}>
-          <form className={s.form} onSubmit={(event) => event.preventDefault()}>
-            {!editing ? (
-              <div className={s.f}>
-                <span className={`${s.cap} ${s.capLabel}`}>{t("drawer.templates")}</span>
-                <div className={s.tpls}>
-                  {TEMPLATE_KEYS.map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={s.tpl}
-                      aria-pressed={template === key}
-                      onClick={() => pickTemplate(key)}
-                    >
-                      {t(`templates.${key}.name`)}
-                      <small>{t(`templates.${key}.detail`)}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+        </header>
 
-            <div className={s.f}>
-              <label className={s.cap} htmlFor="ar-name">
-                {t("drawer.name")}
-              </label>
-              <input
-                id="ar-name"
-                ref={firstField}
-                className={s.input}
-                maxLength={120}
-                value={nameTouched ? name : defaultName}
-                placeholder={t("drawer.namePlaceholder")}
-                onChange={(event) => {
-                  setNameTouched(true);
-                  setName(event.target.value);
-                }}
-              />
-            </div>
-
-            <div className={s.f}>
-              <span className={`${s.cap} ${s.capLabel}`}>{t("drawer.target")}</span>
-              {editing ? (
-                <p className={s.plain}>
-                  <b>{targetText}</b>
-                  <br />
-                  <span>{t("drawer.targetFixed")}</span>
-                </p>
-              ) : (
-                <div className={s.three}>
-                  <select
-                    aria-label={t("drawer.project")}
-                    className={s.input}
-                    value={projectId}
-                    onChange={(event) => {
-                      setProjectId(event.target.value);
-                      setEnvironmentId("");
-                      setServiceId("");
-                    }}
-                  >
-                    {(options?.projects ?? []).map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.key}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    aria-label={t("drawer.environment")}
-                    className={s.input}
-                    value={environmentId}
-                    onChange={(event) => {
-                      setEnvironmentId(event.target.value);
-                      setServiceId("");
-                    }}
-                  >
-                    <option value="">{t("drawer.allEnvironments")}</option>
-                    {(project?.environments ?? []).map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.key}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    aria-label={t("drawer.service")}
-                    className={s.input}
-                    value={serviceId}
-                    disabled={!environment}
-                    onChange={(event) => setServiceId(event.target.value)}
-                  >
-                    <option value="">{t("drawer.allServices")}</option>
-                    {(environment?.services ?? []).map((sv) => (
-                      <option key={sv.id} value={sv.id}>
-                        {sv.key}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div className={s.two}>
-              <div className={s.f}>
-                <label className={s.cap} htmlFor="ar-signal">
-                  {t("drawer.signal")}
-                </label>
-                <select
-                  id="ar-signal"
-                  className={s.input}
-                  value={signal}
-                  onChange={(event) => changeSignal(event.target.value as Signal)}
-                >
-                  {SIGNAL_SOURCES.map((source) => (
-                    <optgroup key={source} label={t(`sources.${source}`)}>
-                      {SIGNALS.filter((key) => SIGNAL_SOURCE[key] === source).map((key) => (
-                        <option key={key} value={key}>
-                          {t.dyn("signal", key)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-              <div className={s.f}>
-                <label className={s.cap} htmlFor="ar-direction">
-                  {t("drawer.direction")}
-                </label>
-                <select
-                  id="ar-direction"
-                  className={s.input}
-                  value={operator}
-                  onChange={(event) => changeOperator(event.target.value as Operator)}
-                >
-                  <option value=">">{t("drawer.above")}</option>
-                  <option value="<">{t("drawer.below")}</option>
-                  <option value="above_normal" disabled={Boolean(text || endpoint) || signal === "matching_logs"}>
-                    {t("drawer.aboveNormal")}
-                  </option>
-                  <option value="below_normal" disabled={Boolean(text || endpoint) || signal === "matching_logs"}>
-                    {t("drawer.belowNormal")}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            {source === "logs" ? (
-              <div className={s.f}>
-                <label className={s.cap} htmlFor="ar-contains">
-                  {signal === "matching_logs" ? t("drawer.containsRequired") : t("drawer.contains")}
-                </label>
-                <input
-                  id="ar-contains"
-                  className={s.input}
-                  maxLength={200}
-                  placeholder={t("drawer.containsPlaceholder")}
-                  value={logContains}
-                  disabled={anomaly}
-                  onChange={(event) => {
-                    setTemplate(null);
-                    setLogContains(event.target.value);
-                  }}
-                />
-                <small className={s.d}>{anomaly ? t("drawer.filterNotWithNormal") : t("drawer.containsHint")}</small>
-              </div>
-            ) : null}
-
-            {source === "traces" ? (
-              <div className={s.f}>
-                <label className={s.cap} htmlFor="ar-route">
-                  {t("drawer.route")}
-                </label>
-                <input
-                  id="ar-route"
-                  className={s.input}
-                  maxLength={300}
-                  list="ar-route-choices"
-                  placeholder={t("drawer.routePlaceholder")}
-                  value={route}
-                  disabled={anomaly}
-                  onChange={(event) => {
-                    setTemplate(null);
-                    setRoute(event.target.value);
-                  }}
-                />
-                <datalist id="ar-route-choices">
-                  {routeChoices.map((choice) => (
-                    <option key={choice} value={choice} />
-                  ))}
-                </datalist>
-                <small className={s.d}>{anomaly ? t("drawer.filterNotWithNormal") : t("drawer.routeHint")}</small>
-              </div>
-            ) : null}
-
-            <div className={s.f}>
-              <label className={s.cap} htmlFor="ar-threshold">
-                {anomaly ? t("drawer.sensitivity") : t("drawer.threshold")}
-              </label>
-              <div className={s.thr}>
-                <input
-                  id="ar-threshold"
-                  type="range"
-                  min={anomaly ? SENSITIVITY.min : range.min}
-                  max={anomaly ? SENSITIVITY.max : range.max}
-                  step={anomaly ? SENSITIVITY.step : range.step}
-                  value={threshold}
-                  onChange={(event) => {
-                    setTemplate(null);
-                    setThreshold(Number(event.target.value));
-                  }}
-                />
-                <output className={s.d} htmlFor="ar-threshold">
-                  {anomaly ? t("drawer.sensitivityValue", { value: fmt.number(threshold) }) : show(threshold)}
-                </output>
-              </div>
-              {anomaly ? <small className={s.d}>{t("drawer.sensitivityHint")}</small> : null}
-              <input
-                hidden={anomaly}
-                aria-label={t("drawer.threshold")}
-                type="number"
-                className={s.input}
-                style={{ marginTop: 8 }}
-                min={0}
-                max={RATIO_SIGNALS.has(signal) && !anomaly ? 100 : undefined}
-                step="any"
-                value={toShown(signal, threshold)}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  if (Number.isFinite(value) && value >= 0) {
-                    setTemplate(null);
-                    setThreshold(fromShown(signal, value));
-                  }
-                }}
-              />
-            </div>
-
-            <div className={s.f}>
-              <label className={s.cap} htmlFor="ar-for">
-                {t("drawer.duration")}
-              </label>
-              <select
-                id="ar-for"
-                className={s.input}
-                value={forSeconds}
-                onChange={(event) => {
-                  setTemplate(null);
-                  setForSeconds(Number(event.target.value));
-                }}
-              >
-                {(DURATIONS.includes(forSeconds)
-                  ? DURATIONS
-                  : [...DURATIONS, forSeconds].sort((a, b) => a - b)
-                ).map((value) => (
-                  <option key={value} value={value}>
-                    {value === 0 ? t("drawer.durationNone") : duration(value)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className={s.f}>
-              <span className={`${s.cap} ${s.capLabel}`}>{t("drawer.severity")}</span>
-              <div className={s.segment} role="group" aria-label={t("drawer.severity")}>
-                {(["critical", "warning"] as Severity[]).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={s.tpl}
-                    aria-pressed={severity === value}
-                    onClick={() => setSeverity(value)}
-                  >
-                    {t(value === "critical" ? "drawer.critical" : "drawer.warning")}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <p className={s.plain}>
-              <b>{targetText}</b>: {sentence}, <b>{action}</b>. {t("sentence.routing")}
+        <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_400px] lg:overflow-hidden">
+          <form className="min-w-0 px-6 py-6 lg:overflow-y-auto" onSubmit={(event) => event.preventDefault()}>
+            <p className="mb-4 flex items-center gap-2 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+              <Zap aria-hidden className="h-3.5 w-3.5 text-gold" />
+              {t("flow.trigger")}
             </p>
-            {incomplete ? <p className={s.d}>{t("drawer.needsText")}</p> : null}
+            <ol className="m-0 list-none p-0">
+              {!editing ? (
+                <FlowNode
+                  index={++step}
+                  icon={Sparkles}
+                  title={t("drawer.templates")}
+                  summary={template ? t(`templates.${template}.name`) : t("flow.custom")}
+                  state={template ? "done" : "todo"}
+                  open={openNodes.has("start")}
+                  onToggle={() => toggle("start")}
+                  testId="flow-start"
+                >
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {TEMPLATE_KEYS.map((key) => {
+                      const SourceIcon = SOURCE_ICON[SIGNAL_SOURCE[TEMPLATES[key].signal]];
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          aria-pressed={template === key}
+                          onClick={() => pickTemplate(key)}
+                          className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                            template === key
+                              ? "border-brand-accent/70 bg-brand-soft ring-1 ring-brand-accent/40"
+                              : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
+                          }`}
+                        >
+                          <SourceIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent" />
+                          <span className="min-w-0">
+                            <span className="block text-caption font-semibold text-ink">
+                              {t(`templates.${key}.name`)}
+                            </span>
+                            <span className="block font-mono text-[11px] text-ink-muted">
+                              {t(`templates.${key}.detail`)}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </FlowNode>
+              ) : null}
+
+              <FlowNode
+                index={++step}
+                icon={Target}
+                title={t("drawer.target")}
+                summary={targetText}
+                state={projectId ? "done" : "todo"}
+                open={openNodes.has("scope")}
+                onToggle={() => toggle("scope")}
+                testId="flow-scope"
+              >
+                {rule ? (
+                  <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 px-3.5 py-3">
+                    <ProjectLogo projectId={rule.project_id} name={rule.target.project} size="md" variant="mark" />
+                    <span className="min-w-0">
+                      <b className="block truncate text-body text-ink">{targetText}</b>
+                      <span className="text-caption text-ink-muted">{t("drawer.targetFixed")}</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <FieldLabel>{t("drawer.project")}</FieldLabel>
+                      <div
+                        role="radiogroup"
+                        aria-label={t("drawer.project")}
+                        className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+                      >
+                        {(options?.projects ?? []).map((p) => (
+                          <Choice
+                            key={p.id}
+                            selected={projectId === p.id}
+                            onSelect={() => {
+                              setProjectId(p.id);
+                              setEnvironmentId("");
+                              setServiceId("");
+                            }}
+                            className="flex items-center gap-2.5 px-3 py-2.5"
+                          >
+                            <ProjectLogo projectId={p.id} name={projectName(p.id, p.key)} size="md" variant="mark" />
+                            <span className="min-w-0">
+                              <span className="block truncate text-caption font-semibold text-ink">
+                                {projectName(p.id, p.key)}
+                              </span>
+                              <span className="block font-mono text-[11px] text-ink-muted">
+                                {t("flow.envCount", { count: p.environments.length })}
+                              </span>
+                            </span>
+                          </Choice>
+                        ))}
+                      </div>
+                    </div>
+                    {project ? (
+                      <div>
+                        <FieldLabel>{t("drawer.environment")}</FieldLabel>
+                        <div role="radiogroup" aria-label={t("drawer.environment")} className="flex flex-wrap gap-2">
+                          <Choice
+                            selected={!environmentId}
+                            onSelect={() => {
+                              setEnvironmentId("");
+                              setServiceId("");
+                            }}
+                            className="px-3 py-1.5 text-caption font-medium"
+                          >
+                            {t("drawer.allEnvironments")}
+                          </Choice>
+                          {project.environments.map((e) => (
+                            <Choice
+                              key={e.id}
+                              selected={environmentId === e.id}
+                              onSelect={() => {
+                                setEnvironmentId(e.id);
+                                setServiceId("");
+                              }}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 font-mono text-caption"
+                            >
+                              <span
+                                aria-hidden
+                                className="h-2 w-2 rounded-full"
+                                style={{ background: kindColour(e.key) }}
+                              />
+                              {e.key}
+                            </Choice>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {environment ? (
+                      <div>
+                        <FieldLabel>{t("drawer.service")}</FieldLabel>
+                        <div role="radiogroup" aria-label={t("drawer.service")} className="flex flex-wrap gap-2">
+                          <Choice
+                            selected={!serviceId}
+                            onSelect={() => setServiceId("")}
+                            className="px-3 py-1.5 text-caption font-medium"
+                          >
+                            {t("drawer.allServices")}
+                          </Choice>
+                          {environment.services.map((sv) => (
+                            <Choice
+                              key={sv.id}
+                              selected={serviceId === sv.id}
+                              onSelect={() => setServiceId(sv.id)}
+                              className="px-3 py-1.5 font-mono text-caption"
+                            >
+                              {sv.key}
+                            </Choice>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </FlowNode>
+
+              <FlowNode
+                index={++step}
+                icon={Activity}
+                title={t("drawer.signal")}
+                summary={signalName}
+                state={incomplete ? "invalid" : "done"}
+                open={openNodes.has("signal")}
+                onToggle={() => toggle("signal")}
+                testId="flow-signal"
+              >
+                <div role="radiogroup" aria-label={t("drawer.signal")} className="flex flex-col gap-4">
+                  {SIGNAL_SOURCES.map((group) => {
+                    const SourceIcon = SOURCE_ICON[group];
+                    return (
+                      <div key={group} role="group" aria-label={t(`sources.${group}`)}>
+                        <p className="mb-2 flex items-center gap-1.5 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                          <SourceIcon aria-hidden className="h-3.5 w-3.5" />
+                          {t(`sources.${group}`)}
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {SIGNALS.filter((key) => SIGNAL_SOURCE[key] === group).map((key) => (
+                            <Choice
+                              key={key}
+                              selected={signal === key}
+                              onSelect={() => changeSignal(key)}
+                              className="px-3 py-2.5"
+                            >
+                              <span className="block text-caption font-semibold text-ink">{t.dyn("signal", key)}</span>
+                              <span className="mt-0.5 block text-[11.5px] leading-snug text-ink-muted">
+                                {t.dyn("signalHint", key)}
+                              </span>
+                            </Choice>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {source === "logs" ? (
+                  <div className="mt-4">
+                    <FieldLabel htmlFor="ar-contains">
+                      {signal === "matching_logs" ? t("drawer.containsRequired") : t("drawer.contains")}
+                    </FieldLabel>
+                    <input
+                      id="ar-contains"
+                      className={s.input}
+                      maxLength={200}
+                      placeholder={t("drawer.containsPlaceholder")}
+                      value={logContains}
+                      disabled={anomaly}
+                      onChange={(event) => {
+                        setTemplate(null);
+                        setLogContains(event.target.value);
+                      }}
+                    />
+                    <small className="mt-1.5 block text-micro text-ink-muted">
+                      {anomaly ? t("drawer.filterNotWithNormal") : t("drawer.containsHint")}
+                    </small>
+                    {incomplete ? (
+                      <p className="mt-2 text-caption font-medium text-warning">{t("drawer.needsText")}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {source === "traces" ? (
+                  <div className="mt-4">
+                    <FieldLabel htmlFor="ar-route">{t("drawer.route")}</FieldLabel>
+                    <input
+                      id="ar-route"
+                      className={s.input}
+                      maxLength={300}
+                      list="ar-route-choices"
+                      placeholder={t("drawer.routePlaceholder")}
+                      value={route}
+                      disabled={anomaly}
+                      onChange={(event) => {
+                        setTemplate(null);
+                        setRoute(event.target.value);
+                      }}
+                    />
+                    <datalist id="ar-route-choices">
+                      {routeChoices.map((choice) => (
+                        <option key={choice} value={choice} />
+                      ))}
+                    </datalist>
+                    <small className="mt-1.5 block text-micro text-ink-muted">
+                      {anomaly ? t("drawer.filterNotWithNormal") : t("drawer.routeHint")}
+                    </small>
+                  </div>
+                ) : null}
+              </FlowNode>
+
+              <FlowNode
+                index={++step}
+                icon={SlidersHorizontal}
+                title={t("flow.condition")}
+                summary={conditionSummary}
+                state={draft ? "done" : "todo"}
+                open={openNodes.has("condition")}
+                onToggle={() => toggle("condition")}
+                badge={fireBadge}
+                testId="flow-condition"
+              >
+                <FieldLabel>{t("drawer.direction")}</FieldLabel>
+                <div
+                  role="radiogroup"
+                  aria-label={t("drawer.direction")}
+                  className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+                >
+                  {(
+                    [
+                      [">", t("drawer.above"), TrendingUp],
+                      ["<", t("drawer.below"), TrendingDown],
+                      ["above_normal", t("drawer.aboveNormal"), ArrowUpFromLine],
+                      ["below_normal", t("drawer.belowNormal"), ArrowDownToLine],
+                    ] as const
+                  ).map(([value, label, DirIcon]) => (
+                    <Choice
+                      key={value}
+                      selected={operator === value}
+                      onSelect={() => changeOperator(value)}
+                      disabled={
+                        ANOMALY_OPERATORS.has(value) && (Boolean(text || endpoint) || signal === "matching_logs")
+                      }
+                      className="flex flex-col items-center gap-1 px-2 py-2.5 text-center text-caption font-medium"
+                    >
+                      <DirIcon aria-hidden className="h-4 w-4 text-brand-accent" />
+                      {label}
+                    </Choice>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-xl border border-border bg-surface-2 px-4 py-3.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <label
+                      htmlFor="ar-threshold"
+                      className="font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase"
+                    >
+                      {anomaly ? t("drawer.sensitivity") : t("drawer.threshold")}
+                    </label>
+                    <output
+                      htmlFor="ar-threshold"
+                      className="font-[family-name:var(--font-display)] text-[1.375rem] font-bold tracking-[-0.02em] text-ink tabular-nums"
+                    >
+                      {anomaly ? t("drawer.sensitivityValue", { value: fmt.number(threshold) }) : show(threshold)}
+                    </output>
+                  </div>
+                  <input
+                    id="ar-threshold"
+                    type="range"
+                    className="mt-2 w-full accent-[var(--brand-accent)]"
+                    min={anomaly ? SENSITIVITY.min : range.min}
+                    max={anomaly ? SENSITIVITY.max : range.max}
+                    step={anomaly ? SENSITIVITY.step : range.step}
+                    value={threshold}
+                    onChange={(event) => {
+                      setTemplate(null);
+                      setThreshold(Number(event.target.value));
+                    }}
+                  />
+                  <div className="flex justify-between font-mono text-[10.5px] text-ink-muted">
+                    <span>{anomaly ? fmt.number(SENSITIVITY.min) : show(range.min)}</span>
+                    <span>{anomaly ? fmt.number(SENSITIVITY.max) : show(range.max)}</span>
+                  </div>
+                  {anomaly ? (
+                    <small className="mt-2 block text-micro text-ink-muted">{t("drawer.sensitivityHint")}</small>
+                  ) : (
+                    <input
+                      aria-label={t("drawer.threshold")}
+                      type="number"
+                      className={`${s.input} mt-2.5 max-w-[10rem]`}
+                      min={0}
+                      max={RATIO_SIGNALS.has(signal) ? 100 : undefined}
+                      step="any"
+                      value={toShown(signal, threshold)}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (Number.isFinite(value) && value >= 0) {
+                          setTemplate(null);
+                          setThreshold(fromShown(signal, value));
+                        }
+                      }}
+                    />
+                  )}
+                </div>
+
+                <div className="mt-5">
+                  <FieldLabel>{t("drawer.duration")}</FieldLabel>
+                  <div role="radiogroup" aria-label={t("drawer.duration")} className="flex flex-wrap gap-2">
+                    {(DURATIONS.includes(forSeconds)
+                      ? DURATIONS
+                      : [...DURATIONS, forSeconds].sort((a, b) => a - b)
+                    ).map((value) => (
+                      <Choice
+                        key={value}
+                        selected={forSeconds === value}
+                        onSelect={() => {
+                          setTemplate(null);
+                          setForSeconds(value);
+                        }}
+                        className="px-3 py-1.5 font-mono text-caption"
+                      >
+                        {value === 0 ? t("drawer.durationNone") : duration(value)}
+                      </Choice>
+                    ))}
+                  </div>
+                </div>
+              </FlowNode>
+
+              <FlowNode
+                index={++step}
+                icon={BellRing}
+                title={t("flow.action")}
+                summary={action}
+                state="done"
+                open={openNodes.has("action")}
+                onToggle={() => toggle("action")}
+                testId="flow-action"
+              >
+                <div role="radiogroup" aria-label={t("drawer.severity")} className="grid gap-2 sm:grid-cols-2">
+                  {(["critical", "warning"] as Severity[]).map((value) => {
+                    const SevIcon = value === "critical" ? Siren : TriangleAlert;
+                    return (
+                      <Choice
+                        key={value}
+                        selected={severity === value}
+                        onSelect={() => setSeverity(value)}
+                        className="flex items-start gap-3 px-3.5 py-3"
+                      >
+                        <span
+                          className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
+                            value === "critical" ? "bg-critical-soft text-critical" : "bg-warning-soft text-warning"
+                          }`}
+                        >
+                          <SevIcon aria-hidden className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-caption font-semibold text-ink">
+                            {t(value === "critical" ? "drawer.critical" : "drawer.warning")}
+                          </span>
+                          <span className="mt-0.5 block text-[11.5px] leading-snug text-ink-muted">
+                            {t(value === "critical" ? "flow.criticalHint" : "flow.warningHint")}
+                          </span>
+                        </span>
+                      </Choice>
+                    );
+                  })}
+                </div>
+                <Link
+                  href="/notification-policies"
+                  className="mt-3 flex items-center gap-3 rounded-xl border border-dashed border-border-strong px-3.5 py-3 text-caption text-ink-secondary transition-colors hover:bg-surface-hover"
+                >
+                  <Send aria-hidden className="h-4 w-4 shrink-0 text-brand-accent" />
+                  <span className="min-w-0 flex-1">{t("sentence.routing")}</span>
+                  <span className="shrink-0 font-semibold text-brand-accent">{t("flow.routingLink")}</span>
+                </Link>
+              </FlowNode>
+
+              <FlowNode
+                index={++step}
+                icon={FileCheck2}
+                title={t("flow.review")}
+                summary={effectiveName || t("drawer.namePlaceholder")}
+                state={effectiveName && draft ? "done" : "todo"}
+                open={openNodes.has("review")}
+                onToggle={() => toggle("review")}
+                last
+                testId="flow-review"
+              >
+                <FieldLabel htmlFor="ar-name">{t("drawer.name")}</FieldLabel>
+                <input
+                  id="ar-name"
+                  className={s.input}
+                  maxLength={120}
+                  value={nameTouched ? name : defaultName}
+                  placeholder={t("drawer.namePlaceholder")}
+                  onChange={(event) => {
+                    setNameTouched(true);
+                    setName(event.target.value);
+                  }}
+                />
+                <p className="mt-4 rounded-xl border border-brand-accent/30 bg-brand-soft px-4 py-3 text-caption leading-relaxed text-ink">
+                  <b>{targetText}</b>: {sentence}, <b>{action}</b>. {t("sentence.routing")}
+                </p>
+              </FlowNode>
+            </ol>
           </form>
 
-          <div className={s.pv} style={{ ["--c" as string]: previewTone }} aria-live="polite">
-            <span className={s.cap}>{t("preview.caption")}</span>
+          <aside
+            className="border-t border-border bg-surface px-6 py-6 lg:overflow-y-auto lg:border-t-0 lg:border-l"
+            style={{ ["--c" as string]: previewTone }}
+            aria-live="polite"
+          >
+            <p className="flex items-center gap-2 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+              <History aria-hidden className="h-3.5 w-3.5" />
+              {t("preview.caption")}
+            </p>
             {previewState === "error" ? (
               <p className={s.err}>{t("preview.error")}</p>
             ) : preview ? (
@@ -698,9 +955,7 @@ export function RuleDrawer({
                   <span>
                     {t("preview.wouldFire", { count: preview.count })}
                     {" · "}
-                    {preview.count
-                      ? t("preview.totalMinutes", { count: preview.minutes })
-                      : t("preview.quietDay")}
+                    {preview.count ? t("preview.totalMinutes", { count: preview.minutes }) : t("preview.quietDay")}
                   </span>
                 </div>
                 {preview.series && preview.series.series.length > 1 ? (
@@ -715,8 +970,8 @@ export function RuleDrawer({
                     timeLabel={(value) => hhmm(new Date(value), fmt.tag)}
                     thresholdLabel={show(threshold)}
                     nowLabel={t("register.timelineNow")}
-                    width={440}
-                    height={200}
+                    width={360}
+                    height={190}
                     label={t("preview.caption")}
                   />
                 ) : (
@@ -768,14 +1023,39 @@ export function RuleDrawer({
                 </p>
               </>
             ) : (
-              <p className={s.coverage}>{t("preview.loading")}</p>
+              <p className={s.coverage}>{incomplete ? "—" : t("preview.loading")}</p>
             )}
-          </div>
+
+            <div className="mt-6 rounded-xl border border-border bg-surface-2 p-4">
+              <p className="mb-3 font-mono text-[10.5px] font-medium tracking-[0.14em] text-ink-muted uppercase">
+                {t("flow.summary")}
+              </p>
+              <dl className="m-0 grid gap-2.5 text-caption">
+                {(
+                  [
+                    [Target, t("drawer.target"), targetText],
+                    [Activity, t("drawer.signal"), signalName],
+                    [SlidersHorizontal, t("flow.condition"), conditionSummary],
+                    [BellRing, t("flow.action"), action],
+                  ] as const
+                ).map(([RowIcon, label, value]) => (
+                  <div key={label} className="flex items-start gap-2.5">
+                    <RowIcon aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-accent" />
+                    <dt className="sr-only">{label}</dt>
+                    <dd className="m-0 min-w-0 text-ink-secondary">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </aside>
         </div>
-        <div className={s.df}>
-          <span className={`${s.cap} ${s.d}`}>{t("drawer.checkedEvery", { duration: duration(options?.evaluation_interval_seconds ?? 60) })}</span>
+
+        <footer className="flex flex-wrap items-center gap-3 border-t border-border bg-surface px-6 py-3.5">
+          <span className="font-mono text-[11px] text-ink-muted">
+            {t("drawer.checkedEvery", { duration: duration(options?.evaluation_interval_seconds ?? 60) })}
+          </span>
           {error ? <span className={s.err}>{error}</span> : null}
-          <span style={{ display: "flex", gap: 8 }}>
+          <span className="ml-auto flex gap-2">
             <button type="button" className={s.btn} onClick={onClose}>
               {t("drawer.cancel")}
             </button>
@@ -785,14 +1065,10 @@ export function RuleDrawer({
               disabled={!csrfToken || !draft || !effectiveName || saving !== "idle"}
               onClick={() => void save()}
             >
-              {saving === "saving"
-                ? t("drawer.saving")
-                : saving === "saved"
-                  ? t("drawer.saved")
-                  : t("drawer.save")}
+              {saving === "saving" ? t("drawer.saving") : saving === "saved" ? t("drawer.saved") : t("drawer.save")}
             </button>
           </span>
-        </div>
+        </footer>
       </section>
     </>
   );
