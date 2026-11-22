@@ -314,8 +314,14 @@ export function ClusterCard({ cluster, className = "" }: { cluster: Cluster; cla
               {cluster.cluster_ref}
               {cluster.site ? ` · ${cluster.site}` : ""}
             </span>
-            {" · "}
-            <span data-tabular>{t("list.row.environments", { count: cluster.referenced_environments?.length ?? 0 })}</span>
+            {/* Only the detail read lists the environments; the list read
+                does not, and an absent list is not "0 environments". */}
+            {cluster.referenced_environments ? (
+              <>
+                {" · "}
+                <span data-tabular>{t("list.row.environments", { count: cluster.referenced_environments.length })}</span>
+              </>
+            ) : null}
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <StateChip label={t("card.agent")} value={agent} word={t.dyn("enum.agent", agent, humanize(agent))} />
