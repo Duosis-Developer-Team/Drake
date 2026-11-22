@@ -1,9 +1,15 @@
 """Reading development activity: the map, a slice of commits, aliases.
 
+The map is per repository: a catalogued repository carries its project (and
+its services); a repository of a watched GitHub organisation that nobody has
+catalogued is a repository node of its own.
+
 Visibility follows the catalog exactly as the rest of Agent Visibility does:
 a project's commits and usage are seen by those holding `agent.view` and
-`project.view` on that project. Aliases are organisation-wide, so changing
-them takes `agent.manage` at the organisation root.
+`project.view` on that project. A repository outside the catalog belongs to
+no project, so only those holding `agent.view` at the organisation root see
+it (as with agents outside the catalog). Aliases are organisation-wide, so
+changing them takes `agent.manage` at the organisation root.
 
 One person is one node: a GitHub login, a second login, and a Claude Code
 identity collapse into one when an alias says so, or when Claude Code's
@@ -15,6 +21,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -86,6 +93,23 @@ def _num(value: Any) -> float:
     return float(value)
 
 
+def repository_id(external_id: Any, full_name: str) -> str:
+    """A repository's node id: GitHub's id when known (a rename keeps it)."""
+    if external_id is not None:
+        return f"gh:{int(external_id)}"
+    return f"repo:{full_name.lower()}"
+
+
+def _repository_filter(repository: str | None) -> tuple[int | None, str | None]:
+    if not repository:
+        return None, None
+    if repository.startswith("gh:"):
+        return int(repository[3:]), None
+    if repository.startswith("repo:"):
+        return None, repository[5:].lower()
+    return None, None
+
+
 async def dev_map(
     connection: AsyncConnection,
     principal: Principal,
@@ -94,63 +118,80 @@ async def dev_map(
     now: datetime | None = None,
     reads_commits: bool,
     reads_usage: bool,
+    orgs: Iterable[str] = (),
 ) -> dict[str, Any]:
     moment = now or datetime.now(UTC)
     days = WINDOWS[window]
     since = moment - timedelta(days=days)
     first_day = (moment - timedelta(days=days - 1)).date()
-    project_ids, _ = await _visibility(connection, principal)
+    project_ids, org_wide = await _visibility(connection, principal)
     people = await _people(connection)
+    org_names = sorted({o.strip().lower() for o in orgs if o and o.strip()})
+    ids = project_ids or [uuid.UUID(int=0)]
 
     projects = {
-        uuid.UUID(str(r[0])): {
-            "id": str(r[0]),
-            "key": str(r[1]),
-            "name": str(r[2]),
-            "repository": f"{r[3]}/{r[4]}",
-            "url": f"https://github.com/{r[3]}/{r[4]}",
-        }
+        uuid.UUID(str(r[0])): {"key": str(r[1]), "name": str(r[2])}
         for r in (
             await connection.execute(
                 text(
-                    "SELECT id, project_key, display_name, repo_owner, repo_name FROM projects "
+                    "SELECT id, project_key, display_name FROM projects "
                     "WHERE id = ANY(:ids) AND lifecycle = 'active'"
                 ),
-                {"ids": project_ids or [uuid.UUID(int=0)]},
+                {"ids": ids},
             )
         ).all()
     }
+    # What the loop reads that this caller may see: the visible projects'
+    # repositories, and (organisation-wide only) the watched orgs' others.
     tracked = (
         await connection.execute(
             text(
                 """
-                SELECT count(*) FROM projects p
-                JOIN github_repositories r
-                  ON lower(r.full_name) = lower(p.repo_owner || '/' || p.repo_name)
-                WHERE p.id = ANY(:ids) AND r.access_state = 'accessible'
+                SELECT count(DISTINCT r.external_id) FROM github_repositories r
+                LEFT JOIN projects p
+                  ON p.lifecycle = 'active'
+                 AND lower(r.full_name) = lower(p.repo_owner || '/' || p.repo_name)
+                WHERE r.access_state = 'accessible' AND NOT r.archived
+                  AND r.security_gate IS NULL
+                  AND (p.id = ANY(:ids)
+                       OR (:org_wide AND p.id IS NULL AND lower(r.owner_login) = ANY(:orgs)))
                 """
             ),
-            {"ids": project_ids or [uuid.UUID(int=0)]},
+            {"ids": ids, "org_wide": org_wide, "orgs": org_names},
         )
     ).scalar_one()
+    known_ids = {
+        str(r[0]): int(r[1])
+        for r in (
+            await connection.execute(
+                text(
+                    "SELECT lower(full_name), external_id FROM github_repositories "
+                    "ORDER BY last_reconciled_at NULLS FIRST"
+                )
+            )
+        ).all()
+    }
 
     commits = (
         await connection.execute(
             text(
                 """
-                SELECT project_id, author_login, author_name, agent, additions, deletions,
-                       services, unmapped_files, authored_at
+                SELECT repository_external_id, repository, project_id, author_login,
+                       author_name, agent, additions, deletions, services, unmapped_files,
+                       authored_at
                 FROM dev_commits
-                WHERE project_id = ANY(:ids) AND authored_at >= :since
+                WHERE authored_at >= :since
+                  AND (project_id = ANY(:ids) OR (:org_wide AND project_id IS NULL))
                 ORDER BY authored_at
                 """
             ),
-            {"ids": list(projects) or [uuid.UUID(int=0)], "since": since},
+            {"ids": list(projects) or [uuid.UUID(int=0)], "org_wide": org_wide, "since": since},
         )
     ).all()
 
     person: dict[str, dict[str, Any]] = {}
     names: dict[str, str] = {}
+    repositories: dict[str, dict[str, Any]] = {}
 
     def node(key: str) -> dict[str, Any]:
         if key not in person:
@@ -163,7 +204,7 @@ async def dev_map(
                 "additions": 0,
                 "deletions": 0,
                 "agents": defaultdict(int),
-                "projects": set(),
+                "repositories": set(),
                 "days": set(),
                 "last_at": None,
                 "series": [0] * days,
@@ -172,14 +213,47 @@ async def dev_map(
             }
         return person[key]
 
-    edges: dict[tuple[str, uuid.UUID, str], dict[str, Any]] = {}
-    service_edges: dict[tuple[uuid.UUID, str | None], int] = defaultdict(int)
-    project_stats: dict[uuid.UUID, dict[str, Any]] = {
-        pid: {"commits": 0, "agent_commits": 0, "people": set(), "services": set()}
-        for pid in projects
-    }
-    for pid, login, name, agent, adds, dels, services, unmapped, at in commits:
-        pid = uuid.UUID(str(pid))
+    def repository(rid: str, full_name: str, pid: Any) -> dict[str, Any]:
+        project_id = uuid.UUID(str(pid)) if pid is not None else None
+        if rid not in repositories:
+            project = projects.get(project_id) if project_id else None
+            repositories[rid] = {
+                "id": rid,
+                "full_name": full_name,
+                "name": full_name.rpartition("/")[2],
+                "url": f"https://github.com/{full_name}",
+                "catalogued": project is not None,
+                "project_id": str(project_id) if project else None,
+                "project_key": project["key"] if project else None,
+                "project_name": project["name"] if project else None,
+                "commits": 0,
+                "agent_commits": 0,
+                "people": set(),
+                "services": set(),
+                "cost_usd": None,
+            }
+        return repositories[rid]
+
+    def edge_of(key: str, rid: str, agent: str) -> dict[str, Any]:
+        return edges.setdefault(
+            (key, rid, agent),
+            {
+                "person": key,
+                "repository": rid,
+                "agent": agent,
+                "commits": 0,
+                "additions": 0,
+                "deletions": 0,
+                "last_at": None,
+                "telemetry": None,
+            },
+        )
+
+    edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+    service_edges: dict[tuple[str, str | None], int] = defaultdict(int)
+    for ext, full, pid, login, name, agent, adds, dels, services, unmapped, at in commits:
+        rid = repository_id(ext, str(full))
+        repo = repository(rid, str(full), pid)
         key = people.of_login(login, name or "")
         p = node(key)
         if login:
@@ -191,45 +265,37 @@ async def dev_map(
         p["additions"] += int(adds or 0)
         p["deletions"] += int(dels or 0)
         p["agents"][agent] += 1
-        p["projects"].add(str(pid))
+        p["repositories"].add(rid)
         p["days"].add(at.date())
         p["last_at"] = at
         index = (at.date() - first_day).days
         if 0 <= index < days:
             p["series"][index] += 1
-        edge = edges.setdefault(
-            (key, pid, agent),
-            {
-                "person": key,
-                "project_id": str(pid),
-                "agent": agent,
-                "commits": 0,
-                "additions": 0,
-                "deletions": 0,
-                "last_at": None,
-                "telemetry": None,
-            },
-        )
+        edge = edge_of(key, rid, agent)
         edge["commits"] += 1
         edge["additions"] += int(adds or 0)
         edge["deletions"] += int(dels or 0)
         edge["last_at"] = at.isoformat()
-        stats = project_stats[pid]
-        stats["commits"] += 1
-        stats["agent_commits"] += 1 if agent != "none" else 0
-        stats["people"].add(key)
-        for service in services or []:
-            service_edges[(pid, service)] += 1
-            stats["services"].add(service)
-        if unmapped:
-            service_edges[(pid, None)] += 1
+        repo["commits"] += 1
+        repo["agent_commits"] += 1 if agent != "none" else 0
+        repo["people"].add(key)
+        if repo["catalogued"]:
+            # Services are the catalog's: a repository outside it has none.
+            for service in services or []:
+                service_edges[(rid, service)] += 1
+                repo["services"].add(service)
+            if unmapped:
+                service_edges[(rid, None)] += 1
 
-    # Claude Code's own usage, per person and project.
+    # Claude Code's own usage, per person and repository.
+    usage_where = "day >= :d AND (project_id = ANY(:ids) OR (:org_wide AND project_id IS NULL))"
+    usage_params = {"ids": list(projects) or [uuid.UUID(int=0)], "org_wide": org_wide}
     usage_rows = (
         await connection.execute(
             text(
-                """
-                SELECT project_id, identity, max(person_hint), sum(cost_usd),
+                f"""
+                SELECT repository, max(repository_external_id), max(project_id::text),
+                       identity, max(person_hint), sum(cost_usd),
                        sum(input_tokens), sum(output_tokens), sum(cache_read_tokens),
                        sum(cache_creation_tokens), sum(api_requests), sum(api_errors),
                        sum(prompts), sum(sessions), sum(active_seconds),
@@ -237,56 +303,48 @@ async def dev_map(
                        sum(pull_requests), sum(edits_accepted), sum(edits_rejected),
                        count(active_seconds), count(lines_added)
                 FROM dev_agent_days
-                WHERE project_id = ANY(:ids) AND day >= :d
-                GROUP BY project_id, identity
-                """
+                WHERE {usage_where}
+                GROUP BY repository, identity
+                """  # noqa: S608 - fixed fragment; values are bound parameters
             ),
-            {"ids": list(projects) or [uuid.UUID(int=0)], "d": first_day},
+            {**usage_params, "d": first_day},
         )
     ).all()
     breakdown_rows = (
         await connection.execute(
             text(
-                """
-                SELECT project_id, identity, kind, name, sum(calls), sum(failures),
+                f"""
+                SELECT identity, kind, name, sum(calls), sum(failures),
                        sum(cost_usd), sum(tokens)
                 FROM dev_agent_breakdown
-                WHERE project_id = ANY(:ids) AND day >= :d
-                GROUP BY project_id, identity, kind, name
-                """
+                WHERE {usage_where}
+                GROUP BY identity, kind, name
+                """  # noqa: S608 - fixed fragment; values are bound parameters
             ),
-            {"ids": list(projects) or [uuid.UUID(int=0)], "d": first_day},
+            {**usage_params, "d": first_day},
         )
     ).all()
     identity_person: dict[str, str] = {}
     for row in usage_rows:
-        pid, identity, hint = uuid.UUID(str(row[0])), str(row[1]), row[2]
+        full, ext, pid = str(row[0]), row[1], row[2]
+        rid = repository_id(ext if ext is not None else known_ids.get(full), full)
+        repo = repository(rid, full, pid)
+        identity, hint = str(row[3]), row[4]
         key, linked = people.of_claude(identity, hint)
         identity_person[identity] = key
         p = node(key)
         p["linked"] = linked
-        p["projects"].add(str(pid))
-        t = _usage(row)
+        p["repositories"].add(rid)
+        t = _usage(row[2:])
         p["telemetry"] = _merge(p["telemetry"], t)
-        edge = edges.setdefault(
-            (key, pid, "claude_code"),
-            {
-                "person": key,
-                "project_id": str(pid),
-                "agent": "claude_code",
-                "commits": 0,
-                "additions": 0,
-                "deletions": 0,
-                "last_at": None,
-                "telemetry": None,
-            },
-        )
+        edge = edge_of(key, rid, "claude_code")
         edge["telemetry"] = _merge(edge["telemetry"], t)
-        project_stats[pid]["people"].add(key)
+        repo["people"].add(key)
+        repo["cost_usd"] = (repo["cost_usd"] or 0.0) + t["cost_usd"]
     breakdowns: dict[str, dict[str, dict[str, dict[str, float]]]] = defaultdict(
         lambda: defaultdict(dict)
     )
-    for _pid, identity, kind, name, calls, failures, cost, tokens in breakdown_rows:
+    for identity, kind, name, calls, failures, cost, tokens in breakdown_rows:
         owner = identity_person.get(str(identity))
         if owner is None:
             continue
@@ -326,7 +384,7 @@ async def dev_map(
                 "deletions": p["deletions"],
                 "agents": agents,
                 "tools": tools,
-                "projects": sorted(p["projects"]),
+                "repositories": sorted(p["repositories"]),
                 "active_days": len(p["days"]),
                 "last_at": p["last_at"].isoformat() if p["last_at"] else None,
                 "series": p["series"],
@@ -351,6 +409,24 @@ async def dev_map(
         default=None,
     )
     telemetry_people = [p["telemetry"] for p in person.values() if p["telemetry"]]
+    repository_out = [
+        {
+            **r,
+            "people": len(r["people"]),
+            "services": len(r["services"]),
+            "cost_usd": round(r["cost_usd"], 4) if r["cost_usd"] is not None else None,
+        }
+        for r in sorted(
+            repositories.values(),
+            # The catalog's first, then by activity.
+            key=lambda r: (
+                not r["catalogued"],
+                -r["commits"],
+                -(r["cost_usd"] or 0),
+                (r["project_name"] or r["name"]).lower(),
+            ),
+        )
+    ]
     return {
         "window": window,
         "as_of": moment.isoformat(),
@@ -359,12 +435,14 @@ async def dev_map(
             "commits": reads_commits,
             "telemetry": reads_usage,
             "repositories": int(tracked or 0),
+            "organisations": org_names if org_wide else [],
         },
         "summary": {
             "commits": total_commits,
             "agent_commits": agent_commits,
             "people": len(person),
-            "repositories": sum(1 for s in project_stats.values() if s["commits"] or s["people"]),
+            "repositories": len(repository_out),
+            "catalogued": sum(1 for r in repository_out if r["catalogued"]),
             "top_agent": top_agent[0] if top_agent else None,
             "agents": dict(agent_totals),
             "cost_usd": round(sum(t["cost_usd"] for t in telemetry_people), 4)
@@ -374,22 +452,10 @@ async def dev_map(
             "sessions": sum(t["sessions"] for t in telemetry_people) if telemetry_people else None,
         },
         "people": people_out,
-        "projects": [
-            {
-                **projects[pid],
-                "commits": s["commits"],
-                "agent_commits": s["agent_commits"],
-                "people": len(s["people"]),
-                "services": len(s["services"]),
-            }
-            for pid, s in sorted(
-                project_stats.items(), key=lambda kv: (-kv[1]["commits"], projects[kv[0]]["name"])
-            )
-            if s["commits"] or s["people"]
-        ],
+        "repositories": repository_out,
         "services": [
-            {"project_id": str(pid), "key": service, "commits": n}
-            for (pid, service), n in sorted(service_edges.items(), key=lambda kv: -kv[1])
+            {"repository": rid, "key": service, "commits": n}
+            for (rid, service), n in sorted(service_edges.items(), key=lambda kv: -kv[1])
         ],
         "edges": edge_list,
     }
@@ -404,6 +470,7 @@ def _fallback_name(key: str) -> str:
 
 
 def _usage(row: Any) -> dict[str, Any]:
+    """Telemetry totals from a usage row (its columns after the repository ones)."""
     tokens_in, tokens_out, cache_read, cache_create = (int(row[i] or 0) for i in (4, 5, 6, 7))
     return {
         "cost_usd": _num(row[3]),
@@ -462,12 +529,14 @@ async def dev_commits(
     service: str | None,
     agent: str | None,
     limit: int,
+    repository: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     moment = now or datetime.now(UTC)
     since = moment - timedelta(days=WINDOWS[window])
-    project_ids, _ = await _visibility(connection, principal)
+    project_ids, org_wide = await _visibility(connection, principal)
     ids = [p for p in project_ids if project is None or p == project] or [uuid.UUID(int=0)]
+    external, full_name = _repository_filter(repository)
     people = await _people(connection)
     rows = (
         await connection.execute(
@@ -475,16 +544,32 @@ async def dev_commits(
                 """
                 SELECT c.sha, c.title, c.authored_at, c.author_login, c.author_name, c.agent,
                        c.agent_evidence, c.additions, c.deletions, c.services, c.pr_number,
-                       c.repository, c.project_id, p.project_key, p.display_name
-                FROM dev_commits c JOIN projects p ON p.id = c.project_id
-                WHERE c.project_id = ANY(:ids) AND c.authored_at >= :since
+                       c.repository, c.project_id, p.project_key, p.display_name,
+                       c.repository_external_id
+                FROM dev_commits c LEFT JOIN projects p ON p.id = c.project_id
+                WHERE c.authored_at >= :since
+                  AND (c.project_id = ANY(:ids)
+                       OR (:org_wide AND CAST(:project AS uuid) IS NULL
+                           AND c.project_id IS NULL))
+                  AND (CAST(:external AS bigint) IS NULL
+                       OR c.repository_external_id = :external)
+                  AND (CAST(:full AS text) IS NULL OR lower(c.repository) = :full)
                   AND (CAST(:agent AS text) IS NULL OR c.agent = :agent)
                   AND (CAST(:service AS text) IS NULL OR :service = ANY(c.services))
                 ORDER BY c.authored_at DESC
                 LIMIT 2000
                 """
             ),
-            {"ids": ids, "since": since, "agent": agent, "service": service},
+            {
+                "ids": ids,
+                "org_wide": org_wide,
+                "project": project,
+                "external": external,
+                "full": full_name,
+                "since": since,
+                "agent": agent,
+                "service": service,
+            },
         )
     ).all()
     items = []
@@ -509,9 +594,10 @@ async def dev_commits(
                 "services": list(r[9] or []),
                 "pr_number": r[10],
                 "repository": repo,
-                "project_id": str(r[12]),
-                "project_key": str(r[13]),
-                "project_name": str(r[14]),
+                "repository_id": repository_id(r[15], repo),
+                "project_id": str(r[12]) if r[12] is not None else None,
+                "project_key": str(r[13]) if r[13] is not None else None,
+                "project_name": str(r[14]) if r[14] is not None else None,
                 "url": f"https://github.com/{repo}/commit/{r[0]}",
                 "pr_url": f"https://github.com/{repo}/pull/{r[10]}" if r[10] else None,
             }
@@ -580,3 +666,70 @@ async def delete_alias(connection: AsyncConnection, *, kind: str, alias: str) ->
         {"k": kind, "a": alias},
     )
     return bool(result.rowcount)
+
+
+async def person_login(
+    connection: AsyncConnection,
+    principal: Principal,
+    person_key: str,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    """The GitHub login whose picture stands for a person, if the caller sees them.
+
+    Only logins behind rows the caller may see on the map count — a commit,
+    or a Claude Code session naming the login — so a picture is never an
+    answer to "does this person exist elsewhere". The person's own key wins
+    when it is one of their logins; otherwise the first, alphabetically.
+    """
+    project_ids, org_wide = await _visibility(connection, principal)
+    since = (now or datetime.now(UTC)) - timedelta(days=WINDOWS["90d"])
+    people = await _people(connection)
+    params = {
+        "ids": project_ids or [uuid.UUID(int=0)],
+        "org_wide": org_wide,
+        "since": since,
+        "day": since.date(),
+    }
+    visible = "(project_id = ANY(:ids) OR (:org_wide AND project_id IS NULL))"
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT DISTINCT author_login FROM dev_commits
+                WHERE author_login IS NOT NULL AND authored_at >= :since AND {visible}
+                UNION
+                SELECT DISTINCT person_hint FROM dev_agent_days
+                WHERE person_hint IS NOT NULL AND day >= :day AND {visible}
+                """  # noqa: S608 - fixed fragment; values are bound parameters
+            ),
+            params,
+        )
+    ).all()
+    logins = sorted(
+        {
+            str(r[0])
+            for r in rows
+            if r[0]
+            and not str(r[0]).endswith("[bot]")
+            and people.of_login(str(r[0]), "") == person_key
+        },
+        key=str.lower,
+    )
+    for login in logins:
+        if login.lower() == person_key.lower():
+            return login
+    return logins[0] if logins else None
+
+
+async def avatar_installation(connection: AsyncConnection) -> int | None:
+    """An active App installation to look a public profile up through."""
+    found = (
+        await connection.execute(
+            text(
+                "SELECT external_id FROM github_installations "
+                "WHERE state = 'active' AND suspended_at IS NULL ORDER BY external_id LIMIT 1"
+            )
+        )
+    ).scalar_one_or_none()
+    return int(found) if found is not None else None

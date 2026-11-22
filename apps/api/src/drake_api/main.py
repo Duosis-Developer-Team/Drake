@@ -36,6 +36,7 @@ from drake_api.dashboards.router import router as dashboards_router
 from drake_api.db import dispose_engines, get_engine
 from drake_api.deployments.router import router as deployments_router
 from drake_api.deployments.worker import DeploymentIngestWorker
+from drake_api.dev_activity.avatars import Avatars
 from drake_api.dev_activity.collector import DevActivity
 from drake_api.dev_activity.router import router as dev_activity_router
 from drake_api.errors import register_error_handlers
@@ -368,6 +369,8 @@ def create_app(
         if settings.observability_traces_enabled and store_connector is not None
         else None
     )
+    # People's GitHub pictures for the map, fetched server-side (cached).
+    app.state.dev_avatars = Avatars(github_client if settings.github_app_enabled else None)
     app.state.dev_activity = (
         DevActivity(
             get_engine(settings),
@@ -377,6 +380,7 @@ def create_app(
             database=store_connector.database if store_connector is not None else "otel",
             interval_seconds=settings.dev_activity_interval_seconds,
             budget=settings.dev_activity_commit_budget,
+            orgs=settings.dev_activity_orgs,
         )
         if settings.dev_activity_enabled
         and app.state.telemetry_redis is not None

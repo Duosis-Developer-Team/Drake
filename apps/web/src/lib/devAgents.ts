@@ -1,7 +1,11 @@
 /**
- * Development agents (Agent Visibility): who changes the catalog's
+ * Development agents (Agent Visibility): who changes the watched
  * repositories, with which coding agent, and — when Claude Code's own
  * telemetry is connected — what it cost and what it did.
+ *
+ * A repository is a node whether or not it is catalogued: a catalogued one
+ * carries its project (name, logo, services); any other repository of the
+ * watched GitHub organisations is shown by its own name.
  *
  * Commits come from the repositories (a `Co-Authored-By:` trailer, a
  * "Generated with …" marker, an agent author); usage from Claude Code.
@@ -67,28 +71,37 @@ export interface DevPerson {
   deletions: number;
   agents: Partial<Record<CodingAgent, number>>;
   tools: CodingAgent[];
-  projects: string[];
+  /** Repository node ids (`gh:<id>`, or `repo:<owner/name>`). */
+  repositories: string[];
   active_days: number;
   last_at: string | null;
   series: number[];
   telemetry: DevTelemetry | null;
 }
 
-export interface DevProject {
+export interface DevRepository {
+  /** `gh:<GitHub id>` (a rename keeps it), or `repo:<owner/name>`. */
   id: string;
-  key: string;
+  /** owner/name */
+  full_name: string;
   name: string;
-  repository: string;
   /** The repository on GitHub, built by the API. */
   url: string;
+  /** In the catalog: it has a project (logo, name) and services. */
+  catalogued: boolean;
+  project_id: string | null;
+  project_key: string | null;
+  project_name: string | null;
   commits: number;
   agent_commits: number;
   people: number;
   services: number;
+  /** Claude Code's cost here; null when no session named it. */
+  cost_usd: number | null;
 }
 
 export interface DevService {
-  project_id: string;
+  repository: string;
   /** null: files outside any catalog service (repository level). */
   key: string | null;
   commits: number;
@@ -96,7 +109,7 @@ export interface DevService {
 
 export interface DevEdge {
   person: string;
-  project_id: string;
+  repository: string;
   agent: CodingAgent;
   commits: number;
   additions: number;
@@ -109,12 +122,19 @@ export interface DevMap {
   window: DevWindow;
   as_of: string;
   days: string[];
-  configured: { commits: boolean; telemetry: boolean; repositories: number };
+  configured: {
+    commits: boolean;
+    telemetry: boolean;
+    repositories: number;
+    /** The GitHub organisations read whole (shown to org-wide viewers only). */
+    organisations: string[];
+  };
   summary: {
     commits: number;
     agent_commits: number;
     people: number;
     repositories: number;
+    catalogued: number;
     top_agent: CodingAgent | null;
     agents: Partial<Record<CodingAgent, number>>;
     cost_usd: number | null;
@@ -122,7 +142,7 @@ export interface DevMap {
     sessions: number | null;
   };
   people: DevPerson[];
-  projects: DevProject[];
+  repositories: DevRepository[];
   services: DevService[];
   edges: DevEdge[];
 }
@@ -142,9 +162,10 @@ export interface DevCommit {
   services: string[];
   pr_number: number | null;
   repository: string;
-  project_id: string;
-  project_key: string;
-  project_name: string;
+  repository_id: string;
+  project_id: string | null;
+  project_key: string | null;
+  project_name: string | null;
   url: string;
   pr_url: string | null;
 }
@@ -163,13 +184,13 @@ export const fetchDevMap = (window: DevWindow) =>
 export function devCommitsPath(filter: {
   window: DevWindow;
   person?: string;
-  project?: string;
+  repository?: string;
   service?: string;
   agent?: CodingAgent;
 }): string {
   const q = new URLSearchParams({ window: filter.window, limit: "200" });
   if (filter.person) q.set("person", filter.person);
-  if (filter.project) q.set("project", filter.project);
+  if (filter.repository) q.set("repository", filter.repository);
   if (filter.service) q.set("service", filter.service);
   if (filter.agent) q.set("agent", filter.agent);
   return `/v1/agents/dev/commits?${q.toString()}`;
