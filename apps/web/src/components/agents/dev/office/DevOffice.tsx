@@ -16,6 +16,7 @@
 import { Expand, Minus, Pause, Play, Plug, Plus, Scan, Shrink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { isDuosis } from "@/components/clusters/ClusterCard";
 import { TracesisWordmark } from "@/components/shell/Brand";
 import { DataState } from "@/components/state/DataState";
 import { Button, SegmentedControl } from "@/components/ui/controls";
@@ -792,9 +793,21 @@ export function DevOffice({
               className="absolute flex flex-col items-center justify-center overflow-hidden rounded-[2px] border border-[#47d2c8]/50 bg-[radial-gradient(circle_at_50%_30%,#0f3a4a,#04121c_75%)] text-center shadow-[0_0_20px_rgba(70,210,200,0.45)]"
               style={box(world.cluster.screen)}
             >
-              <span className="max-w-full truncate px-1 leading-none font-bold tracking-[0.06em] text-[#e6fffb]" style={{ fontSize: Math.max(8, Math.round(clusterPx * 0.3)) }}>
-                {data?.cluster?.name ?? t("rooms.cluster")}
-              </span>
+              {data?.cluster && isDuosis({ cluster_ref: data.cluster.ref, site: data.cluster.name }) ? (
+                // Duosis's own cluster: its logo, as on the cluster pages.
+                <img
+                  src="/owners/duosis-logo-dark.svg"
+                  alt={data.cluster.name}
+                  draggable={false}
+                  className="block w-auto max-w-[86%] object-contain"
+                  style={{ height: Math.max(10, Math.round(clusterPx * (clusterPx >= 30 ? 0.52 : 0.7))) }}
+                  data-testid="dev-office-cluster-logo"
+                />
+              ) : (
+                <span className="max-w-full truncate px-1 leading-none font-bold tracking-[0.06em] text-[#e6fffb]" style={{ fontSize: Math.max(8, Math.round(clusterPx * 0.3)) }}>
+                  {data?.cluster?.name ?? t("rooms.cluster")}
+                </span>
+              )}
               {/* Too small to read (a phone's whole-office view): the name alone. */}
               {clusterPx >= 30 ? (
                 <span
@@ -815,7 +828,19 @@ export function DevOffice({
               className="absolute flex items-center justify-center rounded-[2px] border border-[#d1a345]/50 bg-[radial-gradient(circle_at_50%_40%,#2a2440,#120f1c_75%)] shadow-[0_0_16px_rgba(209,163,69,0.35)]"
               style={box(world.lobby.screen)}
             >
-              <TracesisWordmark size={Math.max(10, Math.round(lobbyPx * 0.46))} />
+              {/* The company's front door: Duosis when the office's cluster is Duosis's. */}
+              {data?.cluster && isDuosis({ cluster_ref: data.cluster.ref, site: data.cluster.name }) ? (
+                <img
+                  src="/owners/duosis-logo-dark.svg"
+                  alt="Duosis" // i18n-ignore: a company name
+                  draggable={false}
+                  className="block w-auto max-w-[88%] object-contain"
+                  style={{ height: Math.max(10, Math.round(lobbyPx * 0.72)) }}
+                  data-testid="dev-office-lobby-logo"
+                />
+              ) : (
+                <TracesisWordmark size={Math.max(10, Math.round(lobbyPx * 0.46))} />
+              )}
             </div>
           </div>
         ) : null}
