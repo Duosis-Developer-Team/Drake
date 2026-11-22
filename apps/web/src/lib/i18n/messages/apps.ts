@@ -40,6 +40,7 @@ export const apps = defineMessages({
     unbound: "Not bound to a workload",
     bind: "Bind",
     openProject: "Open project",
+    openEnvironment: "Open environment",
   },
   tr: {
     title: "Uygulamalar",
@@ -75,5 +76,6 @@ export const apps = defineMessages({
     unbound: "Bir iş yüküne bağlı değil",
     bind: "Bağla",
     openProject: "Projeyi aç",
+    openEnvironment: "Ortamı aç",
   },
 });
