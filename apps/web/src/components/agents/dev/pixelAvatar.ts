@@ -114,7 +114,9 @@ export function loadAvatar(personKey: string): Promise<string | null> {
   if (!pending) {
     pending = (async (): Promise<string | null> => {
       try {
-        const response = await fetch(avatarUrl(personKey), { credentials: "include" });
+        // "no-cache": always revalidate (a cheap 304), so a portrait set after
+        // the browser kept someone's GitHub picture shows on the next visit.
+        const response = await fetch(avatarUrl(personKey), { credentials: "include", cache: "no-cache" });
         if (response.status !== 200) return null;
         if (response.headers.get("X-Tracesis-Avatar") === "portrait") {
           const type = (response.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();

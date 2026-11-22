@@ -45,8 +45,8 @@ export type Pick =
   | { kind: "edge"; person: string; repository: string; agent: CodingAgent }
   | { kind: "service"; repository: string; key: string | null };
 
-const PERSON_W = 236;
-const PERSON_H = 68;
+const PERSON_W = 272;
+const PERSON_H = 92;
 const PERSON_GAP = 22;
 const PROJECT_W = 244;
 const PROJECT_H = 86;
@@ -634,16 +634,16 @@ export function DevMap({
             {...follow({ kind: "person", key: p.key })}
             onClick={() => onPick({ kind: "person", key: p.key })}
             data-testid={`dev-person-${p.key}`}
-            className={`absolute flex items-center gap-3 rounded-2xl border bg-surface px-3 text-left transition-[opacity,box-shadow,border-color] duration-200 hover:shadow-[0_12px_30px_-18px_rgb(0_0_0/0.5)] ${
+            className={`absolute flex items-center gap-3.5 rounded-2xl border bg-surface px-3.5 text-left transition-[opacity,box-shadow,border-color] duration-200 hover:shadow-[0_12px_30px_-18px_rgb(0_0_0/0.5)] ${
               picked?.kind === "person" && picked.key === p.key
                 ? "border-brand-accent/70 ring-1 ring-brand-accent/40"
                 : "border-border hover:border-border-strong"
             } ${on ? "" : "opacity-30"}`}
             style={{ left: at.x, top: at.y, width: PERSON_W, height: PERSON_H }}
           >
-            <Avatar person={p} />
+            <Avatar person={p} size={64} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[0.875rem] font-semibold text-ink">
+              <span className="block truncate text-[0.9375rem] font-semibold text-ink">
                 {p.name}
                 {!p.linked ? (
                   <span className="ml-1.5 rounded-full bg-surface-2 px-1.5 py-px text-[10px] font-medium text-ink-muted">

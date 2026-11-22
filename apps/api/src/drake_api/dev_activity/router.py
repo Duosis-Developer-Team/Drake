@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
@@ -93,6 +94,10 @@ async def person_avatar(
     """
     settings: Settings = request.app.state.settings
     avatars = getattr(request.app.state, "dev_avatars", None)
+    # Always revalidated: a portrait set (or removed) later must replace the
+    # face a browser already holds, so nothing is reused without asking. The
+    # ETag makes asking cheap (a 304 carries no bytes).
+    fresh = "private, no-cache"
     headers = {
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; sandbox",
@@ -100,19 +105,19 @@ async def person_avatar(
     async with get_engine(settings).connect() as connection:
         people = await repo.visible_people(connection, auth.principal)
         if person_key not in people:
-            return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
+            return Response(status_code=204, headers={"Cache-Control": fresh})
         # A hand-made portrait, when an operator set one, stands for the person.
         made = await repo.portrait(connection, person_key)
         if made is not None:
             etag = f'"p-{int(made["updated_at"].timestamp() * 1000)}"'
             if request.headers.get("if-none-match") == etag:
-                return Response(status_code=304, headers={"ETag": etag})
+                return Response(status_code=304, headers={"ETag": etag, "Cache-Control": fresh})
             return Response(
                 content=made["content"],
                 media_type=made["media_type"],
                 headers={
                     **headers,
-                    "Cache-Control": "private, max-age=3600",
+                    "Cache-Control": fresh,
                     "ETag": etag,
                     "X-Tracesis-Avatar": "portrait",
                 },
@@ -124,13 +129,17 @@ async def person_avatar(
         installation = await repo.avatar_installation(connection) if login and avatars else None
     avatar = await avatars.of_login(login, installation) if login and avatars is not None else None
     if avatar is None:
-        return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
+        return Response(status_code=204, headers={"Cache-Control": fresh})
+    etag = f'"g-{hashlib.sha256(avatar.content).hexdigest()[:20]}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": fresh})
     return Response(
         content=avatar.content,
         media_type=avatar.media_type,
         headers={
             **headers,
-            "Cache-Control": "private, max-age=86400",
+            "Cache-Control": fresh,
+            "ETag": etag,
             "X-Tracesis-Avatar": "github",
         },
     )
