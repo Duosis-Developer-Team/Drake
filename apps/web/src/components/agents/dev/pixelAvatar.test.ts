@@ -105,6 +105,8 @@ describe("arcade avatars", () => {
     expect(isPortrait("portrait-person")).toBe(true);
     expect(isPortrait("someone-else")).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Always revalidated, so a portrait set later replaces a cached picture.
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ cache: "no-cache" }));
   });
 
   it("never shows a portrait of a type it does not expect", async () => {

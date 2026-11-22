@@ -704,7 +704,13 @@ async def test_every_repository_of_a_watched_org_is_on_the_map(
         # Faces come from Tracesis, which asks GitHub; scoped like the map.
         face = await client.get("/v1/agents/dev/people/eneserman/avatar")
         assert face.status_code == 200 and face.headers["content-type"] == "image/png"
-        assert face.content == PNG and "max-age=86400" in face.headers["cache-control"]
+        # Never reused unasked: a portrait set later must replace it.
+        assert face.content == PNG and face.headers["cache-control"] == "private, no-cache"
+        same = await client.get(
+            "/v1/agents/dev/people/eneserman/avatar",
+            headers={"If-None-Match": face.headers["etag"]},
+        )
+        assert same.status_code == 304 and not same.content
         assert face.headers["x-content-type-options"] == "nosniff"
         assert face.headers["x-tracesis-avatar"] == "github"
         assert (await client.get("/v1/agents/dev/people/orgonly/avatar")).status_code == 200
@@ -730,7 +736,9 @@ async def test_every_repository_of_a_watched_org_is_on_the_map(
         assert made.headers["x-tracesis-avatar"] == "portrait"
         assert made.headers["x-content-type-options"] == "nosniff"
         assert "sandbox" in made.headers["content-security-policy"]
-        assert "max-age=3600" in made.headers["cache-control"]
+        assert made.headers["cache-control"] == "private, no-cache"
+        # The GitHub picture's tag no longer matches: the portrait replaces it.
+        assert made.headers["etag"] != face.headers["etag"]
         again = await client.get(
             "/v1/agents/dev/people/eneserman/avatar",
             headers={"If-None-Match": made.headers["etag"]},
