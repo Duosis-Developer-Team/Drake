@@ -256,6 +256,29 @@ export const alerting = defineMessages({
       save: "Create objective",
       cancel: "Cancel",
       failed: "The objective could not be created.",
+      step: {
+        where: "Where",
+        whereHint: "The application, its environment, then the service the objective is for.",
+        what: "What to measure",
+        target: "How good it has to be",
+        review: "Name and review",
+      },
+      formula: {
+        availability: "successful requests ÷ all requests",
+        latency: "requests under the threshold ÷ all requests",
+      },
+      hasObjectives: "{count, plural, one {# objective already} other {# objectives already}}",
+      noObjectives: "no objective yet",
+      pickService: "Choose a service above to see what this objective promises.",
+      preview: {
+        allowance: "Allowed downtime",
+        allowanceHint: "of full outage per {window}",
+        allowanceLatency: "Allowed slow time",
+        allowanceLatencyHint: "of every request being slow, per {window}",
+        per10k: "Per 10,000 requests",
+        per10kAvailability: "may fail before the objective breaks",
+        per10kLatency: "may be slower than {threshold}",
+      },
       suggest: {
         title: "Services without an objective",
         description:
@@ -272,6 +295,14 @@ export const alerting = defineMessages({
         manifest: "Declared in the project manifest; change it there.",
         failed: "The change could not be saved.",
       },
+    },
+    sloBoard: {
+      target: "{ratio} · {window}",
+      groupMeta: "{count, plural, one {# objective} other {# objectives}} · {meeting} meeting",
+      postureTitle: "Every objective, by verdict",
+      postureHint: "Pick a verdict to show only those objectives.",
+      filtered: "Showing {state} objectives only",
+      clearFilter: "Show all",
     },
     sloList: {
       title: "Service objectives",
@@ -628,6 +659,29 @@ export const alerting = defineMessages({
       save: "Hedefi oluştur",
       cancel: "Vazgeç",
       failed: "Hedef oluşturulamadı.",
+      step: {
+        where: "Nerede",
+        whereHint: "Uygulama, ortamı, sonra hedefin ait olduğu servis.",
+        what: "Ne ölçülsün",
+        target: "Ne kadar iyi olmalı",
+        review: "Ad ve özet",
+      },
+      formula: {
+        availability: "başarılı istekler ÷ tüm istekler",
+        latency: "eşiğin altındaki istekler ÷ tüm istekler",
+      },
+      hasObjectives: "{count, plural, one {zaten # hedef var} other {zaten # hedef var}}",
+      noObjectives: "henüz hedef yok",
+      pickService: "Bu hedefin neyi vaat ettiğini görmek için yukarıdan bir servis seçin.",
+      preview: {
+        allowance: "İzin verilen kesinti",
+        allowanceHint: "{window} içinde tam kesinti olarak",
+        allowanceLatency: "Yavaş kalabileceği süre",
+        allowanceLatencyHint: "{window} içinde tüm istekler yavaşmış gibi",
+        per10k: "Her 10.000 istekte",
+        per10kAvailability: "hedef bozulmadan hata verebilir",
+        per10kLatency: "{threshold} süresinden yavaş olabilir",
+      },
       suggest: {
         title: "Hedefi olmayan servisler",
         description:
@@ -644,6 +698,14 @@ export const alerting = defineMessages({
         manifest: "Proje manifestinde tanımlı; orada değiştirin.",
         failed: "Değişiklik kaydedilemedi.",
       },
+    },
+    sloBoard: {
+      target: "{ratio} · {window}",
+      groupMeta: "{count, plural, one {# hedef} other {# hedef}} · {meeting} karşılanıyor",
+      postureTitle: "Tüm hedefler, sonuca göre",
+      postureHint: "Yalnızca o hedefleri görmek için bir sonuç seçin.",
+      filtered: "Yalnızca {state} hedefler gösteriliyor",
+      clearFilter: "Tümünü göster",
     },
     sloList: {
       title: "Servis hedefleri",

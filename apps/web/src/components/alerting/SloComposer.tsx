@@ -3,20 +3,23 @@
 /**
  * Setting objectives from the screen.
  *
- * Two ways in. The suggestions list every service that has none yet, with
- * one click for each indicator at a target a healthy service already meets
- * — so a fresh objective starts quiet instead of paging. The composer is the
- * full form: application, then environment, then service (the same order as
- * everywhere else), the indicator, and target, window and threshold from the
- * server's own short lists. The client never names a template or a query.
+ * Two ways in. The suggestions are cards for every service that has none
+ * yet, with one click for each indicator at a target a healthy service
+ * already meets — so a fresh objective starts quiet instead of paging. The
+ * composer walks four steps: where (application, environment, service, as
+ * tiles with their logos), what (availability or latency, explained), the
+ * target (a slider over the server's own short list, with the error budget
+ * it leaves shown as time and as requests), and a review card. The client
+ * never names a template or a query.
  */
 
-import { Plus, Sparkles } from "lucide-react";
+import { Activity, Check, Plus, Sparkles, Timer } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { kindColour } from "@/components/apps/AppLauncher";
+import { useProjectsByKey } from "@/components/alerting/SloBoard";
 import { ProjectLogo } from "@/components/ui/ProjectLogo";
-import { Button, SegmentedControl, Select } from "@/components/ui/controls";
+import { Button } from "@/components/ui/controls";
 import { Drawer } from "@/components/ui/overlay";
 import { compareEnvironments } from "@/components/explore/ServiceCascade";
 import { ApiError } from "@/lib/api";
@@ -61,6 +64,7 @@ export function SloSuggestions({
   onCreated: () => void;
 }) {
   const t = useT("alerting");
+  const projects = useProjectsByKey();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bare = useMemo(
@@ -102,77 +106,163 @@ export function SloSuggestions({
   };
 
   const latency = options.suggested.latency;
+  const shown = bare.slice(0, 9);
   return (
-    <Panel flush data-testid="slo-suggestions">
-      <PanelHeader
-        flush
-        title={t("sloCompose.suggest.title")}
-        description={t("sloCompose.suggest.description", {
-          availability: formatTarget(
-            options.suggested.availability.objective_ratio,
-          ),
-          latency: formatTarget(latency.objective_ratio),
-          threshold: thresholdLabel(latency.threshold_ms),
-        })}
-      />
+    <section
+      data-testid="slo-suggestions"
+      className="rounded-2xl border border-border bg-surface-2/40 p-5 sm:p-6"
+    >
+      <header className="mb-4 flex flex-wrap items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-accent">
+          <Sparkles aria-hidden className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[1.0625rem] font-semibold tracking-[-0.015em] text-ink">
+            {t("sloCompose.suggest.title")}
+          </h2>
+          <p className="mt-0.5 max-w-3xl text-caption text-ink-muted">
+            {t("sloCompose.suggest.description", {
+              availability: formatTarget(options.suggested.availability.objective_ratio),
+              latency: formatTarget(latency.objective_ratio),
+              threshold: thresholdLabel(latency.threshold_ms),
+            })}
+          </p>
+        </div>
+      </header>
       {error ? (
-        <p role="alert" className="px-7 pb-3 text-caption text-critical">
+        <p role="alert" className="mb-3 text-caption text-critical">
           {error}
         </p>
       ) : null}
-      <ul className="divide-y divide-border">
-        {bare.slice(0, 12).map((service) => (
-          <li
-            key={service.environment_service_id}
-            className="flex flex-wrap items-center gap-x-4 gap-y-2 px-7 py-3"
-          >
-            <ProjectLogo
-              projectId={service.project_id}
-              name={service.project_key}
-              size="md"
-              variant="mark"
-            />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-body font-semibold text-ink">
-                {service.service_key}
-              </span>
-              <span className="block truncate font-mono text-micro text-ink-muted">
-                {service.project_key}/{service.environment_key}
-              </span>
-            </span>
-            <span className="flex flex-wrap gap-2">
-              {(["availability", "latency"] as const).map((indicator) => (
-                <Button
-                  key={indicator}
-                  size="compact"
-                  icon={Plus}
-                  disabled={busy !== null}
-                  onClick={() => add(service, indicator)}
-                  data-testid={`suggest-${indicator}-${service.service_key}-${service.environment_key}`}
-                >
-                  {indicator === "latency"
-                    ? t("sloCompose.suggest.latency", {
-                        ratio: formatTarget(latency.objective_ratio),
-                        threshold: thresholdLabel(latency.threshold_ms),
-                      })
-                    : t("sloCompose.suggest.availability", {
-                        ratio: formatTarget(
-                          options.suggested.availability.objective_ratio,
-                        ),
-                      })}
-                </Button>
-              ))}
-            </span>
-          </li>
-        ))}
+      <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {shown.map((service) => {
+          const project = projects.get(service.project_key);
+          return (
+            <li
+              key={service.environment_service_id}
+              className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface p-4 pl-5"
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-[3px]"
+                style={{ background: kindColour(service.environment_key) }}
+              />
+              <div className="flex items-center gap-3">
+                <ProjectLogo
+                  projectId={service.project_id}
+                  name={project?.name ?? service.project_key}
+                  size="md"
+                  variant="mark"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-body font-semibold text-ink">
+                    {service.service_key}
+                  </span>
+                  <span className="block truncate font-mono text-micro text-ink-muted">
+                    {service.project_key}/{service.environment_key}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-3 grid gap-1.5">
+                {(["availability", "latency"] as const).map((indicator) => {
+                  const Icon = indicator === "latency" ? Timer : Activity;
+                  return (
+                    <button
+                      key={indicator}
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => add(service, indicator)}
+                      data-testid={`suggest-${indicator}-${service.service_key}-${service.environment_key}`}
+                      className="group flex items-center gap-2 rounded-lg border border-border bg-surface-2/60 px-2.5 py-2 text-left text-caption font-medium text-ink transition-colors hover:border-brand-accent/60 hover:bg-brand-soft disabled:opacity-50"
+                    >
+                      <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-accent" />
+                      <span className="min-w-0 truncate">
+                        {indicator === "latency"
+                          ? t("sloCompose.suggest.latency", {
+                              ratio: formatTarget(latency.objective_ratio),
+                              threshold: thresholdLabel(latency.threshold_ms),
+                            })
+                          : t("sloCompose.suggest.availability", {
+                              ratio: formatTarget(options.suggested.availability.objective_ratio),
+                            })}
+                      </span>
+                      <Plus
+                        aria-hidden
+                        className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted group-hover:text-brand-accent"
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
       </ul>
-      {bare.length > 12 ? (
-        <p className="border-t border-border px-7 py-3 text-micro text-ink-muted">
-          {t("sloCompose.suggest.more", { count: bare.length - 12 })}
+      {bare.length > shown.length ? (
+        <p className="mt-3 text-micro text-ink-muted">
+          {t("sloCompose.suggest.more", { count: bare.length - shown.length })}
         </p>
       ) : null}
-    </Panel>
+    </section>
   );
+}
+
+/** A numbered step of the composer, with its question as the heading. */
+function Step({
+  n,
+  title,
+  hint,
+  done,
+  children,
+}: {
+  n: number;
+  title: string;
+  hint?: string;
+  done: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="relative pl-11">
+      <span
+        aria-hidden
+        className={`absolute top-0 left-0 grid h-7 w-7 place-items-center rounded-full font-mono text-[12px] font-semibold ${
+          done ? "bg-brand-accent text-ink-inverse" : "border border-border-strong text-ink-secondary"
+        }`}
+      >
+        {done ? <Check className="h-3.5 w-3.5" /> : n}
+      </span>
+      <h3 className="text-body font-semibold text-ink">{title}</h3>
+      {hint ? <p className="mt-0.5 text-caption text-ink-muted">{hint}</p> : null}
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function chip(active: boolean) {
+  return `inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-caption font-medium transition-colors ${
+    active
+      ? "border-brand-accent/70 bg-brand-soft text-ink"
+      : "border-border bg-surface text-ink-secondary hover:border-border-strong hover:text-ink"
+  }`;
+}
+
+function tile(active: boolean) {
+  return `rounded-xl border text-left transition-colors ${
+    active ? "border-brand-accent/70 bg-brand-soft" : "border-border bg-surface hover:border-border-strong"
+  }`;
+}
+
+/** Seconds as people say an allowance: "3 h 36 min", "43 min". */
+function allowance(seconds: number, tr: boolean): string {
+  const s = Math.max(0, Math.round(seconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const unit = tr ? { d: "g", h: "sa", m: "dk", s: "sn" } : { d: "d", h: "h", m: "min", s: "s" };
+  if (d) return `${d} ${unit.d} ${h} ${unit.h}`;
+  if (h) return `${h} ${unit.h} ${m} ${unit.m}`;
+  if (m) return `${m} ${unit.m}`;
+  return `${s} ${unit.s}`;
 }
 
 export function SloComposer({
@@ -190,6 +280,8 @@ export function SloComposer({
 }) {
   const t = useT("alerting");
   const fmt = useFormat();
+  const projectNames = useProjectsByKey();
+  const tr = fmt.tag.startsWith("tr");
   const [projectId, setProjectId] = useState("");
   const [environmentId, setEnvironmentId] = useState("");
   const [serviceId, setServiceId] = useState("");
@@ -211,9 +303,9 @@ export function SloComposer({
     const seen = new Map<string, string>();
     for (const s of options.services) seen.set(s.project_id, s.project_key);
     return [...seen]
-      .map(([value, label]) => ({ value, label }))
+      .map(([value, key]) => ({ value, key, label: projectNames.get(key)?.name ?? key }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [options.services]);
+  }, [options.services, projectNames]);
   const environments = useMemo(() => {
     const seen = new Map<string, string>();
     for (const s of options.services)
@@ -230,18 +322,33 @@ export function SloComposer({
           (s) =>
             s.project_id === projectId && s.environment_id === environmentId,
         )
-        .map((s) => ({ value: s.environment_service_id, label: s.service_key }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
+        .sort((a, b) => a.service_key.localeCompare(b.service_key)),
     [options.services, projectId, environmentId],
   );
   const service =
     options.services.find((s) => s.environment_service_id === serviceId) ??
     null;
   const thresholdMs = Number(threshold);
+  const ratio = Number(objective);
+  const windowS = Number(windowSeconds);
   const effectiveName =
     name.trim() ||
     (service ? suggestedName(service, indicator, thresholdMs) : "");
+  const targetIndex = Math.max(
+    0,
+    options.objectives.findIndex((r) => r === ratio),
+  );
 
+  const pickApp = (id: string) => {
+    setProjectId(id);
+    const envs = new Set(
+      options.services
+        .filter((s) => s.project_id === id)
+        .map((s) => s.environment_id),
+    );
+    setEnvironmentId(envs.size === 1 ? [...envs][0] : "");
+    setServiceId("");
+  };
   const pickIndicator = (next: Indicator) => {
     setIndicator(next);
     setObjective(String(options.suggested[next].objective_ratio));
@@ -256,8 +363,8 @@ export function SloComposer({
         environment_service_id: service.environment_service_id,
         display_name: effectiveName,
         indicator,
-        objective_ratio: Number(objective),
-        window_seconds: Number(windowSeconds),
+        objective_ratio: ratio,
+        window_seconds: windowS,
         threshold_ms: indicator === "latency" ? thresholdMs : null,
       });
       onCreated();
@@ -269,10 +376,17 @@ export function SloComposer({
     }
   };
 
+  const budgetSeconds = (1 - ratio) * windowS;
+  const per10k = Math.round((1 - ratio) * 10000);
+  const projectName = service
+    ? (projectNames.get(service.project_key)?.name ?? service.project_key)
+    : "";
+
   return (
     <Drawer
       open={open}
       onClose={onClose}
+      width="lg"
       title={t("sloCompose.title")}
       description={t("sloCompose.description")}
       footer={
@@ -289,156 +403,306 @@ export function SloComposer({
         </div>
       }
     >
-      <div className="space-y-5" data-testid="slo-composer">
-        <fieldset className="space-y-2.5">
-          <legend className="mb-2 text-micro font-semibold tracking-[0.08em] text-ink-muted uppercase">
-            {t("sloCompose.target")}
-          </legend>
-          <Select
-            label={t("sloCompose.application")}
-            value={projectId}
-            placeholder={t("sloCompose.choose")}
-            options={projects}
-            onChange={(v) => {
-              setProjectId(v);
-              const envs = new Set(
-                options.services
-                  .filter((s) => s.project_id === v)
-                  .map((s) => s.environment_id),
-              );
-              setEnvironmentId(envs.size === 1 ? [...envs][0] : "");
-              setServiceId("");
-            }}
-          />
-          <Select
-            label={t("sloCompose.environment")}
-            value={environmentId}
-            placeholder={
-              projectId
-                ? t("sloCompose.choose")
-                : t("sloCompose.pickApplication")
-            }
-            options={environments}
-            onChange={(v) => {
-              setEnvironmentId(v);
-              setServiceId("");
-            }}
-          />
-          <Select
-            label={t("sloCompose.service")}
-            value={serviceId}
-            placeholder={
-              environmentId
-                ? t("sloCompose.choose")
-                : t("sloCompose.pickEnvironment")
-            }
-            options={services}
-            onChange={setServiceId}
-            data-testid="slo-compose-service"
-          />
-        </fieldset>
-
-        <div className="space-y-2">
-          <SegmentedControl
-            label={t("sloCompose.indicator")}
-            value={indicator}
-            onChange={pickIndicator}
-            options={[
-              {
-                value: "availability",
-                label: t.dyn("indicator", "availability", "availability"),
-              },
-              {
-                value: "latency",
-                label: t.dyn("indicator", "latency", "latency"),
-              },
-            ]}
-          />
-          <p className="text-caption text-ink-muted">
-            {indicator === "latency"
-              ? t("sloCompose.explain.latency")
-              : t("sloCompose.explain.availability")}
-          </p>
-        </div>
-
-        <div className="grid gap-2.5">
-          <Select
-            label={t("sloCompose.objective")}
-            value={objective}
-            options={options.objectives.map((r) => ({
-              value: String(r),
-              label: formatTarget(r),
-            }))}
-            onChange={(v) => v && setObjective(v)}
-          />
-          {indicator === "latency" ? (
-            <Select
-              label={t("sloCompose.threshold")}
-              value={threshold}
-              options={options.thresholds_ms.map((ms) => ({
-                value: String(ms),
-                label: thresholdLabel(ms),
-              }))}
-              onChange={(v) => v && setThreshold(v)}
-            />
-          ) : null}
-          <Select
-            label={t("sloCompose.window")}
-            value={windowSeconds}
-            options={options.windows_seconds.map((s) => ({
-              value: String(s),
-              label: fmt.duration(s, { compact: true }),
-            }))}
-            onChange={(v) => v && setWindowSeconds(v)}
-          />
-        </div>
-
-        <label className="block space-y-1.5">
-          <span className="text-caption text-ink-secondary">
-            {t("sloCompose.name")}
-          </span>
-          <input
-            value={name}
-            maxLength={120}
-            placeholder={effectiveName || t("sloCompose.namePlaceholder")}
-            onChange={(event) => setName(event.target.value)}
-            className="h-9 w-full rounded-control border border-border bg-surface px-2.5 text-body text-ink"
-          />
-        </label>
-
-        {service ? (
-          <p
-            className="rounded-control bg-surface-2 px-3 py-2.5 text-caption text-ink-secondary"
-            data-testid="slo-compose-summary"
+      <div className="space-y-8 py-1" data-testid="slo-composer">
+        <Step
+          n={1}
+          title={t("sloCompose.step.where")}
+          hint={t("sloCompose.step.whereHint")}
+          done={Boolean(service)}
+        >
+          <div
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+            role="group"
+            aria-label={t("sloCompose.application")}
           >
-            {indicator === "latency"
-              ? t("sloCompose.summary.latency", {
-                  ratio: formatTarget(Number(objective)),
-                  threshold: thresholdLabel(thresholdMs),
-                  window: fmt.duration(Number(windowSeconds), {
-                    compact: true,
-                  }),
-                  budget: formatTarget(1 - Number(objective)),
-                })
-              : t("sloCompose.summary.availability", {
-                  ratio: formatTarget(Number(objective)),
-                  window: fmt.duration(Number(windowSeconds), {
-                    compact: true,
-                  }),
-                  budget: formatTarget(1 - Number(objective)),
-                })}
-          </p>
-        ) : null}
-        {!options.measuring ? (
-          <p className="text-caption text-warning">
-            {t("sloCompose.notMeasuring")}
-          </p>
-        ) : null}
-        {error ? (
-          <p role="alert" className="text-caption text-critical">
-            {error}
-          </p>
-        ) : null}
+            {projects.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                aria-pressed={projectId === p.value}
+                onClick={() => pickApp(p.value)}
+                data-testid={`compose-app-${p.key}`}
+                className={`flex items-center gap-2.5 p-2.5 ${tile(projectId === p.value)}`}
+              >
+                <ProjectLogo projectId={p.value} name={p.label} size="md" variant="mark" />
+                <span className="min-w-0 truncate text-body font-semibold text-ink">
+                  {p.label}
+                </span>
+              </button>
+            ))}
+          </div>
+          {projectId ? (
+            <div
+              className="mt-3 flex flex-wrap gap-2"
+              role="group"
+              aria-label={t("sloCompose.environment")}
+            >
+              {environments.map((e) => (
+                <button
+                  key={e.value}
+                  type="button"
+                  aria-pressed={environmentId === e.value}
+                  onClick={() => {
+                    setEnvironmentId(e.value);
+                    setServiceId("");
+                  }}
+                  data-testid={`compose-env-${e.label}`}
+                  className={chip(environmentId === e.value)}
+                >
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: kindColour(e.label) }}
+                  />
+                  <span className="font-mono">{e.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-micro text-ink-muted">
+              {t("sloCompose.pickApplication")}
+            </p>
+          )}
+          {environmentId ? (
+            <div
+              className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3"
+              role="group"
+              aria-label={t("sloCompose.service")}
+              data-testid="slo-compose-service"
+            >
+              {services.map((s) => (
+                <button
+                  key={s.environment_service_id}
+                  type="button"
+                  aria-pressed={serviceId === s.environment_service_id}
+                  onClick={() => setServiceId(s.environment_service_id)}
+                  data-testid={`compose-service-${s.service_key}`}
+                  className={`px-3 py-2.5 ${tile(serviceId === s.environment_service_id)}`}
+                >
+                  <span className="block truncate text-caption font-semibold text-ink">
+                    {s.service_key}
+                  </span>
+                  <span className="block text-[11px] text-ink-muted">
+                    {s.objectives
+                      ? t("sloCompose.hasObjectives", { count: s.objectives })
+                      : t("sloCompose.noObjectives")}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </Step>
+
+        <Step n={2} title={t("sloCompose.step.what")} done={Boolean(service)}>
+          <div
+            className="grid gap-3 sm:grid-cols-2"
+            role="radiogroup"
+            aria-label={t("sloCompose.indicator")}
+          >
+            {(["availability", "latency"] as const).map((value) => {
+              const Icon = value === "latency" ? Timer : Activity;
+              const active = indicator === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => pickIndicator(value)}
+                  data-testid={`compose-indicator-${value}`}
+                  className={`p-4 ${tile(active)}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={`grid h-8 w-8 place-items-center rounded-lg ${
+                        active ? "bg-brand-accent text-ink-inverse" : "bg-surface-2 text-ink-secondary"
+                      }`}
+                    >
+                      <Icon aria-hidden className="h-4 w-4" />
+                    </span>
+                    <span className="text-body font-semibold text-ink first-letter:uppercase">
+                      {t.dyn("indicator", value, value)}
+                    </span>
+                  </span>
+                  <span className="mt-2 block text-caption text-ink-secondary">
+                    {t(`sloCompose.explain.${value}`)}
+                  </span>
+                  <span className="mt-2 block font-mono text-[11px] text-ink-muted">
+                    {t(`sloCompose.formula.${value}`)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {indicator === "latency" ? (
+            <div
+              className="mt-3 flex flex-wrap items-center gap-2"
+              role="group"
+              aria-label={t("sloCompose.threshold")}
+            >
+              <span className="mr-1 text-caption text-ink-secondary">
+                {t("sloCompose.threshold")}
+              </span>
+              {options.thresholds_ms.map((ms) => (
+                <button
+                  key={ms}
+                  type="button"
+                  aria-pressed={thresholdMs === ms}
+                  onClick={() => setThreshold(String(ms))}
+                  data-testid={`compose-threshold-${ms}`}
+                  className={chip(thresholdMs === ms)}
+                >
+                  <span className="font-mono">{thresholdLabel(ms)}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </Step>
+
+        <Step n={3} title={t("sloCompose.step.target")} done={Boolean(service)}>
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-caption text-ink-secondary">
+                {t("sloCompose.objective")}
+              </span>
+              <span
+                data-tabular
+                className="font-[family-name:var(--font-display)] text-[1.75rem] leading-none font-bold text-ink"
+              >
+                {formatTarget(ratio)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, options.objectives.length - 1)}
+              step={1}
+              value={targetIndex}
+              onChange={(event) =>
+                setObjective(String(options.objectives[Number(event.target.value)]))
+              }
+              aria-label={t("sloCompose.objective")}
+              aria-valuetext={formatTarget(ratio)}
+              data-testid="compose-target"
+              className="mt-3 w-full accent-[var(--brand-accent)]"
+            />
+            <div className="mt-1 flex justify-between font-mono text-[10.5px] text-ink-muted">
+              {options.objectives.map((r) => (
+                <span key={r}>{formatTarget(r)}</span>
+              ))}
+            </div>
+            <div
+              className="mt-4 flex flex-wrap items-center gap-2"
+              role="group"
+              aria-label={t("sloCompose.window")}
+            >
+              <span className="mr-1 text-caption text-ink-secondary">
+                {t("sloCompose.window")}
+              </span>
+              {options.windows_seconds.map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  aria-pressed={windowS === w}
+                  onClick={() => setWindowSeconds(String(w))}
+                  className={chip(windowS === w)}
+                >
+                  {fmt.duration(w, { compact: true })}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3" data-testid="compose-budget-preview">
+              <div className="rounded-lg bg-surface-2 p-3">
+                <p className="text-[11px] text-ink-muted">
+                  {indicator === "latency"
+                    ? t("sloCompose.preview.allowanceLatency")
+                    : t("sloCompose.preview.allowance")}
+                </p>
+                <p data-tabular className="mt-1 font-mono text-body font-semibold text-ink">
+                  {allowance(budgetSeconds, tr)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-ink-muted">
+                  {indicator === "latency"
+                    ? t("sloCompose.preview.allowanceLatencyHint", {
+                        window: fmt.duration(windowS, { compact: true }),
+                      })
+                    : t("sloCompose.preview.allowanceHint", {
+                        window: fmt.duration(windowS, { compact: true }),
+                      })}
+                </p>
+              </div>
+              <div className="rounded-lg bg-surface-2 p-3">
+                <p className="text-[11px] text-ink-muted">{t("sloCompose.preview.per10k")}</p>
+                <p data-tabular className="mt-1 font-mono text-body font-semibold text-ink">
+                  {fmt.number(per10k)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-ink-muted">
+                  {indicator === "latency"
+                    ? t("sloCompose.preview.per10kLatency", {
+                        threshold: thresholdLabel(thresholdMs),
+                      })
+                    : t("sloCompose.preview.per10kAvailability")}
+                </p>
+              </div>
+            </div>
+          </div>
+        </Step>
+
+        <Step n={4} title={t("sloCompose.step.review")} done={false}>
+          <label className="block space-y-1.5">
+            <span className="text-caption text-ink-secondary">{t("sloCompose.name")}</span>
+            <input
+              value={name}
+              maxLength={120}
+              placeholder={effectiveName || t("sloCompose.namePlaceholder")}
+              onChange={(event) => setName(event.target.value)}
+              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-body text-ink"
+            />
+          </label>
+          {service ? (
+            <div
+              className="mt-3 rounded-xl border border-brand-accent/40 bg-brand-soft/60 p-4"
+              data-testid="slo-compose-summary"
+            >
+              <p className="flex flex-wrap items-center gap-2 text-caption font-semibold text-ink">
+                <ProjectLogo
+                  projectId={service.project_id}
+                  name={projectName}
+                  size="sm"
+                  variant="mark"
+                />
+                {effectiveName}
+                <span className="font-mono text-[11px] font-normal text-ink-muted">
+                  {service.project_key}/{service.environment_key}
+                </span>
+              </p>
+              <p className="mt-2 text-caption text-ink-secondary">
+                {indicator === "latency"
+                  ? t("sloCompose.summary.latency", {
+                      ratio: formatTarget(ratio),
+                      threshold: thresholdLabel(thresholdMs),
+                      window: fmt.duration(windowS, { compact: true }),
+                      budget: formatTarget(1 - ratio),
+                    })
+                  : t("sloCompose.summary.availability", {
+                      ratio: formatTarget(ratio),
+                      window: fmt.duration(windowS, { compact: true }),
+                      budget: formatTarget(1 - ratio),
+                    })}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-caption text-ink-muted">{t("sloCompose.pickService")}</p>
+          )}
+          {!options.measuring ? (
+            <p className="mt-3 text-caption text-warning">{t("sloCompose.notMeasuring")}</p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="mt-3 text-caption text-critical">
+              {error}
+            </p>
+          ) : null}
+        </Step>
       </div>
     </Drawer>
   );
