@@ -322,6 +322,7 @@ export const alerting = defineMessages({
     },
     sloBoard: {
       target: "{ratio} · {window}",
+      burnName: { fast: "fast burn", slow: "slow burn" },
       groupMeta: "{count, plural, one {# objective} other {# objectives}} · {meeting} meeting",
       postureTitle: "Every objective, by verdict",
       postureHint: "Pick a verdict to show only those objectives.",
@@ -749,6 +750,7 @@ export const alerting = defineMessages({
     },
     sloBoard: {
       target: "{ratio} · {window}",
+      burnName: { fast: "hızlı yanma", slow: "yavaş yanma" },
       groupMeta: "{count, plural, one {# hedef} other {# hedef}} · {meeting} karşılanıyor",
       postureTitle: "Tüm hedefler, sonuca göre",
       postureHint: "Yalnızca o hedefleri görmek için bir sonuç seçin.",

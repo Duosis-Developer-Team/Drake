@@ -298,7 +298,7 @@ export function ObjectiveCard({ slo, index = 0 }: { slo: Slo; index?: number }) 
             }`}
           >
             <Flame aria-hidden className="h-3 w-3" />
-            {`${activeBurn.factor}× ${activeBurn.name}`}
+            {`${fmt.number(activeBurn.factor, { maximumFractionDigits: 1 })}× ${t.dyn("sloBoard.burnName", activeBurn.name, activeBurn.name)}`}
           </span>
         ) : (
           <span>{t("sloList.row.notBurning")}</span>

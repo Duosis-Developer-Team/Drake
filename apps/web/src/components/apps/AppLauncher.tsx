@@ -155,7 +155,7 @@ export function AppGrid({
   const t = useT("apps");
   const ts = useT("serviceHealth");
   return (
-    <FillGrid count={apps.length} aria-label={t("title")} data-testid="app-grid">
+    <FillGrid count={apps.length} aria-label={t("title")} data-testid="app-grid" className="max-sm:grid-cols-2 max-sm:gap-3">
       {apps.map((app, i) => {
         const active = app.projectId === selectedId;
         const dim = selectedId !== null && !active;
@@ -166,7 +166,7 @@ export function AppGrid({
               aria-pressed={active}
               onClick={() => onSelect(active ? null : app.projectId)}
               data-testid={`app-${app.projectKey}`}
-              className={`group relative flex h-full w-full flex-col items-center overflow-hidden rounded-2xl border bg-surface px-6 pt-8 pb-6 text-center transition-[transform,border-color,box-shadow,opacity] duration-200 outline-none hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-24px_rgb(0_0_0/0.45)] focus-visible:ring-2 focus-visible:ring-focus ${
+              className={`group relative flex h-full w-full flex-col items-center overflow-hidden rounded-2xl border bg-surface px-3 pt-5 pb-4 text-center sm:px-6 sm:pt-8 sm:pb-6 transition-[transform,border-color,box-shadow,opacity] duration-200 outline-none hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-24px_rgb(0_0_0/0.45)] focus-visible:ring-2 focus-visible:ring-focus ${
                 active
                   ? "border-brand-accent/70 ring-1 ring-brand-accent/40"
                   : "border-border hover:border-border-strong"
@@ -179,7 +179,7 @@ export function AppGrid({
                 style={{ background: "radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--brand-accent) 14%, transparent), transparent)" }}
               />
               <span
-                className="relative grid h-32 w-32 place-items-center rounded-[2rem] border border-border bg-gradient-to-b from-surface to-surface-2 transition-transform duration-200 group-hover:scale-[1.03]"
+                className="relative grid h-24 w-24 place-items-center rounded-[1.5rem] border border-border bg-gradient-to-b from-surface to-surface-2 transition-transform duration-200 group-hover:scale-[1.03] sm:h-32 sm:w-32 sm:rounded-[2rem] [&_img]:max-sm:h-16 [&_img]:max-sm:w-16"
                 style={{
                   boxShadow:
                     "inset 0 1px 0 rgb(255 255 255 / 0.07), 0 18px 32px -18px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.12)",
@@ -195,7 +195,7 @@ export function AppGrid({
                   </span>
                 ) : null}
               </span>
-              <span className="relative mt-5 w-full truncate font-[family-name:var(--font-display)] text-[1.375rem] font-bold tracking-[-0.025em] text-ink">
+              <span className="relative mt-4 w-full truncate font-[family-name:var(--font-display)] text-[1.125rem] font-bold tracking-[-0.025em] text-ink sm:mt-5 sm:text-[1.375rem]">
                 {app.name}
               </span>
               <span className="relative mt-1 text-caption text-ink-muted">

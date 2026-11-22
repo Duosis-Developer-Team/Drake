@@ -70,7 +70,7 @@ export const incidents = defineMessages({
       },
       queue: {
         title: "Incident queue",
-        description: "Worst first, as the processor recorded them",
+        description: "Newest first, as the processor recorded them",
       },
       section: {
         active: "Still going on",
@@ -279,7 +279,7 @@ export const incidents = defineMessages({
       },
       queue: {
         title: "Olay kuyruğu",
-        description: "En kötüsü önce, işlemcinin kaydettiği sırayla",
+        description: "En yenisi önce, işlemcinin kaydettiği sırayla",
       },
       section: {
         active: "Hâlâ süren",

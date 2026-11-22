@@ -89,7 +89,7 @@ function ProviderTile({ provider }: { provider: Provider }) {
       <Link
         href="/integrations"
         className={`group flex h-full flex-col gap-3 rounded-xl border p-4 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_14px_30px_-22px_rgb(0_0_0/0.5)] ${
-          connected ? "border-border bg-surface" : "border-dashed border-border bg-transparent opacity-70 hover:opacity-100"
+          connected ? "border-border bg-surface" : "border-dashed border-border bg-transparent [&_svg]:opacity-60"
         }`}
       >
         <span className="flex items-center gap-3">

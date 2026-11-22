@@ -14,7 +14,7 @@
 import { ArrowRight, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
-import { HealthBar, Sparkline, kindColour } from "@/components/apps/AppLauncher";
+import { FillGrid, HealthBar, Sparkline, kindColour } from "@/components/apps/AppLauncher";
 import { OverviewWidget } from "@/components/features/dashboards/widgets";
 import s from "@/components/features/dashboards/dashboards.module.css";
 import { TipProvider } from "@/components/features/dashboards/tip";
@@ -94,7 +94,7 @@ function AppCard({ app, overview, index }: { app: PlatformApp; overview: Overvie
     <article
       data-testid={`overview-app-${app.projectKey}`}
       style={{ animationDelay: `${index * 60}ms` }}
-      className="flex animate-[rise-in_.45s_cubic-bezier(.2,.8,.2,1)_both] flex-col overflow-hidden rounded-panel border border-border bg-surface"
+      className="flex h-full animate-[rise-in_.45s_cubic-bezier(.2,.8,.2,1)_both] flex-col overflow-hidden rounded-panel border border-border bg-surface"
     >
       <Link
         href={`/dashboards?project=${app.projectId}`}
@@ -194,11 +194,14 @@ export function AppsBoard({ apps, overview }: { apps: PlatformApp[]; overview: O
           <ArrowRight aria-hidden className="h-3.5 w-3.5" />
         </Link>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      {/* Apps share the row equally: two halves, three thirds. */}
+      <FillGrid count={apps.length} max={3}>
         {apps.map((app, i) => (
-          <AppCard key={app.projectId} app={app} overview={overview} index={i} />
+          <li key={app.projectId} className="min-w-0">
+            <AppCard app={app} overview={overview} index={i} />
+          </li>
         ))}
-      </div>
+      </FillGrid>
     </section>
   );
 }
