@@ -25,6 +25,8 @@ export interface IncidentBinding {
   cluster_ref: string;
 }
 
+export type IncidentSource = "service_health" | "alert" | "rule" | "slo" | "protection" | "agent";
+
 export interface IncidentSummary {
   id: string;
   state: IncidentState;
@@ -41,6 +43,9 @@ export interface IncidentSummary {
   service_key: string;
   environment_service_id: string;
   binding: IncidentBinding;
+  /** Where the signal that opened it came from. */
+  source?: IncidentSource;
+  priority?: string | null;
   current_health: {
     status: ServiceHealthStatus;
     reasons: string[];
