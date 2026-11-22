@@ -32,13 +32,13 @@ import { useEffect, useState } from "react";
 
 import { useResolvedTheme } from "@/components/shell/ThemeControl";
 
-type Size = "sm" | "md" | "lg";
+type Size = "sm" | "md" | "lg" | "icon";
 
 type Variant = "wordmark" | "mark";
 
 const SIZES: Record<
   Size,
-  { box: string; pad: string; img: string; text: string }
+  { box: string; pad: string; img: string; text: string; frame?: string }
 > = {
   sm: {
     box: "h-5 w-5 rounded-[5px]",
@@ -57,6 +57,14 @@ const SIZES: Record<
     pad: "p-[5px]",
     img: "h-8 max-w-[12rem]",
     text: "text-[0.9375rem]",
+  },
+  /* The mark alone, unframed, filling an app icon the caller draws. */
+  icon: {
+    box: "h-14 w-14 rounded-[14px]",
+    pad: "p-0",
+    img: "h-14 max-w-[14rem]",
+    text: "text-[1.375rem]",
+    frame: "",
   },
 };
 
@@ -240,7 +248,7 @@ export function ProjectLogo({
           decoding="async"
           className={
             variant === "mark"
-              ? `${spec.box} ${spec.pad} border border-border bg-surface-2 object-contain`
+              ? `${spec.box} ${spec.pad} ${spec.frame ?? "border border-border bg-surface-2"} object-contain`
               : `${spec.img} w-auto object-contain object-left`
           }
         />

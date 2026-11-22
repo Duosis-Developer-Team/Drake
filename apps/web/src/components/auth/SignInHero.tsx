@@ -86,16 +86,110 @@ export function SignInBackdrop() {
 
 const FEATURES = ["health", "traces", "objectives", "agents"] as const;
 
+/**
+ * The mark, drawn large as what it is: a trace. The same five shapes as the
+ * logo (Brand.tsx, 450 × 200), each span growing in from the left in turn,
+ * then named — the request, the service it calls and, in gold, the slowest
+ * call. A faint time grid sits behind, as in any waterfall.
+ */
+const SPANS = [
+  { x: 0, y: 0, w: 450, h: 52, rx: 9, gold: false, delay: 0 },
+  { x: 93, y: 80, w: 310, h: 46, rx: 8, gold: false, delay: 320 },
+  { x: 211, y: 156, w: 145, h: 44, rx: 8, gold: true, delay: 640 },
+];
+const STEMS = [
+  { x: 93, y: 40, w: 35, h: 50, delay: 260 },
+  { x: 176, y: 118, w: 22, h: 45, delay: 580 },
+];
+const LABELS = [
+  { key: "root", x: 466, y: 26, delay: 900 },
+  { key: "child", x: 419, y: 103, delay: 1050 },
+  { key: "slow", x: 372, y: 178, delay: 1200 },
+] as const;
+
+function BrandTrace() {
+  const t = useT("shell");
+  const grow = (delay: number, axis: "x" | "y") => ({
+    transformBox: "fill-box" as const,
+    transformOrigin: axis === "x" ? "left center" : "center top",
+    animation: `${axis === "x" ? "signin-grow" : "signin-drop"} .7s cubic-bezier(.2,.8,.2,1) ${delay}ms both`,
+  });
+  return (
+    <figure className="m-0" data-testid="signin-brand-trace">
+      <svg
+        viewBox="-4 -14 584 232"
+        className="block h-auto w-full max-w-[24rem]"
+        role="img"
+        aria-label={t("hero.mark.caption")}
+      >
+        {/* The time grid: hairlines every 50 units under the spans. */}
+        {Array.from({ length: 10 }, (_, i) => (
+          <line
+            key={i}
+            x1={i * 50}
+            x2={i * 50}
+            y1={-10}
+            y2={210}
+            stroke="var(--border-subtle)"
+            strokeDasharray="2 5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {STEMS.map((stem, i) => (
+          <rect key={`s${i}`} x={stem.x} y={stem.y} width={stem.w} height={stem.h} fill="var(--brand)" style={grow(stem.delay, "y")} />
+        ))}
+        {SPANS.map((span, i) => (
+          <rect
+            key={`b${i}`}
+            x={span.x}
+            y={span.y}
+            width={span.w}
+            height={span.h}
+            rx={span.rx}
+            fill={span.gold ? "var(--gold)" : "var(--brand)"}
+            style={grow(span.delay, "x")}
+          />
+        ))}
+        {LABELS.map((label) => (
+          <g key={label.key} style={{ animation: `fade-in .5s ease-out ${label.delay}ms both` }}>
+            <line
+              x1={label.x - 12}
+              x2={label.x - 4}
+              y1={label.y}
+              y2={label.y}
+              stroke={label.key === "slow" ? "var(--gold)" : "var(--text-muted)"}
+              strokeWidth="1.5"
+              vectorEffect="non-scaling-stroke"
+            />
+            <text
+              x={label.x}
+              y={label.y}
+              dominantBaseline="central"
+              className="font-mono"
+              fontSize="17"
+              fontWeight={label.key === "slow" ? 700 : 500}
+              letterSpacing="0.02em"
+              fill={label.key === "slow" ? "var(--gold)" : "var(--text-secondary)"}
+            >
+              {t(`hero.mark.${label.key}`)}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <figcaption className="mt-3 max-w-[30rem] text-[0.8125rem] leading-relaxed text-ink-muted">
+        {t("hero.mark.caption")}
+      </figcaption>
+    </figure>
+  );
+}
+
 export function SignInStory() {
   const t = useT("shell");
   return (
     <section data-testid="signin-hero" className="max-w-[44rem]">
-      <p className="flex items-center gap-2.5 font-mono text-[11px] font-medium tracking-[0.18em] text-ink-muted uppercase">
-        <span aria-hidden className="h-2 w-2 rounded-[2px] bg-gold" />
-        {t("hero.eyebrow")}
-      </p>
+      <BrandTrace />
 
-      <h2 className="mt-6 font-[family-name:var(--font-display)] text-[clamp(2.3rem,3.3vw,3.4rem)] leading-[1.05] font-extrabold tracking-[-0.04em] text-ink">
+      <h2 className="mt-8 font-[family-name:var(--font-display)] text-[clamp(2.1rem,3vw,3.05rem)] leading-[1.05] font-extrabold tracking-[-0.04em] text-ink">
         {t("hero.titleLead")}
         <br />
         {/* The dash stays with the marked phrase, never opening a line. */}
@@ -114,11 +208,11 @@ export function SignInStory() {
         <span className="font-bold text-ink-muted">{t("hero.titleTail")}</span>
       </h2>
 
-      <p className="mt-7 max-w-[34rem] text-[1.0625rem] leading-relaxed text-ink-secondary">
+      <p className="mt-6 max-w-[34rem] text-[1rem] leading-relaxed text-ink-secondary">
         {t("hero.body")}
       </p>
 
-      <ol className="mt-12 grid gap-x-10 gap-y-7 sm:grid-cols-2">
+      <ol className="mt-10 grid gap-x-10 gap-y-6 sm:grid-cols-2">
         {FEATURES.map((key, i) => (
           <li key={key} className="border-t border-border pt-4">
             <p className="flex items-baseline gap-3">
@@ -136,7 +230,7 @@ export function SignInStory() {
         ))}
       </ol>
 
-      <ul className="mt-12 flex flex-wrap gap-x-6 gap-y-2 text-[0.8125rem] text-ink-muted">
+      <ul className="mt-9 flex flex-wrap gap-x-6 gap-y-2 text-[0.8125rem] text-ink-muted">
         <li className="inline-flex items-center gap-1.5">
           <Server aria-hidden className="h-3.5 w-3.5" />
           {t("hero.trust.selfHosted")}

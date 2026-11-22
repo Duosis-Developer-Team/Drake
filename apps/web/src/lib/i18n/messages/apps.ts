@@ -1,0 +1,77 @@
+/**
+ * Strings for the app launcher: projects as apps, their environments as the
+ * places to open, their services as cards. Project, environment and service
+ * names are data and shown as recorded.
+ */
+import { defineMessages } from "../define";
+
+export const apps = defineMessages({
+  en: {
+    title: "Apps",
+    pickApp: "Choose an app",
+    pickEnv: "Choose an environment",
+    pickService: "Services",
+    meta: "{envs, plural, one {# environment} other {# environments}} · {services, plural, one {# service} other {# services}}",
+    services: "{count, plural, one {# service} other {# services}}",
+    close: "Close {app}",
+    back: "All apps",
+    kind: {
+      prod: "Production",
+      staging: "Staging",
+      test: "Test",
+      dev: "Development",
+      other: "Environment",
+    },
+    stat: {
+      requests: "Requests · 24h",
+      errors: "Errors",
+      p95: "Worst p95",
+      lastHour: "Requests · 1h",
+      failed: "Failed",
+      ready: "Ready",
+      cpu: "CPU",
+      memory: "Memory",
+    },
+    noTraffic: "No traces in this window",
+    trafficPending: "Reading traffic…",
+    trafficTruncated: "Traffic shown for the first {count} services",
+    open: "Open",
+    openDashboard: "Open dashboard",
+    unbound: "Not bound to a workload",
+    bind: "Bind",
+  },
+  tr: {
+    title: "Uygulamalar",
+    pickApp: "Bir uygulama seç",
+    pickEnv: "Bir ortam seç",
+    pickService: "Servisler",
+    meta: "{envs, plural, one {# ortam} other {# ortam}} · {services, plural, one {# servis} other {# servis}}",
+    services: "{count, plural, one {# servis} other {# servis}}",
+    close: "{app} kapat",
+    back: "Tüm uygulamalar",
+    kind: {
+      prod: "Canlı",
+      staging: "Ön canlı",
+      test: "Test ortamı",
+      dev: "Geliştirme",
+      other: "Ortam",
+    },
+    stat: {
+      requests: "İstek · 24 sa",
+      errors: "Hata",
+      p95: "En kötü p95",
+      lastHour: "İstek · 1 sa",
+      failed: "Başarısız",
+      ready: "Hazır",
+      cpu: "CPU",
+      memory: "Bellek",
+    },
+    noTraffic: "Bu aralıkta trace yok",
+    trafficPending: "Trafik okunuyor…",
+    trafficTruncated: "Trafik ilk {count} servis için gösteriliyor",
+    open: "Aç",
+    openDashboard: "Panoyu aç",
+    unbound: "Bir iş yüküne bağlı değil",
+    bind: "Bağla",
+  },
+});
