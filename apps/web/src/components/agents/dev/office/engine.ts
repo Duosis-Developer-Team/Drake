@@ -10,7 +10,7 @@
 import { BODY_ROWS, reduced, type Art, type BodyRow, type Sprite } from "./art";
 import type { Intent } from "./director";
 import { paintMap } from "./placeholder";
-import { CHAIR, findPath, SEATED, SIZE, type Desk, type Point, type Room, type World } from "./world";
+import { CHAIR, findPath, SEATED, SIZE, type Desk, type Point, type Rect, type Room, type World } from "./world";
 
 type Dir = "down" | "left" | "right" | "up";
 
@@ -445,6 +445,10 @@ export class OfficeEngine {
     ctx.setTransform(z, 0, 0, z, -Math.round(view.x * z), -Math.round(view.y * z));
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.still, 0, 0);
+    // The wall screens are HTML under the canvas: open a window onto each, so
+    // whoever stands in front of one is drawn over it, as in the room.
+    const screens = this.screens();
+    for (const s of screens) ctx.clearRect(s.x, s.y, s.w, s.h);
     type Item = { y: number; paint: () => void };
     const items: Item[] = [];
     // Chair, then whoever sits in it, then the desk in front of them.
@@ -469,7 +473,12 @@ export class OfficeEngine {
     // Night falls over everything; screens and racks stay lit.
     if (this.night > 0) {
       ctx.fillStyle = `rgba(6,10,30,${this.night})`;
-      ctx.fillRect(0, 0, this.world.w, this.world.h);
+      // Not over the screens' windows: they stay lit (and would otherwise
+      // darken the HTML beneath them).
+      ctx.beginPath();
+      ctx.rect(0, 0, this.world.w, this.world.h);
+      for (const s of screens) ctx.rect(s.x, s.y, s.w, s.h);
+      ctx.fill("evenodd");
     }
     ctx.globalCompositeOperation = "lighter";
     for (const actor of this.actors.values()) {
@@ -499,6 +508,12 @@ export class OfficeEngine {
     }
     ctx.globalCompositeOperation = "source-over";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  /** Every wall screen's rectangle: product rooms, vacant ones, the cluster and the lobby. */
+  screens(): Rect[] {
+    const { rooms, vacant, cluster, lobby } = this.world;
+    return [...rooms, ...vacant, cluster, lobby].map((r) => r.screen);
   }
 
   /**

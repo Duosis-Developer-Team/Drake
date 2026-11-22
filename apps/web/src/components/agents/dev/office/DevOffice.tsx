@@ -729,7 +729,8 @@ export function DevOffice({
             ref={canvasRef}
             width={deviceW}
             height={deviceH}
-            className="block touch-none select-none"
+            // Above the wall screens (z-0): people walk in front of them.
+            className="relative z-[1] block touch-none select-none"
             style={{ width: size.w, height: viewCssH, imageRendering: "pixelated", cursor: "grab" }}
             role="img"
             aria-label={t("title")}
@@ -743,7 +744,8 @@ export function DevOffice({
           />
         ) : null}
         {ready && world ? (
-          <div className="pointer-events-none absolute inset-0" aria-hidden>
+          // Under the canvas, which leaves a window open over each screen.
+          <div className="pointer-events-none absolute inset-0 z-0" aria-hidden>
             {/* Each product room's screen: the project's logo, its name under it. */}
             {world.rooms.map((room) => {
               const r = roomsById.get(room.id);
