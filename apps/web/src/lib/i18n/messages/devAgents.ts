@@ -105,8 +105,8 @@ export const devAgents = defineMessages({
       title: "Connect Claude Code",
       lead: "Claude Code reports its own usage — cost, tokens, sessions, which tools it ran — over OpenTelemetry. Point it at this deployment and name the project it works on.",
       steps: {
-        env: "Set these where Claude Code runs (shell profile, or the env block of managed settings for everyone):",
-        project: "Name the project in OTEL_RESOURCE_ATTRIBUTES — one of: {projects}. Add your GitHub login as tracesis.person so the usage joins your commits.",
+        env: "Each developer, once: run scripts/connect-claude-code.sh from the Tracesis repository (it asks for the token without echoing it), or put these in the env block of ~/.claude/settings.json:",
+        project: "Use Claude Code 2.1.269 or later (claude update): it reports the repository, and sessions in {projects} are matched on their own. Set your GitHub login as tracesis.person so the usage joins your commits.",
         token: "The ingest token comes from an administrator; it is never shown here.",
       },
       off: "The external door is not open in this deployment, so Claude Code cannot report here yet.",
@@ -213,8 +213,8 @@ export const devAgents = defineMessages({
       title: "Claude Code'u bağla",
       lead: "Claude Code kendi kullanımını — maliyet, token, oturum, hangi araçları çalıştırdığı — OpenTelemetry ile raporlar. Bu kuruluma yönlendir ve üzerinde çalıştığı projeyi belirt.",
       steps: {
-        env: "Bunları Claude Code'un çalıştığı yerde tanımla (kabuk profili ya da herkes için yönetilen ayarların env bloğu):",
-        project: "Projeyi OTEL_RESOURCE_ATTRIBUTES içinde belirt — şunlardan biri: {projects}. Kullanım commit'lerinle birleşsin diye GitHub kullanıcı adını tracesis.person olarak ekle.",
+        env: "Her geliştirici bir kez: Tracesis reposunda scripts/connect-claude-code.sh'ı çalıştırsın (token'ı ekrana yazmadan sorar) ya da bunları ~/.claude/settings.json'daki env bloğuna koysun:",
+        project: "Claude Code 2.1.269 veya sonrası gerekli (claude update): repoyu kendisi bildirir, {projects} içindeki oturumlar kendiliğinden eşleşir. Kullanım commit'lerinle birleşsin diye GitHub kullanıcı adını tracesis.person olarak ekle.",
         token: "Giriş token'ı bir yöneticiden gelir; burada hiç gösterilmez.",
       },
       off: "Bu kurulumda dış kapı açık değil; Claude Code henüz buraya raporlayamaz.",
