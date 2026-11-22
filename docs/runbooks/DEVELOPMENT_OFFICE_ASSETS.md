@@ -58,29 +58,34 @@ cobalt and gold accents, lit from the top left.
 
 `office-map.png` is drawn to a guide; `office-map.json` says where everything is on it, in art pixels. Everything the office does with the map comes from this file: where rooms are, where people walk, where desks go, where screens show.
 
-The guides:
-- `docs/runbooks/office/office-map-guide.png` with `office-map-layout.json` (1024 × 768);
-- `docs/runbooks/office/office-map-guide-768x480.png` with `office-map-layout-768x480.json` (the compact 768 × 480).
+The shipped map is the compact 768 × 480, drawn to
+`docs/runbooks/office/office-map-guide-768x480.png` with
+`office-map-layout-768x480.json`. The larger 1024 × 768 guide
+(`office-map-guide.png`, `office-map-layout.json`) still works with the same
+engine: a map of any size is fine as long as its JSON describes it.
 
 ```jsonc
 {
-  "size": [1024, 768],
-  "back_wall": 48,          // every room's back wall: its floor starts below it
-  "outer_wall": 16,
+  "size": [768, 480],
+  "back_wall": 40,          // every room's back wall: its floor starts below it
+  "outer_wall": 8,
   "rooms": {
     "room-1": {
-      "rect": [16, 16, 336, 224],      // x1, y1, x2, y2
+      "rect": [8, 8, 248, 160],        // x1, y1, x2, y2
       "kind": "product",               // product | cluster | lobby
-      "screen": [140, 22, 72, 32],     // x, y, w, h: a dark panel on the back wall
-      "doors": [{ "side": "S", "x": 160, "width": 32 }],   // N: through the back wall
-      "free_floor": [40, 96, 272, 112] // where desks go (lobby: where people stand)
+      "screen": [100, 14, 56, 24],     // x, y, w, h: a dark panel on the back wall
+      "doors": [{ "side": "S", "x": 112, "width": 32 }],   // N: through the back wall
+      "free_floor": [20, 66, 216, 86]  // where desks go (lobby: where people stand)
     },
-    "cluster": { "loading": [512, 416], ... },            // where deliveries are put down
-    "lobby": { "entrance": [488, 48],                      // x, width in the outer wall
-               "blocked": [[398, 696, 80, 36], ...] }      // furniture nobody walks through
+    "cluster": { "loading": [384, 288], ... },            // where deliveries are put down
+    "lobby": { "entrance": [364, 40],                      // x, width in the outer wall
+               "blocked": [[270, 386, 38, 22], ...] }      // furniture nobody walks through
   }
 }
 ```
+
+The lobby's `blocked` list covers the coffee bar, the reception desk, both
+sofas, and the plants by the side walls.
 
 - **Rooms:** there must be exactly one cluster, one lobby, and at least one product room.
 - **Corridors:** whatever lies between two rows of rooms, wall to wall.
@@ -150,7 +155,24 @@ For 4× art the levels are therefore 1, 2, 3, 4, 8, 12…
 
 Furniture and the map are always drawn at Z. The shrunk copies are made once per frame and factor and kept. Nothing is ever resampled by an arbitrary ratio.
 
-**Fit.** The office opens, and "fit" returns, at the largest level where its whole width fits the panel. A phone pans.
+**The stage.** The Office tab takes the whole content area: no page frame, as tall as the window below the app header, no page scroll. The controls float over the canvas as small translucent chips:
+- top left: the page tabs, then live/replay and how many people are at work;
+- top right: the 7/30/90-day window, connect, zoom out, fit, zoom in, and full screen;
+- bottom, in replay: the day bar (clock, date, play, speed, timeline).
+
+Full screen uses the browser's Fullscreen API on the stage; Esc leaves it, and so does picking a person (their drawer opens on the page).
+
+**Fit.** The office opens, and "fit" returns, at the largest level where the whole office fits the stage in both directions. When the office is smaller than the stage, it is centred, kept clear of the top controls (and of the day bar in replay).
+
+| Screen | Stage (CSS) | Fit |
+|--------|-------------|-----|
+| 14" MacBook Pro, 1512 × 860, sidebar open | 1280 × 804 at 2× | Z = 3 |
+| 1440 × 900 at 2× | 1208 × 844 | Z = 3 |
+| The same window at 1× | 1208 × 844 | Z = 1 |
+| A browser shorter than ≈ 800 CSS px at 2× | | Z = 2 |
+| Phone, 390 wide at 3× | 358 × 780 | Z = 1, and it pans when zoomed in |
+
+At Z = 3 the 768 × 480 map is 2304 × 1440 device pixels, 1152 × 720 CSS at 2×.
 
 **People's names** are not shown all the time:
 - **Hover or pick:** a small dark label with the person's name, and a thin outline around them.

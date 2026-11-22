@@ -1,14 +1,14 @@
 /**
- * The office map's geometry: one connected building, 1024 × 768 art pixels.
+ * The office map's geometry: one connected building (768 × 480 art pixels as shipped).
  *
  * An outer wall; three product rooms along the top; a product room either
  * side of the cluster's server room in the middle; a product room either side
  * of the lobby at the bottom, its main entrance in the outer wall; two
- * full-width corridors between the rows. Every room has a 48-pixel back wall
- * with a screen on it, doors, and free floor where desks go.
+ * full-width corridors between the rows. Every room has a back wall with a
+ * screen on it, doors, and free floor where desks go.
  *
- * The art's own `office-map.json` (same shape) replaces this when the map is
- * drawn; this default is the guide the map is drawn to.
+ * The map's own `office-map.json` (same shape) is what the office uses; the
+ * default here is the shipped one, for when that file cannot be read.
  */
 
 export interface MapRect {
@@ -67,45 +67,21 @@ interface LayoutFile {
   >;
 }
 
+/** The shipped map's geometry (768 × 480): what `office-map.json` says when there is none. */
 export const DEFAULT_LAYOUT_FILE: LayoutFile = {
-  size: [1024, 768],
-  back_wall: 48,
-  outer_wall: 16,
+  size: [768, 480],
+  back_wall: 40,
+  outer_wall: 8,
   rooms: {
-    "room-1": { rect: [16, 16, 336, 224], kind: "product", screen: [140, 22, 72, 32], doors: [{ side: "S", x: 160, width: 32 }], free_floor: [40, 96, 272, 112] },
-    "room-2": { rect: [352, 16, 672, 224], kind: "product", screen: [476, 22, 72, 32], doors: [{ side: "S", x: 496, width: 32 }], free_floor: [376, 96, 272, 112] },
-    "room-3": { rect: [688, 16, 1008, 224], kind: "product", screen: [812, 22, 72, 32], doors: [{ side: "S", x: 832, width: 32 }], free_floor: [712, 96, 272, 112] },
-    "room-4": { rect: [16, 272, 272, 464], kind: "product", screen: [108, 278, 72, 32], doors: [{ side: "N", x: 200, width: 32 }], free_floor: [40, 352, 208, 96] },
-    cluster: {
-      rect: [288, 272, 736, 464],
-      kind: "cluster",
-      screen: [448, 278, 128, 40],
-      doors: [
-        { side: "N", x: 664, width: 32 },
-        { side: "S", x: 496, width: 32 },
-      ],
-      loading: [512, 416],
-    },
-    "room-5": { rect: [752, 272, 1008, 464], kind: "product", screen: [844, 278, 72, 32], doors: [{ side: "N", x: 936, width: 32 }], free_floor: [776, 352, 208, 96] },
-    "room-6": { rect: [16, 512, 336, 752], kind: "product", screen: [140, 518, 72, 32], doors: [{ side: "N", x: 264, width: 32 }], free_floor: [40, 592, 272, 144] },
-    lobby: {
-      rect: [352, 512, 672, 752],
-      kind: "lobby",
-      screen: [448, 518, 128, 40],
-      doors: [{ side: "N", x: 600, width: 32 }],
-      entrance: [488, 48],
-      free_floor: [392, 602, 240, 80],
-      // The drawn lobby's reception desk, sofas, coffee bar and plants.
-      blocked: [
-        [398, 696, 80, 36],
-        [356, 596, 34, 66],
-        [634, 596, 34, 66],
-        [538, 562, 54, 36],
-        [362, 668, 26, 34],
-        [638, 674, 28, 34],
-      ],
-    },
-    "room-7": { rect: [688, 512, 1008, 752], kind: "product", screen: [812, 518, 72, 32], doors: [{ side: "N", x: 936, width: 32 }], free_floor: [712, 592, 272, 144] },
+    "room-1": { rect: [8, 8, 248, 160], kind: "product", screen: [100, 14, 56, 24], doors: [{ side: "S", x: 112, width: 32 }], free_floor: [20, 66, 216, 86] },
+    "room-2": { rect: [264, 8, 504, 160], kind: "product", screen: [356, 14, 56, 24], doors: [{ side: "S", x: 368, width: 32 }], free_floor: [276, 66, 216, 86] },
+    "room-3": { rect: [520, 8, 760, 160], kind: "product", screen: [612, 14, 56, 24], doors: [{ side: "S", x: 624, width: 32 }], free_floor: [532, 66, 216, 86] },
+    "room-4": { rect: [8, 192, 200, 320], kind: "product", screen: [60, 198, 56, 24], doors: [{ side: "N", x: 144, width: 32 }], free_floor: [20, 250, 168, 62] },
+    cluster: { rect: [216, 192, 552, 320], kind: "cluster", screen: [320, 198, 96, 28], doors: [{ side: "N", x: 496, width: 32 }, { side: "S", x: 368, width: 32 }], free_floor: [228, 250, 312, 62], loading: [384, 288] },
+    "room-5": { rect: [568, 192, 760, 320], kind: "product", screen: [620, 198, 56, 24], doors: [{ side: "N", x: 704, width: 32 }], free_floor: [580, 250, 168, 62] },
+    "room-6": { rect: [8, 352, 248, 472], kind: "product", screen: [84, 358, 56, 24], doors: [{ side: "N", x: 192, width: 32 }], free_floor: [20, 410, 216, 54] },
+    lobby: { rect: [264, 352, 504, 472], kind: "lobby", screen: [320, 358, 96, 28], doors: [{ side: "N", x: 448, width: 32 }], free_floor: [276, 410, 216, 54], entrance: [364, 40], blocked: [[270, 386, 38, 22], [328, 390, 50, 18], [264, 420, 13, 30], [492, 420, 13, 30], [266, 398, 10, 16], [266, 449, 10, 17], [492, 396, 10, 15], [492, 449, 10, 17]] },
+    "room-7": { rect: [520, 352, 760, 472], kind: "product", screen: [596, 358, 56, 24], doors: [{ side: "N", x: 704, width: 32 }], free_floor: [532, 410, 216, 54] },
   },
 };
 

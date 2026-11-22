@@ -38,18 +38,22 @@ function legal(world: World, path: { x: number; y: number }[]) {
 }
 
 describe("the map's layout", () => {
-  it("reads the guide: nine rooms, the cluster in the middle, two corridors", () => {
-    expect(DEFAULT_LAYOUT.w).toBe(1024);
-    expect(DEFAULT_LAYOUT.h).toBe(768);
+  it("ships the compact map: nine rooms, the cluster in the middle, two corridors", () => {
+    expect([DEFAULT_LAYOUT.w, DEFAULT_LAYOUT.h, DEFAULT_LAYOUT.backWall, DEFAULT_LAYOUT.outerWall]).toEqual([768, 480, 40, 8]);
     expect(DEFAULT_LAYOUT.slots.filter((s) => s.kind === "product")).toHaveLength(7);
     const cluster = DEFAULT_LAYOUT.slots.find((s) => s.kind === "cluster");
-    expect(cluster?.rect.x).toBeGreaterThan(256);
-    expect(cluster?.loading).toEqual({ x: 512, y: 416 });
+    expect(cluster?.loading).toEqual({ x: 384, y: 288 });
     expect(DEFAULT_LAYOUT.corridors.map((c) => [c.y, c.h])).toEqual([
-      [224, 48],
-      [464, 48],
+      [160, 32],
+      [320, 32],
     ]);
+    expect(DEFAULT_LAYOUT.slots.find((s) => s.kind === "lobby")?.blocked.length).toBeGreaterThan(3);
     expect(SLOT_ORDER.every((id) => DEFAULT_LAYOUT.slots.some((s) => s.id === id))).toBe(true);
+  });
+
+  it("matches the map file it ships with", () => {
+    const shipped = parseLayout(JSON.parse(readFileSync(resolve(__dirname, "../../../../../public/office/office-map.json"), "utf8")));
+    expect(shipped).toEqual(DEFAULT_LAYOUT);
   });
 
   it("refuses a map file that does not hold together", () => {
@@ -72,9 +76,11 @@ describe("rooms for repositories", () => {
     expect(slotOf("gh:busy")).toBe("room-2");
     expect(slotOf("gh:quiet")).toBe("room-1");
     expect(slotOf("gh:outside")).toBe("room-3");
-    // The large rooms seat six; the narrow ones beside the cluster fewer.
+    // The compact map's large rooms seat three in a row; anyone more stands.
     const many = Array.from({ length: 9 }, (_, i) => `p${i}`);
-    expect(layoutOffice([{ id: "gh:x", desks: many, catalogued: true, commits: 1 }]).rooms[0].desks).toHaveLength(6);
+    const [big] = layoutOffice([{ id: "gh:x", desks: many, catalogued: true, commits: 1 }]).rooms;
+    expect(big.desks).toHaveLength(3);
+    expect(big.standing.length).toBeGreaterThanOrEqual(4);
     expect(byActivity(repos(3)).map((r) => r.id)).toEqual(["gh:0", "gh:1", "gh:2"]);
   });
 
@@ -123,16 +129,18 @@ describe("rooms for repositories", () => {
   });
 });
 
-describe("the compact map (768 × 480)", () => {
-  const file = JSON.parse(readFileSync(resolve(__dirname, "../../../../../../../docs/runbooks/office/office-map-layout-768x480.json"), "utf8"));
+describe("the larger guide (1024 × 768)", () => {
+  const file = JSON.parse(readFileSync(resolve(__dirname, "../../../../../../../docs/runbooks/office/office-map-layout.json"), "utf8"));
   const layout = parseLayout(file);
 
-  it("reads it whole: the same nine rooms, smaller", () => {
+  it("reads it whole: the same nine rooms, larger, and seats six in a large room", () => {
     expect(layout).not.toBeNull();
     if (!layout) return;
-    expect([layout.w, layout.h, layout.backWall, layout.outerWall]).toEqual([768, 480, 40, 8]);
+    expect([layout.w, layout.h, layout.backWall, layout.outerWall]).toEqual([1024, 768, 48, 16]);
     expect(layout.slots).toHaveLength(9);
-    expect(layout.corridors.map((c) => c.h)).toEqual([32, 32]);
+    expect(layout.corridors.map((c) => c.h)).toEqual([48, 48]);
+    const many = Array.from({ length: 9 }, (_, i) => `p${i}`);
+    expect(layoutOffice([{ id: "gh:x", desks: many, catalogued: true, commits: 1 }], layout).rooms[0].desks).toHaveLength(6);
   });
 
   it("seats people, keeps the lobby spaced, and walks every desk from the lobby", () => {

@@ -79,8 +79,8 @@
     },
     "office-map": {
       "file": "office-map.png",
-      "width": 1024,
-      "height": 768,
+      "width": 768,
+      "height": 480,
       "alpha": false,
       "layout": "office-map.json"
     },

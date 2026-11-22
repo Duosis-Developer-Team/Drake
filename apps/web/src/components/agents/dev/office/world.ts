@@ -97,7 +97,8 @@ export interface RoomInput {
   commits?: number;
 }
 
-const DESK_GAP = 24;
+/** Between two desks of a row: room for a plant, not for a person (they sit from behind). */
+const DESK_GAP = 12;
 /** Between two rows of desks: the first's legs, a walkway, the second's chair. */
 const ROW_STEP = FOOTPRINT.h + 16;
 

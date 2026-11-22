@@ -36,8 +36,9 @@ ENVIRONMENT = {
     "floor-corridor": (32, 32, False),
     "desk": (64, 48, True),
     "box": (16, 16, True),
-    # The whole office drawn as one map, and the two props drawn around a seated person.
-    "office-map": (1024, 768, False),
+    # The whole office drawn as one map (its size is whatever its office-map.json
+    # says; this is the shipped one), and the two props around a seated person.
+    "office-map": (768, 480, False),
     "chair": (32, 32, True),
     "desk-front": (64, 40, True),
 }
@@ -195,8 +196,20 @@ def binary_alpha(rows: list[bytearray], width: int, height: int) -> bool:
     return all(alpha(rows, x, y) in (0, 255) for y in range(height) for x in range(width))
 
 
+def map_size(kit: Path) -> tuple[int, int]:
+    """The map's size as its geometry file gives it, else the shipped one."""
+    try:
+        size = json.loads((kit / MAP_LAYOUT).read_text()).get("size") or []
+        if len(size) == 2 and all(isinstance(v, int) and 256 <= v <= 4096 for v in size):
+            return int(size[0]), int(size[1])
+    except (OSError, ValueError):
+        pass
+    return ENVIRONMENT["office-map"][0], ENVIRONMENT["office-map"][1]
+
+
 def check_environment(kit: Path, report: Report, rescale: bool, staged: dict[str, tuple]) -> None:
-    for name, (w, h, transparent) in ENVIRONMENT.items():
+    expected = {**ENVIRONMENT, "office-map": (*map_size(kit), False)}
+    for name, (w, h, transparent) in expected.items():
         path = kit / f"{name}.png"
         if not path.exists():
             report.notes.append(f"{name}.png missing: the office draws a placeholder")
@@ -326,7 +339,8 @@ def check_map_layout(kit: Path, report: Report) -> None:
         report.fail(MAP_LAYOUT, f"not JSON: {error}")
         return
     w, h = (layout.get("size") or [0, 0])[:2]
-    mw, mh = ENVIRONMENT["office-map"][:2]
+    # The picture's own size, from its header.
+    mw, mh = struct.unpack(">II", (kit / "office-map.png").read_bytes()[16:24])
     if (w, h) != (mw, mh):
         report.fail(MAP_LAYOUT, f"size {w}x{h}, the map is {mw}x{mh}")
     rooms = layout.get("rooms") or {}

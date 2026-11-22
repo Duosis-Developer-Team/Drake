@@ -114,13 +114,14 @@ const C = {
   green: "#47d27b",
   skin: "#e3ad86",
   skin2: "#c98f69",
-  jacket: "#26314f",
-  jacket2: "#35436b",
-  jacket3: "#1c2440",
-  shirt: "#141927",
-  trouser: "#1b1f2d",
-  shoe: "#0c0e15",
-  shoe2: "#2b3040",
+  // The placeholder body: lighter than the floors, so a newcomer reads on them.
+  jacket: "#5b70a8",
+  jacket2: "#7a8fc6",
+  jacket3: "#47598b",
+  shirt: "#e3e8f4",
+  trouser: "#3c4560",
+  shoe: "#20242f",
+  shoe2: "#4a5168",
   card: "#c28b55",
   card2: "#9b6a3c",
   tape: "#ead09a",
@@ -316,9 +317,10 @@ function arms(ctx: CanvasRenderingContext2D, dir: Dir, swing: number, bob: numbe
 
 function bodyFrame(draw: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
   const [c, ctx] = canvas(SIZE.frame.w, SIZE.frame.h);
-  // A soft shadow is drawn by the engine; the frame holds the figure only.
+  // A soft shadow is drawn by the engine; the frame holds the figure only,
+  // ringed in a soft light line so it stands out on a dark floor.
   draw(ctx);
-  outline(c);
+  outline(c, "#b9c4e4");
   return c;
 }
 

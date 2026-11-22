@@ -304,18 +304,23 @@ export function PillTabs<T extends string>({
   value,
   tabs,
   onChange,
+  compact = false,
 }: {
   label: string;
   value: T;
   tabs: { key: T; label: string; icon?: LucideIcon }[];
   onChange: (key: T) => void;
+  /** Smaller pills, for a row floating over a full-size view. */
+  compact?: boolean;
 }) {
   return (
     <div
       role="tablist"
       aria-label={label}
       // On a narrow screen the row scrolls inside itself instead of the page.
-      className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-border bg-surface p-1 shadow-panel [scrollbar-width:none]"
+      className={`inline-flex max-w-full items-center overflow-x-auto rounded-full border border-border bg-surface shadow-panel [scrollbar-width:none] ${
+        compact ? "gap-0.5 p-0.5" : "gap-1 p-1"
+      }`}
     >
       {tabs.map((tab) => {
         const selected = tab.key === value;
@@ -327,13 +332,15 @@ export function PillTabs<T extends string>({
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(tab.key)}
-            className={`inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 text-body font-medium transition-colors ${
+            className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full font-medium transition-colors ${
+              compact ? "h-7 gap-1.5 px-2.5 text-caption" : "h-9 gap-2 px-4 text-body"
+            } ${
               selected
                 ? "bg-accent text-ink-inverse"
                 : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
             }`}
           >
-            {Icon ? <Icon aria-hidden className="h-4 w-4" /> : null}
+            {Icon ? <Icon aria-hidden className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} /> : null}
             {tab.label}
           </button>
         );
