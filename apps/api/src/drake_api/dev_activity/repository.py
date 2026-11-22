@@ -668,6 +668,77 @@ async def delete_alias(connection: AsyncConnection, *, kind: str, alias: str) ->
     return bool(result.rowcount)
 
 
+async def _person_logins(
+    connection: AsyncConnection,
+    *,
+    project_ids: list[Any] | None,
+    org_wide: bool,
+    now: datetime | None = None,
+) -> dict[str, set[str]]:
+    """Every person on the map within the widest window → their GitHub logins.
+
+    `project_ids=None` means everything (an operator's view, no caller).
+    People without a login (a commit name, an unlinked Claude identity) are
+    present with no logins.
+    """
+    since = (now or datetime.now(UTC)) - timedelta(days=WINDOWS["90d"])
+    people = await _people(connection)
+    params: dict[str, Any] = {
+        "ids": project_ids or [uuid.UUID(int=0)],
+        "org_wide": org_wide,
+        "everything": project_ids is None,
+        "since": since,
+        "day": since.date(),
+    }
+    visible = "(:everything OR project_id = ANY(:ids) OR (:org_wide AND project_id IS NULL))"
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT DISTINCT 'commit', author_login, author_name FROM dev_commits
+                WHERE authored_at >= :since AND {visible}
+                UNION
+                SELECT DISTINCT 'claude', identity, person_hint FROM dev_agent_days
+                WHERE day >= :day AND {visible}
+                """  # noqa: S608 - fixed fragment; values are bound parameters
+            ),
+            params,
+        )
+    ).all()
+    found: dict[str, set[str]] = defaultdict(set)
+    for source, first, second in rows:
+        if source == "commit":
+            login = str(first) if first else None
+            if login and login.endswith("[bot]"):
+                continue
+            key = people.of_login(login, str(second or ""))
+            found[key].update([login] if login else [])
+        else:
+            hint = str(second) if second else None
+            key, _ = people.of_claude(str(first), hint)
+            linked = hint and not hint.endswith("[bot]") and key == people.of_login(hint, "")
+            found[key].update([hint] if linked and hint else [])
+    return dict(found)
+
+
+async def visible_people(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    now: datetime | None = None,
+) -> dict[str, set[str]]:
+    """The people this caller can see on the map → their GitHub logins.
+
+    Only rows the caller may see count — a commit, or a Claude Code session —
+    so neither a picture nor a portrait ever answers "does this person exist
+    elsewhere".
+    """
+    project_ids, org_wide = await _visibility(connection, principal)
+    return await _person_logins(
+        connection, project_ids=list(project_ids), org_wide=org_wide, now=now
+    )
+
+
 async def person_login(
     connection: AsyncConnection,
     principal: Principal,
@@ -677,49 +748,98 @@ async def person_login(
 ) -> str | None:
     """The GitHub login whose picture stands for a person, if the caller sees them.
 
-    Only logins behind rows the caller may see on the map count — a commit,
-    or a Claude Code session naming the login — so a picture is never an
-    answer to "does this person exist elsewhere". The person's own key wins
-    when it is one of their logins; otherwise the first, alphabetically.
+    The person's own key wins when it is one of their logins; otherwise the
+    first, alphabetically.
     """
-    project_ids, org_wide = await _visibility(connection, principal)
-    since = (now or datetime.now(UTC)) - timedelta(days=WINDOWS["90d"])
-    people = await _people(connection)
-    params = {
-        "ids": project_ids or [uuid.UUID(int=0)],
-        "org_wide": org_wide,
-        "since": since,
-        "day": since.date(),
-    }
-    visible = "(project_id = ANY(:ids) OR (:org_wide AND project_id IS NULL))"
-    rows = (
-        await connection.execute(
-            text(
-                f"""
-                SELECT DISTINCT author_login FROM dev_commits
-                WHERE author_login IS NOT NULL AND authored_at >= :since AND {visible}
-                UNION
-                SELECT DISTINCT person_hint FROM dev_agent_days
-                WHERE person_hint IS NOT NULL AND day >= :day AND {visible}
-                """  # noqa: S608 - fixed fragment; values are bound parameters
-            ),
-            params,
-        )
-    ).all()
     logins = sorted(
-        {
-            str(r[0])
-            for r in rows
-            if r[0]
-            and not str(r[0]).endswith("[bot]")
-            and people.of_login(str(r[0]), "") == person_key
-        },
-        key=str.lower,
+        (await visible_people(connection, principal, now=now)).get(person_key, set()), key=str.lower
     )
     for login in logins:
         if login.lower() == person_key.lower():
             return login
     return logins[0] if logins else None
+
+
+async def map_people(
+    connection: AsyncConnection, *, now: datetime | None = None
+) -> dict[str, set[str]]:
+    """Every person on the map, whoever looks (operators' tooling only)."""
+    return await _person_logins(connection, project_ids=None, org_wide=True, now=now)
+
+
+# --------------------------------------------------------------------------
+# Portraits
+# --------------------------------------------------------------------------
+
+
+async def portrait(connection: AsyncConnection, person_key: str) -> dict[str, Any] | None:
+    row = (
+        await connection.execute(
+            text(
+                "SELECT media_type, content, updated_at FROM dev_person_portraits "
+                "WHERE person_key = :k"
+            ),
+            {"k": person_key},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return {"media_type": str(row[0]), "content": bytes(row[1]), "updated_at": row[2]}
+
+
+async def set_portrait(
+    connection: AsyncConnection,
+    *,
+    person_key: str,
+    media_type: str,
+    content: bytes,
+    width: int,
+    height: int,
+    updated_by: uuid.UUID | None = None,
+) -> None:
+    await connection.execute(
+        text(
+            """
+            INSERT INTO dev_person_portraits
+              (person_key, media_type, content, width, height, updated_by, updated_at)
+            VALUES (:k, :t, :c, :w, :h, :by, now())
+            ON CONFLICT (person_key) DO UPDATE SET
+              media_type = EXCLUDED.media_type, content = EXCLUDED.content,
+              width = EXCLUDED.width, height = EXCLUDED.height,
+              updated_by = EXCLUDED.updated_by, updated_at = now()
+            """
+        ),
+        {"k": person_key, "t": media_type, "c": content, "w": width, "h": height, "by": updated_by},
+    )
+
+
+async def delete_portrait(connection: AsyncConnection, person_key: str) -> bool:
+    result = await connection.execute(
+        text("DELETE FROM dev_person_portraits WHERE person_key = :k"), {"k": person_key}
+    )
+    return bool(result.rowcount)
+
+
+async def list_portraits(connection: AsyncConnection) -> list[dict[str, Any]]:
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT person_key, media_type, width, height, octet_length(content), updated_at "
+                "FROM dev_person_portraits ORDER BY person_key"
+            )
+        )
+    ).all()
+    return [
+        {
+            "person_key": str(r[0]),
+            "media_type": str(r[1]),
+            "width": int(r[2]),
+            "height": int(r[3]),
+            "bytes": int(r[4]),
+            "updated_at": r[5],
+        }
+        for r in rows
+    ]
 
 
 async def avatar_installation(connection: AsyncConnection) -> int | None:

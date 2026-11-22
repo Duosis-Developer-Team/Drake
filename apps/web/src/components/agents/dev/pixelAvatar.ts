@@ -17,6 +17,8 @@ import { readFeatures, render, SAMPLE, SPRITE } from "./arcadeSprite";
 const loads = new Map<string, Promise<string | null>>();
 const settled = new Map<string, string | null>();
 const backdrops = new Map<string, string>();
+const portraits = new Set<string>();
+const PORTRAIT_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export function avatarUrl(personKey: string): string {
   return `/v1/agents/dev/people/${encodeURIComponent(personKey)}/avatar`;
@@ -82,11 +84,32 @@ export function crispSize(size: number, devicePixelRatio = 1): number {
   return Math.max(unit, Math.floor(size / unit + 1e-6) * unit);
 }
 
+/** Whether the person's face is a hand-made portrait (shown as is) rather than an arcade sprite. */
+export function isPortrait(personKey: string): boolean {
+  return portraits.has(personKey);
+}
+
+async function dataUrl(blob: Blob): Promise<string | null> {
+  try {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return `data:${blob.type};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
+}
+
 export function settledAvatar(personKey: string): string | null | undefined {
   return settled.get(personKey);
 }
 
-/** The person's arcade picture, or null for "draw the initials". Never rejects. */
+/**
+ * The person's face, or null for "draw the initials". Never rejects.
+ *
+ * A hand-made portrait (`X-Tracesis-Avatar: portrait`) is kept as it is; a
+ * GitHub picture is redrawn as an arcade character.
+ */
 export function loadAvatar(personKey: string): Promise<string | null> {
   let pending = loads.get(personKey);
   if (!pending) {
@@ -95,6 +118,12 @@ export function loadAvatar(personKey: string): Promise<string | null> {
         const response = await fetch(avatarUrl(personKey), { credentials: "include" });
         if (response.status !== 200) return null;
         const blob = await response.blob();
+        if (response.headers.get("X-Tracesis-Avatar") === "portrait") {
+          if (!PORTRAIT_TYPES.has(blob.type)) return null;
+          const url = await dataUrl(blob);
+          if (url) portraits.add(personKey);
+          return url;
+        }
         if (blob.type !== "image/png" && blob.type !== "image/jpeg") return null;
         const url = URL.createObjectURL(blob);
         try {

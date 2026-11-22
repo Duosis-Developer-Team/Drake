@@ -82,31 +82,56 @@ async def person_avatar(
     person_key: str = Path(min_length=1, max_length=100, pattern=r"^[^@\s/]+$"),
     auth: AuthContext = Depends(require_auth),
 ) -> Response:
-    """A person's GitHub picture, fetched by Tracesis so the browser never calls GitHub.
+    """A person's face: their hand-made portrait, else their GitHub picture.
 
-    Scoped like the map: only a login behind rows this caller may see
-    counts. 204 means "draw the initials" — no login, a bot, no picture, or
-    one that is not a small PNG/JPEG; it is never a 404, so asking says
-    nothing about who exists.
+    Scoped like the map: only a person behind rows this caller may see
+    counts. `X-Tracesis-Avatar` says which it is (`portrait` is shown as is;
+    `github` is redrawn as an arcade character by the browser, which never
+    calls GitHub). 204 means "draw the initials" — someone not visible, no
+    login, a bot, no picture, or one that is not a small PNG/JPEG; it is
+    never a 404, so asking says nothing about who exists.
     """
     settings: Settings = request.app.state.settings
     avatars = getattr(request.app.state, "dev_avatars", None)
-    avatar = None
-    if avatars is not None:
-        async with get_engine(settings).connect() as connection:
-            login = await repo.person_login(connection, auth.principal, person_key)
-            installation = await repo.avatar_installation(connection) if login else None
-        if login:
-            avatar = await avatars.of_login(login, installation)
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+    }
+    async with get_engine(settings).connect() as connection:
+        people = await repo.visible_people(connection, auth.principal)
+        if person_key not in people:
+            return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
+        # A hand-made portrait, when an operator set one, stands for the person.
+        made = await repo.portrait(connection, person_key)
+        if made is not None:
+            etag = f'"p-{int(made["updated_at"].timestamp() * 1000)}"'
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304, headers={"ETag": etag})
+            return Response(
+                content=made["content"],
+                media_type=made["media_type"],
+                headers={
+                    **headers,
+                    "Cache-Control": "private, max-age=3600",
+                    "ETag": etag,
+                    "X-Tracesis-Avatar": "portrait",
+                },
+            )
+        logins = sorted(people[person_key], key=str.lower)
+        login = next(
+            (x for x in logins if x.lower() == person_key.lower()), logins[0] if logins else None
+        )
+        installation = await repo.avatar_installation(connection) if login and avatars else None
+    avatar = await avatars.of_login(login, installation) if login and avatars is not None else None
     if avatar is None:
         return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
     return Response(
         content=avatar.content,
         media_type=avatar.media_type,
         headers={
+            **headers,
             "Cache-Control": "private, max-age=86400",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "X-Tracesis-Avatar": "github",
         },
     )
 

@@ -34,7 +34,7 @@ import {
   type DevRepository,
 } from "@/lib/devAgents";
 
-import { avatarBackdrop, crispSize, loadAvatar, mayHaveAvatar, settledAvatar } from "./pixelAvatar";
+import { avatarBackdrop, crispSize, isPortrait, loadAvatar, mayHaveAvatar, settledAvatar } from "./pixelAvatar";
 
 export type Pick =
   | { kind: "person"; key: string }
@@ -61,9 +61,10 @@ const MAX_REPOSITORIES = 18;
 const cardHeight = (repo: DevRepository) => (repo.catalogued ? PROJECT_H : REPO_H);
 
 /**
- * A person: an arcade character coloured from their GitHub picture when
- * Tracesis has one, their initials otherwise. The tile is a rounded square
- * with a stepped "pixel" border in the person's colour; nothing moves.
+ * A person: their hand-made portrait when an operator set one, else an arcade
+ * character coloured from their GitHub picture, else their initials. The
+ * tile is a rounded square with a stepped "pixel" border in the person's
+ * colour; nothing moves.
  */
 export function Avatar({ person, size = 36 }: { person: Pick_ | DevPerson; size?: number }) {
   const colour = personColour(person.key);
@@ -81,6 +82,41 @@ export function Avatar({ person, size = 36 }: { person: Pick_ | DevPerson; size?
   }, [person.key, wanted]);
   if (wanted && pixels) {
     const step = Math.max(1, Math.round(size / 18));
+    // A stepped border: the surface, then the person's colour, then a darker
+    // edge — read as a sprite frame rather than a photo ring.
+    const frame = `0 0 0 ${step}px var(--surface-1), 0 0 0 ${step * 2}px ${colour}, 0 0 0 ${step * 3}px color-mix(in srgb, ${colour} 45%, black)`;
+    if (isPortrait(person.key)) {
+      // A hand-made, high-resolution portrait, often on a transparent
+      // background: shown whole and smooth on a soft fill of the person's
+      // colour, so it reads on either theme.
+      return (
+        <span
+          aria-hidden
+          data-testid={`dev-avatar-portrait-${person.key}`}
+          className="relative block shrink-0 overflow-hidden"
+          style={{
+            width: size,
+            height: size,
+            borderRadius: Math.round(size * 0.22),
+            background: `color-mix(in srgb, ${colour} 28%, var(--surface-2))`,
+            boxShadow: frame,
+          }}
+        >
+          <img
+            src={pixels}
+            alt=""
+            width={size}
+            height={size}
+            draggable={false}
+            className="block h-full w-full object-cover"
+            // Portraits keep a little margin, a transparent band under the
+            // shoulders included; at map sizes the face matters more, so lean
+            // in and let the shoulders sit on the tile's bottom edge.
+            style={{ imageRendering: "auto", transform: "translateY(6%) scale(1.12)", transformOrigin: "50% 100%" }}
+          />
+        </span>
+      );
+    }
     const sprite = crispSize(size, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
     return (
       <span
@@ -92,9 +128,7 @@ export function Avatar({ person, size = 36 }: { person: Pick_ | DevPerson; size?
           height: size,
           borderRadius: Math.round(size * 0.22),
           background: avatarBackdrop(person.key) ?? "var(--surface-2)",
-          // A stepped border: the surface, then the person's colour, then a
-          // darker edge — read as a sprite frame rather than a photo ring.
-          boxShadow: `0 0 0 ${step}px var(--surface-1), 0 0 0 ${step * 2}px ${colour}, 0 0 0 ${step * 3}px color-mix(in srgb, ${colour} 45%, black)`,
+          boxShadow: frame,
         }}
       >
         <img
