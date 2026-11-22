@@ -16,7 +16,7 @@
 import { Maximize2, Minus, Pause, Play, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { TracesisMark } from "@/components/shell/Brand";
+import { TracesisWordmark } from "@/components/shell/Brand";
 import { DataState } from "@/components/state/DataState";
 import { Button, SegmentedControl } from "@/components/ui/controls";
 import { useT } from "@/lib/i18n";
@@ -48,7 +48,8 @@ import {
   type TimedEvent,
 } from "./director";
 import { OfficeEngine } from "./engine";
-import { layoutOffice, roomAt, type Point, type Rect, type World } from "./world";
+import { DEFAULT_LAYOUT } from "./layout";
+import { layoutOffice, OTHER, roomAt, type Point, type Rect, type World } from "./world";
 
 type Mode = "live" | "replay";
 const LIVE_POLL_MS = 30_000;
@@ -76,9 +77,11 @@ interface FeedItem {
  */
 export function zoomLevels(density: Density, dpr: number): number[] {
   const out = [1, 2, 4].filter((z) => z < density && density % z === 0);
+  // 4× art also at Z = 3: drawn one device pixel per sprite pixel, unshrunk.
+  if (density === 4) out.push(3);
   const top = Math.max(density * 2, Math.round(8 * dpr));
   for (let z = density; z <= top; z += density) out.push(z);
-  return out;
+  return out.sort((a, b) => a - b);
 }
 
 /** The largest zoom at which the whole office fits the panel's width: the first look and "fit". */
@@ -146,7 +149,7 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
   const [clock, setClock] = useState(0);
   const [camera, setCamera] = useState<Camera | null>(null);
   const [size, setSize] = useState({ w: 0, dpr: 1 });
-  const [hover, setHover] = useState<{ key: string; x: number; y: number } | null>(null);
+
   const [places, setPlaces] = useState<ReturnType<OfficeEngine["places"]>>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
 
@@ -206,9 +209,15 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
   }, []);
 
   const data = state?.data ?? null;
-  const roomsKey = data ? data.rooms.map((r) => `${r.id}:${r.desks.join(",")}`).join(";") : "";
+  const roomsKey = data ? data.rooms.map((r) => `${r.id}:${r.commits ?? 0}:${r.desks.join(",")}`).join(";") : "";
   const world = useMemo<World | null>(
-    () => (data && art ? layoutOffice(data.rooms.map((r) => ({ id: r.id, desks: r.desks })), art.backdoorX) : null),
+    () =>
+      data && art
+        ? layoutOffice(
+            data.rooms.map((r) => ({ id: r.id, desks: r.desks, catalogued: r.catalogued, commits: r.commits ?? 0 })),
+            art.layout ?? DEFAULT_LAYOUT,
+          )
+        : null,
     // The plan changes with the rooms and their desks only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [roomsKey, art],
@@ -531,8 +540,6 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
     if (!p || !engine) return;
     const key = engine.hit(p);
     engine.hover = key;
-    const rect = e.currentTarget.getBoundingClientRect();
-    setHover(key ? { key, x: e.clientX - rect.left, y: e.clientY - rect.top } : null);
     const room = key ? null : world ? roomAt(world, p) : null;
     e.currentTarget.style.cursor = key || room?.kind === "product" ? "pointer" : "grab";
   };
@@ -550,13 +557,14 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
     const engine = engineRef.current;
     if (!p || !engine || !world) return;
     const key = engine.hit(p);
+    engine.focus = key;
     if (key) return onPick({ kind: "person", key });
     const room = roomAt(world, p);
-    if (room?.kind === "product") onPick({ kind: "repository", id: room.id });
+    // A shared room opens its first repository; an empty one opens nothing.
+    if (room?.kind === "product" && !room.vacant) onPick({ kind: "repository", id: room.members[0] ?? room.id });
   };
   const onPointerLeave = () => {
     if (engineRef.current) engineRef.current.hover = null;
-    setHover(null);
   };
 
   /* ------------------------------------------------------------ view */
@@ -599,7 +607,14 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
     return t("places.room", { room: room?.project_name ?? room?.name ?? place });
   };
   const atWork = data ? new Set(data.live.map((v) => v.person)).size : 0;
-  const nameSize = Math.max(10, Math.min(15, Math.round(11 * scale)));
+  // Screens are drawn at the room's size: their text and logo follow the zoom.
+  const stripFont = Math.max(8, Math.round(7.5 * scale));
+  const screenMark = Math.min(1.8, Math.max(0.62, scale * 0.62));
+  const clusterStatus = data?.cluster
+    ? data.cluster.workloads
+      ? t("cluster.health", { healthy: data.cluster.healthy, total: data.cluster.workloads })
+      : t("cluster.ref", { ref: data.cluster.ref })
+    : t("cluster.unknown");
 
   return (
     <div className="space-y-3" data-testid="dev-office">
@@ -680,80 +695,70 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
         ) : null}
         {ready && world ? (
           <div className="pointer-events-none absolute inset-0" aria-hidden>
+            {/* Each product room's screen: the project's logo, its name under it. */}
             {world.rooms.map((room) => {
               const r = roomsById.get(room.id);
-              if (!r) return null;
-              const name = r.project_name ?? r.name;
+              const other = room.id === OTHER;
+              const name = other ? t("rooms.other", { count: room.members.length }) : (r?.project_name ?? r?.name ?? "");
               return (
-                <div key={room.id}>
-                  {/* The project's mark on the room's plaque. */}
-                  <div className="absolute flex items-center justify-center overflow-hidden" style={box(room.plaque)}>
-                    <span className="flex items-center justify-center" style={{ transform: `scale(${Math.min(1.4, Math.max(0.55, scale * 0.9))})` }}>
-                      <RepositoryMark repo={asRepository(r)} size="sm" />
-                    </span>
+                <div
+                  key={room.id}
+                  className="absolute flex flex-col overflow-hidden rounded-[2px] border border-[#6d9cff]/45 bg-[#07102a] shadow-[0_0_16px_rgba(90,150,255,0.45)]"
+                  style={box(room.screen)}
+                  title={r ? (r.catalogued ? r.full_name : `${r.full_name} · ${t("rooms.notCatalogued")}`) : undefined}
+                >
+                  <div className="flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(circle_at_50%_40%,#183066,#07102a_70%)]">
+                    {r && !other ? (
+                      <span className="flex items-center justify-center" style={{ transform: `scale(${screenMark})` }}>
+                        <RepositoryMark repo={asRepository(r)} size="lg" />
+                      </span>
+                    ) : (
+                      <span className="font-bold text-[#cfe0ff]" style={{ fontSize: Math.round(9 * scale) }}>
+                        +{room.members.length}
+                      </span>
+                    )}
                   </div>
-                  {/* The room's name, on its top edge. */}
-                  <div
-                    className="absolute flex justify-center"
-                    style={{ left: (room.x - camX) * scale, top: (room.y - camY) * scale - nameSize * 0.6, width: room.w * scale }}
-                  >
-                    <span
-                      className="max-w-[90%] truncate rounded-full border border-[#d1a345]/60 bg-[#0f1424]/90 px-2.5 py-0.5 font-semibold text-[#f3e2b3] shadow"
-                      style={{ fontSize: nameSize, lineHeight: 1.25 }}
-                      title={r.catalogued ? r.full_name : `${r.full_name} · ${t("rooms.notCatalogued")}`}
+                  {/* Too small to read (a phone's whole-office view): the logo alone. */}
+                  {scale >= 0.8 ? (
+                    <div
+                      className="truncate bg-[#0d1d44] px-1 text-center leading-none font-semibold text-[#dbe7ff]"
+                      style={{ fontSize: stripFont, paddingTop: 1.5 * scale, paddingBottom: 1.5 * scale }}
                     >
                       {name}
-                      {r.catalogued ? null : <span className="ml-1.5 font-normal text-[#8a93a8]">· {t("rooms.notCatalogued")}</span>}
-                    </span>
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
-            <div
-              className="absolute flex items-center justify-center font-bold tracking-[0.14em] text-[#2a1d05] uppercase"
-              style={{ ...box(world.cluster.plaque), fontSize: Math.max(7, Math.round(7.5 * scale)), lineHeight: 1 }}
-            >
-              {t("rooms.cluster")}
-            </div>
-            <div className="absolute flex items-center justify-center" style={box(world.lobby.plaque)}>
-              <TracesisMark height={Math.max(8, Math.round(world.lobby.plaque.h * scale * 0.62))} />
-            </div>
-            {world.vacant.map((v, i) => (
+            {world.vacant.map((room) => (
               <div
-                key={`vacant-${i}`}
-                className="absolute flex justify-center"
-                style={{ left: (v.x - camX) * scale, top: (v.y - camY) * scale - nameSize * 0.6, width: v.w * scale }}
+                key={room.slot}
+                className="absolute flex items-center justify-center rounded-[2px] border border-[#2b3550] bg-[#070a14] text-[#5a6584]"
+                style={{ ...box(room.screen), fontSize: stripFont }}
               >
-                <span className="rounded-full bg-[#0f1424]/80 px-2.5 py-0.5 text-[#8a93a8]" style={{ fontSize: nameSize, lineHeight: 1.25 }}>
-                  {t("rooms.vacant")}
-                </span>
+                {t("rooms.available")}
               </div>
             ))}
+            {/* The cluster's screen: which cluster this is, and how it is doing. */}
             <div
-              className="absolute flex justify-center"
-              style={{ left: (world.lobby.x - camX) * scale, top: (world.lobby.y - camY) * scale - nameSize * 0.6, width: world.lobby.w * scale }}
+              className="absolute flex flex-col items-center justify-center overflow-hidden rounded-[2px] border border-[#47d2c8]/50 bg-[radial-gradient(circle_at_50%_30%,#0f3a4a,#04121c_75%)] text-center shadow-[0_0_20px_rgba(70,210,200,0.45)]"
+              style={box(world.cluster.screen)}
             >
-              <span
-                className="rounded-full bg-[#d1a345] px-2.5 py-0.5 font-bold tracking-[0.12em] text-[#1a1409] uppercase shadow"
-                style={{ fontSize: nameSize - 1, lineHeight: 1.25 }}
-              >
-                {t("rooms.lobby")}
+              <span className="truncate px-1 leading-none font-bold tracking-[0.06em] text-[#e6fffb]" style={{ fontSize: Math.round(10.5 * scale) }}>
+                {data?.cluster?.name ?? t("rooms.cluster")}
+              </span>
+              <span className="mt-[3%] inline-flex items-center gap-1 leading-none text-[#86e6cf]" style={{ fontSize: Math.round(7 * scale) }}>
+                <span aria-hidden className="inline-block rounded-full bg-[#47d27b]" style={{ width: 4 * scale, height: 4 * scale }} />
+                {clusterStatus}
               </span>
             </div>
-          </div>
-        ) : null}
-        {hover && data ? (
-          <div
-            className="pointer-events-none absolute z-10 rounded-control border border-border bg-surface px-2.5 py-1.5 text-micro shadow-lg"
-            style={{ left: Math.min(hover.x + 14, size.w - 220), top: Math.max(8, hover.y - 46) }}
-          >
-            <p className="font-semibold text-ink">{data.people.find((p) => p.key === hover.key)?.name ?? hover.key}</p>
-            <p className="text-ink-secondary">
-              {(() => {
-                const place = places.find((p) => p.person === hover.key);
-                return place ? placeText(place.place, place.moving, place.carrying) : "";
-              })()}
-            </p>
+            {/* The lobby's logo wall. */}
+            <div
+              className="absolute flex items-center justify-center rounded-[2px] border border-[#d1a345]/50 bg-[radial-gradient(circle_at_50%_40%,#2a2440,#120f1c_75%)] shadow-[0_0_16px_rgba(209,163,69,0.35)]"
+              style={box(world.lobby.screen)}
+            >
+              <TracesisWordmark size={Math.max(10, Math.round(15 * scale))} />
+            </div>
           </div>
         ) : null}
         {feed.length ? (
@@ -853,7 +858,17 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
           </button>
         ))}
         {data?.people.map((p) => (
-          <button key={p.key} type="button" onClick={() => onPick({ kind: "person", key: p.key })}>
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => onPick({ kind: "person", key: p.key })}
+            onFocus={() => {
+              if (engineRef.current) engineRef.current.focus = p.key;
+            }}
+            onBlur={() => {
+              if (engineRef.current?.focus === p.key) engineRef.current.focus = null;
+            }}
+          >
             {p.name}
           </button>
         ))}

@@ -1,15 +1,16 @@
 /**
- * The office's simulation and drawing: people walk the corridors to their
- * desks, type, take coffee in the lobby, and carry a delivery to the cluster.
+ * The office's simulation and drawing: people walk out of a room's door,
+ * along the corridors and in through another's to their desks; they idle in
+ * the lobby, and carry a delivery into the cluster's room.
  *
- * The world is drawn at its native size (one canvas pixel per art pixel);
- * the component scales it to the screen by whole device pixels, then this
- * draws the text (name tags, bubbles) at full resolution on top.
+ * The scene is drawn through a camera onto the screen canvas; text (a
+ * hovered person's name, commit chips) is drawn at full resolution on top.
  */
 
 import { BODY_ROWS, reduced, type Art, type BodyRow, type Sprite } from "./art";
 import type { Intent } from "./director";
-import { DESK_SURFACE, findPath, SEATED, SIZE, type Desk, type Point, type Room, type World } from "./world";
+import { paintMap } from "./placeholder";
+import { CHAIR, findPath, SEATED, SIZE, type Desk, type Point, type Room, type World } from "./world";
 
 type Dir = "down" | "left" | "right" | "up";
 
@@ -44,6 +45,14 @@ interface Flash {
   until: number;
 }
 
+interface Box {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 interface Bubble {
   person: string;
   text: string;
@@ -71,7 +80,9 @@ export class OfficeEngine {
   private time = 0;
   private reduced: boolean;
   night = 0;
+  /** The person under the pointer, and the one picked (their name shows, with an outline). */
   hover: string | null = null;
+  focus: string | null = null;
   /** Device pixels per art pixel of the last draw. */
   private zoom = 1;
   private rooms: Map<string, Room>;
@@ -87,36 +98,12 @@ export class OfficeEngine {
   /* ------------------------------------------------------------ the set */
 
   private paintStill(): HTMLCanvasElement {
-    const { w, h } = this.world;
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext("2d");
-    if (!ctx) return c;
-    ctx.imageSmoothingEnabled = false;
-    for (let y = 0; y < h; y += SIZE.tile) for (let x = 0; x < w; x += SIZE.tile) ctx.drawImage(this.art.corridor, x, y);
-    // The open floor beside the lobby: a rug under the free desks.
-    for (const p of this.world.plazas) {
-      ctx.fillStyle = "rgba(20,26,44,0.55)";
-      ctx.fillRect(p.x + 24, p.y + 40, p.w - 48, p.h - 72);
-      ctx.strokeStyle = "rgba(209,163,69,0.55)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(p.x + 25, p.y + 41, p.w - 50, p.h - 74);
-    }
-    for (const room of this.world.rooms)
-      ctx.drawImage(room.backdoor ? this.art.productBackdoor : this.art.productOpen, room.x, room.y);
-    for (const v of this.world.vacant) {
-      ctx.drawImage(this.art.productOpen, v.x, v.y);
-      ctx.fillStyle = "rgba(8,10,20,0.55)";
-      ctx.fillRect(v.x, v.y, v.w, v.h);
-    }
-    ctx.drawImage(this.art.cluster, this.world.cluster.x, this.world.cluster.y);
-    ctx.drawImage(this.art.lobby, this.world.lobby.x, this.world.lobby.y);
-    // Soft shade where the walls meet the corridor floor.
-    ctx.fillStyle = "rgba(0,0,0,0.22)";
-    for (const room of [...this.world.rooms, this.world.cluster, this.world.lobby])
-      ctx.fillRect(room.x, room.y + room.h, room.w, 4);
-    return c;
+    return paintMap(this.world, this.art);
+  }
+
+  /** The room a repository is in (its own, or the shared one). */
+  private roomFor(repository: string): Room | undefined {
+    return this.rooms.get(this.world.roomOf[repository] ?? repository);
   }
 
   setHead(key: string, sprites: Sprite[]) {
@@ -161,8 +148,8 @@ export class OfficeEngine {
     });
   }
 
-  private deskFor(actor: Actor, roomId: string): Desk | null {
-    const room = this.rooms.get(roomId);
+  private deskFor(actor: Actor, repository: string): Desk | null {
+    const room = this.roomFor(repository);
     if (!room || room.kind !== "product") return null;
     const own = room.desks.find((d) => d.owner === actor.key);
     if (own) return own;
@@ -208,9 +195,20 @@ export class OfficeEngine {
         if (actor.goal !== goal) this.go(actor, goal, desk.seat, "sit", instant);
         return;
       }
+      // Every desk taken: stand in the room, a step apart from the others.
+      const room = this.roomFor(actor.intent.room);
+      if (room?.standing.length) {
+        actor.desk = null;
+        const taken = new Set([...this.actors.values()].filter((a) => a !== actor).map((a) => a.goal));
+        const i = room.standing.findIndex((_, k) => !taken.has(`stand:${room.id}:${k}`));
+        const k = i < 0 ? Math.floor(actor.seed * room.standing.length) : i;
+        const goal = `stand:${room.id}:${k}`;
+        if (actor.goal !== goal) this.go(actor, goal, room.standing[k], "idle", instant);
+        return;
+      }
     }
     actor.desk = null;
-    if (!actor.goal.startsWith("lobby:") && !actor.goal.startsWith("coffee")) {
+    if (!actor.goal.startsWith("lobby:")) {
       const spot = this.lobbySpot(actor);
       this.go(actor, spot.goal, spot.at, "idle", instant);
       actor.wander = this.time + IDLE_MIN + actor.seed * IDLE_SPREAD;
@@ -236,13 +234,14 @@ export class OfficeEngine {
   /** A delivery of `room`'s work: its carrier fetches a box and takes it to the cluster. */
   deliver(person: string | null, room: string) {
     const actor = person ? this.actors.get(person) : undefined;
-    if (!actor || this.reduced || !this.rooms.has(room)) {
+    const place = this.roomFor(room);
+    if (!actor || this.reduced || !place) {
       this.land();
       return;
     }
     actor.errand = { room, stage: "fetch" };
     const desk = this.deskFor(actor, room);
-    const at = desk?.seat ?? this.rooms.get(room)?.door ?? this.world.drop;
+    const at = desk?.seat ?? place.standing[0] ?? this.world.drop;
     actor.desk = desk;
     this.go(actor, `errand:${room}`, at, "idle", false);
   }
@@ -310,16 +309,14 @@ export class OfficeEngine {
       this.follow(actor, false);
       return;
     }
-    // Idle in the lobby: now and then, a walk to the coffee machine and back.
+    // Idle in the lobby: now and then a coffee where they stand, or a few steps to a free spot.
     if (!this.reduced && actor.intent.kind === "lobby" && this.time > actor.wander) {
-      actor.wander = this.time + IDLE_MIN + hashOf(actor.key + Math.floor(this.time)) * IDLE_SPREAD;
-      if (actor.goal.startsWith("coffee")) {
-        const spot = this.lobbySpot(actor);
-        this.go(actor, spot.goal, spot.at, "idle", false);
-      } else if (![...this.actors.values()].some((a) => a !== actor && a.goal.startsWith("coffee"))) {
-        this.go(actor, "coffee", this.world.coffee, "coffee", false);
-      } else {
-        const spot = this.lobbySpot(actor);
+      const roll = hashOf(actor.key + Math.floor(this.time));
+      actor.wander = this.time + IDLE_MIN + roll * IDLE_SPREAD;
+      if (actor.pose === "coffee") actor.pose = "idle";
+      else if (roll < 0.55) actor.pose = "coffee";
+      else {
+        const spot = this.lobbySpot({ ...actor, seed: roll });
         if (spot.goal !== actor.goal) this.go(actor, spot.goal, spot.at, "idle", false);
       }
     }
@@ -359,31 +356,30 @@ export class OfficeEngine {
     const set = this.art.bodies.get(actor.key) ?? this.art.body;
     const frame = set.frames[row][index] ?? set.frames["idle-down"][0];
     const { x, y } = this.feet(actor);
-    // A dense character (2× or 4× the rooms' pixels) takes the same room in the
-    // office as any other. Zoomed in far enough, each of its pixels covers whole
-    // device pixels; below that, it is drawn from a copy shrunk by an exact
-    // whole factor (each 2 × 2 or 4 × 4 block averaged), never resampled.
     const d = set.density;
-    const factor = this.zoom < d && d % this.zoom === 0 ? d / this.zoom : 1;
-    const fw = SIZE.frame.w;
-    const fh = SIZE.frame.h;
-    const left = x - set.anchor.x / d;
-    const top = y - set.anchor.y / d;
+    const { factor, k } = this.spriteScale(d);
+    const fw = SIZE.frame.w * k;
+    const fh = SIZE.frame.h * k;
+    const left = x - (set.anchor.x / d) * k;
+    const top = y - (set.anchor.y / d) * k;
     const seated = this.seated(actor);
+    const marked = this.hover === actor.key || this.focus === actor.key;
     if (!seated) {
-      // A shadow, and a ring in the person's colour.
-      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      // A soft shadow under the feet; the person's colour only when they are picked.
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
       ctx.beginPath();
-      ctx.ellipse(x, y, 10, 3.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(x, y, 9, 3, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = actor.colour;
-      ctx.globalAlpha = this.hover === actor.key ? 1 : 0.85;
-      ctx.lineWidth = this.hover === actor.key ? 2 : 1.5;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 12, 4.5, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      if (marked) {
+        ctx.strokeStyle = actor.colour;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(x, y, 12, 4.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
+    // A picked person gets a thin light outline around the sprite.
+    if (marked) ctx.filter = `drop-shadow(0 0 ${Math.max(1, 1 / this.zoom)}px rgba(255,255,255,0.95))`;
     const draw = (image: Sprite, dx: number, dy: number, w: number, h: number, mirror: boolean) => {
       if (!mirror) {
         ctx.drawImage(image, dx, dy, w, h);
@@ -404,6 +400,30 @@ export class OfficeEngine {
       const headX = flip ? fw - frame.headX : frame.headX;
       draw(head, left + headX - SIZE.head / 2, top + frame.headTop - 4, SIZE.head, SIZE.head, facing === "left");
     }
+    ctx.filter = "none";
+  }
+
+  /**
+   * How a character of density `d` is drawn at the current zoom, keeping
+   * every pixel whole: `factor` shrinks the sprite by exact blocks first
+   * (1 = not at all), `k` is its size relative to a 32 × 48 character.
+   *
+   * At Z a multiple of d, each sprite pixel is Z / d device pixels (k = 1).
+   * Below d, the sprite is shrunk d / Z : 1 and each pixel is one device
+   * pixel (k = 1). At Z = 3 with 4× art, nothing is shrunk: one device pixel
+   * per sprite pixel, the person a third larger than the room's scale (k = 4/3).
+   */
+  private spriteScale(d: number): { factor: number; k: number } {
+    const z = this.zoom;
+    if (z >= d && z % d === 0) return { factor: 1, k: 1 };
+    if (z < d && d % z === 0) return { factor: d / z, k: 1 };
+    const perPixel = Math.max(1, Math.floor(z / d));
+    return { factor: 1, k: (d * perPixel) / z };
+  }
+
+  /** A person's drawn size relative to a 32 × 48 character (larger at Z = 3 with 4× art). */
+  private scaleOf(actor: Actor): number {
+    return this.spriteScale((this.art.bodies.get(actor.key) ?? this.art.body).density).k;
   }
 
   /** Everyone in the office now: where they stand, their colour, whether they are on the move. */
@@ -427,24 +447,11 @@ export class OfficeEngine {
     ctx.drawImage(this.still, 0, 0);
     type Item = { y: number; paint: () => void };
     const items: Item[] = [];
-    const desk = this.art.desk;
-    for (const d of [...this.world.rooms.flatMap((r) => r.desks), ...this.world.hotDesks]) {
-      items.push({ y: d.y, paint: () => ctx.drawImage(desk, 0, 0, SIZE.desk.w, DESK_SURFACE, d.x, d.y, SIZE.desk.w, DESK_SURFACE) });
-      items.push({
-        y: d.y + 15,
-        paint: () =>
-          ctx.drawImage(
-            desk,
-            0,
-            DESK_SURFACE,
-            SIZE.desk.w,
-            SIZE.desk.h - DESK_SURFACE,
-            d.x,
-            d.y + DESK_SURFACE,
-            SIZE.desk.w,
-            SIZE.desk.h - DESK_SURFACE,
-          ),
-      });
+    // Chair, then whoever sits in it, then the desk in front of them.
+    const { chair, deskFront } = this.art;
+    for (const d of this.world.rooms.flatMap((r) => r.desks)) {
+      items.push({ y: d.y + CHAIR.y, paint: () => ctx.drawImage(chair, d.x + CHAIR.x, d.y + CHAIR.y) });
+      items.push({ y: d.y + 15, paint: () => ctx.drawImage(deskFront, d.x, d.y) });
     }
     for (const actor of this.actors.values()) {
       // Seated: after the chair, before the desk's top and its monitor.
@@ -469,7 +476,7 @@ export class OfficeEngine {
       if (!this.seated(actor) || !actor.desk) continue;
       // The monitor in front of them lights their face.
       const cx = actor.desk.x + 33;
-      const cy = actor.desk.y + 22;
+      const cy = actor.desk.y + 10;
       const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, 24);
       g.addColorStop(0, `rgba(90,150,255,${0.16 + this.night * 0.45})`);
       g.addColorStop(1, "rgba(90,150,255,0)");
@@ -481,8 +488,9 @@ export class OfficeEngine {
       const t = (this.time - f.start) / (f.until - f.start);
       // Three quick blinks that fade: the racks take the delivery in.
       const pulse = (0.55 + 0.45 * Math.sin(t * Math.PI * 6)) * (1 - t);
-      ctx.fillStyle = `rgba(110,200,255,${0.5 * pulse})`;
-      for (const rack of this.art.racks) ctx.fillRect(cluster.x + rack.x, cluster.y + rack.y, rack.w, rack.h);
+      ctx.fillStyle = `rgba(110,200,255,${0.45 * pulse})`;
+      // The racks along the back wall light up.
+      ctx.fillRect(cluster.x + 8, cluster.y + 4, cluster.w - 16, this.world.layout.backWall + 24);
       ctx.strokeStyle = `rgba(242,207,122,${0.9 * (1 - t)})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -494,64 +502,92 @@ export class OfficeEngine {
   }
 
   /**
-   * Text over the scaled scene, at device resolution: name tags and bubbles.
+   * Text over the scaled scene, at device resolution. No names by default:
+   * the hovered or picked person's name, in a small dark label; zoomed in
+   * close, a compact name under everyone's feet; a commit is a small speech
+   * chip over the author's head. Nothing overlaps: a label that would cover
+   * one already placed steps aside, or is left out.
    * `toScreen` maps a world point to device pixels; `px` is one CSS pixel.
    */
   drawLabels(ctx: CanvasRenderingContext2D, toScreen: (p: Point) => Point, px: number, scale: number) {
-    const font = `600 ${Math.round(10.5 * px)}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
-    ctx.font = font;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // The front-most person keeps their tag over their head; a tag that would
-    // cover one already placed moves up a step (a crowd stacks its names).
-    const sorted = [...this.actors.values()].sort((a, b) => this.feet(b).y - this.feet(a).y);
-    const placed: { x: number; y: number; w: number; h: number }[] = [];
-    const tags: { actor: Actor; label: string; x: number; y: number; w: number; h: number }[] = [];
-    for (const actor of sorted) {
+    const placed: Box[] = [];
+    const free = (b: Box) => !placed.some((p) => p.x < b.x + b.w && b.x < p.x + p.w && p.y < b.y + b.h && b.y < p.y + p.h);
+    const front = [...this.actors.values()].sort((a, b) => this.feet(b).y - this.feet(a).y);
+    const short = (name: string, max: number) => (name.length > max ? `${name.slice(0, max - 1)}…` : name);
+
+    // The picked and the hovered person's name, over their head.
+    for (const key of [this.focus, this.hover]) {
+      const actor = key ? this.actors.get(key) : undefined;
+      if (!actor || placed.some((p) => p.key === actor.key)) continue;
+      ctx.font = `600 ${Math.round(11 * px)}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
       const feet = this.feet(actor);
-      const top = toScreen({ x: feet.x, y: feet.y - SIZE.frame.h + 1 });
-      const label = actor.name.length > 18 ? `${actor.name.slice(0, 17)}…` : actor.name;
-      const w = ctx.measureText(label).width + 10 * px;
-      const h = 15 * px;
-      const rect = { x: top.x - w / 2, y: top.y - h, w, h };
-      for (let i = 0; i < 4 && placed.some((p) => p.x < rect.x + rect.w && rect.x < p.x + p.w && p.y < rect.y + rect.h && rect.y < p.y + p.h); i += 1)
-        rect.y -= h + 2 * px;
-      placed.push(rect);
-      tags.push({ actor, label, ...rect });
-    }
-    for (const tag of tags.reverse()) {
-      const strong = this.hover === tag.actor.key;
-      ctx.globalAlpha = strong ? 1 : 0.92;
-      ctx.fillStyle = tag.actor.colour;
-      roundRect(ctx, tag.x, tag.y, tag.w, tag.h, 4 * px);
+      const top = toScreen({ x: feet.x, y: feet.y - SIZE.frame.h * this.scaleOf(actor) + (this.seated(actor) ? 4 : 0) });
+      const text = short(actor.name, 24);
+      const w = ctx.measureText(text).width + 14 * px;
+      const h = 18 * px;
+      const box = { key: actor.key, x: top.x - w / 2, y: top.y - h - 4 * px, w, h };
+      placed.push(box);
+      ctx.fillStyle = "rgba(12,16,30,0.92)";
+      roundRect(ctx, box.x, box.y, w, h, 5 * px);
       ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(tag.label, tag.x + tag.w / 2, tag.y + tag.h / 2 + 0.5 * px);
-      ctx.globalAlpha = 1;
+      ctx.fillStyle = actor.colour;
+      roundRect(ctx, box.x + 5 * px, box.y + h / 2 - 3 * px, 6 * px, 6 * px, 3 * px);
+      ctx.fill();
+      ctx.fillStyle = "#f3f5fb";
+      ctx.fillText(text, box.x + w / 2 + 3 * px, box.y + h / 2 + 0.5 * px);
     }
-    for (const bubble of this.bubbles) {
+
+    // Zoomed in close: a compact name under each person's feet, where there is room.
+    if (scale >= 4) {
+      ctx.font = `600 ${Math.round(9.5 * px)}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+      for (const actor of front) {
+        if (placed.some((p) => p.key === actor.key) || this.seated(actor)) continue;
+        const feet = this.feet(actor);
+        const at = toScreen({ x: feet.x, y: feet.y + 4 });
+        const text = short(actor.name.split(" ")[0] ?? actor.name, 14);
+        const w = ctx.measureText(text).width + 10 * px;
+        const h = 14 * px;
+        const box = { key: actor.key, x: at.x - w / 2, y: at.y, w, h };
+        if (!free(box)) continue;
+        placed.push(box);
+        ctx.fillStyle = "rgba(12,16,30,0.78)";
+        roundRect(ctx, box.x, box.y, w, h, 7 * px);
+        ctx.fill();
+        ctx.fillStyle = "#e6e9f2";
+        ctx.fillText(text, at.x, box.y + h / 2 + 0.5 * px);
+      }
+    }
+
+    // Commits: a small speech chip, its tail to the author's head.
+    ctx.font = `700 ${Math.round(9.5 * px)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    for (const bubble of [...this.bubbles].sort((a, b) => b.until - a.until)) {
       const actor = this.actors.get(bubble.person);
       if (!actor) continue;
-      const life = Math.min(1, (bubble.until - this.time) / 0.4);
-      const rise = (2.8 - (bubble.until - this.time)) * 4 * scale;
-      // Above the person's name tag.
-      const tag = tags.find((x) => x.actor === actor);
+      const life = Math.max(0, Math.min(1, (bubble.until - this.time) / 0.4));
       const feet = this.feet(actor);
-      const at = tag ? { x: tag.x + tag.w / 2, y: tag.y - 3 * px } : toScreen({ x: feet.x, y: feet.y - SIZE.frame.h - 14 });
-      ctx.font = `700 ${Math.round(10 * px)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      const head = toScreen({ x: feet.x + 10, y: feet.y - SIZE.frame.h * this.scaleOf(actor) + (this.seated(actor) ? 6 : 2) });
       const w = ctx.measureText(bubble.text).width + 12 * px;
-      const h = 16 * px;
-      ctx.globalAlpha = Math.max(0, life);
-      ctx.fillStyle = "#0f1424";
-      roundRect(ctx, at.x - w / 2, at.y - h - rise, w, h, 5 * px);
+      const h = 15 * px;
+      const box = { key: `bubble:${actor.key}`, x: head.x - 4 * px, y: head.y - h - 6 * px, w, h };
+      for (let i = 0; i < 3 && !free(box); i += 1) box.y -= h + 3 * px;
+      if (!free(box)) continue;
+      placed.push(box);
+      ctx.globalAlpha = life;
+      ctx.fillStyle = "#f5f7fc";
+      roundRect(ctx, box.x, box.y, w, h, 4 * px);
       ctx.fill();
-      ctx.strokeStyle = bubble.colour;
-      ctx.lineWidth = 1.5 * px;
-      ctx.stroke();
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(bubble.text, at.x, at.y - h / 2 - rise + 0.5 * px);
+      ctx.beginPath();
+      ctx.moveTo(box.x + 6 * px, box.y + h - 0.5 * px);
+      ctx.lineTo(box.x + 6 * px, box.y + h + 5 * px);
+      ctx.lineTo(box.x + 12 * px, box.y + h - 0.5 * px);
+      ctx.fill();
+      ctx.fillStyle = bubble.colour;
+      ctx.fillRect(box.x, box.y + 3 * px, 2 * px, h - 6 * px);
+      ctx.fillStyle = "#151a2b";
+      ctx.fillText(bubble.text, box.x + w / 2 + 1 * px, box.y + h / 2 + 0.5 * px);
       ctx.globalAlpha = 1;
-      ctx.font = font;
     }
   }
 
@@ -563,7 +599,8 @@ export class OfficeEngine {
       const f = this.feet(actor);
       // A seated person shows only above the desk.
       const bottom = this.seated(actor) ? f.y - 16 : f.y + 3;
-      const inside = p.x >= f.x - 13 && p.x <= f.x + 13 && p.y >= f.y - SIZE.frame.h + 1 && p.y <= bottom;
+      const k = this.scaleOf(actor);
+      const inside = p.x >= f.x - 13 * k && p.x <= f.x + 13 * k && p.y >= f.y - SIZE.frame.h * k + 1 && p.y <= bottom;
       if (inside && f.y > bestY) {
         best = actor;
         bestY = f.y;

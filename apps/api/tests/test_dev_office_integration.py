@@ -187,6 +187,11 @@ async def test_the_office_is_the_map_as_places_and_a_day_to_play(engine: AsyncEn
         # The deployed commit's author carries it.
         assert delivery["person"] == "gencaycoskuntr" and delivery["environment"] == "dev"
         assert [e["at"] for e in body["events"]] == sorted(e["at"] for e in body["events"])
+        # The cluster at the office's centre, and how its workloads are doing.
+        cluster = body["cluster"]
+        assert cluster is not None and cluster["name"] and cluster["ref"]
+        assert 0 <= cluster["healthy"] <= cluster["workloads"]
+        assert room["commits"] >= 2
 
         # The day is bounded: an offset is required, and 90 days is the reach.
         naive = await client.get(
@@ -230,3 +235,5 @@ async def test_the_office_is_the_map_as_places_and_a_day_to_play(engine: AsyncEn
         assert all(e["repository"] == f"gh:{other_external}" for e in body["events"])
         assert "gencaycoskuntr" not in {p["key"] for p in body["people"]}
         assert any(e["kind"] == "deployment" for e in body["events"])
+        # Without cluster.view, no cluster is named.
+        assert body["cluster"] is None

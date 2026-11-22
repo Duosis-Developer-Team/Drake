@@ -27,7 +27,19 @@ export const devOffice = defineMessages({
       ended: "The day is over",
     },
     zoom: { label: "Zoom", in: "Zoom in", out: "Zoom out", fit: "Fit to the panel" },
-    rooms: { cluster: "Cluster", lobby: "Lobby", vacant: "Empty office", notCatalogued: "not in the catalog" },
+    rooms: {
+      cluster: "Cluster",
+      lobby: "Lobby",
+      vacant: "Empty office",
+      available: "Available",
+      other: "{count, plural, one {Other project} other {Other projects · #}}",
+      notCatalogued: "not in the catalog",
+    },
+    cluster: {
+      health: "{healthy} of {total} workloads healthy",
+      ref: "{ref}",
+      unknown: "No cluster in view",
+    },
     places: {
       title: "Who is where",
       lobby: "in the lobby",
@@ -64,7 +76,19 @@ export const devOffice = defineMessages({
       ended: "Gün bitti",
     },
     zoom: { label: "Yakınlaştırma", in: "Yakınlaştır", out: "Uzaklaştır", fit: "Panele sığdır" },
-    rooms: { cluster: "Küme", lobby: "Lobi", vacant: "Boş ofis", notCatalogued: "katalogda değil" },
+    rooms: {
+      cluster: "Küme",
+      lobby: "Lobi",
+      vacant: "Boş ofis",
+      available: "Boş",
+      other: "{count, plural, one {Diğer proje} other {Diğer projeler · #}}",
+      notCatalogued: "katalogda değil",
+    },
+    cluster: {
+      health: "{total} iş yükünden {healthy} sağlıklı",
+      ref: "{ref}",
+      unknown: "Görünür küme yok",
+    },
     places: {
       title: "Kim nerede",
       lobby: "lobide",

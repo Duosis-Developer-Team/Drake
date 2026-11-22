@@ -190,8 +190,18 @@ export interface DevOfficeRoom {
   project_id: string | null;
   project_key: string | null;
   project_name: string | null;
+  /** Commits in the window: busier repositories get the better rooms. */
+  commits?: number;
   /** Person keys, the busiest first. */
   desks: string[];
+}
+
+/** The cluster at the office's centre, and how its workloads are doing. */
+export interface DevOfficeCluster {
+  ref: string;
+  name: string;
+  workloads: number;
+  healthy: number;
 }
 
 export interface DevOfficeEvent {
@@ -211,6 +221,8 @@ export interface DevOffice {
   as_of: string;
   day_start: string;
   configured: DevMap["configured"];
+  /** Null when the viewer may see no cluster. */
+  cluster?: DevOfficeCluster | null;
   people: { key: string; name: string; linked: boolean; portrait: boolean }[];
   rooms: DevOfficeRoom[];
   /** Whose Claude Code reported from where in the last minutes. */

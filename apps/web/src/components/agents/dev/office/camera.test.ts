@@ -8,9 +8,9 @@ describe("the camera", () => {
   it("only zooms where every pixel of the densest character is whole", () => {
     expect(zoomLevels(1, 2).slice(0, 4)).toEqual([1, 2, 3, 4]);
     // 4× characters: shrunk 4:1 or 2:1, or drawn 1:1, 2:1, 3:1…
-    expect(zoomLevels(4, 2).slice(0, 5)).toEqual([1, 2, 4, 8, 12]);
+    expect(zoomLevels(4, 2).slice(0, 6)).toEqual([1, 2, 3, 4, 8, 12]);
     expect(zoomLevels(2, 1).slice(0, 3)).toEqual([1, 2, 4]);
-    expect(zoomLevels(4, 2)).not.toContain(3);
+    expect(zoomLevels(2, 2)).not.toContain(3);
     // Close enough to see a 4× face pixel for pixel.
     expect(Math.max(...zoomLevels(4, 1))).toBeGreaterThanOrEqual(8);
   });

@@ -1,14 +1,18 @@
 # Development office — the art kit
 
-Agents → Office draws the people who change the repositories as a small
-pixel office: product rooms around the cluster's server room, the lobby at
-the bottom, corridors between. This is the contract for its art: what files
-there are, their sizes, where the anchors are, and how a new kit is checked
-and installed.
+Agents → Office draws the people who change the repositories as one pixel
+office building:
+
+- **Product rooms:** seven, for the busiest repositories.
+- **Cluster:** the server room in the middle, its screen naming the actual cluster.
+- **Lobby:** at the bottom, with the main entrance.
+- **Corridors:** joining the rows of rooms; people walk out of a room's doors, along the corridors and in through another room's doors.
+
+This is the contract for its art: what files there are, their sizes, where
+things are on them, and how a new kit is checked and installed.
 
 The art lives in `apps/web/public/office/`. Every file is optional: anything
-missing is drawn by a placeholder of exactly the same size and layout, so a
-drawing replaces a placeholder file by file.
+missing is drawn by a placeholder of the same size and layout.
 
 ## Installing a kit
 
@@ -18,25 +22,28 @@ python3 scripts/office-assets.py path/to/kit           # check, then install
 python3 scripts/office-assets.py path/to/kit --rescale # art exported larger than native
 ```
 
-Everything is checked before anything is written: sizes, frame counts,
-binary alpha (every pixel fully clear or fully opaque), opaque rooms, where
-the feet stand in every frame. The script copies the files, writes
-`asset-manifest.json` to describe exactly what was installed, and leaves
-`preview.png` and `README.md` out of the public folder. `--rescale` is for
-pixel art exported at k × its native size: it finds k, checks the k × k
-blocks are flat, and keeps one pixel per block.
+The script checks everything before it writes anything:
+- sizes and frame counts;
+- binary alpha (every pixel fully clear or fully opaque);
+- that the map is opaque;
+- where the feet stand in every frame;
+- the map's geometry (below).
+
+Then it copies the files and writes `asset-manifest.json` to describe exactly what was installed.
+
+`--rescale` is for pixel art exported at k × its native size. It finds k, checks that the k × k blocks are flat, and keeps one pixel per block.
 
 ## Layout of a kit
 
 ```
 asset-manifest.json
-room-product-open.png      320 × 224   opaque
-room-product-backdoor.png  320 × 224   opaque
-room-cluster.png           384 × 224   opaque
-room-lobby.png             448 × 192   opaque
-floor-corridor.png          32 × 32    opaque, seamless
-desk.png                    64 × 48    transparent
+office-map.png             the whole office, one picture, opaque
+office-map.json            its geometry (below)
+chair.png                   32 × 32    transparent
+desk-front.png              64 × 40    transparent
 box.png                     16 × 16    transparent
+floor-corridor.png          32 × 32    (only for the composed placeholder map)
+room-*.png                             (the first kit's rooms: only for the placeholder map)
 characters/<person>/body-<clip>.png
 ```
 
@@ -47,37 +54,61 @@ Style: pixel art, top-down 3/4 view, a crisp one-pixel grid with no
 anti-aliasing, no text, no logos. The office is dark navy and warm wood with
 cobalt and gold accents, lit from the top left.
 
-## Rooms and props
+## The map and its geometry
 
-The engine walks people on the open floor, so it relies on where things are
-in the room art. These are the anchors of the current kit (room
-coordinates). A kit that moves them needs the constants in
-`apps/web/src/components/agents/dev/office/world.ts` to move too.
+`office-map.png` is drawn to a guide; `office-map.json` says where everything is on it, in art pixels. Everything the office does with the map comes from this file: where rooms are, where people walk, where desks go, where screens show.
 
-| Room | Anchor | Use |
-|------|--------|-----|
-| product | back wall ends at y 72 | the floor starts there |
-| product | plaque `{x 125, y 18, w 36, h 9}` | the project's logo is drawn on it |
-| product | bookcase (left wall, x < 28, y < 124), plant (right wall, x > 290, y < 90) | not walked through |
-| product-backdoor | `backThreshold {x 198, y 72}` | the back door; people use it to reach the corridor behind |
-| cluster | plaque `{x 167, y 33, w 51, h 15}` | reads CLUSTER |
-| cluster | `loadingTarget {x 192, y 147}` | where deliveries are put down |
-| cluster | racks on the back wall (x 46–136, 250–338) and the side walls | they light up when a delivery lands |
-| lobby | `logoSlot {x 324, y 155, w 107, h 17}` | the Tracesis mark |
-| lobby | front door gap x 180–268 | the way in and out |
-| lobby | sofas with tables, plants, reception desk (x ≥ 296, y ≥ 124) | not walked through |
+The guides:
+- `docs/runbooks/office/office-map-guide.png` with `office-map-layout.json` (1024 × 768);
+- `docs/runbooks/office/office-map-guide-768x480.png` with `office-map-layout-768x480.json` (the compact 768 × 480).
 
-Product rooms and the cluster are open at the front (their bottom edge, no
-wall drawn). The lobby has a low front wall with a door gap.
+```jsonc
+{
+  "size": [1024, 768],
+  "back_wall": 48,          // every room's back wall: its floor starts below it
+  "outer_wall": 16,
+  "rooms": {
+    "room-1": {
+      "rect": [16, 16, 336, 224],      // x1, y1, x2, y2
+      "kind": "product",               // product | cluster | lobby
+      "screen": [140, 22, 72, 32],     // x, y, w, h: a dark panel on the back wall
+      "doors": [{ "side": "S", "x": 160, "width": 32 }],   // N: through the back wall
+      "free_floor": [40, 96, 272, 112] // where desks go (lobby: where people stand)
+    },
+    "cluster": { "loading": [512, 416], ... },            // where deliveries are put down
+    "lobby": { "entrance": [488, 48],                      // x, width in the outer wall
+               "blocked": [[398, 696, 80, 36], ...] }      // furniture nobody walks through
+  }
+}
+```
 
-**Desk** (`desk.png`, 64 × 48): the chair at the back (rows 0–19), the desk
-top from row 20, the monitor seen from behind in the middle of the desk. A
-seated person (the cross-legged `body-sit-type` pose, keyboard on the lap)
-is drawn after the chair and before the desk top, feet at desk (34, 31): the
-chair sits behind them, head, shoulders and chest show above the desk, the
-monitor stands in front of their hands and the legs are hidden.
+- **Rooms:** there must be exactly one cluster, one lobby, and at least one product room.
+- **Corridors:** whatever lies between two rows of rooms, wall to wall.
+- **Walking:** a room's floor is walkable inside its walls, but it is entered and left only by its doors. Anything under `blocked` is not walked through.
+- **Repositories → rooms:**
+  - Repositories take product rooms busiest first, the catalog's before the rest. The large rooms go before the two narrow ones beside the cluster.
+  - A room nobody uses is dimmed and its door shut.
+  - When there are more repositories than rooms, the least active share the last room, "Other projects".
+- **Screens:**
+  - Each product room's screen shows its project's logo with the name under it, glowing.
+  - The cluster's screen names the cluster (the one the visible projects deploy to most) and how many of its workloads are healthy.
+  - The lobby's screen is the Tracesis logo wall.
+- **Lobby:** people stand on a spaced grid on its free floor, at least a character's width apart.
 
-**Box** (`box.png`, 16 × 16): the delivery lying on the loading square.
+## Props
+
+**Chair** (`chair.png`, 32 × 32): the seat, its back and arms, its base.
+
+**Desk** (`desk-front.png`, 64 × 40): the desk with its monitor seen from behind, things on it, its legs; no chair.
+
+A desk at (x, y) is drawn in this order:
+1. its chair at (x + 16, y − 14);
+2. the person sitting in it, feet at (x + 32, y + 20), so their head and shoulders clear the monitor;
+3. the desk front at (x, y), in front of them.
+
+Desks are laid out on a room's free floor, spaced, in one or two rows.
+
+**Box** (`box.png`, 16 × 16): the delivery lying on the loading spot.
 
 ## Characters
 
@@ -99,37 +130,46 @@ density:
 | 2× | 64 × 96 | (32, 91) | 256 × 96 and 128 × 96 |
 | 4× (current kit) | 128 × 192 | (64, 180) | 512 × 192 and 256 × 192 |
 
-Whatever its density, a character takes 32 × 48 art pixels of the office.
 The density is read from each person's strips, so people of different
-densities can share an office.
+densities can share an office. Someone without a folder (a newcomer) walks as
+a shared placeholder body with a head made from their portrait, their GitHub
+picture, or their initials.
 
-**Zoom.** The office is drawn at Z device pixels per art pixel, Z whole. The
-levels are the divisors of the densest character's density below it and its
-multiples from it up (for 4×: 1, 2, 4, 8, 12…), so every pixel is always a
-whole number of device pixels. At Z ≥ the density, a character's pixels are
-drawn nearest-neighbour, Z / density device pixels each (Z = 4 shows a 4×
-face pixel for pixel). Below it, the frame is first shrunk by the exact
-factor (4:1 or 2:1): each block averaged, weighted by its coverage, opaque
-when at least half covered. That copy is made once per frame and factor and
-kept. Nothing is ever resampled by an arbitrary ratio.
+**Zoom.** The office is drawn at Z device pixels per art pixel, Z whole. The levels keep every pixel whole. For the densest character's density d they are:
+- the divisors of d below it;
+- 3, when d is 4;
+- the multiples of d.
 
-The office opens, and "fit" returns, at the largest level where its whole
-width fits the panel. It is 1072 art pixels wide, so a 1440-wide Retina
-laptop shows all of it at Z = 2 (one CSS pixel per art pixel). A phone shows
-part of it at Z = 1 and pans.
+For 4× art the levels are therefore 1, 2, 3, 4, 8, 12…
 
-Someone without a folder (a newcomer) walks as a shared placeholder body
-with a head made from their portrait, their GitHub picture, or their
-initials, until their character is added.
+| Z | A 4× character is drawn | Its size in the office |
+|---|-------------------------|------------------------|
+| 1, 2 | shrunk by exactly 4:1 or 2:1 (each block averaged by coverage, opaque when at least half covered), one device pixel per shrunk pixel | 32 × 48 |
+| 3 | unshrunk, one device pixel per sprite pixel | a third larger (≈ 43 × 64) |
+| 4, 8, … | Z / 4 device pixels per sprite pixel | 32 × 48 |
+
+Furniture and the map are always drawn at Z. The shrunk copies are made once per frame and factor and kept. Nothing is ever resampled by an arbitrary ratio.
+
+**Fit.** The office opens, and "fit" returns, at the largest level where its whole width fits the panel. A phone pans.
+
+**People's names** are not shown all the time:
+- **Hover or pick:** a small dark label with the person's name, and a thin outline around them.
+- **Zoomed in close:** a compact name under everyone's feet.
+- **Commits:** small speech chips.
+
+Labels and chips never overlap: one that would is moved aside or left out.
 
 ## `asset-manifest.json`
 
 What the page reads from it:
 
-- `environment.<name>.file`: the room and prop files.
-- `environment.room-product-backdoor.backThreshold.x`: the back door.
+- `environment.<name>.file`: `office-map`, `chair`, `desk-front`, `box`, and
+  the first kit's rooms and corridor tile (for the placeholder map).
+- `environment.office-map.layout`: the map's geometry file.
 - `characters.frameSize` and `characters.anchor`: the feet, when the frame
   size matches a person's strips (otherwise the defaults above).
 - `characters.variants.<person>.sheets.<clip>`: each person's strips.
 
-Paths are relative to `public/office/`, PNG only; anything else is ignored.
+Paths are relative to `public/office/`: PNG for pictures, one JSON file for
+the geometry. Anything else is ignored. A map whose geometry file does not
+match its picture's size is drawn with the guide's geometry.

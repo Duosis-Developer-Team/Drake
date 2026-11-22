@@ -1,15 +1,15 @@
 /**
  * The office's art: the drawings in `public/office/` when they exist (see
- * docs/runbooks/DEVELOPMENT_OFFICE_ASSETS.md), else placeholders drawn here
- * at exactly the same native sizes and frame layouts, so a real drawing
- * replaces a placeholder file by file with nothing else changing.
+ * docs/runbooks/DEVELOPMENT_OFFICE_ASSETS.md), else placeholders at exactly
+ * the same sizes and frame layouts, so a real drawing replaces a placeholder
+ * file by file with nothing else changing.
  *
- * `public/office/manifest.json` (written by scripts/office-assets.py) lists
- * the files present; without it everything is a placeholder, and no file is
- * asked for that is not there.
+ * `public/office/asset-manifest.json` lists the files present; nothing is
+ * asked for that it does not name.
  */
 
-import { BACKDOOR_X, DOOR_WIDTH, PLAQUE, SIDE, SIZE, WALL } from "./world";
+import { parseLayout, type OfficeLayout } from "./layout";
+import { SIZE } from "./world";
 
 export type Sprite = HTMLCanvasElement | HTMLImageElement;
 export type BodyRow =
@@ -55,12 +55,17 @@ export interface BodySet {
 }
 
 export interface Art {
-  productOpen: Sprite;
-  productBackdoor: Sprite;
-  cluster: Sprite;
-  lobby: Sprite;
+  /** The whole office drawn as one map (`office-map.png`), when it exists. */
+  map: Sprite | null;
+  /** The map's own geometry (`office-map.json`), when it comes with one. */
+  layout: OfficeLayout | null;
+  /** The room drawings of the first kit, used to compose a map until the map exists. */
+  rooms: { product: Sprite | null; backdoor: Sprite | null; cluster: Sprite | null; lobby: Sprite | null };
   corridor: Sprite;
-  desk: Sprite;
+  /** The chair, drawn behind a seated person. */
+  chair: Sprite;
+  /** The desk's front, drawn in front of them. */
+  deskFront: Sprite;
   box: Sprite;
   /** The shared placeholder body, for anyone without a character of their own. */
   body: BodySet;
@@ -68,9 +73,6 @@ export interface Art {
   bodies: Map<string, BodySet>;
   /** Per person: [front, facing right, back]; only drawn on the placeholder body. */
   heads: Map<string, Sprite[]>;
-  /** Racks to light up when a delivery lands, in cluster-room coordinates. */
-  racks: { x: number; y: number; w: number; h: number }[];
-  backdoorX: number;
   /** Which files are the user's drawings rather than placeholders. */
   real: Set<string>;
 }
@@ -148,13 +150,6 @@ function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContex
   return [c, ctx];
 }
 
-function hash(n: number): number {
-  let x = n | 0;
-  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
-  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
-  return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
-}
-
 function r(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, colour: string) {
   ctx.fillStyle = colour;
   ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
@@ -182,270 +177,6 @@ function outline(c: HTMLCanvasElement, colour = C.ink) {
       }
     }
   ctx.putImageData(out, 0, 0);
-}
-
-function plant(ctx: CanvasRenderingContext2D, x: number, y: number, seed: number) {
-  // A pot with a leafy top; (x, y) is the pot's bottom-left.
-  r(ctx, x + 1, y - 9, 12, 9, C.pot);
-  r(ctx, x, y - 11, 14, 3, C.pot2);
-  r(ctx, x + 1, y - 3, 12, 2, C.wood0);
-  const leaves = [
-    [3, -24, 8, 6],
-    [0, -19, 7, 6],
-    [7, -20, 8, 7],
-    [4, -16, 7, 5],
-    [-2, -14, 6, 4],
-    [9, -14, 6, 4],
-  ];
-  leaves.forEach(([lx, ly, lw, lh], i) => {
-    r(ctx, x + lx, y + ly, lw, lh, i % 2 ? C.leaf : C.leaf2);
-    r(ctx, x + lx + 1, y + ly, lw - 3, 1, C.leaf3);
-    if (hash(seed + i) > 0.5) r(ctx, x + lx + lw - 2, y + ly + lh - 2, 2, 2, C.leaf0);
-  });
-}
-
-function woodFloor(ctx: CanvasRenderingContext2D, x0: number, y0: number, w: number, h: number, light = false) {
-  const tones = light ? [C.wood4, C.wood3, C.wood5] : [C.wood2, C.wood3, C.wood2];
-  for (let row = 0; row * 8 < h; row += 1) {
-    const y = y0 + row * 8;
-    r(ctx, x0, y, w, 8, tones[row % 3]);
-    r(ctx, x0, y + 7, w, 1, light ? C.wood2 : C.wood1);
-    const offset = (row * 29) % 48;
-    for (let jx = x0 - offset; jx < x0 + w; jx += 48) if (jx > x0) r(ctx, jx, y, 1, 7, light ? C.wood2 : C.wood1);
-    for (let i = 0; i < w / 10; i += 1) {
-      const gx = x0 + Math.floor(hash(row * 131 + i) * w);
-      r(ctx, gx, y + 2 + Math.floor(hash(row * 17 + i) * 4), 3, 1, light ? C.wood5 : C.wood4);
-    }
-  }
-}
-
-function backWall(ctx: CanvasRenderingContext2D, w: number, tone = C.navy3) {
-  r(ctx, 0, 0, w, 8, C.navy4);
-  r(ctx, 0, 0, w, 1, C.navy5);
-  r(ctx, 0, 8, w, WALL - 8, tone);
-  for (let x = 16; x < w; x += 32) r(ctx, x, 10, 1, WALL - 16, C.navy2);
-  r(ctx, 0, 8, w, 1, C.navy2);
-  r(ctx, 0, WALL - 5, w, 5, C.navy1);
-  r(ctx, 0, WALL - 5, w, 1, C.navy4);
-}
-
-function sideWalls(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  for (const x of [0, w - SIDE]) {
-    r(ctx, x, 0, SIDE, h, C.navy4);
-    r(ctx, x === 0 ? SIDE - 1 : x, WALL, 1, h - WALL, C.navy1);
-    r(ctx, x === 0 ? 0 : w - 1, 0, 1, h, C.navy5);
-  }
-}
-
-function frontEdge(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  // The cut-away front wall: a low edge, open at the door.
-  const door = Math.round((w - DOOR_WIDTH) / 2);
-  r(ctx, 0, h - 4, door, 4, C.navy4);
-  r(ctx, door + DOOR_WIDTH, h - 4, w - door - DOOR_WIDTH, 4, C.navy4);
-  r(ctx, 0, h - 4, door, 1, C.navy5);
-  r(ctx, door + DOOR_WIDTH, h - 4, w - door - DOOR_WIDTH, 1, C.navy5);
-  // A doormat at the door.
-  r(ctx, door + 6, h - 12, DOOR_WIDTH - 12, 8, C.navy2);
-  for (let i = 0; i < DOOR_WIDTH - 16; i += 4) r(ctx, door + 8 + i, h - 10, 2, 4, C.navy4);
-}
-
-function plaque(ctx: CanvasRenderingContext2D, p: { x: number; y: number; w: number; h: number }) {
-  r(ctx, p.x - 2, p.y - 2, p.w + 4, p.h + 4, C.gold0);
-  r(ctx, p.x - 1, p.y - 1, p.w + 2, p.h + 2, C.gold);
-  r(ctx, p.x - 1, p.y - 1, p.w + 2, 1, C.gold2);
-  r(ctx, p.x, p.y, p.w, p.h, C.navy0);
-}
-
-function windowAt(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-  r(ctx, x - 2, y - 2, w + 4, h + 4, C.ink);
-  for (let i = 0; i < h; i += 1) r(ctx, x, y + i, w, 1, i < h / 2 ? C.sky : C.sky2);
-  r(ctx, x + Math.floor(w / 2) - 1, y, 2, h, C.navy2);
-  r(ctx, x, y + Math.floor(h / 2) - 1, w, 2, C.navy2);
-  r(ctx, x + 3, y + 3, 6, 1, C.white);
-  r(ctx, x + 3, y + 4, 3, 1, C.white);
-  r(ctx, x - 3, y + h + 2, w + 6, 2, C.wood4);
-}
-
-/* ---------------------------------------------------------------- rooms */
-
-function drawProduct(backdoor: boolean, backdoorX: number): HTMLCanvasElement {
-  const { w, h } = SIZE.product;
-  const [c, ctx] = canvas(w, h);
-  r(ctx, 0, 0, w, h, C.navy1);
-  woodFloor(ctx, SIDE, WALL, w - 2 * SIDE, h - WALL);
-  // Light from the window across the floor.
-  ctx.fillStyle = "rgba(255,240,210,0.07)";
-  ctx.beginPath();
-  ctx.moveTo(28, WALL);
-  ctx.lineTo(92, WALL);
-  ctx.lineTo(132, WALL + 70);
-  ctx.lineTo(60, WALL + 70);
-  ctx.fill();
-  backWall(ctx, w);
-  windowAt(ctx, 26, 16, 60, 26);
-  plaque(ctx, PLAQUE.product);
-  // A whiteboard with the week on it.
-  const bx = w - 98;
-  r(ctx, bx - 1, 13, 66, 30, C.grey2);
-  r(ctx, bx, 14, 64, 28, C.white);
-  r(ctx, bx + 4, 18, 22, 1, C.cobalt);
-  r(ctx, bx + 4, 21, 30, 1, C.cobalt2);
-  r(ctx, bx + 4, 24, 16, 1, C.cobalt2);
-  r(ctx, bx + 40, 18, 18, 12, C.amber);
-  r(ctx, bx + 42, 31, 14, 8, C.green);
-  r(ctx, bx + 8, 30, 20, 6, C.red);
-  r(ctx, bx + 2, 42, 60, 2, C.grey);
-  if (backdoor) {
-    const x = backdoorX - 16;
-    r(ctx, x - 3, 0, 38, WALL, C.wood1);
-    r(ctx, x, 0, 32, WALL, C.navy0);
-    r(ctx, x, WALL - 8, 32, 8, C.wood2);
-    r(ctx, x + 2, 0, 28, 6, C.navy2);
-    r(ctx, x - 3, 0, 1, WALL, C.wood4);
-  }
-  sideWalls(ctx, w, h);
-  plant(ctx, SIDE + 4, WALL + 22, 3);
-  plant(ctx, w - SIDE - 18, WALL + 22, 9);
-  // A low filing cabinet by the right wall.
-  r(ctx, w - SIDE - 20, WALL + 80, 14, 26, C.grey2);
-  r(ctx, w - SIDE - 20, WALL + 80, 14, 2, C.grey);
-  r(ctx, w - SIDE - 17, WALL + 88, 8, 1, C.navy1);
-  r(ctx, w - SIDE - 17, WALL + 97, 8, 1, C.navy1);
-  frontEdge(ctx, w, h);
-  return c;
-}
-
-function rack(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, seed: number) {
-  r(ctx, x, y, w, h, C.ink);
-  r(ctx, x + 1, y + 1, w - 2, h - 2, "#1a1f2b");
-  r(ctx, x + 1, y + 1, w - 2, 1, C.navy4);
-  for (let uy = y + 4; uy < y + h - 4; uy += 6) {
-    r(ctx, x + 3, uy, w - 6, 4, "#232a39");
-    r(ctx, x + 3, uy, w - 6, 1, "#2e3648");
-    const n = hash(seed * 97 + uy);
-    r(ctx, x + w - 7, uy + 1, 2, 2, n > 0.66 ? C.amber : n > 0.2 ? C.green : C.cobalt2);
-    if (n > 0.5) r(ctx, x + w - 11, uy + 1, 2, 2, C.green);
-  }
-}
-
-function drawCluster(): { image: HTMLCanvasElement; racks: Art["racks"] } {
-  const { w, h } = SIZE.cluster;
-  const [c, ctx] = canvas(w, h);
-  r(ctx, 0, 0, w, h, C.navy1);
-  for (let y = WALL; y < h; y += 16)
-    for (let x = SIDE; x < w - SIDE; x += 16) {
-      r(ctx, x, y, 16, 16, C.tile);
-      r(ctx, x, y, 16, 1, C.tile2);
-      r(ctx, x, y, 1, 16, C.tile2);
-      r(ctx, x + 15, y, 1, 16, C.tile3);
-      if (hash(x * 7 + y) > 0.85) r(ctx, x + 6, y + 6, 4, 4, "#2f3950");
-    }
-  backWall(ctx, w, C.navy2);
-  plaque(ctx, PLAQUE.cluster);
-  const racks: Art["racks"] = [];
-  // Racks along the back wall either side of the plaque.
-  for (const x of [14, 50, 86, w - 122, w - 86, w - 50]) {
-    rack(ctx, x, 6, 32, 48, x);
-    racks.push({ x, y: 6, w: 32, h: 48 });
-  }
-  // And along the side walls.
-  for (let y = WALL + 10; y < h - 50; y += 44) {
-    for (const x of [SIDE + 2, w - SIDE - 26]) {
-      rack(ctx, x, y, 24, 40, x + y);
-      racks.push({ x, y, w: 24, h: 40 });
-    }
-  }
-  // Cable trays overhead, along the wall.
-  r(ctx, SIDE, WALL + 2, w - 2 * SIDE, 3, "#3b4560");
-  for (let x = SIDE + 4; x < w - SIDE; x += 12) r(ctx, x, WALL + 2, 2, 3, C.navy1);
-  // The loading square.
-  const sx = w / 2 - 24;
-  const sy = 124;
-  for (let i = 0; i < 48; i += 1)
-    for (let j = 0; j < 48; j += 1) {
-      const edge = i < 4 || j < 4 || i >= 44 || j >= 44;
-      if (edge) r(ctx, sx + i, sy + j, 1, 1, ((i + j) >> 2) % 2 ? C.amber : C.ink);
-    }
-  r(ctx, sx + 4, sy + 4, 40, 40, "#2e3747");
-  sideWalls(ctx, w, h);
-  ctx.fillStyle = "rgba(90,150,255,0.06)";
-  ctx.fillRect(SIDE, WALL, w - 2 * SIDE, h - WALL);
-  frontEdge(ctx, w, h);
-  return { image: c, racks };
-}
-
-function sofa(ctx: CanvasRenderingContext2D, x: number, y: number, facingRight: boolean) {
-  // Seen from above, against a side wall, seats toward the room.
-  const back = facingRight ? x : x + 50;
-  r(ctx, x, y, 64, 72, C.ink);
-  r(ctx, x + 1, y + 1, 62, 70, C.sofa3);
-  r(ctx, back + 1, y + 1, 13, 70, C.sofa);
-  r(ctx, back + 1, y + 1, 13, 2, C.sofa2);
-  for (let i = 0; i < 3; i += 1) {
-    const cy = y + 4 + i * 22;
-    const cx = facingRight ? x + 16 : x + 4;
-    r(ctx, cx, cy, 44, 20, C.sofa2);
-    r(ctx, cx, cy, 44, 2, "#6475ad");
-    r(ctx, cx, cy + 18, 44, 2, C.sofa3);
-  }
-}
-
-function drawLobby(): HTMLCanvasElement {
-  const { w, h } = SIZE.lobby;
-  const [c, ctx] = canvas(w, h);
-  r(ctx, 0, 0, w, h, C.navy1);
-  woodFloor(ctx, SIDE, WALL, w - 2 * SIDE, h - WALL, true);
-  // A rug in the middle.
-  r(ctx, 112, 78, 224, 96, C.gold0);
-  r(ctx, 114, 80, 220, 92, C.rug);
-  r(ctx, 120, 86, 208, 80, C.rug2);
-  r(ctx, 124, 90, 200, 72, C.rug);
-  for (let i = 0; i < 9; i += 1) r(ctx, 134 + i * 22, 124, 6, 6, C.gold);
-  backWall(ctx, w, C.navy3);
-  // A kitchen counter with the coffee machine.
-  r(ctx, 24, 28, 112, 26, C.wood1);
-  r(ctx, 24, 28, 112, 3, C.wood5);
-  r(ctx, 30, 34, 1, 18, C.wood0);
-  r(ctx, 66, 34, 1, 18, C.wood0);
-  r(ctx, 102, 34, 1, 18, C.wood0);
-  r(ctx, 40, 12, 18, 18, "#2a2b33");
-  r(ctx, 40, 12, 18, 2, "#4a4c58");
-  r(ctx, 52, 16, 3, 2, C.red);
-  r(ctx, 45, 22, 8, 6, C.ink);
-  r(ctx, 46, 25, 6, 3, C.white);
-  r(ctx, 76, 20, 6, 8, C.white);
-  r(ctx, 86, 20, 6, 8, C.cobalt2);
-  // A water cooler.
-  r(ctx, 150, 14, 14, 38, C.grey);
-  r(ctx, 151, 8, 12, 14, C.sky);
-  r(ctx, 151, 8, 12, 2, C.sky2);
-  r(ctx, 153, 30, 3, 2, C.red);
-  r(ctx, 158, 30, 3, 2, C.cobalt);
-  // Pictures on the wall.
-  for (const [x, colour] of [
-    [214, C.cobalt],
-    [262, C.gold],
-    [310, C.leaf2],
-  ] as const) {
-    r(ctx, x - 1, 15, 34, 24, C.gold0);
-    r(ctx, x, 16, 32, 22, C.navy0);
-    r(ctx, x + 4, 24, 24, 10, colour);
-    r(ctx, x + 10, 20, 12, 6, C.sky);
-  }
-  plant(ctx, w - SIDE - 30, WALL - 4, 21);
-  plant(ctx, w - SIDE - 54, WALL - 2, 33);
-  sideWalls(ctx, w, h);
-  sofa(ctx, SIDE, 88, true);
-  sofa(ctx, w - SIDE - 64, 88, false);
-  // A low table by each sofa.
-  r(ctx, 80, 108, 20, 32, C.wood1);
-  r(ctx, 80, 108, 20, 2, C.wood5);
-  r(ctx, w - 100, 108, 20, 32, C.wood1);
-  r(ctx, w - 100, 108, 20, 2, C.wood5);
-  plant(ctx, SIDE + 4, h - 10, 5);
-  plant(ctx, w - SIDE - 18, h - 10, 11);
-  frontEdge(ctx, w, h);
-  return c;
 }
 
 function drawCorridor(): HTMLCanvasElement {
@@ -900,7 +631,7 @@ function slice(image: HTMLImageElement, w: number, h: number, count: number): HT
 export interface KitManifest {
   environment?: Record<
     string,
-    { file?: string; backThreshold?: { x?: number; y?: number } } | undefined
+    { file?: string; layout?: string } | undefined
   >;
   characters?: {
     frameSize?: { width?: number; height?: number };
@@ -973,6 +704,21 @@ async function character(
   return { frames, density, anchor: anchorFor(density, manifest), baked: true };
 }
 
+/**
+ * A chair and a desk's front from the placeholder desk (64 × 48, chair
+ * drawn in): the chair's rows become `chair.png`'s 32 × 32, the rest the
+ * desk's 64 × 40 front, so the two sit where the drawn ones would.
+ */
+function splitDesk(desk: Sprite): { chair: HTMLCanvasElement; deskFront: HTMLCanvasElement } {
+  const [chair, c] = canvas(SIZE.chair.w, SIZE.chair.h);
+  c.drawImage(desk, 16, 0, 32, 20, 0, 8, 32, 20);
+  const [deskFront, d] = canvas(SIZE.desk.w, SIZE.desk.h);
+  d.drawImage(desk, 0, 8, 64, 40, 0, 0, 64, 40);
+  return { chair, deskFront };
+}
+
+const SAFE_JSON = /^[A-Za-z0-9_-]+\.json$/;
+
 /** The office's art: the user's drawings where present, placeholders otherwise. */
 export async function loadArt(): Promise<Art> {
   let manifest: KitManifest = {};
@@ -991,18 +737,30 @@ export async function loadArt(): Promise<Art> {
     if (image) real.add(path);
     return image;
   };
-  const threshold = env["room-product-backdoor"]?.backThreshold?.x;
-  const backdoorX =
-    typeof threshold === "number" && threshold > 24 && threshold < SIZE.product.w - 24 ? Math.round(threshold) : BACKDOOR_X;
-  const [productOpen, productBackdoor, cluster, lobby, corridor, desk, box] = await Promise.all([
+  const [map, product, backdoor, cluster, lobby, corridor, desk, chair, deskFront, box] = await Promise.all([
+    get("office-map"),
     get("room-product-open"),
     get("room-product-backdoor"),
     get("room-cluster"),
     get("room-lobby"),
     get("floor-corridor"),
     get("desk"),
+    get("chair"),
+    get("desk-front"),
     get("box"),
   ]);
+  // The map's own geometry, when it brings one; else the guide's.
+  let layout: OfficeLayout | null = null;
+  const layoutFile = env["office-map"]?.layout;
+  if (map && typeof layoutFile === "string" && SAFE_JSON.test(layoutFile)) {
+    try {
+      const response = await fetch(`${BASE}${layoutFile}`, { cache: "no-cache" });
+      if (response.ok) layout = parseLayout(await response.json());
+    } catch {
+      layout = null;
+    }
+  }
+  const split = splitDesk(desk ?? drawDesk());
   const boxSprite = box ?? drawBox();
   const placeholders = placeholderBody(drawBox());
   const body = {} as Record<BodyRow, Frame[]>;
@@ -1016,30 +774,17 @@ export async function loadArt(): Promise<Art> {
       if (set) bodies.set(key, set);
     }),
   );
-  const drawnCluster = drawCluster();
   return {
-    productOpen: productOpen ?? drawProduct(false, backdoorX),
-    productBackdoor: productBackdoor ?? drawProduct(true, backdoorX),
-    cluster: cluster ?? drawnCluster.image,
-    lobby: lobby ?? drawLobby(),
+    map,
+    layout: map && layout && layout.w === map.naturalWidth && layout.h === map.naturalHeight ? layout : null,
+    rooms: { product, backdoor, cluster, lobby },
     corridor: corridor ?? drawCorridor(),
-    desk: desk ?? drawDesk(),
+    chair: chair ?? split.chair,
+    deskFront: deskFront ?? split.deskFront,
     box: boxSprite,
     body: { frames: body, density: 1, anchor: { x: 16, y: 46 }, baked: false },
     bodies,
     heads: new Map(),
-    // The art's racks: along the back wall either side of the plaque, and the side walls.
-    racks: cluster
-      ? [
-          { x: 46, y: 26, w: 90, h: 56 },
-          { x: 250, y: 26, w: 88, h: 56 },
-          { x: 0, y: 40, w: 32, h: 146 },
-          { x: 352, y: 40, w: 32, h: 146 },
-        ]
-      : drawnCluster.racks,
-    backdoorX,
     real,
   };
 }
-
-export const PALETTE = C;

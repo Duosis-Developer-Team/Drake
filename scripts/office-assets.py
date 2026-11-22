@@ -36,6 +36,10 @@ ENVIRONMENT = {
     "floor-corridor": (32, 32, False),
     "desk": (64, 48, True),
     "box": (16, 16, True),
+    # The whole office drawn as one map, and the two props drawn around a seated person.
+    "office-map": (1024, 768, False),
+    "chair": (32, 32, True),
+    "desk-front": (64, 40, True),
 }
 CLIPS = {
     "body-walk-down": 4,
@@ -294,7 +298,58 @@ def manifest_for(kit: Path, people: dict[str, int]) -> dict:
     for name in ENVIRONMENT:
         if (kit / f"{name}.png").exists():
             environment.setdefault(name, {})["file"] = f"{name}.png"
+    if (kit / "office-map.png").exists() and (kit / MAP_LAYOUT).exists():
+        environment["office-map"]["layout"] = MAP_LAYOUT
     return manifest
+
+
+MAP_LAYOUT = "office-map.json"
+
+
+def _inside(box: tuple, rect: list) -> bool:
+    """Whether an [x, y, w, h] rect lies within an (x1, y1, x2, y2) box."""
+    x1, y1, x2, y2 = box
+    return x1 <= rect[0] and y1 <= rect[1] and rect[0] + rect[2] <= x2 and rect[1] + rect[3] <= y2
+
+
+def check_map_layout(kit: Path, report: Report) -> None:
+    """The map's geometry: rooms inside the map; screens, doors and floors inside their room."""
+    path = kit / MAP_LAYOUT
+    if not (kit / "office-map.png").exists():
+        return
+    if not path.exists():
+        report.notes.append(f"{MAP_LAYOUT} missing: the office uses the guide's geometry")
+        return
+    try:
+        layout = json.loads(path.read_text())
+    except ValueError as error:
+        report.fail(MAP_LAYOUT, f"not JSON: {error}")
+        return
+    w, h = (layout.get("size") or [0, 0])[:2]
+    mw, mh = ENVIRONMENT["office-map"][:2]
+    if (w, h) != (mw, mh):
+        report.fail(MAP_LAYOUT, f"size {w}x{h}, the map is {mw}x{mh}")
+    rooms = layout.get("rooms") or {}
+    kinds = [r.get("kind") for r in rooms.values()]
+    if kinds.count("cluster") != 1 or kinds.count("lobby") != 1 or "product" not in kinds:
+        report.fail(MAP_LAYOUT, "needs one cluster, one lobby and product rooms")
+    for name, room in rooms.items():
+        x1, y1, x2, y2 = (room.get("rect") or [0, 0, 0, 0])[:4]
+        if not (0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h):
+            report.fail(MAP_LAYOUT, f"{name}: rect outside the map")
+            continue
+        box = (x1, y1, x2, y2)
+        if not _inside(box, room.get("screen") or [-1, -1, 0, 0]):
+            report.fail(MAP_LAYOUT, f"{name}: screen outside the room")
+        if room.get("free_floor") and not _inside(box, room["free_floor"]):
+            report.fail(MAP_LAYOUT, f"{name}: free floor outside the room")
+        for door in room.get("doors") or []:
+            if door.get("side") not in ("N", "S") or not (
+                x1 <= door.get("x", -1) <= x2 - door.get("width", 0)
+            ):
+                report.fail(MAP_LAYOUT, f"{name}: a door off its wall")
+        if room.get("kind") == "cluster" and not room.get("loading"):
+            report.fail(MAP_LAYOUT, f"{name}: the cluster needs its loading spot")
 
 
 def main() -> int:
@@ -319,6 +374,7 @@ def main() -> int:
     report = Report()
     staged: dict[str, tuple] = {}
     check_environment(kit, report, args.rescale, staged)
+    check_map_layout(kit, report)
     people: dict[str, int] = {}
     root = kit / "characters"
     for person_dir in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []:
@@ -349,6 +405,8 @@ def main() -> int:
             write_png(target, width, height, rows)
         else:
             shutil.copyfile(source, target)
+    if (kit / MAP_LAYOUT).exists() and (kit / "office-map.png").exists():
+        shutil.copyfile(kit / MAP_LAYOUT, out / MAP_LAYOUT)
     (out / "asset-manifest.json").write_text(
         json.dumps(manifest_for(kit, people), indent=2, ensure_ascii=False) + "\n"
     )
