@@ -213,7 +213,7 @@ export function Portfolio({ projects, rows }: { projects: Project[]; rows: Servi
   const { overview } = usePlatformOverview(rows);
   const traffic = answered(overview?.traffic);
 
-  const incidents = useResource<{ items: IncidentSummary[] }>("/v1/incidents?state=open&limit=100");
+  const incidents = useResource<{ items: IncidentSummary[] }>("/v1/incidents?state=open&limit=50");
   const slos = useResource<{ items: Slo[] }>("/v1/slo");
   const deploys = useResource<DeploymentPage>(deploymentListPath({ startedWithin: "24h" }));
 
