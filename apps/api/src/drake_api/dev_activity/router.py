@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
@@ -43,6 +44,43 @@ async def dev_map(
             connection,
             auth.principal,
             window=window,
+            reads_commits=bool(loop and loop.reads_commits),
+            reads_usage=bool(loop and loop.reads_usage),
+            orgs=settings.dev_activity_orgs,
+        )
+
+
+@router.get("/office")
+async def dev_office(
+    request: Request,
+    window: str = Query("30d", pattern=_WINDOW),
+    day_start: datetime | None = Query(None),
+    auth: AuthContext = Depends(require_auth),
+) -> dict[str, Any]:
+    """The map's people and repositories as an office: desks, who is at work now,
+    and one day's commits and deliveries to play back.
+
+    `day_start` is the viewer's local midnight (with its offset); the day is
+    the 24 hours after it, within the last 90 days.
+    """
+    settings: Settings = request.app.state.settings
+    loop = _loop(request)
+    now = datetime.now(UTC)
+    if day_start is None:
+        day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=UTC)
+    elif day_start.tzinfo is None:
+        raise HTTPException(status_code=422, detail="day_start needs an offset")
+    if not now - timedelta(days=90) <= day_start <= now + timedelta(days=1):
+        raise HTTPException(status_code=422, detail="day_start outside the last 90 days")
+    presence = await loop.presence(now) if loop is not None else []
+    async with get_engine(settings).connect() as connection:
+        return await repo.office(
+            connection,
+            auth.principal,
+            window=window,
+            day_start=day_start,
+            presence=presence,
+            now=now,
             reads_commits=bool(loop and loop.reads_commits),
             reads_usage=bool(loop and loop.reads_usage),
             orgs=settings.dev_activity_orgs,

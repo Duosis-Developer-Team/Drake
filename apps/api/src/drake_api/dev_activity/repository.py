@@ -859,3 +859,302 @@ async def avatar_installation(connection: AsyncConnection) -> int | None:
         )
     ).scalar_one_or_none()
     return int(found) if found is not None else None
+
+
+# --------------------------------------------------------------------------
+# The office: the same people and repositories as the map, as places
+# --------------------------------------------------------------------------
+
+OFFICE_MAX_COMMITS = 2000
+OFFICE_MAX_DEPLOYMENTS = 300
+OFFICE_MAX_LIVE = 200
+# Several workloads of one project rolled out within this long are one
+# delivery (an API and a web image pinned together, say).
+_DELIVERY_GAP = timedelta(minutes=10)
+
+
+async def office(
+    connection: AsyncConnection,
+    principal: Principal,
+    *,
+    window: str,
+    day_start: datetime,
+    presence: Iterable[Any] = (),
+    now: datetime | None = None,
+    reads_commits: bool,
+    reads_usage: bool,
+    orgs: Iterable[str] = (),
+) -> dict[str, Any]:
+    """People, rooms and desks (from the map), who is at work now, and a day's events.
+
+    Scoped exactly like the map: a room is a repository the caller may see,
+    a person is someone behind rows the caller may see, and live presence or
+    an event in any other repository is left out. `presence` is the
+    collector's read (identity, hint, repository, last seen).
+    """
+    moment = now or datetime.now(UTC)
+    seen = await dev_map(
+        connection,
+        principal,
+        window=window,
+        now=moment,
+        reads_commits=reads_commits,
+        reads_usage=reads_usage,
+        orgs=orgs,
+    )
+    project_ids, org_wide = await _visibility(connection, principal)
+    people = await _people(connection)
+
+    person_out: dict[str, dict[str, Any]] = {
+        p["key"]: {"key": p["key"], "name": p["name"], "linked": p["linked"]}
+        for p in seen["people"]
+        if not p["bot"]
+    }
+    rooms: dict[str, dict[str, Any]] = {
+        r["id"]: {
+            "id": r["id"],
+            "name": r["name"],
+            "full_name": r["full_name"],
+            "catalogued": r["catalogued"],
+            "project_id": r["project_id"],
+            "project_key": r["project_key"],
+            "project_name": r["project_name"],
+            "desks": [],
+        }
+        for r in seen["repositories"]
+    }
+    desk_weight: dict[tuple[str, str], int] = defaultdict(int)
+    for e in seen["edges"]:
+        if e["person"] in person_out and e["repository"] in rooms:
+            desk_weight[(e["repository"], e["person"])] += e["commits"] + (
+                1 if e["telemetry"] else 0
+            )
+
+    projects = {
+        str(r[0]): {"key": str(r[1]), "name": str(r[2]), "repo": str(r[3]).lower()}
+        for r in (
+            await connection.execute(
+                text(
+                    "SELECT id, project_key, display_name, repo_owner || '/' || repo_name "
+                    "FROM projects WHERE id = ANY(:ids) AND lifecycle = 'active'"
+                ),
+                {"ids": list(project_ids) or [uuid.UUID(int=0)]},
+            )
+        ).all()
+    }
+    known_ids = {
+        str(r[0]): int(r[1])
+        for r in (
+            await connection.execute(
+                text("SELECT lower(full_name), external_id FROM github_repositories")
+            )
+        ).all()
+    }
+
+    def room(rid: str, full_name: str, project_id: str | None) -> dict[str, Any] | None:
+        """The room, added when the map had none (activity outside its window)."""
+        if rid in rooms:
+            return rooms[rid]
+        project = projects.get(project_id) if project_id else None
+        if project_id and project is None:
+            return None  # a project the caller may not see
+        if project is None and not org_wide:
+            return None  # outside the catalog: organisation-wide callers only
+        rooms[rid] = {
+            "id": rid,
+            "name": full_name.rpartition("/")[2],
+            "full_name": full_name,
+            "catalogued": project is not None,
+            "project_id": project_id if project else None,
+            "project_key": project["key"] if project else None,
+            "project_name": project["name"] if project else None,
+            "desks": [],
+        }
+        return rooms[rid]
+
+    def person(key: str, name: str | None = None, linked: bool = True) -> None:
+        if key not in person_out:
+            person_out[key] = {
+                "key": key,
+                "name": people.display(key) or name or _fallback_name(key),
+                "linked": linked,
+            }
+
+    # Live: the collector's read, kept to the repositories this caller sees.
+    live: dict[str, dict[str, Any]] = {}
+    for p in presence:
+        repo = p.repository
+        project_id = str(repo.project_id) if repo.project_id else None
+        ext = repo.external_id if repo.external_id is not None else known_ids.get(repo.full_name)
+        rid = repository_id(ext, repo.full_name)
+        if room(rid, repo.full_name, project_id) is None:
+            continue
+        key, linked = people.of_claude(p.identity, p.person_hint)
+        person(key, linked=linked)
+        # One place per person: the most recent wins.
+        if key not in live or live[key]["last_seen"] < p.last_seen:
+            live[key] = {"person": key, "repository": rid, "last_seen": p.last_seen}
+        desk_weight[(rid, key)] += 1
+        if len(live) >= OFFICE_MAX_LIVE:
+            break
+
+    day_end = day_start + timedelta(days=1)
+    commit_rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT authored_at, repository_external_id, repository, project_id,
+                       author_login, author_name, agent, title, sha
+                FROM dev_commits
+                WHERE authored_at >= :start AND authored_at < :end
+                  AND (project_id = ANY(:ids) OR (:org_wide AND project_id IS NULL))
+                ORDER BY authored_at
+                LIMIT :limit
+                """
+            ),
+            {
+                "start": day_start,
+                "end": day_end,
+                "ids": list(project_ids) or [uuid.UUID(int=0)],
+                "org_wide": org_wide,
+                "limit": OFFICE_MAX_COMMITS,
+            },
+        )
+    ).all()
+    events: list[dict[str, Any]] = []
+    for at, ext, full, pid, login, name, agent, title, sha in commit_rows:
+        if login and str(login).endswith("[bot]"):
+            continue
+        rid = repository_id(ext, str(full))
+        if room(rid, str(full), str(pid) if pid else None) is None:
+            continue
+        key = people.of_login(login, name or "")
+        person(key, name=name or None)
+        desk_weight[(rid, key)] += 1
+        events.append(
+            {
+                "at": at.isoformat(),
+                "kind": "commit",
+                "person": key,
+                "repository": rid,
+                "agent": agent,
+                "title": str(title or "")[:160],
+                "short": str(sha)[:7],
+            }
+        )
+
+    deploy_rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT d.rollout_started_at, d.project_id, d.commit_sha, e.environment_key
+                FROM deployment_revisions d
+                LEFT JOIN environments e ON e.id = d.environment_id
+                WHERE d.project_id = ANY(:ids)
+                  AND d.rollout_started_at >= :start AND d.rollout_started_at < :end
+                ORDER BY d.rollout_started_at
+                LIMIT :limit
+                """
+            ),
+            {
+                "ids": [uuid.UUID(p) for p in projects] or [uuid.UUID(int=0)],
+                "start": day_start,
+                "end": day_end,
+                "limit": OFFICE_MAX_DEPLOYMENTS,
+            },
+        )
+    ).all()
+    last_delivery: dict[str, datetime] = {}
+    for at, pid, sha, environment in deploy_rows:
+        project_id = str(pid)
+        project = projects.get(project_id)
+        if project is None:
+            continue
+        full = project["repo"]
+        rid = repository_id(known_ids.get(full), full)
+        if room(rid, full, project_id) is None:
+            continue
+        previous = last_delivery.get(project_id)
+        if previous is not None and at - previous < _DELIVERY_GAP:
+            continue
+        last_delivery[project_id] = at
+        carrier = await _carrier(connection, people, full, known_ids.get(full), sha, at)
+        if carrier is not None:
+            person(carrier[0], name=carrier[1])
+        events.append(
+            {
+                "at": at.isoformat(),
+                "kind": "deployment",
+                "person": carrier[0] if carrier else None,
+                "repository": rid,
+                "environment": str(environment) if environment else None,
+                "short": str(sha)[:7] if sha else None,
+            }
+        )
+    events.sort(key=lambda e: e["at"])
+
+    for (rid, key), weight in sorted(desk_weight.items(), key=lambda kv: (-kv[1], kv[0])):
+        if weight and rid in rooms and key in person_out and key not in rooms[rid]["desks"]:
+            rooms[rid]["desks"].append(key)
+    portraits = {
+        str(r[0])
+        for r in (
+            await connection.execute(
+                text("SELECT person_key FROM dev_person_portraits WHERE person_key = ANY(:k)"),
+                {"k": list(person_out) or [""]},
+            )
+        ).all()
+    }
+    return {
+        "window": window,
+        "as_of": moment.isoformat(),
+        "day_start": day_start.isoformat(),
+        "configured": seen["configured"],
+        "people": [
+            {**p, "portrait": p["key"] in portraits}
+            for p in sorted(person_out.values(), key=lambda p: str(p["name"]).lower())
+        ],
+        "rooms": [r for r in rooms.values() if r["desks"] or r["catalogued"]],
+        "live": [
+            {**v, "last_seen": v["last_seen"].isoformat()}
+            for v in sorted(live.values(), key=lambda v: v["person"])
+        ],
+        "events": events,
+        "truncated": len(commit_rows) >= OFFICE_MAX_COMMITS,
+    }
+
+
+async def _carrier(
+    connection: AsyncConnection,
+    people: People,
+    full_name: str,
+    external_id: int | None,
+    sha: str | None,
+    at: datetime,
+) -> tuple[str, str | None] | None:
+    """Who carries a delivery: the deployed commit's author, else the last one before it."""
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT author_login, author_name FROM dev_commits
+                WHERE (repository_external_id = CAST(:ext AS bigint) OR lower(repository) = :full)
+                  AND (sha = CAST(:sha AS text)
+                       OR (authored_at <= :at AND authored_at > :floor))
+                  AND (author_login IS NULL OR author_login NOT LIKE '%[bot]')
+                ORDER BY (sha = coalesce(CAST(:sha AS text), '')) DESC, authored_at DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "ext": external_id,
+                "full": full_name,
+                "sha": sha,
+                "at": at,
+                "floor": at - timedelta(days=14),
+            },
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return people.of_login(row[0], row[1] or ""), (row[1] or None)
