@@ -46,8 +46,11 @@ export function ServicesLauncher({
   onProject,
   onEnvironment,
   shelfAction,
+  hideGrid = false,
 }: {
   rows: ServiceHealthRow[];
+  /** The page draws its own app picker (Projects' portfolio cards). */
+  hideGrid?: boolean;
   /** The page's own signal read, when it already has one. */
   signalById?: Map<string, SignalItem>;
   project: string;
@@ -78,7 +81,9 @@ export function ServicesLauncher({
 
   return (
     <div className="flex flex-col gap-6" data-testid="services-launcher">
-      <AppGrid apps={apps} selectedId={selected?.projectId ?? null} onSelect={(id) => onProject(id ?? "")} />
+      {hideGrid ? null : (
+        <AppGrid apps={apps} selectedId={selected?.projectId ?? null} onSelect={(id) => onProject(id ?? "")} />
+      )}
       {selected ? (
         <AppShelf
           key={selected.projectId}

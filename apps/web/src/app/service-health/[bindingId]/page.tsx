@@ -11,7 +11,9 @@
 import {
   ArrowLeft,
   ArrowRight,
+  MemoryStick,
   Pencil,
+  Repeat,
   RotateCcw,
   Route,
   ScrollText,
@@ -86,8 +88,6 @@ const CHARTABLE: { signal: string; unit: string }[] = [
   { signal: "latency_p95", unit: "seconds" },
 ];
 
-const BIG_NUMBER =
-  "font-[family-name:var(--font-display)] text-[1.75rem] leading-none font-bold tracking-[-0.03em] text-ink";
 
 function signalLabel(t: Translator<"serviceHealth">, name: string): string {
   return t.dyn("signal", name, SIGNAL_LABELS[name] ?? name);
@@ -622,34 +622,23 @@ export default function ServiceHealthDetailPage() {
                     status={availability.status}
                     reasons={availability.reasons}
                   >
-                    <div className="flex items-end justify-between gap-4">
-                      <span>
-                        {/* Two exact numbers: a percentage alone would hide
-                            the difference between 0/0 and an unmeasured pair. */}
-                        <span data-tabular className={`block ${BIG_NUMBER}`}>
-                          {availability.ready_replicas ?? "—"}
-                          <span className="text-ink-muted">
-                            /{availability.desired_replicas ?? "—"}
-                          </span>
-                        </span>
-                        <span className="mt-1.5 block text-caption text-ink-muted">
-                          {t("detail.availability.replicasReady")}
-                        </span>
-                      </span>
-                      <span className="text-caption text-ink-muted">
-                        {availability.desired_replicas
-                          ? `${Math.round(((availability.ready_replicas ?? 0) / availability.desired_replicas) * 100)}%`
-                          : "—"}
-                      </span>
+                    <div className="flex flex-1 flex-col items-center justify-center">
+                      <Gauge
+                        value={
+                          availability.desired_replicas
+                            ? (availability.ready_replicas ?? 0) / availability.desired_replicas
+                            : null
+                        }
+                        unit="ratio"
+                        tone={readyTone}
+                        label={t("detail.availability.replicasReady")}
+                        caption={
+                          // Two exact numbers: a percentage alone would hide
+                          // the difference between 0/0 and an unmeasured pair.
+                          `${availability.ready_replicas ?? "—"} / ${availability.desired_replicas ?? "—"}`
+                        }
+                      />
                     </div>
-                    <MiniMeter
-                      fraction={
-                        availability.desired_replicas
-                          ? (availability.ready_replicas ?? 0) / availability.desired_replicas
-                          : null
-                      }
-                      tone={readyTone}
-                    />
                     {availability.scaled_to_zero ? (
                       <p className="rounded-control bg-surface-2 px-2.5 py-1 text-micro text-ink-secondary">
                         {t("detail.availability.scaledToZero")}
@@ -663,35 +652,45 @@ export default function ServiceHealthDetailPage() {
                     status={stability.status}
                     reasons={stability.reasons}
                   >
-                    <span>
-                      <span data-tabular className={`block ${BIG_NUMBER}`}>
-                        {stability.restarts_in_window ?? "—"}
+                    {/* Restarts have no ceiling, so no gauge: a count, and the two
+                        failure modes as tiles that light up when they happen. */}
+                    <div className="flex flex-1 items-center">
+                    <div className="grid w-full grid-cols-3 gap-2">
+                      <span
+                        className={`flex flex-col items-center justify-center gap-1 rounded-control border px-2 py-3 text-center ${
+                          (stability.restarts_in_window ?? 0) > 0
+                            ? "border-warning/40 bg-warning-soft"
+                            : "border-border bg-surface-2"
+                        }`}
+                      >
+                        <RotateCcw aria-hidden className="h-4 w-4 text-ink-muted" />
+                        <span data-tabular className="text-[1.5rem] leading-none font-semibold text-ink">
+                          {stability.restarts_in_window ?? "—"}
+                        </span>
+                        <span className="text-micro leading-tight text-ink-muted">
+                          {t("detail.stability.restartsInWindow")}
+                        </span>
                       </span>
-                      <span className="mt-1.5 block text-caption text-ink-muted">
-                        {t("detail.stability.restartsInWindow")}
-                      </span>
-                    </span>
-                    <div className="grid grid-cols-1 gap-2">
                       {(
                         [
-                          [t("detail.stability.crashLoop"), stability.crash_looping],
-                          [t("detail.stability.oomKilled"), stability.oom_killed],
+                          [t("detail.stability.crashLoop"), stability.crash_looping, Repeat],
+                          [t("detail.stability.oomKilled"), stability.oom_killed, MemoryStick],
                         ] as const
-                      ).map(([label, flagged]) => (
+                      ).map(([label, flagged, Icon]) => (
                         <span
                           key={label}
-                          className={`flex items-center justify-between gap-2 rounded-control px-2.5 py-1 text-caption ${
-                            flagged
-                              ? toneSpec("critical").chip
-                              : "bg-surface-2 text-ink-secondary"
+                          className={`flex flex-col items-center justify-center gap-1 rounded-control border px-2 py-3 text-center ${
+                            flagged ? `${toneSpec("critical").chip}` : "border-border bg-surface-2"
                           }`}
                         >
-                          {label}
-                          <span className="font-semibold">
+                          <Icon aria-hidden className={`h-4 w-4 ${flagged ? "" : "text-ink-muted"}`} />
+                          <span className={`text-caption font-semibold ${flagged ? "" : "text-healthy"}`}>
                             {flagged ? tc("state.yes") : tc("state.no")}
                           </span>
+                          <span className="text-micro leading-tight text-ink-muted">{label}</span>
                         </span>
                       ))}
+                    </div>
                     </div>
                   </SectionCard>
 
@@ -701,31 +700,39 @@ export default function ServiceHealthDetailPage() {
                     status={resources.status}
                     reasons={resources.reasons}
                   >
-                    <span>
-                      <span data-tabular className={`block ${BIG_NUMBER}`}>
-                        {formatSignal(resources.cpu_utilization, "ratio")}
-                      </span>
-                      <span className="mt-1.5 block text-caption text-ink-muted">
-                        {t("detail.resources.cpuOfLimit")}
-                      </span>
-                    </span>
-                    <div className="space-y-3">
-                      <UsageLine
+                    <div className="grid grid-cols-2 gap-1">
+                      <Gauge
+                        size="compact"
+                        value={resources.cpu_utilization}
+                        unit="ratio"
+                        thresholds={utilisation}
                         label={t("detail.resources.cpu")}
-                        used={resources.cpu_cores_used}
-                        limit={resources.cpu_limit_cores}
-                        unit="cores"
-                        ratio={resources.cpu_utilization}
-                        thresholds={utilisation}
+                        caption={
+                          resources.cpu_limit_cores !== null
+                            ? t("detail.resources.ofLimit", {
+                                used: formatSignal(resources.cpu_cores_used, "cores"),
+                                limit: formatSignal(resources.cpu_limit_cores, "cores"),
+                              })
+                            : `${formatSignal(resources.cpu_cores_used, "cores")} · ${t("detail.resources.noLimit")}`
+                        }
                       />
-                      <UsageLine
+                      <Gauge
+                        size="compact"
+                        value={resources.memory_utilization}
+                        unit="ratio"
+                        thresholds={utilisation}
                         label={t("detail.resources.memory")}
-                        used={resources.memory_bytes_used}
-                        limit={resources.memory_limit_bytes}
-                        unit="bytes"
-                        ratio={resources.memory_utilization}
-                        thresholds={utilisation}
+                        caption={
+                          resources.memory_limit_bytes !== null
+                            ? t("detail.resources.ofLimit", {
+                                used: formatSignal(resources.memory_bytes_used, "bytes"),
+                                limit: formatSignal(resources.memory_limit_bytes, "bytes"),
+                              })
+                            : `${formatSignal(resources.memory_bytes_used, "bytes")} · ${t("detail.resources.noLimit")}`
+                        }
                       />
+                    </div>
+                    <div className="border-t border-border pt-3">
                       <UsageLine
                         label={t("detail.pressure.throttling")}
                         used={null}
@@ -746,22 +753,26 @@ export default function ServiceHealthDetailPage() {
                   >
                     {application.metrics_present ? (
                       <>
-                        <span>
-                          <span data-tabular className={`block ${BIG_NUMBER}`}>
-                            {formatSignal(application.error_ratio, "ratio")}
-                          </span>
-                          <span className="mt-1.5 block text-caption text-ink-muted">
-                            {t("detail.application.errorRatio")}
-                          </span>
+                        <div className="flex flex-col items-center">
+                          {/* The share that succeeded, so the gauge shows the
+                              real number; the bands mark 99% and 95%. */}
+                          <Gauge
+                            size="compact"
+                            value={application.error_ratio === null ? null : 1 - application.error_ratio}
+                            unit="ratio"
+                            thresholds={{ warn: 0.99, critical: 0.95, direction: "below" }}
+                            label={t("detail.application.successRatio")}
+                            caption={`${t("detail.application.errorRatio")} ${formatSignal(application.error_ratio, "ratio")}`}
+                          />
                           {application.source === "traces" ? (
                             <span
                               data-testid="application-source"
-                              className="mt-1 block text-micro text-ink-muted"
+                              className="mt-1 block text-center text-micro text-ink-muted"
                             >
                               {t("detail.application.fromTraces")}
                             </span>
                           ) : null}
-                        </span>
+                        </div>
                         <div className="grid grid-cols-1 gap-2">
                           <span className="flex items-center justify-between gap-2 rounded-control bg-surface-2 px-2.5 py-1 text-caption">
                             <span className="text-ink-secondary">

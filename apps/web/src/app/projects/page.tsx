@@ -421,7 +421,14 @@ function ProjectsInner() {
       {view === "portfolio" && projectsCollection.loading && projects.length === 0 ? (
         <DataState kind="loading" />
       ) : view === "portfolio" && projects.length > 0 ? (
-        <Portfolio projects={projects} rows={servicesCollection.items} />
+        <Portfolio
+          projects={projects}
+          rows={servicesCollection.items}
+          project={params.get("project_id") ?? ""}
+          environment={params.get("environment_id") ?? ""}
+          onProject={(project) => updateParams({ project_id: project, environment_id: "" })}
+          onEnvironment={(environment) => updateParams({ environment_id: environment })}
+        />
       ) : (
       <div className="flex flex-col gap-8">
         {projects.length > 0 ? (

@@ -17,7 +17,6 @@
  */
 
 import { ArrowRight, GitBranch } from "lucide-react";
-import Link from "next/link";
 import { useMemo } from "react";
 
 import { ProjectLogo } from "@/components/ui/ProjectLogo";
@@ -32,6 +31,8 @@ import type { ServiceHealthRow, ServiceHealthStatus } from "@/lib/serviceHealth"
 import { STATUS_LABELS, toneForServiceStatus } from "@/components/service-health/primitives";
 import { toneSpec } from "@/lib/design/status";
 import { useResource } from "@/lib/useResource";
+
+import { OpenProjectLink, ServicesLauncher } from "./ServicesLauncher";
 
 import { FillGrid, HealthBar, kindColour, Sparkline } from "./AppLauncher";
 
@@ -75,7 +76,11 @@ function ProjectCard({
   objectives,
   deploys,
   index,
+  selected,
+  onSelect,
 }: {
+  selected: boolean;
+  onSelect: () => void;
   project: Project;
   app: PlatformApp | null;
   overview: Parameters<typeof pulseOf>[0];
@@ -92,11 +97,15 @@ function ProjectCard({
   const total = app ? app.services : project.counts.services;
   return (
     <li className="min-w-0">
-      <Link
-        href={`/projects/${project.id}`}
+      <button
+        type="button"
+        aria-pressed={selected}
+        onClick={onSelect}
         data-testid={`portfolio-${project.project_key}`}
         style={{ animationDelay: `${index * 60}ms` }}
-        className="group relative flex h-full animate-[rise-in_.45s_cubic-bezier(.2,.8,.2,1)_both] flex-col overflow-hidden rounded-2xl border border-border bg-surface outline-none transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_18px_40px_-24px_rgb(0_0_0/0.45)] focus-visible:ring-2 focus-visible:ring-focus"
+        className={`group relative flex h-full w-full animate-[rise-in_.45s_cubic-bezier(.2,.8,.2,1)_both] flex-col overflow-hidden rounded-2xl border bg-surface text-left outline-none transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-24px_rgb(0_0_0/0.45)] focus-visible:ring-2 focus-visible:ring-focus ${
+          selected ? "border-brand-accent/70 ring-1 ring-brand-accent/40" : "border-border hover:border-border-strong"
+        }`}
       >
         <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{ background: CRITICALITY_COLOUR[project.criticality] }} />
         <div className="flex items-start gap-4 px-5 pt-5">
@@ -195,16 +204,31 @@ function ProjectCard({
         <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3 text-micro">
           <span className="text-ink-muted">{t("portfolio.servicesCount", { bound, total })}</span>
           <span className="inline-flex items-center gap-1 font-semibold text-brand-accent">
-            {t("portfolio.open")}
-            <ArrowRight aria-hidden className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+            {t("portfolio.pickEnv")}
+            <ArrowRight aria-hidden className={`h-3.5 w-3.5 transition-transform ${selected ? "rotate-90" : "group-hover:translate-x-0.5"}`} />
           </span>
         </div>
-      </Link>
+      </button>
     </li>
   );
 }
 
-export function Portfolio({ projects, rows }: { projects: Project[]; rows: ServiceHealthRow[] }) {
+export function Portfolio({
+  projects,
+  rows,
+  project,
+  environment,
+  onProject,
+  onEnvironment,
+}: {
+  projects: Project[];
+  rows: ServiceHealthRow[];
+  /** The chosen project and environment: URL state the page owns. */
+  project: string;
+  environment: string;
+  onProject: (project: string) => void;
+  onEnvironment: (environment: string) => void;
+}) {
   const t = useT("boards");
   const tc = useT("catalog");
   const fmt = useFormat();
@@ -236,6 +260,9 @@ export function Portfolio({ projects, rows }: { projects: Project[]; rows: Servi
   const daySeries = traffic && overview ? overview.buckets.map((_, i) => traffic.reduce((a, x) => a + (x.buckets[i]?.requests ?? 0), 0)) : [];
   const envTally = new Map<ServiceHealthStatus, number>();
   for (const e of envs) if (e.worst) envTally.set(e.worst, (envTally.get(e.worst) ?? 0) + 1);
+
+  // One project: its environments are open from the start.
+  const chosen = projects.some((p) => p.id === project) ? project : projects.length === 1 ? projects[0].id : "";
 
   const ordered = [...projects].sort(
     (a, b) => CRITICALITY.indexOf(a.criticality) - CRITICALITY.indexOf(b.criticality) || a.display_name.localeCompare(b.display_name),
@@ -296,9 +323,25 @@ export function Portfolio({ projects, rows }: { projects: Project[]; rows: Servi
                 : null
             }
             deploys={deploysBy ? (deploysBy.get(project.project_key)?.length ?? 0) : null}
+            selected={chosen === project.id}
+            onSelect={() => onProject(chosen === project.id ? "" : project.id)}
           />
         ))}
       </FillGrid>
+
+      {/* The chosen project's environments, sized to fill the row, then the
+          chosen environment's services — the launcher without its own grid. */}
+      {chosen ? (
+        <ServicesLauncher
+          rows={rows}
+          hideGrid
+          project={chosen}
+          environment={environment}
+          onProject={onProject}
+          onEnvironment={onEnvironment}
+          shelfAction={(id) => <OpenProjectLink projectId={id} />}
+        />
+      ) : null}
     </div>
   );
 }
