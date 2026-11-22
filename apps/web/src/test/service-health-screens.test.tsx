@@ -425,7 +425,7 @@ describe("service health detail", () => {
     // Ready-over-desired keeps its exact digits — a percentage alone would
     // hide the difference between 0/0 and an unmeasured pair.
     const availability = screen.getByTestId("section-availability");
-    expect(availability).toHaveTextContent("3/3");
+    expect(availability).toHaveTextContent("3 / 3");
     expect(availability).toHaveTextContent("100%");
   });
 

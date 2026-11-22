@@ -187,7 +187,7 @@ describe("catalog screens", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("projects open on a portfolio: each project a card that opens it, with what is open against it", async () => {
+  it("projects open on a portfolio: each project a card that picks it, with what is open against it", async () => {
     routerState.params = new URLSearchParams();
     installFetchMock({
       "/v1/projects": {
@@ -206,7 +206,10 @@ describe("catalog screens", () => {
     render(<ProjectsPage />);
     expect(await screen.findByTestId("portfolio")).toBeInTheDocument();
     const card = await screen.findByTestId("portfolio-alpha");
-    expect(card).toHaveAttribute("href", "/projects/p1");
+    // A card picks its project: one project is picked from the start, its
+    // environments open below, with the way into the project's own page.
+    expect(card).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("link", { name: /open project/i })).toHaveAttribute("href", "/projects/p1");
     expect(within(card).getByText("High criticality")).toBeInTheDocument();
     // One open incident is counted; objectives did not answer, so a dash — not 0.
     await waitFor(() => expect(within(card).getByText("Open incidents").nextSibling).toHaveTextContent("1"));

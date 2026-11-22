@@ -225,6 +225,7 @@ export const serviceHealth = defineMessages({
       },
       application: {
         errorRatio: "error ratio",
+        successRatio: "requests that succeeded",
         requestRate: "Request rate",
         latencyP95: "Latency (p95)",
         noMetrics: "No application metrics",
@@ -567,6 +568,7 @@ export const serviceHealth = defineMessages({
       },
       application: {
         errorRatio: "hata oranı",
+        successRatio: "başarılı istekler",
         requestRate: "İstek hızı",
         latencyP95: "Gecikme (p95)",
         noMetrics: "Uygulama metriği yok",
