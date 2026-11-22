@@ -61,20 +61,28 @@ describe("the office's floor plan", () => {
         if (a !== b) expect(overlaps(a, b)).toBe(false);
   });
 
-  it("puts the third and fourth rooms beside the lobby, fronts in line", () => {
+  it("puts open floor with free desks either side of the lobby, its front in line", () => {
     const world = layoutOffice(rooms(4));
-    const beside = world.rooms.slice(2);
-    expect(beside.every((r) => r.y + r.h === world.lobby.y + world.lobby.h)).toBe(true);
-    expect(beside[0].x + beside[0].w).toBeLessThan(world.lobby.x);
-    expect(beside[1].x).toBeGreaterThan(world.lobby.x + world.lobby.w);
-    // Their back doors open onto the corridor above.
-    expect(beside.every((r) => r.backdoor)).toBe(true);
+    expect(world.plazas).toHaveLength(2);
+    expect(world.plazas[0].x + world.plazas[0].w).toBe(world.lobby.x);
+    expect(world.plazas[1].x).toBe(world.lobby.x + world.lobby.w);
+    expect(world.lobby.y + world.lobby.h).toBe(world.plazas[0].y + world.plazas[0].h);
+    expect(world.hotDesks.every((d) => walkable(world, d.seat))).toBe(true);
+    // The third and fourth rooms go above, behind a corridor; the middle row gets back doors.
+    const above = world.rooms.filter((r) => r.id === "gh:2" || r.id === "gh:3");
+    expect(above).toHaveLength(2);
+    expect(above.every((r) => r.y < world.cluster.y)).toBe(true);
+  });
+
+  it("is narrow enough to show whole on a laptop at one CSS pixel an art pixel", () => {
+    expect(WORLD_W).toBeLessThanOrEqual(1080);
+    for (const n of [0, 2, 5, 9]) expect(layoutOffice(rooms(n)).w).toBe(WORLD_W);
   });
 
   it("leaves an empty office where no repository fills a slot", () => {
-    expect(layoutOffice(rooms(1)).vacant).toHaveLength(3);
-    expect(layoutOffice([]).vacant).toHaveLength(4);
-    expect(layoutOffice(rooms(6)).vacant).toHaveLength(0);
+    expect(layoutOffice(rooms(1)).vacant).toHaveLength(1);
+    expect(layoutOffice([]).vacant).toHaveLength(2);
+    expect(layoutOffice(rooms(4)).vacant).toHaveLength(0);
   });
 
   it("gives each person a desk, up to six a room, and their seat is free to sit in", () => {

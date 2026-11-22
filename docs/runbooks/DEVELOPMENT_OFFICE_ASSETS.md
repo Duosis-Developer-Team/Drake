@@ -72,9 +72,10 @@ wall drawn). The lobby has a low front wall with a door gap.
 
 **Desk** (`desk.png`, 64 × 48): the chair at the back (rows 0–19), the desk
 top from row 20, the monitor seen from behind in the middle of the desk. A
-seated person is drawn after the chair and before the desk top, so the chair
-sits behind them and the monitor in front of their chest; their head shows
-above the monitor.
+seated person (the cross-legged `body-sit-type` pose, keyboard on the lap)
+is drawn after the chair and before the desk top, feet at desk (34, 31): the
+chair sits behind them, head, shoulders and chest show above the desk, the
+monitor stands in front of their hands and the legs are hidden.
 
 **Box** (`box.png`, 16 × 16): the delivery lying on the loading square.
 
@@ -96,12 +97,26 @@ density:
 |---------|-------|---------------|--------|
 | 1× | 32 × 48 | (16, 45) | 128 × 48 and 64 × 48 |
 | 2× | 64 × 96 | (32, 91) | 256 × 96 and 128 × 96 |
+| 4× (current kit) | 128 × 192 | (64, 180) | 512 × 192 and 256 × 192 |
 
-A 2× character takes the same room in the office as a 1× one and shows twice
-the detail: the engine draws rooms at a zoom of Z device pixels per art
-pixel and 2× characters at Z / 2, and keeps Z even while one is on screen so
-every pixel stays whole. The density is read from each person's strips, so
-1× and 2× people can share an office.
+Whatever its density, a character takes 32 × 48 art pixels of the office.
+The density is read from each person's strips, so people of different
+densities can share an office.
+
+**Zoom.** The office is drawn at Z device pixels per art pixel, Z whole. The
+levels are the divisors of the densest character's density below it and its
+multiples from it up (for 4×: 1, 2, 4, 8, 12…), so every pixel is always a
+whole number of device pixels. At Z ≥ the density, a character's pixels are
+drawn nearest-neighbour, Z / density device pixels each (Z = 4 shows a 4×
+face pixel for pixel). Below it, the frame is first shrunk by the exact
+factor (4:1 or 2:1): each block averaged, weighted by its coverage, opaque
+when at least half covered. That copy is made once per frame and factor and
+kept. Nothing is ever resampled by an arbitrary ratio.
+
+The office opens, and "fit" returns, at the largest level where its whole
+width fits the panel. It is 1072 art pixels wide, so a 1440-wide Retina
+laptop shows all of it at Z = 2 (one CSS pixel per art pixel). A phone shows
+part of it at Z = 1 and pans.
 
 Someone without a folder (a newcomer) walks as a shared placeholder body
 with a head made from their portrait, their GitHub picture, or their

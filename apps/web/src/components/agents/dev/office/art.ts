@@ -48,7 +48,7 @@ export interface Frame {
  */
 export interface BodySet {
   frames: Record<BodyRow, Frame[]>;
-  density: 1 | 2;
+  density: Density;
   /** Where the feet are in a frame, in sprite pixels. */
   anchor: { x: number; y: number };
   baked: boolean;
@@ -805,6 +805,76 @@ export function headFromInitials(text: string, colour: string): Sprite[] {
   return [front, back, back];
 }
 
+/* ---------------------------------------------------------------- reducing */
+
+/**
+ * Shrink pixel art by an exact whole factor: each `factor` × `factor` block
+ * becomes one pixel, its colour the coverage-weighted average of the block
+ * (premultiplied alpha), opaque when the block is at least half covered.
+ * No resampling, so nothing shimmers or blurs; the result keeps binary alpha.
+ */
+export function boxReduce(
+  src: Uint8ClampedArray,
+  width: number,
+  height: number,
+  factor: number,
+): { data: Uint8ClampedArray<ArrayBuffer>; width: number; height: number } {
+  const w = Math.floor(width / factor);
+  const h = Math.floor(height / factor);
+  const out = new Uint8ClampedArray(new ArrayBuffer(w * h * 4));
+  const area = factor * factor;
+  for (let y = 0; y < h; y += 1)
+    for (let x = 0; x < w; x += 1) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let dy = 0; dy < factor; dy += 1)
+        for (let dx = 0; dx < factor; dx += 1) {
+          const i = ((y * factor + dy) * width + x * factor + dx) * 4;
+          const alpha = src[i + 3];
+          r += src[i] * alpha;
+          g += src[i + 1] * alpha;
+          b += src[i + 2] * alpha;
+          a += alpha;
+        }
+      const o = (y * w + x) * 4;
+      if (a * 2 >= 255 * area && a > 0) {
+        out[o] = Math.round(r / a);
+        out[o + 1] = Math.round(g / a);
+        out[o + 2] = Math.round(b / a);
+        out[o + 3] = 255;
+      }
+    }
+  return { data: out, width: w, height: h };
+}
+
+const shrunk = new WeakMap<object, Map<number, HTMLCanvasElement>>();
+
+/** A frame shrunk by an exact whole factor, made once and kept. */
+export function reduced(image: Sprite, factor: number): Sprite {
+  let byFactor = shrunk.get(image);
+  if (!byFactor) {
+    byFactor = new Map();
+    shrunk.set(image, byFactor);
+  }
+  const cached = byFactor.get(factor);
+  if (cached) return cached;
+  const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+  const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
+  try {
+    const [, src] = canvas(width, height);
+    src.drawImage(image, 0, 0);
+    const small = boxReduce(src.getImageData(0, 0, width, height).data, width, height, factor);
+    const [c, ctx] = canvas(small.width, small.height);
+    ctx.putImageData(new ImageData(small.data, small.width, small.height), 0, 0);
+    byFactor.set(factor, c);
+    return c;
+  } catch {
+    return image;
+  }
+}
+
 /* ---------------------------------------------------------------- loading */
 
 function load(src: string): Promise<HTMLImageElement | null> {
@@ -848,13 +918,21 @@ export function safePath(path: unknown): string | null {
   return typeof path === "string" && SAFE_PATH.test(path) && !path.includes("..") ? path : null;
 }
 
-/** Sprite pixels per art pixel, from a clip's height: 48 → 1, 96 → 2; anything else is refused. */
-export function densityOf(height: number): 1 | 2 | null {
-  return height === SIZE.frame.h ? 1 : height === SIZE.frame.h * 2 ? 2 : null;
+export type Density = 1 | 2 | 4;
+const DEFAULT_ANCHOR: Record<Density, { x: number; y: number }> = {
+  1: { x: 16, y: 45 },
+  2: { x: 32, y: 91 },
+  4: { x: 64, y: 180 },
+};
+
+/** Sprite pixels per art pixel, from a clip's height: 48 → 1, 96 → 2, 192 → 4; anything else is refused. */
+export function densityOf(height: number): Density | null {
+  for (const d of [1, 2, 4] as const) if (height === SIZE.frame.h * d) return d;
+  return null;
 }
 
 /** Where the feet are in a frame of that density: the manifest's anchor when its frame size matches. */
-export function anchorFor(density: 1 | 2, manifest?: KitManifest["characters"]): { x: number; y: number } {
+export function anchorFor(density: Density, manifest?: KitManifest["characters"]): { x: number; y: number } {
   const size = manifest?.frameSize;
   const anchor = manifest?.anchor;
   if (
@@ -864,7 +942,7 @@ export function anchorFor(density: 1 | 2, manifest?: KitManifest["characters"]):
     typeof anchor?.y === "number"
   )
     return { x: anchor.x, y: anchor.y };
-  return density === 2 ? { x: 32, y: 91 } : { x: 16, y: 45 };
+  return DEFAULT_ANCHOR[density];
 }
 
 /** A person's own character from their strips; null unless every clip is there and well formed. */
@@ -962,44 +1040,6 @@ export async function loadArt(): Promise<Art> {
     backdoorX,
     real,
   };
-}
-
-/* ---------------------------------------------------------------- scenery */
-
-/** The garden beside the lobby (always drawn here; it is not part of the art set). */
-export function drawGarden(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, seed: number) {
-  r(ctx, x, y, w, h, C.grass);
-  for (let i = 0; i < (w * h) / 60; i += 1) {
-    const gx = x + Math.floor(hash(seed * 31 + i) * w);
-    const gy = y + Math.floor(hash(seed * 57 + i * 3) * h);
-    r(ctx, gx, gy, 2, 1, C.grass2);
-  }
-  // A stepping-stone path and a bench.
-  for (let i = 0; i < Math.floor(w / 28); i += 1) {
-    const sx = x + 10 + i * 28;
-    const sy = y + h / 2 + Math.round(Math.sin(i + seed) * 10);
-    r(ctx, sx, sy, 14, 8, C.stone2);
-    r(ctx, sx + 1, sy, 12, 6, C.stone);
-  }
-  r(ctx, x + w / 2 - 24, y + 24, 48, 10, C.wood1);
-  r(ctx, x + w / 2 - 24, y + 24, 48, 3, C.wood4);
-  r(ctx, x + w / 2 - 22, y + 34, 3, 5, C.wood0);
-  r(ctx, x + w / 2 + 19, y + 34, 3, 5, C.wood0);
-  for (let i = 0; i < 4; i += 1) {
-    const tx = x + 16 + Math.floor(hash(seed + i * 7) * (w - 48));
-    const ty = y + 60 + Math.floor(hash(seed + i * 13) * (h - 90));
-    tree(ctx, tx, ty);
-  }
-}
-
-function tree(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  r(ctx, x + 10, y + 18, 6, 12, C.wood1);
-  r(ctx, x + 4, y + 28, 18, 4, "rgba(0,0,0,0.25)");
-  r(ctx, x + 2, y + 2, 22, 18, C.leaf);
-  r(ctx, x, y + 6, 26, 10, C.leaf);
-  r(ctx, x + 5, y, 16, 6, C.leaf2);
-  r(ctx, x + 4, y + 4, 8, 3, C.leaf3);
-  r(ctx, x + 14, y + 12, 8, 6, C.leaf0);
 }
 
 export const PALETTE = C;

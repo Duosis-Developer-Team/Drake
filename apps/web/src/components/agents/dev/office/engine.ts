@@ -7,7 +7,7 @@
  * draws the text (name tags, bubbles) at full resolution on top.
  */
 
-import { BODY_ROWS, drawGarden, type Art, type BodyRow, type Sprite } from "./art";
+import { BODY_ROWS, reduced, type Art, type BodyRow, type Sprite } from "./art";
 import type { Intent } from "./director";
 import { DESK_SURFACE, findPath, SEATED, SIZE, type Desk, type Point, type Room, type World } from "./world";
 
@@ -72,6 +72,8 @@ export class OfficeEngine {
   private reduced: boolean;
   night = 0;
   hover: string | null = null;
+  /** Device pixels per art pixel of the last draw. */
+  private zoom = 1;
   private rooms: Map<string, Room>;
 
   constructor(world: World, art: Art, reducedMotion: boolean) {
@@ -93,7 +95,14 @@ export class OfficeEngine {
     if (!ctx) return c;
     ctx.imageSmoothingEnabled = false;
     for (let y = 0; y < h; y += SIZE.tile) for (let x = 0; x < w; x += SIZE.tile) ctx.drawImage(this.art.corridor, x, y);
-    this.world.gardens.forEach((g, i) => drawGarden(ctx, g.x, g.y, g.w, g.h, i + 1));
+    // The open floor beside the lobby: a rug under the free desks.
+    for (const p of this.world.plazas) {
+      ctx.fillStyle = "rgba(20,26,44,0.55)";
+      ctx.fillRect(p.x + 24, p.y + 40, p.w - 48, p.h - 72);
+      ctx.strokeStyle = "rgba(209,163,69,0.55)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(p.x + 25, p.y + 41, p.w - 50, p.h - 74);
+    }
     for (const room of this.world.rooms)
       ctx.drawImage(room.backdoor ? this.art.productBackdoor : this.art.productOpen, room.x, room.y);
     for (const v of this.world.vacant) {
@@ -350,8 +359,12 @@ export class OfficeEngine {
     const set = this.art.bodies.get(actor.key) ?? this.art.body;
     const frame = set.frames[row][index] ?? set.frames["idle-down"][0];
     const { x, y } = this.feet(actor);
-    // A character of density 2 is drawn at half its pixel size: the same world size, twice the detail.
+    // A dense character (2× or 4× the rooms' pixels) takes the same room in the
+    // office as any other. Zoomed in far enough, each of its pixels covers whole
+    // device pixels; below that, it is drawn from a copy shrunk by an exact
+    // whole factor (each 2 × 2 or 4 × 4 block averaged), never resampled.
     const d = set.density;
+    const factor = this.zoom < d && d % this.zoom === 0 ? d / this.zoom : 1;
     const fw = SIZE.frame.w;
     const fh = SIZE.frame.h;
     const left = x - set.anchor.x / d;
@@ -382,7 +395,7 @@ export class OfficeEngine {
       ctx.drawImage(image, 0, 0, w, h);
       ctx.restore();
     };
-    draw(frame.image, left, top, fw, fh, flip);
+    draw(factor > 1 ? reduced(frame.image, factor) : frame.image, left, top, fw, fh, flip);
     const heads = set.baked ? undefined : this.art.heads.get(actor.key);
     if (heads) {
       const moving = actor.path.length > 0;
@@ -393,10 +406,12 @@ export class OfficeEngine {
     }
   }
 
-  /** The densest character in the office: the camera keeps its pixels whole. */
-  density(): 1 | 2 {
-    for (const actor of this.actors.values()) if (this.art.bodies.get(actor.key)?.density === 2) return 2;
-    return 1;
+  /** Everyone in the office now: where they stand, their colour, whether they are on the move. */
+  people(): { key: string; x: number; y: number; colour: string; moving: boolean; working: boolean }[] {
+    return [...this.actors.values()].map((a) => {
+      const f = this.feet(a);
+      return { key: a.key, x: f.x, y: f.y, colour: a.colour, moving: a.path.length > 0, working: a.intent.kind === "work" };
+    });
   }
 
   /**
@@ -406,31 +421,31 @@ export class OfficeEngine {
    */
   draw(ctx: CanvasRenderingContext2D, view: { x: number; y: number; z: number }) {
     const { z } = view;
+    this.zoom = z;
     ctx.setTransform(z, 0, 0, z, -Math.round(view.x * z), -Math.round(view.y * z));
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.still, 0, 0);
     type Item = { y: number; paint: () => void };
     const items: Item[] = [];
     const desk = this.art.desk;
-    for (const room of this.world.rooms)
-      for (const d of room.desks) {
-        items.push({ y: d.y, paint: () => ctx.drawImage(desk, 0, 0, SIZE.desk.w, DESK_SURFACE, d.x, d.y, SIZE.desk.w, DESK_SURFACE) });
-        items.push({
-          y: d.y + 15,
-          paint: () =>
-            ctx.drawImage(
-              desk,
-              0,
-              DESK_SURFACE,
-              SIZE.desk.w,
-              SIZE.desk.h - DESK_SURFACE,
-              d.x,
-              d.y + DESK_SURFACE,
-              SIZE.desk.w,
-              SIZE.desk.h - DESK_SURFACE,
-            ),
-        });
-      }
+    for (const d of [...this.world.rooms.flatMap((r) => r.desks), ...this.world.hotDesks]) {
+      items.push({ y: d.y, paint: () => ctx.drawImage(desk, 0, 0, SIZE.desk.w, DESK_SURFACE, d.x, d.y, SIZE.desk.w, DESK_SURFACE) });
+      items.push({
+        y: d.y + 15,
+        paint: () =>
+          ctx.drawImage(
+            desk,
+            0,
+            DESK_SURFACE,
+            SIZE.desk.w,
+            SIZE.desk.h - DESK_SURFACE,
+            d.x,
+            d.y + DESK_SURFACE,
+            SIZE.desk.w,
+            SIZE.desk.h - DESK_SURFACE,
+          ),
+      });
+    }
     for (const actor of this.actors.values()) {
       // Seated: after the chair, before the desk's top and its monitor.
       const y = this.seated(actor) && actor.desk ? actor.desk.y + 10 : actor.y;

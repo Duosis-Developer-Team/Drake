@@ -5,27 +5,28 @@
  * number of product rooms and their desks alone, so the plan is the same
  * for every viewer and testable without a canvas.
  *
- *   ┌──────────── corridor ─────────────┐   further product rooms, three a
- *   │    [P]     [P]     [P]            │   row, as many rows as needed (A)
- *   ├──────────── corridor ─────────────┤
- *   │ [P]     [ CLUSTER ]     [P]       │   row B: the server room centred
- *   ├──────────── corridor ─────────────┤
- *   │ [P]    [   LOBBY   ]    [P]       │   row C: the base, between rooms
- *   └──────────── corridor ─────────────┘
+ *   [P] : [P] : [P]            further product rooms, three a row (A)
+ *   ═══════════ corridor ═══
+ *   [P] : [ CLUSTER ] : [P]    row B: the server room centred
+ *   ═══════════ corridor ═══
+ *   desks [  LOBBY  ] desks    row C: the base, open floor either side
+ *   ═══════════ corridor ═══
  *
- * The first four rooms sit beside the cluster and the lobby; a slot no
- * repository fills is an empty office. Product rooms and the cluster are
- * open at the front (their bottom edge); the lobby has a door there. A
- * product room with a corridor above it also has a back door. Side
- * corridors join the rows.
+ * The first two rooms sit beside the cluster; a slot no repository fills is
+ * an empty office. ":" is a walkway between rooms, joining the corridors.
+ * Product rooms and the cluster are open at the front (their bottom edge);
+ * the lobby has a door there. A product room with a corridor behind it also
+ * has a back door.
  */
 
 export const CELL = 8;
 /** A product room's back wall: its floor starts here (the art's back threshold). */
 export const WALL = 72;
 export const SIDE = 6;
-export const CORRIDOR = 48;
-export const GAP = 16;
+/** The corridor between two rows of rooms. */
+export const CORRIDOR = 32;
+/** The walkway between two rooms of a row. */
+export const PASS = 24;
 export const SIZE = {
   product: { w: 320, h: 224 },
   cluster: { w: 384, h: 224 },
@@ -43,8 +44,11 @@ export const LOBBY_DOOR = { x: 180, w: 88 };
 export const DOOR_WIDTH = LOBBY_DOOR.w;
 /** The row of a desk sprite where its top surface starts: the chair is above it. */
 export const DESK_SURFACE = 20;
-/** A seated person, in desk coordinates: centred on the chair, head above the monitor. */
-export const SEATED = { x: 34, y: 39 };
+/**
+ * A seated person, in desk coordinates: centred on the chair, head and
+ * shoulders above the desk top, the cross-legged legs hidden behind it.
+ */
+export const SEATED = { x: 34, y: 31 };
 /** Where a character stands in its frame (the art's anchor). */
 export const ANCHOR = { x: 16, y: 45 };
 /** Plaques and slots on the room art, in room coordinates (the art's manifest). */
@@ -77,9 +81,15 @@ const FURNITURE: Record<"product" | "cluster" | "lobby", Rect[]> = {
 };
 export const ROW_PER = 3;
 /** A strip of corridor above the top row, where its rooms' names sit. */
-export const TOP = 24;
-const INNER = SIZE.product.w * 2 + SIZE.lobby.w + GAP * 2;
-export const WORLD_W = INNER + CORRIDOR * 2;
+export const TOP = 16;
+/** The corridor along the bottom, in front of the lobby. */
+export const BOTTOM = 32;
+/**
+ * The office is as narrow as its widest row (two rooms and the cluster, a
+ * passage between each) so the whole of it fits a laptop's panel at one CSS
+ * pixel per art pixel.
+ */
+export const WORLD_W = SIZE.product.w * 2 + SIZE.cluster.w + PASS * 2;
 
 export interface Point {
   x: number;
@@ -120,7 +130,10 @@ export interface World {
   cluster: Room;
   lobby: Room;
   corridors: Rect[];
-  gardens: Rect[];
+  /** The open floor either side of the lobby. */
+  plazas: Rect[];
+  /** Free desks on the plazas (scenery; nobody owns them). */
+  hotDesks: Desk[];
   /** Product slots no repository fills (drawn as empty offices). */
   vacant: Rect[];
   lobbySpots: Point[];
@@ -161,21 +174,23 @@ function plaqueOf(room: Rect, kind: RoomKind): Rect {
 }
 
 function rowStart(count: number, width: number): number {
-  const total = count * width + Math.max(0, count - 1) * CORRIDOR;
-  return CORRIDOR + Math.round((INNER - total) / 2);
+  const total = count * width + Math.max(0, count - 1) * PASS;
+  return Math.round((WORLD_W - total) / 2);
 }
 
 export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World {
   const products = input.slice();
-  const middle = products.slice(0, 4);
-  const upper = products.slice(4);
+  const middle = products.slice(0, 2);
+  const upper = products.slice(2);
   const upperRows = Math.ceil(upper.length / ROW_PER);
   const rowH = SIZE.product.h + CORRIDOR;
   const yB = TOP + upperRows * rowH;
   const yC = yB + rowH;
-  const h = yC + SIZE.product.h + CORRIDOR;
+  // The bottom row is as tall as the lobby: the office stays short enough to see whole.
+  const h = yC + SIZE.lobby.h + BOTTOM;
   const rooms: Room[] = [];
   const vacant: Rect[] = [];
+  const passages: Rect[] = [];
 
   const make = (id: string, kind: RoomKind, rect: Rect, backdoor: boolean, owners: string[]): Room => ({
     ...rect,
@@ -190,22 +205,27 @@ export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World 
   for (let r = 0; r < upperRows; r += 1) {
     const inRow = upper.slice(r * ROW_PER, r * ROW_PER + ROW_PER);
     const start = rowStart(inRow.length, SIZE.product.w);
+    const y = TOP + r * rowH;
     inRow.forEach((room, i) => {
-      const rect = { x: start + i * (SIZE.product.w + CORRIDOR), y: TOP + r * rowH, ...SIZE.product };
-      rooms.push(make(room.id, "product", rect, false, room.desks));
+      const rect = { x: start + i * (SIZE.product.w + PASS), y, ...SIZE.product };
+      // A back door only where a corridor runs behind (not along the top edge).
+      rooms.push(make(room.id, "product", rect, r > 0, room.desks));
+      if (i > 0) passages.push({ x: rect.x - PASS, y, w: PASS, h: SIZE.product.h });
     });
+    // Around a short row, the floor is open too.
+    passages.push({ x: 0, y, w: start, h: SIZE.product.h });
+    const end = start + inRow.length * SIZE.product.w + (inRow.length - 1) * PASS;
+    passages.push({ x: end, y, w: WORLD_W - end, h: SIZE.product.h });
   }
-  // Beside the cluster first (left, right), then beside the lobby.
-  const slots: { rect: Rect; backdoor: boolean }[] = [
-    { rect: { x: CORRIDOR, y: yB, ...SIZE.product }, backdoor: upperRows > 0 },
-    { rect: { x: WORLD_W - CORRIDOR - SIZE.product.w, y: yB, ...SIZE.product }, backdoor: upperRows > 0 },
-    { rect: { x: CORRIDOR, y: yC, ...SIZE.product }, backdoor: true },
-    { rect: { x: WORLD_W - CORRIDOR - SIZE.product.w, y: yC, ...SIZE.product }, backdoor: true },
+  // Beside the cluster, left then right; a back door when a corridor runs behind.
+  const slots: Rect[] = [
+    { x: 0, y: yB, ...SIZE.product },
+    { x: WORLD_W - SIZE.product.w, y: yB, ...SIZE.product },
   ];
-  slots.forEach((slot, i) => {
+  slots.forEach((rect, i) => {
     const room = middle[i];
-    if (room) rooms.push(make(room.id, "product", slot.rect, slot.backdoor, room.desks));
-    else vacant.push(slot.rect);
+    if (room) rooms.push(make(room.id, "product", rect, upperRows > 0, room.desks));
+    else vacant.push(rect);
   });
   const cluster = make(
     "cluster",
@@ -214,26 +234,34 @@ export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World 
     false,
     [],
   );
-  // The lobby's front lines up with the rooms beside it.
+  passages.push({ x: SIZE.product.w, y: yB, w: cluster.x - SIZE.product.w, h: SIZE.product.h });
+  passages.push({ x: cluster.x + cluster.w, y: yB, w: WORLD_W - SIZE.product.w - cluster.x - cluster.w, h: SIZE.product.h });
+  // The lobby at the bottom, its front in line with the rows above, open floor either side.
   const lobby = make(
     "lobby",
     "lobby",
-    { x: Math.round((WORLD_W - SIZE.lobby.w) / 2), y: yC + SIZE.product.h - SIZE.lobby.h, ...SIZE.lobby },
+    { x: Math.round((WORLD_W - SIZE.lobby.w) / 2), y: yC, ...SIZE.lobby },
     false,
     [],
   );
-  const corridors: Rect[] = [
-    { x: 0, y: 0, w: CORRIDOR, h },
-    { x: WORLD_W - CORRIDOR, y: 0, w: CORRIDOR, h },
-    { x: 0, y: 0, w: WORLD_W, h: TOP },
+  const plazas: Rect[] = [
+    { x: 0, y: yC, w: lobby.x, h: SIZE.lobby.h },
+    { x: lobby.x + lobby.w, y: yC, w: WORLD_W - lobby.x - lobby.w, h: SIZE.lobby.h },
   ];
+  // A few free desks in each, anyone's to use: an open-plan corner.
+  const hotDesks: Desk[] = plazas.flatMap((p) =>
+    [0, 1].map((i) => {
+      const x = p.x + Math.round(p.w / 2) - SIZE.desk.w - 12 + i * (SIZE.desk.w + 24);
+      const y = p.y + 72;
+      return { x, y, seat: { x: x + SEATED.x, y: y + 16 }, owner: null };
+    }),
+  );
+  const corridors: Rect[] = [{ x: 0, y: 0, w: WORLD_W, h: TOP }, ...passages, ...plazas];
   for (let r = 0; r < upperRows; r += 1)
     corridors.push({ x: 0, y: TOP + r * rowH + SIZE.product.h, w: WORLD_W, h: CORRIDOR });
   corridors.push({ x: 0, y: yB + SIZE.product.h, w: WORLD_W, h: CORRIDOR });
-  // The hall above the lobby, and the corridor along every front.
-  corridors.push({ x: lobby.x, y: yC, w: lobby.w, h: lobby.y - yC });
-  corridors.push({ x: 0, y: yC + SIZE.product.h, w: WORLD_W, h: CORRIDOR });
-  const gardens: Rect[] = [];
+  // The corridor along the bottom, in front of the lobby's door.
+  corridors.push({ x: 0, y: yC + SIZE.lobby.h, w: WORLD_W, h: BOTTOM });
 
   const cols = Math.ceil(WORLD_W / CELL);
   const rows = Math.ceil(h / CELL);
@@ -258,6 +286,7 @@ export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World 
     // A desk blocks from its surface down; the chair behind it stays free to sit in.
     for (const desk of room.desks) mark({ x: desk.x + 2, y: desk.y + 24, w: SIZE.desk.w - 4, h: SIZE.desk.h - 24 }, 0);
   }
+  for (const desk of hotDesks) mark({ x: desk.x + 2, y: desk.y + 24, w: SIZE.desk.w - 4, h: SIZE.desk.h - 24 }, 0);
 
   const lobbySpots: Point[] = [];
   for (let r = 0; r < 3; r += 1)
@@ -273,7 +302,8 @@ export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World 
     cluster,
     lobby,
     corridors,
-    gardens,
+    plazas,
+    hotDesks,
     vacant,
     lobbySpots,
     // In front of the coffee machine on the kitchen counter.

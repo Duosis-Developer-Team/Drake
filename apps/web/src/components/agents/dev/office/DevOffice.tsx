@@ -31,7 +31,7 @@ import {
 
 import { RepositoryMark, type Pick } from "../DevMap";
 import { isPortrait, loadAvatar, mayHaveAvatar } from "../pixelAvatar";
-import { headFromInitials, headFromPortrait, headFromSprite, loadArt, type Art } from "./art";
+import { headFromInitials, headFromPortrait, headFromSprite, loadArt, type Art, type Density } from "./art";
 import {
   advance,
   between,
@@ -67,27 +67,23 @@ interface FeedItem {
   colour: string;
 }
 
-/** The zoom levels: multiples of `step` (2 when a character is drawn at double density). */
-export function zoomLevels(step: 1 | 2, dpr: number): number[] {
-  const top = Math.max(step * 2, Math.round(8 * dpr));
-  const out: number[] = [];
-  for (let z = step; z <= top; z += step) out.push(z);
+/**
+ * The zoom levels, in device pixels per art pixel, for the densest character
+ * on screen (`density` sprite pixels per art pixel). Below it, only exact
+ * divisors (a 4× character is shrunk 4:1 or 2:1, block by block); from it
+ * up, only its multiples (each sprite pixel 1, 2, 3… device pixels). Every
+ * level keeps every pixel whole.
+ */
+export function zoomLevels(density: Density, dpr: number): number[] {
+  const out = [1, 2, 4].filter((z) => z < density && density % z === 0);
+  const top = Math.max(density * 2, Math.round(8 * dpr));
+  for (let z = density; z <= top; z += density) out.push(z);
   return out;
 }
 
-/**
- * The zoom a first look opens at: about one CSS pixel per art pixel (people
- * stay readable; a phone pans), larger when the whole width fits at more.
- */
-export function defaultZoom(step: 1 | 2, dpr: number, cssWidth: number, worldW: number): number {
-  const levels = zoomLevels(step, dpr);
-  const near = levels.reduce((best, z) => (Math.abs(z - dpr) <= Math.abs(best - dpr) ? z : best), levels[0]);
-  return Math.max(near, fitZoom(step, dpr, cssWidth, worldW));
-}
-
-/** The largest zoom at which the whole width of the office fits. */
-export function fitZoom(step: 1 | 2, dpr: number, cssWidth: number, worldW: number): number {
-  const levels = zoomLevels(step, dpr);
+/** The largest zoom at which the whole office fits the panel's width: the first look and "fit". */
+export function fitZoom(density: Density, dpr: number, cssWidth: number, worldW: number): number {
+  const levels = zoomLevels(density, dpr);
   const device = cssWidth * dpr;
   return levels.filter((z) => worldW * z <= device).pop() ?? levels[0];
 }
@@ -226,7 +222,8 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
     roomName.current = new Map(data.rooms.map((r) => [r.id, r.project_name ?? r.name]));
   }, [data]);
   // A character drawn at double density needs an even zoom to keep its pixels whole.
-  const step: 1 | 2 = data && art && data.people.some((p) => art.bodies.get(p.key)?.density === 2) ? 2 : 1;
+  // The densest character on screen sets the zoom levels (every pixel whole).
+  const density: Density = (data && art ? Math.max(1, ...data.people.map((p) => art.bodies.get(p.key)?.density ?? 1)) : 1) as Density;
 
   /* ------------------------------------------------------------ the engine */
 
@@ -357,35 +354,28 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
   }, []);
 
   const deviceW = Math.round(size.w * size.dpr);
-  const opening = world && size.w ? defaultZoom(step, size.dpr, size.w, world.w) : step;
-  const z = camera && camera.z % step === 0 ? camera.z : opening;
-  const viewCssH = world
-    ? Math.max(MIN_HEIGHT, Math.min(Math.round((world.h * z) / size.dpr), Math.round((globalThis.innerHeight || 900) * 0.72)))
-    : MIN_HEIGHT;
+  const levels = useMemo(() => zoomLevels(density, size.dpr), [density, size.dpr]);
+  // The whole office, at the largest zoom that keeps every pixel whole.
+  const fit = world && size.w ? fitZoom(density, size.dpr, size.w, world.w) : levels[0];
+  const z = camera && levels.includes(camera.z) ? camera.z : fit;
+  // The panel is as tall as the whole office at "fit"; zooming in pans inside it.
+  const viewCssH = world ? Math.max(MIN_HEIGHT, Math.ceil((world.h * fit) / size.dpr)) : MIN_HEIGHT;
   const deviceH = Math.round(viewCssH * size.dpr);
 
   useEffect(() => {
     if (!world || !deviceW) return;
     setCamera((prev) => {
-      if (prev && prev.z % step === 0) return clampCamera(prev, world, deviceW, deviceH);
-      // Open on the cluster with the lobby in view.
-      const zz = prev ? Math.max(step, Math.round(prev.z / step) * step) : opening;
-      const cx = world.cluster.x + world.cluster.w / 2 - deviceW / zz / 2;
-      const cy = world.lobby.y + world.lobby.h + 24 - deviceH / zz;
-      return clampCamera({ x: cx, y: cy, z: zz }, world, deviceW, deviceH);
+      if (prev && levels.includes(prev.z)) return clampCamera(prev, world, deviceW, deviceH);
+      return clampCamera({ x: 0, y: 0, z: fit }, world, deviceW, deviceH);
     });
-  }, [world, deviceW, deviceH, opening, step]);
+  }, [world, deviceW, deviceH, fit, levels]);
 
   const zoomAt = useCallback(
     (next: number | "fit", focus?: { x: number; y: number }) => {
       if (!world) return;
       setCamera((prev) => {
-        const cam = prev ?? { x: 0, y: 0, z: opening };
-        const levels = zoomLevels(step, size.dpr);
-        const nz =
-          next === "fit"
-            ? fitZoom(step, size.dpr, size.w, world.w)
-            : Math.min(levels[levels.length - 1], Math.max(levels[0], next));
+        const cam = prev ?? { x: 0, y: 0, z: fit };
+        const nz = next === "fit" ? fit : Math.min(levels[levels.length - 1], Math.max(levels[0], next));
         // Keep the point under the focus (device pixels in the view) where it is.
         const fx = focus?.x ?? deviceW / 2;
         const fy = focus?.y ?? deviceH / 2;
@@ -394,10 +384,9 @@ export function DevOffice({ window: span, onPick }: { window: DevWindow; onPick:
         return clampCamera({ x: wx - fx / nz, y: wy - fy / nz, z: nz }, world, deviceW, deviceH);
       });
     },
-    [world, opening, step, size.dpr, size.w, deviceW, deviceH],
+    [world, fit, levels, deviceW, deviceH],
   );
   const zoomBy = (direction: 1 | -1, focus?: { x: number; y: number }) => {
-    const levels = zoomLevels(step, size.dpr);
     const i = levels.indexOf(z);
     const next = levels[Math.min(levels.length - 1, Math.max(0, (i < 0 ? 0 : i) + direction))];
     zoomAt(next, focus);

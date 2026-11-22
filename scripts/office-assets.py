@@ -8,9 +8,10 @@
 A kit is the shape docs/runbooks/DEVELOPMENT_OFFICE_ASSETS.md describes:
 rooms and props at its root, each person's character strips under
 `characters/<person>/body-<clip>.png`, and `asset-manifest.json`. Characters
-come at one of two densities: 32 x 48 frames (feet on row 45, x 16) or
-64 x 96 frames (feet on row 91, x 32). Everything is checked before anything
-is written: sizes, frame counts, binary alpha, where the feet stand.
+come at one of three densities: 32 x 48 frames (feet on row 45, x 16),
+64 x 96 (row 91, x 32) or 128 x 192 (row 180, x 64). Everything is checked
+before anything is written: sizes, frame counts, binary alpha, where the feet
+stand.
 
 `--rescale` is for drawings exported larger than their native size (each art
 pixel a k x k block): it finds k, checks the blocks are flat, and samples one
@@ -48,7 +49,8 @@ CLIPS = {
     "body-coffee": 2,
 }
 FRAME = (32, 48)
-ANCHOR = {1: (16, 45), 2: (32, 91)}
+ANCHOR = {1: (16, 45), 2: (32, 91), 4: (64, 180)}
+DENSITIES = tuple(FRAME[1] * d for d in ANCHOR)
 SKIP = {"preview.png", "README.md", ".DS_Store"}
 SAFE_PERSON = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
 
@@ -165,7 +167,7 @@ def downscale(width: int, height: int, rows: list[bytearray], native: tuple[int,
                 for dx in range(0, k, max(1, k // 3)):
                     total += 1
                     px = rows[by * k + dy][(bx * k + dx) * 4 : (bx * k + dx) * 4 + 4]
-                    flat += sum(abs(a - b) for a, b in zip(px, centre)) < 24
+                    flat += sum(abs(a - b) for a, b in zip(px, centre, strict=True)) < 24
             line += centre
         out.append(line)
     if flat / max(1, total) < 0.85:
@@ -207,12 +209,16 @@ def check_environment(kit: Path, report: Report, rescale: bool, staged: dict[str
             continue
         if transparent and not binary_alpha(rows, width, height):
             report.fail(path.name, "alpha is not binary (only fully clear or fully opaque pixels)")
-        if not transparent and any(alpha(rows, x, y) != 255 for y in range(height) for x in range(width)):
+        if not transparent and any(
+            alpha(rows, x, y) != 255 for y in range(height) for x in range(width)
+        ):
             report.fail(path.name, "must be opaque")
         staged[path.name] = (width, height, rows)
 
 
-def check_character(person_dir: Path, report: Report, rescale: bool, staged: dict[str, tuple]) -> int | None:
+def check_character(
+    person_dir: Path, report: Report, rescale: bool, staged: dict[str, tuple]
+) -> int | None:
     person = person_dir.name
     if not set(person) <= SAFE_PERSON:
         report.fail(person, "a person key may hold letters, digits, '.', '_' and '-' only")
@@ -226,14 +232,14 @@ def check_character(person_dir: Path, report: Report, rescale: bool, staged: dic
             continue
         try:
             width, height, rows = read_png(path)
-            if rescale and height not in (FRAME[1], FRAME[1] * 2):
+            if rescale and height not in DENSITIES:
                 width, height, rows = downscale(width, height, rows, (FRAME[0] * frames, FRAME[1]))
         except ValueError as error:
             report.fail(where, str(error))
             continue
         d = height // FRAME[1]
-        if height not in (FRAME[1], FRAME[1] * 2):
-            report.fail(where, f"height {height}: frames are 48 or 96 tall")
+        if height not in DENSITIES:
+            report.fail(where, f"height {height}: frames are 48, 96 or 192 tall")
             continue
         if density is None:
             density = d
@@ -248,8 +254,12 @@ def check_character(person_dir: Path, report: Report, rescale: bool, staged: dic
             report.fail(where, "alpha is not binary")
         ax, ay = ANCHOR[d]
         for f in range(frames):
-            xs = [x for x in range(f * fw, (f + 1) * fw) for y in range(height) if alpha(rows, x, y)]
-            ys = [y for y in range(height) for x in range(f * fw, (f + 1) * fw) if alpha(rows, x, y)]
+            xs = [
+                x for x in range(f * fw, (f + 1) * fw) for y in range(height) if alpha(rows, x, y)
+            ]
+            ys = [
+                y for y in range(height) for x in range(f * fw, (f + 1) * fw) if alpha(rows, x, y)
+            ]
             if not ys:
                 report.fail(where, f"frame {f + 1} is empty")
                 continue
@@ -288,11 +298,19 @@ def manifest_for(kit: Path, people: dict[str, int]) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("kit", type=Path)
-    parser.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "apps/web/public/office")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "apps/web/public/office",
+    )
     parser.add_argument("--check", action="store_true", help="check only; write nothing")
-    parser.add_argument("--rescale", action="store_true", help="shrink fake-upscaled art to its native size")
+    parser.add_argument(
+        "--rescale", action="store_true", help="shrink fake-upscaled art to its native size"
+    )
     args = parser.parse_args()
     kit: Path = args.kit
     if not kit.is_dir():
@@ -314,8 +332,11 @@ def main() -> int:
             print(f"FAIL {problem}", file=sys.stderr)
         print(f"{len(report.problems)} problem(s); nothing written.", file=sys.stderr)
         return 1
-    by_density = {d: sorted(p for p, v in people.items() if v == d) for d in (1, 2)}
-    print(f"ok: {len(staged)} files; characters 1x {by_density[1]} 2x {by_density[2]}")
+    by_density = {d: sorted(p for p, v in people.items() if v == d) for d in ANCHOR}
+    print(
+        f"ok: {len(staged)} files; characters "
+        + " ".join(f"{d}x {v}" for d, v in by_density.items())
+    )
     if args.check:
         return 0
     out: Path = args.out
@@ -328,7 +349,9 @@ def main() -> int:
             write_png(target, width, height, rows)
         else:
             shutil.copyfile(source, target)
-    (out / "asset-manifest.json").write_text(json.dumps(manifest_for(kit, people), indent=2, ensure_ascii=False) + "\n")
+    (out / "asset-manifest.json").write_text(
+        json.dumps(manifest_for(kit, people), indent=2, ensure_ascii=False) + "\n"
+    )
     for stale in ("preview.png", "README.md"):
         (out / stale).unlink(missing_ok=True)
     print(f"installed into {out}")
