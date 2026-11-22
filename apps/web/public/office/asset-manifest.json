@@ -1,0 +1,340 @@
+{
+  "assetPack": "agent-office-pixel-kit-v2",
+  "pixelOrigin": "top-left",
+  "environment": {
+    "room-product-open": {
+      "file": "room-product-open.png",
+      "width": 320,
+      "height": 224,
+      "alpha": false,
+      "plaque": {
+        "x": 125,
+        "y": 18,
+        "width": 36,
+        "height": 9
+      }
+    },
+    "room-product-backdoor": {
+      "file": "room-product-backdoor.png",
+      "width": 320,
+      "height": 224,
+      "alpha": false,
+      "plaque": {
+        "x": 125,
+        "y": 18,
+        "width": 36,
+        "height": 9
+      },
+      "backThreshold": {
+        "x": 198,
+        "y": 72
+      }
+    },
+    "room-cluster": {
+      "file": "room-cluster.png",
+      "width": 384,
+      "height": 224,
+      "alpha": false,
+      "plaque": {
+        "x": 167,
+        "y": 33,
+        "width": 51,
+        "height": 15
+      },
+      "loadingTarget": {
+        "x": 192,
+        "y": 147
+      }
+    },
+    "room-lobby": {
+      "file": "room-lobby.png",
+      "width": 448,
+      "height": 192,
+      "alpha": false,
+      "logoSlot": {
+        "x": 324,
+        "y": 155,
+        "width": 107,
+        "height": 17
+      }
+    },
+    "floor-corridor": {
+      "file": "floor-corridor.png",
+      "width": 32,
+      "height": 32,
+      "alpha": false,
+      "tileable": true
+    },
+    "desk": {
+      "file": "desk.png",
+      "width": 64,
+      "height": 48,
+      "alpha": true
+    },
+    "box": {
+      "file": "box.png",
+      "width": 16,
+      "height": 16,
+      "alpha": true
+    }
+  },
+  "characters": {
+    "root": "characters",
+    "layout": "horizontal",
+    "hasBakedHead": true,
+    "carryIncludesBox": true,
+    "frameSize": {
+      "width": 128,
+      "height": 192
+    },
+    "anchor": {
+      "x": 64,
+      "y": 180
+    },
+    "logicalScaleRelativeToV2": 4,
+    "flipHorizontal": {
+      "body-walk-right": "body-walk-left",
+      "body-carry-right": "body-carry-left"
+    },
+    "animations": {
+      "body-idle-down": {
+        "frames": 2,
+        "direction": "down",
+        "frameMs": 580,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 256,
+        "imageHeight": 192
+      },
+      "body-walk-down": {
+        "frames": 4,
+        "direction": "down",
+        "frameMs": 130,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 512,
+        "imageHeight": 192
+      },
+      "body-walk-left": {
+        "frames": 4,
+        "direction": "left",
+        "frameMs": 130,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 512,
+        "imageHeight": 192
+      },
+      "body-walk-up": {
+        "frames": 4,
+        "direction": "up",
+        "frameMs": 130,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 512,
+        "imageHeight": 192
+      },
+      "body-carry-down": {
+        "frames": 4,
+        "direction": "down",
+        "frameMs": 150,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 512,
+        "imageHeight": 192
+      },
+      "body-carry-left": {
+        "frames": 4,
+        "direction": "left",
+        "frameMs": 150,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 512,
+        "imageHeight": 192
+      },
+      "body-carry-up": {
+        "frames": 4,
+        "direction": "up",
+        "frameMs": 150,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 512,
+        "imageHeight": 192
+      },
+      "body-sit-type": {
+        "frames": 2,
+        "direction": "down",
+        "frameMs": 220,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 256,
+        "imageHeight": 192
+      },
+      "body-coffee": {
+        "frames": 2,
+        "direction": "down",
+        "frameMs": 560,
+        "frameWidth": 128,
+        "frameHeight": 192,
+        "imageWidth": 256,
+        "imageHeight": 192
+      }
+    },
+    "variants": {
+      "arcanamlisarac": {
+        "sheets": {
+          "body-walk-down": "characters/arcanamlisarac/body-walk-down.png",
+          "body-walk-left": "characters/arcanamlisarac/body-walk-left.png",
+          "body-walk-up": "characters/arcanamlisarac/body-walk-up.png",
+          "body-idle-down": "characters/arcanamlisarac/body-idle-down.png",
+          "body-carry-down": "characters/arcanamlisarac/body-carry-down.png",
+          "body-carry-left": "characters/arcanamlisarac/body-carry-left.png",
+          "body-carry-up": "characters/arcanamlisarac/body-carry-up.png",
+          "body-sit-type": "characters/arcanamlisarac/body-sit-type.png",
+          "body-coffee": "characters/arcanamlisarac/body-coffee.png"
+        },
+        "palette": [
+          "#080607",
+          "#171112",
+          "#281713",
+          "#2a1f1f",
+          "#2d292e",
+          "#533127",
+          "#413c41",
+          "#504a4e",
+          "#714636",
+          "#aa5e45",
+          "#a4684c",
+          "#817c83",
+          "#b68869",
+          "#e89871",
+          "#c0b4ac",
+          "#f3ae89"
+        ]
+      },
+      "beratustunay01": {
+        "sheets": {
+          "body-walk-down": "characters/beratustunay01/body-walk-down.png",
+          "body-walk-left": "characters/beratustunay01/body-walk-left.png",
+          "body-walk-up": "characters/beratustunay01/body-walk-up.png",
+          "body-idle-down": "characters/beratustunay01/body-idle-down.png",
+          "body-carry-down": "characters/beratustunay01/body-carry-down.png",
+          "body-carry-left": "characters/beratustunay01/body-carry-left.png",
+          "body-carry-up": "characters/beratustunay01/body-carry-up.png",
+          "body-sit-type": "characters/beratustunay01/body-sit-type.png",
+          "body-coffee": "characters/beratustunay01/body-coffee.png"
+        },
+        "palette": [
+          "#130e0d",
+          "#251815",
+          "#211d24",
+          "#2e2b34",
+          "#4d3531",
+          "#433e42",
+          "#553f3c",
+          "#4a4548",
+          "#695251",
+          "#ae6850",
+          "#7a7881",
+          "#b88354",
+          "#e2906f",
+          "#e8a48a",
+          "#f9ac8d",
+          "#f0d9c2"
+        ]
+      },
+      "canilbey": {
+        "sheets": {
+          "body-walk-down": "characters/canilbey/body-walk-down.png",
+          "body-walk-left": "characters/canilbey/body-walk-left.png",
+          "body-walk-up": "characters/canilbey/body-walk-up.png",
+          "body-idle-down": "characters/canilbey/body-idle-down.png",
+          "body-carry-down": "characters/canilbey/body-carry-down.png",
+          "body-carry-left": "characters/canilbey/body-carry-left.png",
+          "body-carry-up": "characters/canilbey/body-carry-up.png",
+          "body-sit-type": "characters/canilbey/body-sit-type.png",
+          "body-coffee": "characters/canilbey/body-coffee.png"
+        },
+        "palette": [
+          "#0f0c0d",
+          "#261a19",
+          "#1a1927",
+          "#271f24",
+          "#2e292f",
+          "#313049",
+          "#51342c",
+          "#694e44",
+          "#9f684e",
+          "#ad654c",
+          "#7c7884",
+          "#9b8575",
+          "#dd9672",
+          "#e59a76",
+          "#e2a98a",
+          "#d5c6b9"
+        ]
+      },
+      "eneserman": {
+        "sheets": {
+          "body-walk-down": "characters/eneserman/body-walk-down.png",
+          "body-walk-left": "characters/eneserman/body-walk-left.png",
+          "body-walk-up": "characters/eneserman/body-walk-up.png",
+          "body-idle-down": "characters/eneserman/body-idle-down.png",
+          "body-carry-down": "characters/eneserman/body-carry-down.png",
+          "body-carry-left": "characters/eneserman/body-carry-left.png",
+          "body-carry-up": "characters/eneserman/body-carry-up.png",
+          "body-sit-type": "characters/eneserman/body-sit-type.png",
+          "body-coffee": "characters/eneserman/body-coffee.png"
+        },
+        "palette": [
+          "#040303",
+          "#151012",
+          "#241a1b",
+          "#221e24",
+          "#2b262a",
+          "#4e342f",
+          "#453e43",
+          "#4d474d",
+          "#6d5453",
+          "#0b7ddb",
+          "#c1653e",
+          "#a46f52",
+          "#b18769",
+          "#e49062",
+          "#f9a976",
+          "#e0c5b0"
+        ]
+      },
+      "gencay": {
+        "sheets": {
+          "body-walk-down": "characters/gencay/body-walk-down.png",
+          "body-walk-left": "characters/gencay/body-walk-left.png",
+          "body-walk-up": "characters/gencay/body-walk-up.png",
+          "body-idle-down": "characters/gencay/body-idle-down.png",
+          "body-carry-down": "characters/gencay/body-carry-down.png",
+          "body-carry-left": "characters/gencay/body-carry-left.png",
+          "body-carry-up": "characters/gencay/body-carry-up.png",
+          "body-sit-type": "characters/gencay/body-sit-type.png",
+          "body-coffee": "characters/gencay/body-coffee.png"
+        },
+        "palette": [
+          "#050404",
+          "#130f12",
+          "#1a1927",
+          "#241c22",
+          "#2c2733",
+          "#2c2a41",
+          "#312f46",
+          "#4a3532",
+          "#58403c",
+          "#645358",
+          "#ae633d",
+          "#a16f55",
+          "#727695",
+          "#b6855f",
+          "#ea9c6a",
+          "#c7c2cc"
+        ]
+      }
+    }
+  }
+}

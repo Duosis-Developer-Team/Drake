@@ -1095,6 +1095,117 @@ async def run_once(
     return report
 
 
+# --------------------------------------------------------------------------
+# Presence: who is working where right now (the office's live mode)
+# --------------------------------------------------------------------------
+
+# A session counts as "at work in a repository" while it reported within
+# this long. Claude Code emits an event per prompt and per API call, so a
+# working session reports every few seconds to minutes.
+PRESENCE_WINDOW = timedelta(minutes=15)
+# Several viewers polling every half minute share one read.
+PRESENCE_TTL_SECONDS = 20.0
+
+
+@dataclass(frozen=True)
+class Presence:
+    """One Claude identity's latest event in one repository."""
+
+    identity: str
+    person_hint: str | None
+    repository: Repository
+    last_seen: datetime
+
+
+def presence_statement(database: str) -> str:
+    """The latest event per identity and repository, newest first, within a window."""
+    repo = _repository_columns()
+    return f"""
+        SELECT {_PROJECT_TAG} AS project_tag, {_VCS} AS vcs, {repo},
+               {_IDENTITY} AS identity, any({_PERSON_HINT}) AS person_hint,
+               toString(max(Timestamp)) AS last_seen
+        FROM {database}.otel_logs
+        WHERE ServiceName = 'claude-code'
+          AND Timestamp >= {{start:DateTime64(9, 'UTC')}}
+          AND Timestamp < {{end:DateTime64(9, 'UTC')}}
+        GROUP BY project_tag, vcs, vcs_owner, vcs_name, vcs_url, identity
+        HAVING identity != ''
+        ORDER BY last_seen DESC
+        LIMIT {{max_rows:UInt32}}
+    """  # noqa: S608 - fixed fragments; values are bound parameters
+
+
+def _store_time(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    head, _, fraction = raw.partition(".")
+    try:
+        moment = datetime.strptime(head, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    if fraction.isdigit():
+        moment += timedelta(microseconds=int(fraction[:6].ljust(6, "0")))
+    return moment
+
+
+async def read_presence(
+    engine: AsyncEngine,
+    store: UsageStore,
+    *,
+    database: str,
+    now: datetime,
+    orgs: Iterable[str] = (),
+    window: timedelta = PRESENCE_WINDOW,
+) -> list[Presence]:
+    """Who reported from which repository within `window`, newest first.
+
+    One grouped read under the store's row ceiling: a row is an identity in a
+    repository, so a thousand is far more than a team has at once. A failed
+    read is "nobody is here", never an error for the caller.
+    """
+    try:
+        result = await store.query(
+            presence_statement(database),
+            {
+                "start": clickhouse_time(now - window),
+                "end": clickhouse_time(now + timedelta(minutes=1)),
+                "max_rows": str(MAX_USAGE_ROWS),
+            },
+            max_rows=MAX_USAGE_ROWS,
+            timeout_seconds=10.0,
+            correlation_id="dev-office",
+        )
+    except Exception as error:
+        logger.warning(
+            "dev activity: presence read failed: %s %s",
+            type(error).__name__,
+            getattr(error, "code", "") or str(error)[:200],
+        )
+        return []
+    rows = result.rows if isinstance(result.rows, list) else []
+    if not rows:
+        return []
+    resolver = await _resolver(engine, orgs)
+    seen: dict[tuple[str, str], Presence] = {}
+    for row in rows:
+        repository = _resolve(resolver, row)
+        identity = _safe_identity(row.get("identity"))
+        moment = _store_time(row.get("last_seen"))
+        if repository is None or identity is None or moment is None:
+            continue
+        key = (identity, repository.full_name)
+        if key in seen and seen[key].last_seen >= moment:
+            continue
+        seen[key] = Presence(
+            identity=identity,
+            person_hint=_safe_identity(row.get("person_hint")),
+            repository=repository,
+            last_seen=moment,
+        )
+    return sorted(seen.values(), key=lambda p: p.last_seen, reverse=True)
+
+
 class DevActivity:
     """Lifespan-owned loop; exists only when development activity is enabled."""
 
@@ -1121,6 +1232,26 @@ class DevActivity:
         # Kept across cycles, so a moved name is asked about once a day.
         self._renames = Renames(source)
         self._task: asyncio.Task[None] | None = None
+        self._presence: tuple[float, list[Presence]] | None = None
+        self._presence_lock = asyncio.Lock()
+
+    async def presence(self, now: datetime | None = None) -> list[Presence]:
+        """Who is at work where right now; one store read per few seconds, shared."""
+        if self._store is None:
+            return []
+        async with self._presence_lock:
+            cached = self._presence
+            if cached is not None and time.monotonic() - cached[0] < PRESENCE_TTL_SECONDS:
+                return cached[1]
+            found = await read_presence(
+                self._engine,
+                self._store,
+                database=self._database,
+                now=now or datetime.now(UTC),
+                orgs=self._orgs,
+            )
+            self._presence = (time.monotonic(), found)
+            return found
 
     @property
     def running(self) -> bool:

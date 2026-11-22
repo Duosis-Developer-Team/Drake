@@ -181,6 +181,49 @@ export interface DevConnect {
 export const fetchDevMap = (window: DevWindow) =>
   apiGet<DevMap>(`/v1/agents/dev/map?window=${window}`);
 
+/** A room of the office: a repository on the map, with a desk per person who works there. */
+export interface DevOfficeRoom {
+  id: string;
+  name: string;
+  full_name: string;
+  catalogued: boolean;
+  project_id: string | null;
+  project_key: string | null;
+  project_name: string | null;
+  /** Person keys, the busiest first. */
+  desks: string[];
+}
+
+export interface DevOfficeEvent {
+  at: string;
+  kind: "commit" | "deployment";
+  /** A delivery's carrier may be unknown. */
+  person: string | null;
+  repository: string;
+  agent?: CodingAgent;
+  title?: string;
+  short?: string | null;
+  environment?: string | null;
+}
+
+export interface DevOffice {
+  window: DevWindow;
+  as_of: string;
+  day_start: string;
+  configured: DevMap["configured"];
+  people: { key: string; name: string; linked: boolean; portrait: boolean }[];
+  rooms: DevOfficeRoom[];
+  /** Whose Claude Code reported from where in the last minutes. */
+  live: { person: string; repository: string; last_seen: string }[];
+  events: DevOfficeEvent[];
+  truncated: boolean;
+}
+
+export const fetchDevOffice = (window: DevWindow, dayStart: string) =>
+  apiGet<DevOffice>(
+    `/v1/agents/dev/office?window=${window}&day_start=${encodeURIComponent(dayStart)}`,
+  );
+
 export function devCommitsPath(filter: {
   window: DevWindow;
   person?: string;
