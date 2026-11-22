@@ -1,23 +1,22 @@
 /**
- * A person's GitHub picture, redrawn as an arcade character.
+ * A person's GitHub picture, turned into an arcade character.
  *
  * The bytes come from Tracesis (`GET /v1/agents/dev/people/{key}/avatar`),
  * never from GitHub: the browser talks to its own origin only. A 204 — no
  * login, a bot, no picture — means "draw the initials", and is not an error.
  *
- * The picture is shrunk to a GRID × GRID (16 × 16) canvas (its centre square), every
- * pixel snapped to a small palette (four levels per channel, after a little
- * extra contrast so faces stay readable at that size), then scaled back up
- * with smoothing off. The result is a data URL: one load per person per
- * page, shared by every node that shows them.
+ * The picture is not pixelated into a mosaic: it is read at SAMPLE × SAMPLE
+ * for skin, hair, shirt, background, hair length and a beard, and a
+ * hand-drawn 16 × 16 sprite is coloured from that (arcadeSprite.ts). The
+ * result is a data URL: one load per person per page, shared by every node
+ * that shows them.
  */
 
-export const GRID = 16;
-const SCALE = 5;
-const LEVELS = [0, 85, 170, 255];
+import { readFeatures, render, SAMPLE, SPRITE } from "./arcadeSprite";
 
 const loads = new Map<string, Promise<string | null>>();
 const settled = new Map<string, string | null>();
+const backdrops = new Map<string, string>();
 
 export function avatarUrl(personKey: string): string {
   return `/v1/agents/dev/people/${encodeURIComponent(personKey)}/avatar`;
@@ -28,45 +27,36 @@ export function mayHaveAvatar(personKey: string, bot = false): boolean {
   return !bot && !personKey.startsWith("name:") && !personKey.startsWith("claude:") && personKey !== "unknown";
 }
 
-/** Snap one channel to the palette, with a little contrast first. */
-export function quantize(value: number): number {
-  const contrasted = Math.max(0, Math.min(255, (value - 128) * 1.18 + 128));
-  let best = LEVELS[0];
-  for (const level of LEVELS) if (Math.abs(level - contrasted) < Math.abs(best - contrasted)) best = level;
-  return best;
-}
-
-/** The picture as pixel art (a PNG data URL), or null when it cannot be drawn. */
-export function pixelate(image: CanvasImageSource & { naturalWidth: number; naturalHeight: number }): string | null {
+/** The person's character (a PNG data URL), or null when it cannot be drawn. */
+export function arcade(
+  image: CanvasImageSource & { naturalWidth: number; naturalHeight: number },
+  personKey: string,
+): string | null {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
   if (!width || !height) return null;
   try {
-    const small = document.createElement("canvas");
-    small.width = GRID;
-    small.height = GRID;
-    const context = small.getContext("2d", { willReadFrequently: true });
-    if (!context) return null;
+    const sample = document.createElement("canvas");
+    sample.width = SAMPLE;
+    sample.height = SAMPLE;
+    const read = sample.getContext("2d", { willReadFrequently: true });
+    if (!read) return null;
     const side = Math.min(width, height);
-    context.imageSmoothingEnabled = true;
-    context.drawImage(image, (width - side) / 2, (height - side) / 2, side, side, 0, 0, GRID, GRID);
-    const frame = context.getImageData(0, 0, GRID, GRID);
-    const px = frame.data;
-    for (let i = 0; i < px.length; i += 4) {
-      px[i] = quantize(px[i]);
-      px[i + 1] = quantize(px[i + 1]);
-      px[i + 2] = quantize(px[i + 2]);
-      px[i + 3] = 255;
-    }
-    context.putImageData(frame, 0, 0);
-    const big = document.createElement("canvas");
-    big.width = GRID * SCALE;
-    big.height = GRID * SCALE;
-    const draw = big.getContext("2d");
-    if (!draw) return null;
-    draw.imageSmoothingEnabled = false;
-    draw.drawImage(small, 0, 0, big.width, big.height);
-    return big.toDataURL("image/png");
+    read.imageSmoothingEnabled = true;
+    read.imageSmoothingQuality = "high";
+    read.drawImage(image, (width - side) / 2, (height - side) / 2, side, side, 0, 0, SAMPLE, SAMPLE);
+    const features = readFeatures(read.getImageData(0, 0, SAMPLE, SAMPLE).data, personKey);
+
+    // Kept at its native 16 × 16: the tile scales it by whole pixels, so
+    // every sprite pixel stays square (see the Avatar component).
+    const sprite = document.createElement("canvas");
+    sprite.width = SPRITE;
+    sprite.height = SPRITE;
+    const paint = sprite.getContext("2d");
+    if (!paint) return null;
+    paint.putImageData(new ImageData(render(features), SPRITE, SPRITE), 0, 0);
+    backdrops.set(personKey, `rgb(${features.backdrop.join(" ")})`);
+    return sprite.toDataURL("image/png");
   } catch {
     return null;
   }
@@ -79,6 +69,17 @@ function decode(url: string): Promise<HTMLImageElement | null> {
     image.onerror = () => resolve(null);
     image.src = url;
   });
+}
+
+/** The character's backdrop colour, to fill the tile around the sprite. */
+export function avatarBackdrop(personKey: string): string | undefined {
+  return backdrops.get(personKey);
+}
+
+/** The largest size at or under `size` CSS pixels that scales a 16-pixel sprite by whole device pixels. */
+export function crispSize(size: number, devicePixelRatio = 1): number {
+  const unit = SPRITE / Math.max(1, devicePixelRatio);
+  return Math.max(unit, Math.floor(size / unit + 1e-6) * unit);
 }
 
 export function settledAvatar(personKey: string): string | null | undefined {
@@ -98,7 +99,7 @@ export function loadAvatar(personKey: string): Promise<string | null> {
         const url = URL.createObjectURL(blob);
         try {
           const image = await decode(url);
-          return image ? pixelate(image) : null;
+          return image ? arcade(image, personKey) : null;
         } finally {
           URL.revokeObjectURL(url);
         }
