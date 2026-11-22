@@ -1,0 +1,254 @@
+{
+  "assetPack": "agent-office-pixel-kit-v2",
+  "pixelOrigin": "top-left",
+  "environment": {
+    "room-product-open": {
+      "file": "room-product-open.png",
+      "width": 320,
+      "height": 224,
+      "alpha": false,
+      "plaque": {
+        "x": 125,
+        "y": 18,
+        "width": 36,
+        "height": 9
+      }
+    },
+    "room-product-backdoor": {
+      "file": "room-product-backdoor.png",
+      "width": 320,
+      "height": 224,
+      "alpha": false,
+      "plaque": {
+        "x": 125,
+        "y": 18,
+        "width": 36,
+        "height": 9
+      },
+      "backThreshold": {
+        "x": 198,
+        "y": 72
+      }
+    },
+    "room-cluster": {
+      "file": "room-cluster.png",
+      "width": 384,
+      "height": 224,
+      "alpha": false,
+      "plaque": {
+        "x": 167,
+        "y": 33,
+        "width": 51,
+        "height": 15
+      },
+      "loadingTarget": {
+        "x": 192,
+        "y": 147
+      }
+    },
+    "room-lobby": {
+      "file": "room-lobby.png",
+      "width": 448,
+      "height": 192,
+      "alpha": false,
+      "logoSlot": {
+        "x": 324,
+        "y": 155,
+        "width": 107,
+        "height": 17
+      }
+    },
+    "floor-corridor": {
+      "file": "floor-corridor.png",
+      "width": 32,
+      "height": 32,
+      "alpha": false,
+      "tileable": true
+    },
+    "desk": {
+      "file": "desk.png",
+      "width": 64,
+      "height": 48,
+      "alpha": true
+    },
+    "box": {
+      "file": "box.png",
+      "width": 16,
+      "height": 16,
+      "alpha": true
+    }
+  },
+  "characters": {
+    "root": "characters",
+    "layout": "horizontal",
+    "frameSize": {
+      "width": 32,
+      "height": 48
+    },
+    "anchor": {
+      "x": 16,
+      "y": 45
+    },
+    "hasBakedHead": true,
+    "carryIncludesBox": true,
+    "flipHorizontal": {
+      "body-walk-right": "body-walk-left",
+      "body-carry-right": "body-carry-left"
+    },
+    "animations": {
+      "body-walk-down": {
+        "frames": 4,
+        "direction": "down",
+        "frameMs": 130,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 128,
+        "imageHeight": 48
+      },
+      "body-walk-left": {
+        "frames": 4,
+        "direction": "left",
+        "frameMs": 130,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 128,
+        "imageHeight": 48
+      },
+      "body-walk-up": {
+        "frames": 4,
+        "direction": "up",
+        "frameMs": 130,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 128,
+        "imageHeight": 48
+      },
+      "body-idle-down": {
+        "frames": 2,
+        "direction": "down",
+        "frameMs": 580,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 64,
+        "imageHeight": 48
+      },
+      "body-carry-down": {
+        "frames": 4,
+        "direction": "down",
+        "frameMs": 150,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 128,
+        "imageHeight": 48
+      },
+      "body-carry-left": {
+        "frames": 4,
+        "direction": "left",
+        "frameMs": 150,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 128,
+        "imageHeight": 48
+      },
+      "body-carry-up": {
+        "frames": 4,
+        "direction": "up",
+        "frameMs": 150,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 128,
+        "imageHeight": 48
+      },
+      "body-sit-type": {
+        "frames": 2,
+        "direction": "down",
+        "frameMs": 220,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 64,
+        "imageHeight": 48
+      },
+      "body-coffee": {
+        "frames": 2,
+        "direction": "down",
+        "frameMs": 500,
+        "frameWidth": 32,
+        "frameHeight": 48,
+        "imageWidth": 64,
+        "imageHeight": 48
+      }
+    },
+    "variants": {
+      "gencay": {
+        "description": "Lacivert ceket ve açık mavi gömlek",
+        "sheets": {
+          "body-walk-down": "characters/gencay/body-walk-down.png",
+          "body-walk-left": "characters/gencay/body-walk-left.png",
+          "body-walk-up": "characters/gencay/body-walk-up.png",
+          "body-idle-down": "characters/gencay/body-idle-down.png",
+          "body-carry-down": "characters/gencay/body-carry-down.png",
+          "body-carry-left": "characters/gencay/body-carry-left.png",
+          "body-carry-up": "characters/gencay/body-carry-up.png",
+          "body-sit-type": "characters/gencay/body-sit-type.png",
+          "body-coffee": "characters/gencay/body-coffee.png"
+        }
+      },
+      "eneserman": {
+        "description": "Mavi boyun askılı",
+        "sheets": {
+          "body-walk-down": "characters/eneserman/body-walk-down.png",
+          "body-walk-left": "characters/eneserman/body-walk-left.png",
+          "body-walk-up": "characters/eneserman/body-walk-up.png",
+          "body-idle-down": "characters/eneserman/body-idle-down.png",
+          "body-carry-down": "characters/eneserman/body-carry-down.png",
+          "body-carry-left": "characters/eneserman/body-carry-left.png",
+          "body-carry-up": "characters/eneserman/body-carry-up.png",
+          "body-sit-type": "characters/eneserman/body-sit-type.png",
+          "body-coffee": "characters/eneserman/body-coffee.png"
+        }
+      },
+      "arcanamlisarac": {
+        "description": "Gözlüklü, dalgalı saçlı",
+        "sheets": {
+          "body-walk-down": "characters/arcanamlisarac/body-walk-down.png",
+          "body-walk-left": "characters/arcanamlisarac/body-walk-left.png",
+          "body-walk-up": "characters/arcanamlisarac/body-walk-up.png",
+          "body-idle-down": "characters/arcanamlisarac/body-idle-down.png",
+          "body-carry-down": "characters/arcanamlisarac/body-carry-down.png",
+          "body-carry-left": "characters/arcanamlisarac/body-carry-left.png",
+          "body-carry-up": "characters/arcanamlisarac/body-carry-up.png",
+          "body-sit-type": "characters/arcanamlisarac/body-sit-type.png",
+          "body-coffee": "characters/arcanamlisarac/body-coffee.png"
+        }
+      },
+      "canilbey": {
+        "description": "Kısa saçlı ve lacivert bomber montlu",
+        "sheets": {
+          "body-walk-down": "characters/canilbey/body-walk-down.png",
+          "body-walk-left": "characters/canilbey/body-walk-left.png",
+          "body-walk-up": "characters/canilbey/body-walk-up.png",
+          "body-idle-down": "characters/canilbey/body-idle-down.png",
+          "body-carry-down": "characters/canilbey/body-carry-down.png",
+          "body-carry-left": "characters/canilbey/body-carry-left.png",
+          "body-carry-up": "characters/canilbey/body-carry-up.png",
+          "body-sit-type": "characters/canilbey/body-sit-type.png",
+          "body-coffee": "characters/canilbey/body-coffee.png"
+        }
+      },
+      "beratustunay01": {
+        "description": "Geniş gülümseyen, koyu tişörtlü",
+        "sheets": {
+          "body-walk-down": "characters/beratustunay01/body-walk-down.png",
+          "body-walk-left": "characters/beratustunay01/body-walk-left.png",
+          "body-walk-up": "characters/beratustunay01/body-walk-up.png",
+          "body-idle-down": "characters/beratustunay01/body-idle-down.png",
+          "body-carry-down": "characters/beratustunay01/body-carry-down.png",
+          "body-carry-left": "characters/beratustunay01/body-carry-left.png",
+          "body-carry-up": "characters/beratustunay01/body-carry-up.png",
+          "body-sit-type": "characters/beratustunay01/body-sit-type.png",
+          "body-coffee": "characters/beratustunay01/body-coffee.png"
+        }
+      }
+    }
+  }
+}

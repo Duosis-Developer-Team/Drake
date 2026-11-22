@@ -11,6 +11,7 @@
 import {
   Activity,
   Bot,
+  Building2,
   Coins,
   GitBranch,
   LayoutGrid,
@@ -69,9 +70,9 @@ export default function AgentsPage() {
   const { locale } = useLocale();
   const [span, setSpan] = useState<Window>("24h");
   const [view, setView] = useState<
-    "inventory" | "map" | "mcp" | "governance" | "development"
+    "inventory" | "map" | "mcp" | "governance" | "development" | "office"
   >("inventory");
-  const dev = view === "development";
+  const dev = view === "development" || view === "office";
   const [metric, setMetric] = useState<"calls" | "cost">("calls");
   const [state, setState] = useState<State>({ kind: "loading" });
   const [connect, setConnect] = useState<AgentConnect | null>(null);
@@ -165,6 +166,7 @@ export default function AgentsPage() {
                 label: t("view.development"),
                 icon: GitBranch,
               },
+              { key: "office", label: t("view.office"), icon: Building2 },
             ]}
           />
         }
@@ -200,7 +202,7 @@ export default function AgentsPage() {
         <ConnectPanel connect={connect} />
       </Drawer>
 
-      {dev ? <DevelopmentView /> : null}
+      {dev ? <DevelopmentView key={view} mode={view === "office" ? "office" : "map"} /> : null}
 
       {!dev && state.kind === "loading" ? (
         <Panel>

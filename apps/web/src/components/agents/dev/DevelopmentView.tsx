@@ -42,6 +42,7 @@ import {
 } from "@/lib/devAgents";
 
 import { Avatar, DevMap, RepositoryMark, repositoryTitle, type Pick } from "./DevMap";
+import { DevOffice } from "./office/DevOffice";
 
 const MAP_MIN_WIDTH = 860;
 /** Panel `p-5` on both sides plus its 1px border. */
@@ -617,8 +618,10 @@ export function catalogOnly(map: MapData): MapData {
   };
 }
 
-export function DevelopmentView() {
+export function DevelopmentView({ mode = "map" }: { mode?: "map" | "office" } = {}) {
+  const office = mode === "office";
   const t = useT("devAgents");
+  const to = useT("devOffice");
   const fmt = useFormat();
   const { locale } = useLocale();
   const [window, setWindow] = useState<DevWindow>("30d");
@@ -676,7 +679,7 @@ export function DevelopmentView() {
   return (
     <div ref={ref} className="space-y-5" data-testid="dev-view">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-3xl text-body text-ink-secondary">{t("lead")}</p>
+        <p className="max-w-3xl text-body text-ink-secondary">{office ? to("lead") : t("lead")}</p>
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedControl
             label={t("window.label")}
@@ -699,7 +702,13 @@ export function DevelopmentView() {
         <Panel><DataState kind="error" /></Panel>
       ) : null}
 
-      {map && summary ? (
+      {office && map ? (
+        <Panel className="overflow-hidden">
+          <DevOffice window={window} onPick={setPick} />
+        </Panel>
+      ) : null}
+
+      {!office && map && summary ? (
         <section className="overflow-hidden rounded-panel border border-border bg-surface" aria-label={t("title")}>
           <div className="grid divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
             <Figure
@@ -742,7 +751,7 @@ export function DevelopmentView() {
         </section>
       ) : null}
 
-      {map && !empty ? (
+      {!office && map && !empty ? (
         <Panel className="overflow-hidden">
           <PanelHeader
             title={t("map.title")}
@@ -818,7 +827,7 @@ export function DevelopmentView() {
         </Panel>
       ) : null}
 
-      {map && empty ? (
+      {!office && map && empty ? (
         <Panel data-testid="dev-empty">
           <div className="flex flex-col items-center gap-3 py-10 text-center">
             <span className="grid h-14 w-14 place-items-center rounded-2xl bg-surface-2 text-ink-muted"><GitCommitHorizontal aria-hidden className="h-6 w-6" /></span>
