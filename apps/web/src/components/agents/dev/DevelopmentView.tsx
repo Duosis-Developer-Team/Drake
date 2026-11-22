@@ -312,7 +312,7 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
     return (
       <div className="space-y-6" data-testid="dev-person-detail">
         <header className="flex items-center gap-4">
-          <Avatar person={person} size={56} />
+          <Avatar person={person} size={96} />
           <div className="min-w-0">
             <h3 className="truncate font-[family-name:var(--font-display)] text-[1.375rem] font-bold tracking-[-0.02em] text-ink">{person.name}</h3>
             {person.logins.length ? (
@@ -385,7 +385,7 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
     return (
       <div className="space-y-6" data-testid="dev-edge-detail">
         <header className="flex items-center gap-3">
-          <Avatar person={person} size={44} />
+          <Avatar person={person} size={56} />
           <span aria-hidden className="h-[3px] w-10 rounded-full" style={{ background: AGENT_COLOUR[edge.agent] }} />
           <span className="grid h-11 w-11 place-items-center rounded-[0.8rem] border border-border bg-surface-2">
             <RepositoryMark repo={repo} />
@@ -497,7 +497,7 @@ function RepositoryDetail({ map, repo, window }: { map: MapData; repo: DevReposi
         <ul className="flex flex-wrap gap-2">
           {people.map((p) => (
             <li key={p.key} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 py-1 pr-3 pl-1">
-              <Avatar person={p} size={24} />
+              <Avatar person={p} size={32} />
               <span className="text-caption text-ink">{p.name}</span>
             </li>
           ))}
@@ -570,7 +570,7 @@ function MobileList({ map, onPick }: { map: MapData; onPick: (p: Pick) => void }
       {map.people.map((person) => (
         <li key={person.key} className="rounded-2xl border border-border bg-surface p-3.5">
           <button type="button" onClick={() => onPick({ kind: "person", key: person.key })} className="flex w-full items-center gap-3 text-left">
-            <Avatar person={person} />
+            <Avatar person={person} size={52} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold text-ink">{person.name}</span>
               <span className="text-micro text-ink-muted">
