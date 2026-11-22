@@ -489,6 +489,22 @@ class Settings(BaseSettings):
     dev_activity_enabled: bool = False
     dev_activity_interval_seconds: float = 900.0
     dev_activity_commit_budget: int = 300
+    # GitHub organisations whose every repository the map covers, catalogued
+    # or not (read through the App installation, never written). Empty: the
+    # catalog's repositories only.
+    dev_activity_orgs: list[str] = []
+
+    @field_validator("dev_activity_orgs")
+    @classmethod
+    def _dev_activity_orgs(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for org in value:
+            name = org.strip()
+            # GitHub's own rule for an organisation login.
+            if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", name):
+                raise ValueError(f"not a GitHub organisation login: {org!r}")
+            cleaned.append(name)
+        return cleaned
 
     slo_evaluator_enabled: bool = False
     slo_evaluator_interval_seconds: float = 300.0

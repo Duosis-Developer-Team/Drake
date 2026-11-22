@@ -312,6 +312,10 @@ agents:
   # what Claude Code cost (its own telemetry through the external door).
   # Needs the GitHub App and/or observability traces.
   devActivityEnabled: false
+  # GitHub organisations whose every repository the development map covers,
+  # catalogued or not (read-only, through the App installation). Empty: the
+  # catalog's repositories only.
+  devActivityOrgs: []
 
 slo:
   # Objectives (migration 0031): the evaluator judges every enabled

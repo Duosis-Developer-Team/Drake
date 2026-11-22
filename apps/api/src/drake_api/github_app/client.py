@@ -830,6 +830,15 @@ class GitHubClient:
             raise GitHubContractError("directory listing was not a list")
         return [item for item in payload if isinstance(item, dict)]
 
+    async def get_user(self, token: InstallationToken, login: str) -> dict[str, Any]:
+        """A public user profile (id, avatar) by login. Read-only, metadata only."""
+        response = await self._request(
+            "GET", f"/users/{self._segment(login, 'login')}", token.token
+        )
+        if not isinstance(response.payload, dict):
+            raise GitHubContractError("user response was not an object")
+        return response.payload
+
     async def get_environment(
         self, token: InstallationToken, owner: str, repo: str, environment: str
     ) -> dict[str, Any]:
