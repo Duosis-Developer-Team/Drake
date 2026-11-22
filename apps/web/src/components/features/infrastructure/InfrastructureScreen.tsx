@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
-import { ProjectLogo } from "@/components/ui/ProjectLogo";
+import { GroupMark } from "@/components/clusters/ClusterDashboard";
 import { DataState } from "@/components/state/DataState";
 import { useFormat, useT } from "@/lib/i18n";
 import {
@@ -117,6 +117,8 @@ function envTone(e: EnvRow): Level {
 interface Group {
   key: string;
   name: string;
+  /** Who owns it: a project, Tracesis itself, the platform. */
+  kind: NamespaceSnapshot["group"]["kind"];
   /** The catalog project this group is, when it is one: for its logo. */
   projectId: string | null;
   envs: EnvRow[];
@@ -256,23 +258,38 @@ export function InfrastructureScreen() {
   );
 }
 
+/** Days until the disk fills at its current growth, and load per core. */
+function nodeFacts(node: NodeSnapshot) {
+  const days =
+    node.disk.growth_per_day && node.disk.growth_per_day > 0 && node.disk.now !== null
+      ? Math.round((1 - node.disk.now) / node.disk.growth_per_day)
+      : null;
+  const perCore = node.load5.now !== null && node.cores ? node.load5.now / node.cores : null;
+  return { days, perCore };
+}
+
 function Loaded({ snap }: { snap: InfraSnapshot }) {
   const t = useT("infrastructure");
   const { n, pct } = useNum();
-  const facts = (node: NodeSnapshot) => {
-    const days =
-      node.disk.growth_per_day && node.disk.growth_per_day > 0 && node.disk.now !== null
-        ? Math.round((1 - node.disk.now) / node.disk.growth_per_day)
-        : null;
-    const perCore = node.load5.now !== null && node.cores ? node.load5.now / node.cores : null;
-    return { days, perCore };
-  };
   return (
     <>
       {snap.state === "partial" ? <p className={s.partial}>{t("state.partial")}</p> : null}
-      <Ledger snap={snap} facts={facts} n={n} pct={pct} />
+      <Ledger snap={snap} facts={nodeFacts} n={n} pct={pct} />
       <WhoUses snap={snap} />
     </>
+  );
+}
+
+/**
+ * The machine ledger on its own, for the cluster page: the same design as
+ * Resource usage, so a node reads the same wherever it is shown.
+ */
+export function NodeLedger({ snap }: { snap: InfraSnapshot }) {
+  const { n, pct } = useNum();
+  return (
+    <div className={s.root}>
+      <Ledger snap={snap} facts={nodeFacts} n={n} pct={pct} />
+    </div>
   );
 }
 
@@ -438,6 +455,148 @@ function NodeDetail({
   );
 }
 
+/* ---------- search with suggestions ---------- */
+
+interface Suggestion {
+  id: string;
+  label: string;
+  sub: string;
+  value: string;
+  group: Group;
+  namespace: boolean;
+}
+
+/**
+ * Search that answers as you type: owners (apps, Tracesis, the platform)
+ * by name, then namespaces, each with the owner's mark. Choosing one
+ * filters the table to it; free text still filters as before.
+ */
+function WhoSearch({ groups, onChange }: { groups: Group[]; onChange: (value: string) => void }) {
+  const t = useT("infrastructure");
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listId = "who-search-list";
+  const needle = text.trim().toLowerCase();
+  const suggestions = useMemo<Suggestion[]>(() => {
+    if (!needle) return [];
+    const score = (name: string) => (name.toLowerCase().startsWith(needle) ? 0 : name.toLowerCase().includes(needle) ? 1 : 2);
+    const owners = groups
+      .filter((g) => score(g.name) < 2)
+      .sort((a, b) => score(a.name) - score(b.name) || a.name.localeCompare(b.name))
+      .map((g) => ({
+        id: `g-${g.key}`,
+        label: g.name,
+        sub: g.kind === "project" ? t("who.kindProject") : t("who.kindGroup"),
+        value: g.name,
+        group: g,
+        namespace: false,
+      }));
+    const namespaces = groups
+      .flatMap((g) => g.envs.map((e) => ({ g, ns: e.namespace })))
+      .filter(({ ns }) => score(ns) < 2)
+      .sort((a, b) => score(a.ns) - score(b.ns) || a.ns.localeCompare(b.ns))
+      .map(({ g, ns }) => ({ id: `n-${ns}`, label: ns, sub: g.name, value: ns, group: g, namespace: true }));
+    return [...owners, ...namespaces].slice(0, 8);
+  }, [groups, needle, t]);
+
+  const choose = (item: Suggestion) => {
+    setText(item.value);
+    setOpen(false);
+    onChange(item.value);
+  };
+  const set = (value: string) => {
+    setText(value);
+    setOpen(true);
+    setActive(0);
+    onChange(value);
+  };
+
+  return (
+    <div className="relative ml-auto w-full sm:w-72">
+      <input
+        className={s.search}
+        style={{ width: "100%", paddingRight: text ? 30 : undefined }}
+        type="text"
+        role="combobox"
+        aria-expanded={open && suggestions.length > 0}
+        aria-controls={open && needle && suggestions.length > 0 ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={open && suggestions[active] ? `who-opt-${suggestions[active].id}` : undefined}
+        value={text}
+        placeholder={t("who.search")}
+        aria-label={t("who.search")}
+        onChange={(e) => set(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+            setActive((i) => Math.min(i + 1, suggestions.length - 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActive((i) => Math.max(i - 1, 0));
+          } else if (e.key === "Enter" && open && suggestions[active]) {
+            e.preventDefault();
+            choose(suggestions[active]);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+      />
+      {text ? (
+        <button
+          type="button"
+          aria-label={t("who.clear")}
+          onClick={() => set("")}
+          className="absolute top-1/2 right-2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full text-ink-muted hover:bg-surface-hover hover:text-ink"
+        >
+          ×
+        </button>
+      ) : null}
+      {open && needle ? (
+        <div
+          className="absolute top-[calc(100%+6px)] right-0 left-0 z-40 overflow-hidden rounded-xl border border-border bg-surface shadow-[0_18px_40px_-18px_rgb(0_0_0/0.45)]"
+          data-testid="who-suggestions"
+        >
+          {suggestions.length === 0 ? (
+            <p className="px-3.5 py-3 text-caption text-ink-muted">{t("who.noMatch")}</p>
+          ) : (
+            <ul id={listId} role="listbox" aria-label={t("who.suggestions")} className="max-h-80 overflow-auto py-1.5">
+              {suggestions.map((item, i) => (
+                <li
+                  key={item.id}
+                  id={`who-opt-${item.id}`}
+                  role="option"
+                  aria-selected={i === active}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    choose(item);
+                  }}
+                  onMouseEnter={() => setActive(i)}
+                  className={`flex cursor-pointer items-center gap-3 px-3 py-2 ${i === active ? "bg-surface-hover" : ""}`}
+                >
+                  <GroupMark group={item.group} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-caption font-semibold text-ink ${item.namespace ? "font-mono" : ""}`}>
+                      {item.label}
+                    </span>
+                    <span className="block truncate text-[11px] text-ink-muted">{item.sub}</span>
+                  </span>
+                  <span className="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[10.5px] text-ink-muted">
+                    {item.namespace ? t("who.kindNamespace") : item.group.kind === "project" ? t("who.kindProject") : t("who.kindGroup")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ---------- who uses it ---------- */
 function WhoUses({ snap }: { snap: InfraSnapshot }) {
   const t = useT("infrastructure");
@@ -462,7 +621,7 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
     const m = new Map<string, Group>();
     const zero = () => new Array<SeriesValue>(snap.times.length).fill(null);
     for (const e of envs) {
-      const g = m.get(e.group.key) ?? { key: e.group.key, name: groupName(e.group), projectId: null, envs: [], cpu: 0, memory: 0, cpuRequested: 0, memoryRequested: 0, pods: 0, warn: 0, bad: 0, cpuSeries: zero(), memorySeries: zero() };
+      const g = m.get(e.group.key) ?? { key: e.group.key, name: groupName(e.group), kind: e.group.kind, projectId: null, envs: [], cpu: 0, memory: 0, cpuRequested: 0, memoryRequested: 0, pods: 0, warn: 0, bad: 0, cpuSeries: zero(), memorySeries: zero() };
       g.envs.push(e);
       if (!g.projectId && e.group.kind === "project" && e.project) g.projectId = e.project.project_id;
       g.cpu += e.cpu ?? 0;
@@ -538,7 +697,7 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
           {option("all", t("who.wholeOption"), allFill)}
           {snap.nodes.map((x) => option(x.name, x.name, fill(x)))}
         </div>
-        <input className={s.search} type="search" value={q} placeholder={t("who.search")} aria-label={t("who.search")} onChange={(e) => setQ(e.target.value.trim().toLowerCase())} />
+        <WhoSearch groups={groups} onChange={(value) => setQ(value.trim().toLowerCase())} />
       </div>
 
       <div className={s.chHead}>
@@ -594,7 +753,7 @@ function WhoUses({ snap }: { snap: InfraSnapshot }) {
                 if (!open) prefetchNamespacePods(snap.cluster.id, g.envs.map((x) => x.namespace));
               }} onMouseEnter={() => setFocus(focusKey)} onMouseLeave={() => setFocus(null)}>
               <span className={`${s.rk} ${s.d}`}>{groups.indexOf(g) + 1}</span>
-              <span className={s.nm}><i />{g.projectId ? <ProjectLogo projectId={g.projectId} name={g.name} size="md" variant="mark" /> : null}<span><b>{g.name}</b><small>{t("who.environments", { count: g.envs.length })} · {t("who.podsCount", { count: Math.round(g.pods) })}</small></span></span>
+              <span className={s.nm}><i />{g.projectId || g.kind === "drake" ? <GroupMark group={g} size="sm" /> : null}<span><b>{g.name}</b><small>{t("who.environments", { count: g.envs.length })} · {t("who.podsCount", { count: Math.round(g.pods) })}</small></span></span>
               <span className={s.us}>
                 <span className={s.shb}><i style={{ width: `${(val(g) / top) * 100}%` }} /></span>
                 <span className={s.ut}><b>{unit(val(g))}</b> · {t("who.ofScope", { share: pct(capacity ? val(g) / capacity : null), scope: scopeName })}</span>
