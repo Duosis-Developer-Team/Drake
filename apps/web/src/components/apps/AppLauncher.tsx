@@ -155,7 +155,7 @@ export function AppGrid({
   const t = useT("apps");
   const ts = useT("serviceHealth");
   return (
-    <FillGrid count={apps.length} aria-label={t("title")} data-testid="app-grid">
+    <FillGrid count={apps.length} aria-label={t("title")} data-testid="app-grid" className="max-sm:grid-cols-2 max-sm:gap-3">
       {apps.map((app, i) => {
         const active = app.projectId === selectedId;
         const dim = selectedId !== null && !active;
@@ -166,7 +166,7 @@ export function AppGrid({
               aria-pressed={active}
               onClick={() => onSelect(active ? null : app.projectId)}
               data-testid={`app-${app.projectKey}`}
-              className={`group relative flex h-full w-full flex-col items-center overflow-hidden rounded-2xl border bg-surface px-6 pt-8 pb-6 text-center transition-[transform,border-color,box-shadow,opacity] duration-200 outline-none hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-24px_rgb(0_0_0/0.45)] focus-visible:ring-2 focus-visible:ring-focus ${
+              className={`group relative flex h-full w-full flex-col items-center overflow-hidden rounded-2xl border bg-surface px-3 pt-5 pb-4 text-center sm:px-6 sm:pt-8 sm:pb-6 transition-[transform,border-color,box-shadow,opacity] duration-200 outline-none hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-24px_rgb(0_0_0/0.45)] focus-visible:ring-2 focus-visible:ring-focus ${
                 active
                   ? "border-brand-accent/70 ring-1 ring-brand-accent/40"
                   : "border-border hover:border-border-strong"
@@ -179,7 +179,7 @@ export function AppGrid({
                 style={{ background: "radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--brand-accent) 14%, transparent), transparent)" }}
               />
               <span
-                className="relative grid h-32 w-32 place-items-center rounded-[2rem] border border-border bg-gradient-to-b from-surface to-surface-2 transition-transform duration-200 group-hover:scale-[1.03]"
+                className="relative grid h-24 w-24 place-items-center rounded-[1.5rem] border border-border bg-gradient-to-b from-surface to-surface-2 transition-transform duration-200 group-hover:scale-[1.03] sm:h-32 sm:w-32 sm:rounded-[2rem] [&_img]:max-sm:h-16 [&_img]:max-sm:w-16"
                 style={{
                   boxShadow:
                     "inset 0 1px 0 rgb(255 255 255 / 0.07), 0 18px 32px -18px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.12)",
@@ -195,7 +195,7 @@ export function AppGrid({
                   </span>
                 ) : null}
               </span>
-              <span className="relative mt-5 w-full truncate font-[family-name:var(--font-display)] text-[1.375rem] font-bold tracking-[-0.025em] text-ink">
+              <span className="relative mt-4 w-full truncate font-[family-name:var(--font-display)] text-[1.125rem] font-bold tracking-[-0.025em] text-ink sm:mt-5 sm:text-[1.375rem]">
                 {app.name}
               </span>
               <span className="relative mt-1 text-caption text-ink-muted">
@@ -272,6 +272,8 @@ export function EnvCard({
   onSelect,
   active = false,
   cta,
+  stats,
+  series,
 }: {
   env: PlatformEnv;
   pulse: Pulse | null;
@@ -281,6 +283,10 @@ export function EnvCard({
   onSelect?: () => void;
   active?: boolean;
   cta?: string;
+  /** Figures to show instead of the traffic ones (Logs shows log lines). */
+  stats?: { label: string; value: string; tone?: string }[];
+  /** A series to draw instead of requests per bucket. */
+  series?: { values: number[]; colour?: string } | null;
 }) {
   const t = useT("apps");
   const ts = useT("serviceHealth");
@@ -288,6 +294,14 @@ export function EnvCard({
   const kind = envKind(env.key);
   const colour = KIND_COLOUR[kind];
   const errorRatio = pulse?.requests ? (pulse.errors ?? 0) / pulse.requests : null;
+  const drawn =
+    series !== undefined
+      ? series && series.values.length > 1 && series.values.some((v) => v > 0)
+        ? series
+        : null
+      : pulse && pulse.perBucket.length > 1 && pulse.requests
+        ? { values: pulse.perBucket, colour: kind === "prod" ? "var(--gold)" : "var(--brand-accent)" }
+        : null;
   const body = (
     <>
       <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: colour }} />
@@ -307,8 +321,8 @@ export function EnvCard({
       </div>
 
       <div className="relative mt-4 -mx-1">
-        {pulse && pulse.perBucket.length > 1 && pulse.requests ? (
-          <Sparkline values={pulse.perBucket} height={52} colour={kind === "prod" ? "var(--gold)" : "var(--brand-accent)"} />
+        {drawn ? (
+          <Sparkline values={drawn.values} height={52} colour={drawn.colour ?? "var(--brand-accent)"} />
         ) : (
           <div className="grid h-[52px] place-items-center rounded-lg border border-dashed border-border text-micro text-ink-muted">
             {pending ? t("trafficPending") : t("noTraffic")}
@@ -316,6 +330,18 @@ export function EnvCard({
         )}
       </div>
 
+      {stats ? (
+        <dl className="mt-4 grid grid-cols-3 gap-3">
+          {stats.map((stat) => (
+            <div key={stat.label} className="min-w-0">
+              <dt className="truncate text-[11px] text-ink-muted">{stat.label}</dt>
+              <dd data-tabular className={`mt-0.5 truncate font-mono text-[0.9375rem] font-semibold ${stat.tone ?? (stat.value === "—" ? "text-ink-muted" : "text-ink")}`}>
+                {stat.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
       <dl className="mt-4 grid grid-cols-3 gap-3">
         <div>
           <dt className="text-[11px] text-ink-muted">{t("stat.requests")}</dt>
@@ -341,6 +367,7 @@ export function EnvCard({
           </dd>
         </div>
       </dl>
+      )}
 
       <div className="mt-4 flex items-center gap-3 border-t border-border pt-3.5">
         <HealthBar tally={env.tally} className="max-w-[7rem]" />

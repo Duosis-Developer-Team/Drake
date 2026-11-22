@@ -160,6 +160,29 @@ describe("infrastructure screen", () => {
     );
   });
 
+  it("suggests owners and namespaces as you type, and filters to the one chosen", async () => {
+    routes();
+    render(
+      <SessionProvider>
+        <InfrastructurePage />
+      </SessionProvider>,
+    );
+    const box = await screen.findByRole("combobox", { name: "Search project or environment" });
+    fireEvent.change(box, { target: { value: "h" } });
+    const list = await screen.findByRole("listbox");
+    // An owner first, then its namespace; each with its kind.
+    const options = within(list).getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Hermes");
+    expect(options[0]).toHaveTextContent("App");
+    expect(within(list).getByRole("option", { name: /hermes-test/ })).toBeInTheDocument();
+    fireEvent.mouseDown(options[0]);
+    expect(box).toHaveValue("Hermes");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    // Only Hermes is left in the table.
+    expect(screen.getByRole("button", { name: /Hermes.*Requested too much/s })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Tracesis.*Uses more than requested/s })).not.toBeInTheDocument();
+  });
+
   it("says so when the cluster's metrics are not readable", async () => {
     installFetchMock({
       "/v1/me": { status: 200, body: makeMe({ permissions: ["cluster.view"] }) },

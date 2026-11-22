@@ -16,6 +16,11 @@
  * axis row states the window's real start and end, and hovering or
  * keyboard-focusing a dot shows its event name and clock time in a visible
  * label, not only in the accessible name a mouse user never sees.
+ *
+ * Drawn as a timeline rather than a row of dots: hour gridlines, an
+ * incident or alert as a span from opening to resolution (striped to "now"
+ * while still open), deployments as pins. With nothing to plot it shrinks
+ * to one strip that still names every lane.
  */
 
 import { Bell, HeartPulse, Rocket, Siren, type LucideIcon } from "lucide-react";
@@ -73,7 +78,32 @@ function tooltipAlignmentClass(position: number): string {
   return "left-1/2 -translate-x-1/2";
 }
 
-export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
+/** An event's partner on the other end of its span: an incident's
+ *  resolution, an alert's resolution. */
+function partnerId(event: TimelineEvent): string | null {
+  const [kind, ...rest] = event.id.split(":");
+  const id = rest.join(":");
+  if (kind === "incident-opened") return `incident-resolved:${id}`;
+  if (kind === "alert-firing") return `alert-resolved:${id}`;
+  return null;
+}
+
+const SPAN_FILL: Record<string, string> = {
+  critical: "bg-critical/25 border-critical/50",
+  warning: "bg-warning/25 border-warning/50",
+  info: "bg-info/20 border-info/45",
+  success: "bg-healthy/20 border-healthy/45",
+};
+
+export function OperationalTimeline({
+  lanes,
+  window: frame,
+}: {
+  lanes: TimelineLane[];
+  /** A fixed window (epoch ms) to draw against — the Overview's last 24
+   *  hours. Without it the axis spans the events themselves. */
+  window?: { start: number; end: number };
+}) {
   const t = useT("commandCenter");
   const fmt = useFormat();
   const [tableOpen, setTableOpen] = useState(false);
@@ -101,44 +131,114 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
   const times = allEvents
     .map((event) => new Date(event.at).getTime())
     .filter((value) => !Number.isNaN(value));
-  const min = times.length ? Math.min(...times) : null;
-  const max = times.length ? Math.max(...times) : null;
+  // A fixed window still widens to an event older than its start (an
+  // incident opened two days ago and still open), so nothing is clipped.
+  const min = times.length ? (frame ? Math.min(frame.start, ...times) : Math.min(...times)) : null;
+  const max = times.length ? (frame ? Math.max(frame.end, ...times) : Math.max(...times)) : null;
   const span = min !== null && max !== null && max > min ? max - min : null;
 
-  function positionOf(at: string): number {
-    const t = new Date(at).getTime();
-    if (min === null || span === null || Number.isNaN(t)) return 50;
-    return ((t - min) / span) * 100;
+  function positionOf(at: string | number): number {
+    const value = typeof at === "number" ? at : new Date(at).getTime();
+    if (min === null || span === null || Number.isNaN(value)) return 50;
+    return ((value - min) / span) * 100;
   }
 
   const axisSpansMultipleDays = min !== null && max !== null && utcDateKey(min) !== utcDateKey(max);
+  // Hour gridlines: every 4 hours on a day-long window, every hour on a
+  // short one; never more than seven.
+  const ticks: number[] = [];
+  if (min !== null && max !== null && span !== null) {
+    const hours = span / 3_600_000;
+    const step = (hours > 12 ? 4 : hours > 4 ? 2 : 1) * 3_600_000;
+    for (let at = Math.ceil(min / step) * step; at < max && ticks.length < 7; at += step) {
+      if (at > min) ticks.push(at);
+    }
+  }
+
+  const byId = new Map(allEvents.map((event) => [event.id, event]));
+  const grid = (
+    <span aria-hidden className="pointer-events-none absolute inset-0">
+      {ticks.map((at) => (
+        <span key={at} className="absolute inset-y-1 w-px bg-border" style={{ left: `${positionOf(at)}%` }} />
+      ))}
+      {frame ? <span className="absolute inset-y-0 right-0 w-px bg-brand-accent/60" /> : null}
+    </span>
+  );
+
+  if (allEvents.length === 0) {
+    // Nothing to plot: one compact strip that still names every lane and
+    // which ones Tracesis cannot see, rather than four empty tracks.
+    return (
+      <div data-testid="operational-timeline" className="flex flex-col gap-3">
+        <p className="flex items-center gap-2 text-caption text-ink-secondary">
+          <span aria-hidden className="h-2 w-2 rounded-full bg-healthy" />
+          {frame ? t("timeline.quiet") : t("timeline.emptyWindow")}
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {lanes.map((lane) => {
+            const Icon = laneIcon(lane.key);
+            return lane.historyAvailable ? (
+              <li key={lane.key} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-micro text-ink-secondary">
+                <Icon aria-hidden className="h-3.5 w-3.5" />
+                {laneLabel(lane)}
+                <span data-tabular className="font-semibold text-ink">0</span>
+              </li>
+            ) : (
+              <li
+                key={lane.key}
+                data-testid={`lane-unavailable-${lane.key}`}
+                title={t("timeline.historyUnavailable")}
+                className="inline-flex max-w-full items-center gap-2 rounded-full border border-dashed border-border px-3 py-1.5 text-micro text-ink-muted"
+              >
+                <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t("timeline.historyUnavailable")}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  }
 
   return (
     <div data-testid="operational-timeline">
       {min !== null && max !== null ? (
-        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-          <span className="sm:w-40 sm:shrink-0 xl:w-44" aria-hidden />
-          <div
-            className="flex flex-1 items-center justify-between text-micro text-ink-muted"
-            data-testid="timeline-axis"
-          >
-            <span>{axisPoint(min, axisSpansMultipleDays)}</span>
-            <span>{axisPoint(max, axisSpansMultipleDays)}</span>
+        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:gap-3">
+          <span className="sm:w-44 sm:shrink-0" aria-hidden />
+          <div className="relative flex-1">
+            {ticks.length ? (
+              <div aria-hidden className="relative mb-1 hidden h-4 sm:block">
+                {ticks.map((at) => (
+                  <span
+                    key={at}
+                    className="absolute -translate-x-1/2 font-mono text-[10px] text-ink-muted"
+                    style={{ left: `${positionOf(at)}%` }}
+                  >
+                    {new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between text-micro text-ink-muted" data-testid="timeline-axis">
+              <span>{axisPoint(min, axisSpansMultipleDays)}</span>
+              <span>{frame && max === frame.end ? `${axisPoint(max, axisSpansMultipleDays)} · ${t("timeline.now")}` : axisPoint(max, axisSpansMultipleDays)}</span>
+            </div>
           </div>
         </div>
       ) : null}
       <div className="space-y-2">
         {lanes.map((lane) => {
           const Icon = laneIcon(lane.key);
+          const deploys = lane.key.includes("deploy");
           return (
             <div
               key={lane.key}
-              className="flex flex-col gap-2 rounded-[0.625rem] bg-surface-2 p-3 sm:flex-row sm:items-center sm:gap-4"
+              className="flex flex-col gap-2 rounded-xl border border-border bg-surface-2/50 p-2.5 sm:flex-row sm:items-center sm:gap-3"
             >
-              <span className="flex items-center gap-3 sm:w-40 sm:shrink-0 xl:w-44">
+              <span className="flex items-center gap-3 sm:w-44 sm:shrink-0">
                 <span
                   aria-hidden
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-ink-secondary"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface text-ink-secondary"
                 >
                   <Icon className="h-4 w-4" />
                 </span>
@@ -147,21 +247,22 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                 </span>
                 <span
                   data-tabular
-                  className="ml-auto rounded-full bg-surface px-2 py-0.5 text-micro font-semibold text-ink-secondary sm:ml-0"
+                  className="ml-auto rounded-full bg-surface px-2 py-0.5 text-micro font-semibold text-ink-secondary"
                 >
                   {lane.historyAvailable ? lane.events.length : "—"}
                 </span>
               </span>
               {!lane.historyAvailable ? (
                 <span
-                  className="block h-8 min-w-0 flex-1 truncate rounded-full border border-dashed border-border px-4 text-micro leading-[1.875rem] text-ink-muted"
+                  className="block h-9 min-w-0 flex-1 truncate rounded-lg border border-dashed border-border px-4 text-micro leading-[2.125rem] text-ink-muted"
                   title={t("timeline.historyUnavailable")}
                   data-testid={`lane-unavailable-${lane.key}`}
                 >
                   {t("timeline.historyUnavailable")}
                 </span>
               ) : lane.events.length === 0 ? (
-                <span className="relative flex h-8 min-w-0 flex-1 items-center overflow-hidden rounded-full bg-surface px-4 text-micro text-ink-muted">
+                <span className="relative flex h-9 min-w-0 flex-1 items-center overflow-hidden rounded-lg bg-surface px-4 text-micro text-ink-muted">
+                  {grid}
                   <span
                     aria-hidden
                     className="absolute inset-x-4 top-1/2 h-px -translate-y-1/2 bg-[repeating-linear-gradient(90deg,var(--border-subtle)_0_6px,transparent_6px_12px)]"
@@ -169,7 +270,28 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                   <span className="relative truncate bg-surface pr-3">{t("timeline.emptyWindow")}</span>
                 </span>
               ) : (
-                <div className="relative h-8 flex-1 rounded-full bg-surface">
+                <div className="relative h-9 flex-1 rounded-lg bg-surface">
+                  {grid}
+                  {/* Spans first, under the markers: open → resolved, or
+                      open → now when it is still open. */}
+                  {lane.events.map((event) => {
+                    const partner = partnerId(event);
+                    if (!partner) return null;
+                    const end = byId.get(partner);
+                    if (!end && !frame) return null;
+                    const from = positionOf(event.at);
+                    const to = end ? positionOf(end.at) : 100;
+                    return (
+                      <span
+                        key={`span:${event.id}`}
+                        aria-hidden
+                        className={`absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full border ${SPAN_FILL[event.tone] ?? SPAN_FILL.info} ${
+                          end ? "" : "bg-[repeating-linear-gradient(135deg,transparent_0_4px,var(--surface-3)_4px_7px)]"
+                        }`}
+                        style={{ left: `${from}%`, width: `${Math.max(0.8, to - from)}%` }}
+                      />
+                    );
+                  })}
                   {lane.events.map((event) => {
                     const spec = toneSpec(event.tone);
                     const position = positionOf(event.at);
@@ -179,10 +301,15 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
                         className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
                         style={{ left: `clamp(0.75rem, ${position}%, calc(100% - 0.75rem))` }}
                       >
+                        {deploys ? (
+                          <span aria-hidden className={`absolute left-1/2 h-7 w-px -translate-x-1/2 -translate-y-1/2 top-1/2 ${spec.dot} opacity-60`} />
+                        ) : null}
                         <Link
                           href={event.href}
                           aria-label={t("timeline.eventAt", { event: eventLabel(event), time: formatClock(event.at) })}
-                          className={`block h-3.5 w-3.5 rounded-full ring-4 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot}`}
+                          className={`relative block ring-4 ring-surface transition-transform hover:scale-125 focus-visible:scale-125 ${spec.dot} ${
+                            deploys ? "h-3 w-3 rotate-45 rounded-[2px]" : "h-3.5 w-3.5 rounded-full"
+                          }`}
                         />
                         {/* Visible on hover AND keyboard focus; anchored to the
                             near edge so it never runs off a narrow track. */}
@@ -200,6 +327,23 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-ink-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="h-2 w-5 rounded-full border border-critical/50 bg-critical/25" />
+          {t("timeline.legend.span")}
+        </span>
+        {frame ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="h-2 w-5 rounded-full border border-warning/50 bg-[repeating-linear-gradient(135deg,transparent_0_4px,var(--surface-3)_4px_7px)]" />
+            {t("timeline.legend.ongoing")}
+          </span>
+        ) : null}
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="h-2.5 w-2.5 rotate-45 rounded-[2px] bg-healthy" />
+          {t("timeline.legend.deploy")}
+        </span>
       </div>
 
       <details
@@ -220,26 +364,18 @@ export function OperationalTimeline({ lanes }: { lanes: TimelineLane[] }) {
               </tr>
             </thead>
             <tbody>
-              {allEvents.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="py-3 text-center text-ink-muted">
-                    {t("timeline.noEvents")}
-                  </td>
-                </tr>
-              ) : (
-                lanes.flatMap((lane) =>
-                  lane.events.map((event) => (
-                    <tr key={event.id} className="border-b border-border last:border-0">
-                      <td className="py-1.5 pr-3 text-ink-secondary">{laneLabel(lane)}</td>
-                      <td className="py-1.5 pr-3">
-                        <Link href={event.href} className="text-ink hover:underline">
-                          {eventLabel(event)}
-                        </Link>
-                      </td>
-                      <td className="py-1.5 text-ink-muted">{formatClock(event.at)}</td>
-                    </tr>
-                  )),
-                )
+              {lanes.flatMap((lane) =>
+                lane.events.map((event) => (
+                  <tr key={event.id} className="border-b border-border last:border-0">
+                    <td className="py-1.5 pr-3 text-ink-secondary">{laneLabel(lane)}</td>
+                    <td className="py-1.5 pr-3">
+                      <Link href={event.href} className="text-ink hover:underline">
+                        {eventLabel(event)}
+                      </Link>
+                    </td>
+                    <td className="py-1.5 text-ink-muted">{formatClock(event.at)}</td>
+                  </tr>
+                )),
               )}
             </tbody>
           </table>

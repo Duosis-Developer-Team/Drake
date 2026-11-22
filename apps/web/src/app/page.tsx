@@ -24,14 +24,15 @@
  * most dangerous thing a monitoring product can render.
  */
 
-import { ArrowRight, Server } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
-import { RingProgress } from "@/components/charts/visuals";
+import { ClusterCard } from "@/components/clusters/ClusterCard";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
 import { AppsBoard, PlatformPulse } from "@/components/command-center/Platform";
 import { EvidenceCoverage } from "@/components/command-center/EvidenceCoverage";
+import { IntegrationsBoard } from "@/components/command-center/IntegrationsBoard";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
 import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
 import { HealthMatrix } from "@/components/data-viz/HealthMatrix";
@@ -39,9 +40,8 @@ import { OperationalTimeline } from "@/components/data-viz/OperationalTimeline";
 import { SignalBoard } from "@/components/service-health/SignalBoard";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
-import { StatusBadge, StatusDot } from "@/components/ui/StatusBadge";
 import { Modal } from "@/components/ui/overlay";
-import { FreshnessIndicator, RelativeTime } from "@/components/ui/identifiers";
+import { FreshnessIndicator } from "@/components/ui/identifiers";
 import {
   DeniedState,
   ErrorState,
@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/states";
 import { alertListPath, type AlertInstance, type AlertSummary, type Page } from "@/lib/alerting";
 import type { CatalogContext, Cluster, IntegrationHealth } from "@/lib/catalog";
-import { compareTone, humanize, toneForHealth, toneSpec } from "@/lib/design/status";
+import { toneForHealth, toneSpec } from "@/lib/design/status";
 import { deploymentListPath, type DeploymentPage } from "@/lib/deployments";
 import { useFormat, useT } from "@/lib/i18n";
 import type { IncidentSummary } from "@/lib/incidents";
@@ -181,13 +181,26 @@ export default function CommandCenterPage() {
   const isNarrow = useMediaQuery("(max-width: 1023px)");
   const [timelineDialogOpen, setTimelineDialogOpen] = useState(false);
 
+  // The Overview's timeline is always the last 24 hours, the same window
+  // its alert and deployment reads ask for.
+  const timelineWindow = useMemo(() => {
+    const end = Date.now();
+    return { start: end - 24 * 3_600_000, end };
+    // Re-anchored whenever the reads behind it refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentAlerts.data, recentDeployments.data, incidents.data]);
+  const projectIds = useMemo(
+    () => new Map((services.data?.items ?? []).map((row) => [row.project_key, row.project_id])),
+    [services.data],
+  );
+
   const timelineSection = (
     <Panel data-testid="correlation-timeline">
       <PanelHeader title={t("timeline.title")} description={t("timeline.description")} />
       {isNarrow ? (
         <TimelineSummary lanes={timelineLanes} onExpand={() => setTimelineDialogOpen(true)} />
       ) : (
-        <OperationalTimeline lanes={timelineLanes} />
+        <OperationalTimeline lanes={timelineLanes} window={timelineWindow} />
       )}
     </Panel>
   );
@@ -206,11 +219,22 @@ export default function CommandCenterPage() {
     </Panel>
   );
 
-  const attentionQueueSection = <AttentionQueue items={attention} loading={anyLoading} />;
+  const attentionQueueSection = (
+    <AttentionQueue
+      items={attention}
+      loading={anyLoading}
+      projectIds={projectIds}
+      checked={sources.map(({ key, label, resource }) => ({
+        key,
+        label,
+        answered: Boolean(resource.data) && !resource.error,
+      }))}
+    />
+  );
 
   const hasBound = boundIds(services.data?.items ?? []).length > 0;
   const signalSection = hasBound ? (
-    <SignalBoard rows={services.data?.items ?? []} resource={signals} limit={5} />
+    <SignalBoard rows={services.data?.items ?? []} resource={signals} limit={6} />
   ) : null;
 
   const evidenceCoverageSection = (
@@ -283,37 +307,28 @@ export default function CommandCenterPage() {
             {evidenceCoverageSection}
             <div className="flex flex-col gap-5" data-testid="estate-overview">
               <Panel flush><FleetPanel resource={clusters} /></Panel>
-              <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
+              <Panel flush><IntegrationsBoard resource={integrations} /></Panel>
             </div>
           </>
         ) : (
           <>
-            {/* What to act on, beside where it lives. */}
-            <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-              <div className="[&>*]:h-full">{attentionQueueSection}</div>
-              <div className="[&>*]:h-full">{healthMatrixSection}</div>
-            </div>
+            {/* What to act on leads, across the page: its cards sit two to
+                a row, and the timeline below is what to read them against. */}
+            {attentionQueueSection}
             {timelineSection}
-            {signalSection ? (
-              <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
-                <div className="[&>*]:h-full">{signalSection}</div>
-                <div className="[&>*]:h-full">{capacityRiskSection}</div>
-              </div>
-            ) : null}
+            {/* Every service on one board: the map spans the page, the worst
+                tiles three to a row. */}
+            {signalSection}
             <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2" data-testid="estate-overview">
               <Panel flush><FleetPanel resource={clusters} /></Panel>
-              <Panel flush><IntegrationsPanel resource={integrations} /></Panel>
+              <Panel flush><IntegrationsBoard resource={integrations} /></Panel>
             </div>
-            {/* Without a signal board, capacity risk pairs with the evidence
-                behind the verdict instead of stretching across the page. */}
-            {signalSection ? (
-              evidenceCoverageSection
-            ) : (
-              <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
-                <div className="[&>*]:h-full">{capacityRiskSection}</div>
-                <div className="[&>*]:h-full">{evidenceCoverageSection}</div>
-              </div>
-            )}
+            {/* Where each service lives, beside what may run out under it. */}
+            <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+              <div className="[&>*]:h-full">{healthMatrixSection}</div>
+              <div className="[&>*]:h-full">{capacityRiskSection}</div>
+            </div>
+            {evidenceCoverageSection}
           </>
         )}
       </div>
@@ -323,7 +338,7 @@ export default function CommandCenterPage() {
         onClose={() => setTimelineDialogOpen(false)}
         title={t("timeline.title")}
       >
-        <OperationalTimeline lanes={timelineLanes} />
+        <OperationalTimeline lanes={timelineLanes} window={timelineWindow} />
       </Modal>
     </PageFrame>
   );
@@ -522,7 +537,7 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
   const t = useT("commandCenter");
   const clusters = resource.data?.clusters ?? [];
   return (
-    <div data-testid="fleet-panel" className="flex min-w-0 flex-col">
+    <div data-testid="fleet-panel" className="flex h-full min-w-0 flex-col">
       <PanelHeader
         flush
         title={t("fleet.title")}
@@ -553,124 +568,13 @@ function FleetPanel({ resource }: { resource: Resource<{ clusters: Cluster[] }> 
           <NotConfiguredState compact title={t("fleet.empty")} />
         </div>
       ) : (
-        <ul className="divide-y divide-border" data-tabular>
+        <ul className="flex flex-1 flex-col gap-4 px-5 pb-5" aria-label={t("fleet.title")}>
           {clusters.map((cluster) => (
-            <li
-              key={cluster.id}
-              className="flex flex-wrap items-center gap-4 px-7 py-5 transition-colors hover:bg-surface-hover"
-            >
-              <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink-secondary">
-                <Server className="h-5 w-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <Link
-                  href={`/clusters/${cluster.id}`}
-                  className="font-semibold text-ink hover:text-brand"
-                >
-                  {cluster.display_name || cluster.cluster_ref}
-                </Link>
-                <span className="mt-0.5 block font-mono text-micro text-ink-muted">
-                  {cluster.cluster_ref}
-                </span>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
-                  <span className="text-ink-muted">{t("fleet.agent")}</span>
-                  <StatusDot
-                    status={toneForHealth(cluster.operational?.agent)}
-                    label={t.dyn("token", cluster.operational?.agent ?? "unknown", humanize(cluster.operational?.agent))}
-                  />
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pr-3 pl-3 text-micro">
-                  <span className="text-ink-muted">{t("fleet.inventory")}</span>
-                  <StatusDot
-                    status={toneForHealth(cluster.operational?.inventory)}
-                    label={t.dyn("token", cluster.operational?.inventory ?? "unknown", humanize(cluster.operational?.inventory))}
-                  />
-                  </span>
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
-                <FleetCounts cluster={cluster} />
-                <span className="text-micro text-ink-muted">
-                  <RelativeTime value={cluster.as_of} />
-                </span>
-              </div>
-            </li>
+            <ClusterCard key={cluster.id} cluster={cluster} className="flex-1" />
           ))}
         </ul>
       )}
     </div>
-  );
-}
-
-/**
- * What the agent's last sweep actually counted.
- *
- * Healthy-over-total, per cluster, straight from the summary — never a
- * percentage this component computed and never a bare "healthy".
- *
- * An agent that is not connected has no current view to report, and saying so
- * beats showing its last numbers as if they were now. That is the same rule
- * the freshness column states, applied to the numbers themselves.
- */
-function FleetCounts({ cluster }: { cluster: Cluster }) {
-  const t = useT("commandCenter");
-  const summary = useResource<InventorySummary>(
-    `/v1/clusters/${cluster.id}/inventory/summary`,
-  );
-
-  if (summary.loading && !summary.data) {
-    return <span className="text-micro text-ink-muted">…</span>;
-  }
-  if (!summary.data) {
-    return <span className="text-micro text-ink-muted">—</span>;
-  }
-  if (summary.data.agent.status !== "connected") {
-    // No current view to report. The agent and inventory columns beside this
-    // one already name which half is missing, and showing the last numbers
-    // here would present them as if they were now.
-    return (
-      <span className="text-micro text-ink-muted" data-testid="fleet-counts-unavailable">
-        {t("fleet.noSweep")}
-      </span>
-    );
-  }
-  return (
-    <span className="flex flex-wrap items-center gap-3" data-testid="fleet-counts">
-      {(
-        [
-          ["nodes", summary.data.nodes],
-          ["workloads", summary.data.workloads],
-          ["pods", summary.data.pods],
-        ] as const
-      ).map(([key, rollup]) => {
-        const label = t(`fleet.counts.${key}`);
-        return (
-        <span key={key} className="flex items-center gap-1.5">
-          {/* The ring reads before the digits do; the digits stay exact. */}
-          <RingProgress
-            size={34}
-            label={t("fleet.healthyRing", { what: label })}
-            value={rollup.total > 0 ? (rollup.healthy / rollup.total) * 100 : null}
-            tone={
-              rollup.unhealthy > 0
-                ? "critical"
-                : rollup.degraded > 0 || rollup.unknown > 0
-                  ? "warning"
-                  : "success"
-            }
-          />
-          <span className="text-micro whitespace-nowrap text-ink-secondary">
-            <span data-tabular className="block font-medium text-ink">
-              {rollup.healthy}
-              <span className="text-ink-muted">/{rollup.total}</span>
-            </span>
-            {label}
-          </span>
-        </span>
-        );
-      })}
-    </span>
   );
 }
 
@@ -681,152 +585,3 @@ function FleetCounts({ cluster }: { cluster: Cluster }) {
  * configured-and-fine, and not-configured sits at the bottom in muted type,
  * because "you have not connected this" is not a problem to be triaged.
  */
-function IntegrationsPanel({
-  resource,
-}: {
-  resource: Resource<{ integrations: IntegrationHealth[] }>;
-}) {
-  const t = useT("commandCenter");
-  const all = resource.data?.integrations ?? [];
-  const configured = all.filter((entry) => entry.configuration_state === "configured");
-  const notConfigured = all.length - configured.length;
-  // Worst first, then by type — the shared severity order rather than an
-  // alphabetical sort of the status words.
-  const sorted = [...configured].sort(
-    (a, b) =>
-      compareTone(toneForHealth(a.observed_state), toneForHealth(b.observed_state)) ||
-      a.integration_type.localeCompare(b.integration_type),
-  );
-  const stateOf = (entry: IntegrationHealth): string =>
-    entry.configuration_state === "configured"
-      ? t.dyn("token", entry.observed_state, humanize(entry.observed_state))
-      : t("integrations.notConnected");
-
-  return (
-    <div data-testid="integrations-panel" className="flex min-w-0 flex-col">
-      <PanelHeader
-        flush
-        title={t("integrations.title")}
-        description={t("integrations.description")}
-        actions={
-          <Link
-            href="/integrations"
-            className="rounded text-caption font-medium text-brand hover:underline"
-          >
-            {t("integrations.manage")}
-          </Link>
-        }
-      />
-      {resource.loading && !resource.data ? (
-        <div className="px-4 py-4">
-          <LoadingSkeleton variant="table" rows={3} />
-        </div>
-      ) : resource.denied ? (
-        <div className="px-4 py-2">
-          <DeniedState compact />
-        </div>
-      ) : !resource.data ? (
-        <div className="px-4 py-2">
-          <ErrorState compact description={resource.error ?? undefined} onRetry={resource.reload} />
-        </div>
-      ) : (
-        <>
-          {all.length > 0 ? (
-            <div className="border-b border-border px-7 py-6">
-              <div className="flex items-end justify-between gap-4">
-                <p>
-                  <span data-tabular className="text-[2.5rem] leading-none font-semibold tracking-[-0.04em] text-ink">
-                    {configured.length}
-                  </span>
-                  <span className="text-2xl font-semibold tracking-tight text-ink-muted">/{all.length}</span>
-                  <span className="ml-2 text-caption text-ink-muted">{t("integrations.connected")}</span>
-                </p>
-                <span className="text-caption text-ink-muted">
-                  <span data-tabular className="font-semibold text-ink">
-                    {configured.filter((entry) => entry.observed_state === "ok").length}
-                  </span>{" "}
-                  {t("integrations.reportingOk")}
-                </span>
-              </div>
-              {/* Every provider as an avatar: connected ones lit with their
-                  state ring, the rest visibly dormant — not a grey pie. */}
-              <ul className="mt-5 flex flex-wrap gap-3" aria-label={t("integrations.byState")}>
-                {[...configured, ...all.filter((entry) => entry.configuration_state !== "configured")].map((entry) => {
-                  const isConfigured = entry.configuration_state === "configured";
-                  const entrySpec = toneSpec(isConfigured ? toneForHealth(entry.observed_state) : "not-applicable");
-                  const name = humanize(entry.integration_type);
-                  return (
-                    <li
-                      key={`${entry.integration_type}:${entry.scope.ref}`}
-                      title={t("integrations.providerState", { name, state: stateOf(entry) })}
-                      className="relative"
-                    >
-                      <span
-                        className={`flex h-12 w-12 items-center justify-center rounded-full text-caption font-semibold ${
-                          isConfigured
-                            ? "bg-brand text-ink-inverse shadow-panel"
-                            : "border border-dashed border-border bg-surface-2 text-ink-muted"
-                        }`}
-                      >
-                        {name.slice(0, 2)}
-                      </span>
-                      <span
-                        aria-hidden
-                        className={`absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-surface ${isConfigured ? entrySpec.dot : "bg-surface-3"}`}
-                      />
-                      <span className="sr-only">
-                        {t("integrations.providerStateShort", { name, state: stateOf(entry) })}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
-          <ul className="divide-y divide-border">
-            {sorted.map((integration) => (
-              <li
-                key={`${integration.integration_type}:${integration.scope.ref}`}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-7 py-4"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-body text-ink">
-                    {humanize(integration.integration_type)}
-                  </span>
-                  <span className="block truncate font-mono text-micro text-ink-muted">
-                    {integration.scope.type}:{integration.scope.ref}
-                  </span>
-                </span>
-                <span className="flex shrink-0 items-center gap-3">
-                  <FreshnessIndicator
-                    asOf={integration.last_success_at}
-                    state={integration.last_success_at ? "fresh" : "unknown"}
-                  />
-                  <StatusBadge
-                    status={toneForHealth(integration.observed_state)}
-                    label={stateOf(integration)}
-                    size="compact"
-                  />
-                </span>
-              </li>
-            ))}
-          </ul>
-          {sorted.length === 0 ? (
-            <div className="px-4 py-2">
-              <NotConfiguredState
-                compact
-                title={t("integrations.emptyTitle")}
-                description={t("integrations.emptyDescription")}
-              />
-            </div>
-          ) : null}
-          {notConfigured > 0 ? (
-            <p className="border-t border-border px-4 py-2 text-micro text-ink-muted">
-              {t("integrations.notConfigured", { count: notConfigured })}
-            </p>
-          ) : null}
-        </>
-      )}
-    </div>
-  );
-}

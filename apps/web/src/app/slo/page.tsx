@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * SLO overview.
+ * Service objectives, as a board.
  *
- * One row per objective, and four numbers that are deliberately not one:
- * the objective, what compliance actually was, how much error budget is
- * left, and whether it is currently burning fast enough to matter.
+ * The posture band on top counts every objective by verdict (each verdict a
+ * filter); below, the objectives are cards grouped by application, each
+ * keeping four numbers deliberately apart: the objective, what compliance
+ * actually was, how much error budget is left, and whether it is burning.
  *
  * `insufficient_data`, `stale`, `query_failed` and `not_configured` each
  * render as themselves. None of them renders as healthy, and none renders
@@ -14,46 +15,25 @@
  */
 
 import { Target } from "lucide-react";
-import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
-import { SloBadge } from "@/components/alerting/primitives";
+import { ObjectiveGroups, PostureBand } from "@/components/alerting/SloBoard";
 import {
   NewSloButton,
   SloComposer,
   SloSuggestions,
 } from "@/components/alerting/SloComposer";
-import {
-  CountTile,
-  ListFooter,
-  useCursorList,
-  useTotal,
-  useUrlFilters,
-} from "@/components/ops/ListKit";
-import {
-  CardTitle,
-  EmptyHero,
-  FactPill,
-  PillSelect,
-  RowBubble,
-  ShareBar,
-  StatePad,
-  Toolbar,
-} from "@/components/incidents/OpsKit";
+import { ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
+import { EmptyHero, FactPill, StatePad } from "@/components/incidents/OpsKit";
 import { DataState } from "@/components/state/DataState";
-import { StatusBadge } from "@/components/state/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
-import type { StatusTone } from "@/lib/design/status";
-import { useFormat, useT } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   SLO_EXPLANATIONS,
   SLO_LABELS,
-  formatBudget,
   fetchSloOptions,
-  formatRatio,
-  formatTarget,
   sloListPath,
   type SloOptions,
   type Slo,
@@ -70,125 +50,6 @@ const STATES: SloStatus[] = [
   "query_failed",
   "not_configured",
 ];
-
-/** Verdict → tone. The unmeasured states are never the healthy tone. */
-const SLO_TONE: Record<SloStatus, StatusTone> = {
-  healthy: "success",
-  warning: "warning",
-  critical: "critical",
-  exhausted: "critical",
-  insufficient_data: "unknown",
-  not_configured: "unknown",
-  stale: "stale",
-  query_failed: "critical",
-};
-
-/**
- * One objective. Name, verdict and any active burn lead; then compliance
- * and remaining budget as the two numbers this screen exists to keep apart,
- * each with its own bar. The whole row opens the objective.
- */
-function SloRow({ slo }: { slo: Slo }) {
-  const t = useT("alerting");
-  const fmt = useFormat();
-  const evaluation = slo.evaluation;
-  const activeBurn = evaluation?.burn_rates.find((rate) => rate.active) ?? null;
-  const tone: StatusTone = evaluation ? SLO_TONE[evaluation.status] : "unknown";
-  const remaining = evaluation?.error_budget_remaining ?? null;
-  return (
-    <li
-      data-testid={`slo-row-${slo.slo_key}`}
-      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-7 py-4 transition-colors hover:bg-surface-hover lg:grid-cols-[auto_minmax(0,1fr)_auto]"
-    >
-      <RowBubble icon={Target} tone={tone} />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <Link
-            href={`/slo/${slo.id}`}
-            className="truncate text-body font-semibold text-ink after:absolute after:inset-0 after:content-['']"
-          >
-            {slo.display_name}
-          </Link>
-          {evaluation ? (
-            <SloBadge status={evaluation.status} />
-          ) : (
-            /* Never "healthy" for something nobody has measured. */
-            <StatusBadge
-              status="unknown"
-              label={t("sloList.row.notEvaluated")}
-              size="compact"
-            />
-          )}
-          {activeBurn ? (
-            <StatusBadge
-              status={
-                activeBurn.severity === "critical" ? "critical" : "warning"
-              }
-              label={`${activeBurn.factor}× ${activeBurn.name}`}
-              size="compact"
-            />
-          ) : null}
-        </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-muted">
-          <span className="font-mono">
-            {[slo.project_key, slo.environment_key, slo.service_key]
-              .filter(Boolean)
-              .join("/")}{" "}
-            · {t.dyn("indicator", slo.indicator, slo.indicator)}
-          </span>
-          <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
-          <span className="text-caption text-ink-secondary">
-            {t("sloList.row.target", {
-              ratio: formatTarget(slo.objective_ratio),
-              window: fmt.duration(slo.window_seconds, { compact: true }),
-            })}
-          </span>
-          {!activeBurn ? <span>{t("sloList.row.notBurning")}</span> : null}
-          <span>
-            {evaluation ? fmt.relative(evaluation.evaluated_for) : "—"}
-          </span>
-        </div>
-      </div>
-      <div className="col-span-2 grid grid-cols-2 gap-6 lg:col-span-1 lg:w-80">
-        <div>
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-micro text-ink-muted">
-              {t("sloList.row.compliance")}
-            </span>
-            <span data-tabular className="text-body font-semibold text-ink">
-              {formatRatio(evaluation?.compliance_ratio ?? null)}
-            </span>
-          </div>
-          <p className="mt-2 truncate text-micro text-ink-muted">
-            {t("sloList.row.ofTarget", {
-              ratio: formatRatio(slo.objective_ratio),
-            })}
-          </p>
-        </div>
-        <div>
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-micro text-ink-muted">
-              {t("sloList.row.budgetLeft")}
-            </span>
-            <span
-              data-tabular
-              className={`text-body font-semibold ${
-                (remaining ?? 0) < 0 ? "text-critical" : "text-ink"
-              }`}
-            >
-              {formatBudget(remaining)}
-            </span>
-          </div>
-          <ShareBar
-            share={remaining}
-            tone={(remaining ?? 0) < 0.25 ? "critical" : tone}
-            className="mt-2"
-          />
-        </div>
-      </div>
-    </li>
-  );
-}
 
 const FILTER_KEYS = ["status"] as const;
 
@@ -265,197 +126,157 @@ function SloInner({ onChanged }: { onChanged: () => void }) {
           onCreated={onChanged}
         />
       ) : null}
-      <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <CountTile
-            data-testid="alerting-kpi-meeting"
-            label={t("sloList.kpi.meeting")}
-            value={meeting}
-            tone="success"
-            active={status === "healthy"}
-            onClick={() => toggle("healthy")}
-            caption={t("sloList.kpi.meetingCaption")}
-          />
-          <CountTile
-            data-testid="alerting-kpi-burning-fast"
-            label={t("sloList.kpi.burning")}
-            value={burning}
-            tone="warning"
-            active={status === "warning"}
-            onClick={() => toggle("warning")}
-            caption={t("sloList.kpi.burningCaption")}
-          />
-          <CountTile
-            data-testid="alerting-kpi-breached"
-            label={t("sloList.kpi.breached")}
-            value={breached}
-            tone="critical"
-            active={false}
-            caption={t("sloList.kpi.breachedCaption")}
-          />
-          <CountTile
-            data-testid="alerting-kpi-never-measured"
-            label={t("sloList.kpi.neverMeasured")}
-            value={neverMeasured}
-            tone="unknown"
-            active={false}
-            caption={t("sloList.kpi.neverMeasuredCaption")}
-          />
-        </div>
+      <div className="flex flex-col gap-6">
+        <PostureBand
+          total={all}
+          active={status}
+          onPick={toggle}
+          slices={[
+            {
+              key: "meeting",
+              label: t("sloList.kpi.meeting"),
+              caption: t("sloList.kpi.meetingCaption"),
+              value: meeting,
+              tone: "success",
+              status: "healthy",
+              testId: "alerting-kpi-meeting",
+            },
+            {
+              key: "burning",
+              label: t("sloList.kpi.burning"),
+              caption: t("sloList.kpi.burningCaption"),
+              value: burning,
+              tone: "warning",
+              status: "warning",
+              testId: "alerting-kpi-burning-fast",
+            },
+            {
+              key: "breached",
+              label: t("sloList.kpi.breached"),
+              caption: t("sloList.kpi.breachedCaption"),
+              value: breached,
+              tone: "critical",
+              testId: "alerting-kpi-breached",
+            },
+            {
+              key: "never",
+              label: t("sloList.kpi.neverMeasured"),
+              caption: t("sloList.kpi.neverMeasuredCaption"),
+              value: neverMeasured,
+              tone: "unknown",
+              testId: "alerting-kpi-never-measured",
+            },
+          ]}
+        />
 
-        {options && csrfToken ? (
-          <SloSuggestions
-            options={options}
-            csrfToken={csrfToken}
-            onCreated={onChanged}
-          />
+        {status ? (
+          <div className="-mt-2 flex items-center gap-2 text-caption text-ink-secondary" data-testid="slo-filters">
+            <span>
+              {t("sloBoard.filtered", {
+                state: t.dyn("slo", status, SLO_LABELS[status as SloStatus]),
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => update({ status: "" })}
+              className="rounded-full border border-border px-2.5 py-0.5 font-medium text-ink hover:bg-surface-hover"
+            >
+              {t("sloBoard.clearFilter")}
+            </button>
+          </div>
         ) : null}
 
-        <Toolbar
-          data-testid="slo-filters"
-          summary={
-            list.state === "ready" && list.total !== null
-              ? t("sloList.shown", {
-                  shown: list.items.length,
-                  total: list.total,
-                })
-              : undefined
-          }
-        >
-          <PillSelect
-            label={t("sloList.filter.state")}
-            value={status}
-            placeholder={t("sloList.filter.anyState")}
-            options={STATES.map((value) => ({
-              value,
-              label: t.dyn("slo", value, SLO_LABELS[value]),
-            }))}
-            onChange={(value) => update({ status: value })}
-          />
-        </Toolbar>
-
-        <div>
-          <div>
-            <Panel
-              flush
-              className="motion-safe:animate-[fade-in_420ms_var(--ease-entrance)_backwards] [animation-delay:60ms]"
-            >
-              <CardTitle
-                flush
-                icon={Target}
-                title={t("sloList.heading.title")}
-                description={t("sloList.heading.description")}
-              />
-              {list.state === "loading" ? (
-                <StatePad>
-                  <DataState kind="loading" />
-                </StatePad>
-              ) : list.state === "error" ? (
-                <StatePad>
-                  {list.denied ? (
-                    <DataState kind="permission-denied" />
-                  ) : (
-                    <DataState
-                      kind="error"
-                      description={list.message}
-                      onRetry={retry}
-                    />
-                  )}
-                </StatePad>
-              ) : items.length === 0 ? (
-                <EmptyHero
-                  icon={Target}
-                  title={t("sloList.empty.title")}
-                  description={t("sloList.empty.description")}
-                >
-                  <FactPill>
-                    {t("sloList.empty.state", {
-                      value: status
-                        ? t.dyn("slo", status, SLO_LABELS[status as SloStatus])
-                        : t("sloList.empty.any"),
-                    })}
-                  </FactPill>
-                </EmptyHero>
+        {list.state === "loading" ? (
+          <Panel>
+            <StatePad>
+              <DataState kind="loading" />
+            </StatePad>
+          </Panel>
+        ) : list.state === "error" ? (
+          <Panel>
+            <StatePad>
+              {list.denied ? (
+                <DataState kind="permission-denied" />
               ) : (
-                <>
-                  <ul className="divide-y divide-border">
-                    {items.map((slo) => (
-                      <SloRow key={slo.id} slo={slo} />
-                    ))}
-                  </ul>
-                  <ListFooter
-                    shown={items.length}
-                    summary={t("sloList.shown", {
-                      shown: items.length,
-                      total:
-                        list.state === "ready"
-                          ? (list.total ?? items.length)
-                          : items.length,
-                    })}
-                    hasMore={list.state === "ready" && list.hasMore}
-                    loadingMore={list.state === "ready" && list.loadingMore}
-                    moreError={list.state === "ready" && list.moreError}
-                    onMore={() => list.state === "ready" && list.loadMore()}
-                    moreLabel={t("list.more")}
-                    loadingLabel={t("list.loadingMore")}
-                    errorLabel={t("list.moreError")}
-                  />
-
-                  {/* Anything that is not a measurement is explained in words, so
-                    nobody reads a dash as a zero. */}
-                  {items.some(
-                    (slo) =>
-                      slo.evaluation === null ||
-                      [
-                        "insufficient_data",
-                        "stale",
-                        "query_failed",
-                        "not_configured",
-                      ].includes(slo.evaluation.status),
-                  ) ? (
-                    <div
-                      className="space-y-2 border-t border-border bg-surface-2/60 px-7 py-5"
-                      data-testid="slo-caveats"
-                    >
-                      {items
-                        .filter(
-                          (slo) =>
-                            slo.evaluation !== null &&
-                            [
-                              "insufficient_data",
-                              "stale",
-                              "query_failed",
-                              "not_configured",
-                            ].includes(slo.evaluation.status),
-                        )
-                        .map((slo) => (
-                          <p
-                            key={slo.id}
-                            className="text-caption text-ink-secondary"
-                          >
-                            <span className="font-semibold text-ink">
-                              {slo.display_name}
-                            </span>
-                            {" — "}
-                            {t.dyn(
-                              "sloExplanation",
-                              slo.evaluation!.status,
-                              SLO_EXPLANATIONS[slo.evaluation!.status],
-                            )}
-                          </p>
-                        ))}
-                      {items.some((slo) => slo.evaluation === null) ? (
-                        <p className="text-caption text-ink-secondary">
-                          {t("sloList.caveat.notEvaluated")}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </>
+                <DataState kind="error" description={list.message} onRetry={retry} />
               )}
-            </Panel>
-          </div>
-        </div>
+            </StatePad>
+          </Panel>
+        ) : items.length === 0 ? (
+          <Panel flush>
+            <EmptyHero
+              icon={Target}
+              title={t("sloList.empty.title")}
+              description={t("sloList.empty.description")}
+            >
+              <FactPill>
+                {t("sloList.empty.state", {
+                  value: status
+                    ? t.dyn("slo", status, SLO_LABELS[status as SloStatus])
+                    : t("sloList.empty.any"),
+                })}
+              </FactPill>
+            </EmptyHero>
+          </Panel>
+        ) : (
+          <>
+            <ObjectiveGroups items={items} />
+            {list.state === "ready" && list.hasMore ? (
+              <Panel flush>
+                <ListFooter
+                  shown={items.length}
+                  summary={t("sloList.shown", {
+                    shown: items.length,
+                    total: list.total ?? items.length,
+                  })}
+                  hasMore={list.hasMore}
+                  loadingMore={list.loadingMore}
+                  moreError={list.moreError}
+                  onMore={() => list.loadMore()}
+                  moreLabel={t("list.more")}
+                  loadingLabel={t("list.loadingMore")}
+                  errorLabel={t("list.moreError")}
+                />
+              </Panel>
+            ) : null}
+
+            {/* Anything that is not a measurement is explained in words, so
+                nobody reads a dash as a zero. */}
+            {items.some(
+              (slo) =>
+                slo.evaluation === null ||
+                ["insufficient_data", "stale", "query_failed", "not_configured"].includes(slo.evaluation.status),
+            ) ? (
+              <div
+                className="space-y-2 rounded-2xl border border-dashed border-border-strong bg-surface-2/40 px-6 py-5"
+                data-testid="slo-caveats"
+              >
+                {items
+                  .filter(
+                    (slo) =>
+                      slo.evaluation !== null &&
+                      ["insufficient_data", "stale", "query_failed", "not_configured"].includes(
+                        slo.evaluation.status,
+                      ),
+                  )
+                  .map((slo) => (
+                    <p key={slo.id} className="text-caption text-ink-secondary">
+                      <span className="font-semibold text-ink">{slo.display_name}</span>
+                      {" — "}
+                      {t.dyn("sloExplanation", slo.evaluation!.status, SLO_EXPLANATIONS[slo.evaluation!.status])}
+                    </p>
+                  ))}
+                {items.some((slo) => slo.evaluation === null) ? (
+                  <p className="text-caption text-ink-secondary">{t("sloList.caveat.notEvaluated")}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {options && csrfToken ? (
+          <SloSuggestions options={options} csrfToken={csrfToken} onCreated={onChanged} />
+        ) : null}
       </div>
     </PageFrame>
   );

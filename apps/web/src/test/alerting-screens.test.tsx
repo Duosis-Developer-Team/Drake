@@ -626,13 +626,15 @@ describe("setting objectives", () => {
     const calls = renderWithOptions();
     fireEvent.click(await screen.findByTestId("slo-new"));
     const composer = screen.getByTestId("slo-composer");
-    fireEvent.change(within(composer).getByLabelText("Application"), { target: { value: "p-h" } });
+    fireEvent.click(within(composer).getByTestId("compose-app-hermes"));
     // Two environments: production is offered first.
-    const env = within(composer).getByLabelText("Environment") as HTMLSelectElement;
-    expect([...env.options].map((o) => o.textContent)).toEqual(["Choose", "prod", "dev"]);
-    fireEvent.change(env, { target: { value: "e-hp" } });
-    fireEvent.change(screen.getByTestId("slo-compose-service"), { target: { value: "es-1" } });
+    const envs = within(composer).getByRole("group", { name: "Environment" });
+    expect(within(envs).getAllByRole("button").map((b) => b.textContent)).toEqual(["prod", "dev"]);
+    fireEvent.click(within(composer).getByTestId("compose-env-prod"));
+    fireEvent.click(within(screen.getByTestId("slo-compose-service")).getByTestId("compose-service-api"));
     expect(screen.getByTestId("slo-compose-summary")).toHaveTextContent("99.5% of requests succeed over");
+    // The budget a target leaves is shown as time before it is saved.
+    expect(screen.getByTestId("compose-budget-preview")).toHaveTextContent("3 h 36 min");
     fireEvent.click(screen.getByTestId("slo-compose-save"));
     await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true));
     const body = JSON.parse(String(calls.find((c) => c.init?.method === "POST")!.init?.body));

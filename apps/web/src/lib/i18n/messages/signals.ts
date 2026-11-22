@@ -37,6 +37,23 @@ export const signals = defineMessages({
       requests: "{ratio} of requests failing",
       logs: "{count, plural, one {# error log line} other {# error log lines}} in the last hour",
     },
+    map: {
+      legend: "What the colours mean",
+      requests: "{count, plural, one {# request} other {# requests}}, {failed} failed",
+      errorLines: "{count, plural, one {# error line} other {# error lines}}",
+      envKey: "letter = environment",
+      key: {
+        critical: "Failing badly",
+        warning: "Failing or noisy",
+        success: "Serving fine",
+        idle: "No traffic",
+      },
+    },
+    summary: {
+      judged: "{count, plural, one {# service judged} other {# services judged}}",
+      failing: "{count} failing",
+      noisy: "{count} noisy logs",
+    },
   },
   tr: {
     title: "Nerede sorun var?",
@@ -68,6 +85,23 @@ export const signals = defineMessages({
     attention: {
       requests: "isteklerin {ratio} kadarı başarısız",
       logs: "son bir saatte {count} hata log satırı",
+    },
+    map: {
+      legend: "Renklerin anlamı",
+      requests: "{count} istek, {failed} başarısız",
+      errorLines: "{count} hata satırı",
+      envKey: "harf = ortam",
+      key: {
+        critical: "Ağır başarısız",
+        warning: "Başarısız ya da gürültülü",
+        success: "Sorunsuz",
+        idle: "Trafik yok",
+      },
+    },
+    summary: {
+      judged: "{count} servis değerlendirildi",
+      failing: "{count} başarısız",
+      noisy: "{count} gürültülü log",
     },
   },
 });

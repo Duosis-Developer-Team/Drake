@@ -23,7 +23,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import {
@@ -34,6 +34,23 @@ import {
 } from "@/components/alerting/primitives";
 import { useApi } from "@/components/catalog/primitives";
 import { CountTile, ListFooter, useCursorList, useUrlFilters } from "@/components/ops/ListKit";
+import {
+  AppTag,
+  BandCard,
+  Chip,
+  DayBars,
+  Figure,
+  Legend,
+  RankBar,
+  bucketAxis,
+  bucketIndex,
+  median,
+  useProjectIndex,
+  useSample,
+  type ProjectRef,
+} from "@/components/ops/Visuals";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
+import { durationSeconds } from "@/lib/incidents";
 import {
   CardTitle,
   EmptyHero,
@@ -66,15 +83,49 @@ const PRIORITIES: Priority[] = ["P1", "P2", "P3", "P4"];
  * priority are chips; incident, notification and owner trail as three
  * separate facts, never collapsed into one tick (see the file header).
  */
-function AlertRow({ alert }: { alert: AlertInstance }) {
+const PRIORITY_COLOUR: Record<Priority, string> = {
+  P1: "var(--status-critical)",
+  P2: "var(--status-warning)",
+  P3: "var(--status-info)",
+  P4: "var(--text-muted)",
+};
+
+/** Labels worth reading in a row: where it fired, not what it is called. */
+const NOISE_LABELS = new Set(["alertname", "severity", "priority", "cluster", "job", "endpoint", "service", "instance"]);
+
+function LabelChips({ labels }: { labels: Record<string, string> }) {
+  const shown = Object.entries(labels)
+    // The scraping server's own label says nothing about where it fired.
+    .filter(([key]) => !NOISE_LABELS.has(key) && !key.startsWith("prom"))
+    .slice(0, 3);
+  if (shown.length === 0) return null;
+  return (
+    <>
+      {shown.map(([key, value]) => (
+        <span
+          key={key}
+          title={`${key}=${value}`}
+          className="inline-flex max-w-[16rem] items-center gap-1 truncate rounded-md border border-border bg-surface-2 px-1.5 py-px font-mono text-[10.5px]"
+        >
+          <span className="text-ink-muted">{key}</span>
+          <span className="truncate text-ink-secondary">{value}</span>
+        </span>
+      ))}
+    </>
+  );
+}
+
+function AlertRow({ alert, projects }: { alert: AlertInstance; projects: Map<string, ProjectRef> }) {
   const t = useT("alerting");
   const fmt = useFormat();
   const firing = alert.status === "firing";
+  const lasted = durationSeconds(alert.starts_at, alert.ends_at ?? alert.resolved_at);
   return (
     <li
       data-testid={`alert-row-${alert.alert_name}`}
-      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-7 py-4 transition-colors hover:bg-surface-hover md:grid-cols-[auto_minmax(0,1fr)_auto]"
+      className="relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 py-4 pr-6 pl-7 transition-colors hover:bg-surface-hover md:grid-cols-[auto_minmax(0,1fr)_auto]"
     >
+      <span aria-hidden className="absolute inset-y-3 left-0 w-[3px] rounded-r-full" style={{ background: PRIORITY_COLOUR[alert.priority] ?? "var(--text-muted)" }} />
       <RowBubble
         icon={firing ? BellRing : CheckCircle2}
         tone={firing ? "critical" : "success"}
@@ -87,13 +138,28 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
           >
             {alert.alert_name}
           </Link>
-          <span className="font-mono text-micro text-ink-muted">
-            {alert.mapping_state === "mapped"
-              ? [alert.project_key, alert.environment_key, alert.service_key]
-                  .filter(Boolean)
-                  .join("/")
-              : t("row.noCatalogMatch")}
-          </span>
+          {alert.occurrence > 1 ? (
+            <span
+              title={t("row.occurrencesTitle", { count: alert.occurrence })}
+              className="rounded-full bg-surface-3 px-1.5 py-px font-mono text-[10.5px] font-semibold text-ink-secondary"
+            >
+              {t("row.occurrences", { count: alert.occurrence })}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          {alert.mapping_state === "mapped" ? (
+            <AppTag
+              projectKey={alert.project_key}
+              environmentKey={alert.environment_key}
+              projects={projects}
+              outside={t("row.noCatalogMatch")}
+            />
+          ) : (
+            <span className="text-micro text-ink-muted">{t("row.noCatalogMatch")}</span>
+          )}
+          {alert.service_key ? <span className="font-mono text-micro text-ink-muted">{alert.service_key}</span> : null}
+          <LabelChips labels={alert.labels ?? {}} />
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-secondary">
           {/* An alert without an incident is not a failure of anything: P3
@@ -136,10 +202,13 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
         <StatusPill status={alert.status} />
         <SeverityBadge severity={alert.severity} />
         <PriorityBadge priority={alert.priority} />
-        <div className="ml-2 w-24 text-right text-micro leading-4 text-ink-muted">
+        <div className="ml-2 w-28 text-right text-micro leading-4 text-ink-muted">
           <div className="font-medium text-ink-secondary">
             {fmt.relative(alert.last_seen_at)}
           </div>
+          {lasted !== null ? (
+            <div data-tabular>{t("row.for", { duration: fmt.duration(lasted, { compact: true }) })}</div>
+          ) : null}
           {/* Drake's own receipt time, kept visible so a late delivery is not
               mistaken for a late outage. */}
           <div>{t("row.received", { when: fmt.relative(alert.ingested_at) })}</div>
@@ -149,9 +218,153 @@ function AlertRow({ alert }: { alert: AlertInstance }) {
   );
 }
 
+/**
+ * The last 7 days in one card: alerts that started every six hours, by
+ * priority; how long they usually lasted and how many became incidents;
+ * which rules fire most and where. Drawn from a bounded sample of the
+ * window — the tiles above keep the server's exact counts of what is firing.
+ */
+function AlertBand({ projects }: { projects: Map<string, ProjectRef> }) {
+  const t = useT("alerting");
+  const fmt = useFormat();
+  const sample = useSample<AlertInstance>(alertListPath({ window: "7d" }), { paging: "offset", max: 250 });
+  const axis = useMemo(() => bucketAxis(28, 6), []);
+  const items = useMemo(() => sample.items ?? [], [sample.items]);
+  const counts = useMemo(() => {
+    const buckets = axis.map(() => ({}) as Record<string, number>);
+    for (const alert of items) {
+      const i = bucketIndex(axis, 6, alert.starts_at);
+      if (i >= 0) buckets[i][alert.priority] = (buckets[i][alert.priority] ?? 0) + 1;
+    }
+    return buckets;
+  }, [axis, items]);
+  const series = PRIORITIES.map((p) => ({ key: p, label: PRIORITY_LABELS[p], colour: PRIORITY_COLOUR[p] }));
+  const lasted = median(
+    items.flatMap((a) => {
+      const end = a.ends_at ?? a.resolved_at;
+      const seconds = end ? durationSeconds(a.starts_at, end) : null;
+      return seconds === null ? [] : [seconds];
+    }),
+  );
+  const toIncident = items.filter((a) => a.incident).length;
+  const rules = new Map<string, number>();
+  const apps = new Map<string, number>();
+  for (const alert of items) {
+    rules.set(alert.alert_name, (rules.get(alert.alert_name) ?? 0) + 1);
+    const key = alert.project_key ?? "";
+    apps.set(key, (apps.get(key) ?? 0) + 1);
+  }
+  const topRules = [...rules.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const topApps = [...apps.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const rulePeak = Math.max(1, ...topRules.map(([, n]) => n));
+  const appPeak = Math.max(1, ...topApps.map(([, n]) => n));
 
+  return (
+    <BandCard
+      data-testid="alert-band"
+      title={t("list.band.title")}
+      note={sample.items && !sample.complete ? t("list.band.truncated", { count: items.length }) : t("list.band.note")}
+    >
+      {sample.failed ? (
+        <p className="text-caption text-ink-muted">{t("list.band.failed")}</p>
+      ) : (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="grid grid-cols-3 gap-4">
+              <Figure label={t("list.band.started")} value={sample.items ? fmt.number(items.length) : "—"} note={t("list.band.startedNote")} />
+              <Figure
+                label={t("list.band.duration")}
+                value={lasted === null ? "—" : fmt.duration(lasted, { compact: true })}
+                note={t("list.band.durationNote")}
+              />
+              <Figure
+                label={t("list.band.toIncident")}
+                value={items.length ? `${fmt.number((toIncident / items.length) * 100, { maximumFractionDigits: 0 })}%` : "—"}
+                note={t("list.band.toIncidentNote", { count: toIncident, total: items.length })}
+              />
+            </div>
+            <DayBars axis={axis} hours={6} series={series} counts={counts} height={148} label={t("list.band.note")} />
+            <Legend items={series.map((s) => ({ label: s.label, colour: s.colour }))} />
+          </div>
+          <div className="grid min-w-0 gap-5 sm:grid-cols-2 xl:grid-cols-1 xl:border-l xl:border-border xl:pl-6">
+            <div className="min-w-0">
+              <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.noisiest")}</p>
+              {topRules.length === 0 ? (
+                <p className="text-caption text-ink-secondary">{sample.items ? t("list.band.none") : "…"}</p>
+              ) : (
+                <ul className="flex flex-col gap-2.5">
+                  {topRules.map(([name, n]) => (
+                    <RankBar key={name} value={n} peak={rulePeak} colour="var(--series-4)" label={<span className="font-mono text-[12px]">{name}</span>} />
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.byApp")}</p>
+              {topApps.length === 0 ? (
+                <p className="text-caption text-ink-secondary">{sample.items ? t("list.band.none") : "…"}</p>
+              ) : (
+                <ul className="flex flex-col gap-2.5">
+                  {topApps.map(([key, n]) => {
+                    const project = key ? projects.get(key) : undefined;
+                    return (
+                      <RankBar
+                        key={key || "outside"}
+                        value={n}
+                        peak={appPeak}
+                        label={
+                          <span className="inline-flex items-center gap-1.5">
+                            {project ? <ProjectLogo projectId={project.id} name={project.name} size="sm" variant="mark" /> : null}
+                            <span className={key ? "font-medium" : "text-ink-muted"}>{key ? (project?.name ?? key) : t("list.band.outside")}</span>
+                          </span>
+                        }
+                      />
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </BandCard>
+  );
+}
 
-const FILTER_KEYS = ["status", "priority", "mapping_state"] as const;
+/** Rows of the same rule, under one header that says how many and how many fire. */
+function RuleGroups({ items, projects }: { items: AlertInstance[]; projects: Map<string, ProjectRef> }) {
+  const t = useT("alerting");
+  const groups = new Map<string, AlertInstance[]>();
+  for (const alert of items) groups.set(alert.alert_name, [...(groups.get(alert.alert_name) ?? []), alert]);
+  return (
+    <div className="divide-y divide-border">
+      {[...groups.entries()].map(([name, alerts]) => {
+        const firing = alerts.filter((a) => a.status === "firing").length;
+        return (
+          <details key={name} open className="group/rule">
+            <summary className="flex cursor-pointer list-none items-center gap-3 bg-surface-2/50 px-7 py-2.5 hover:bg-surface-hover">
+              <span aria-hidden className="text-ink-muted transition-transform group-open/rule:rotate-90">›</span>
+              <span className="font-mono text-caption font-semibold text-ink">{name}</span>
+              <span className="text-micro text-ink-muted">{t("list.group.alerts", { count: alerts.length })}</span>
+              {firing ? (
+                <span className="rounded-full bg-critical-soft px-2 py-px text-[11px] font-semibold text-critical">
+                  {t("list.group.firing", { count: firing })}
+                </span>
+              ) : null}
+            </summary>
+            <ul className="divide-y divide-border">
+              {alerts.map((alert) => (
+                <AlertRow key={alert.id} alert={alert} projects={projects} />
+              ))}
+            </ul>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+const FILTER_KEYS = ["status", "priority", "mapping_state", "group"] as const;
 
 function AlertsInner() {
   const t = useT("alerting");
@@ -160,6 +373,8 @@ function AlertsInner() {
   const status = filters.status === "any" ? "" : (STATUSES as readonly string[]).includes(filters.status) ? filters.status : "firing";
   const priority = (PRIORITIES as readonly string[]).includes(filters.priority) ? filters.priority : "";
   const mapping = filters.mapping_state === "unmapped" ? "unmapped" : "";
+  const grouped = filters.group === "rule";
+  const projects = useProjectIndex();
   const [summary] = useApi<AlertSummary>("/v1/alerts/summary");
   const [list, retry] = useCursorList<AlertInstance>(
     alertListPath({ status, priority, mapping_state: mapping }),
@@ -246,6 +461,8 @@ function AlertsInner() {
           </div>
         )}
 
+        <AlertBand projects={projects} />
+
         {/* Fixed vocabularies only. There is no free-text field here, and
             no way to type a matcher, a regex or a PromQL fragment. */}
         <Toolbar
@@ -269,6 +486,9 @@ function AlertsInner() {
             options={PRIORITIES.map((value) => ({ value, label: PRIORITY_LABELS[value] }))}
             onChange={(value) => update({ priority: value })}
           />
+          <Chip active={grouped} onClick={() => update({ group: grouped ? "" : "rule" })}>
+            {t("list.group.byRule")}
+          </Chip>
         </Toolbar>
 
         <div>
@@ -318,11 +538,15 @@ function AlertsInner() {
                 </EmptyHero>
               ) : (
                 <>
-                  <ul className="divide-y divide-border">
-                    {list.items.map((alert) => (
-                      <AlertRow key={alert.id} alert={alert} />
-                    ))}
-                  </ul>
+                  {grouped ? (
+                    <RuleGroups items={list.items} projects={projects} />
+                  ) : (
+                    <ul className="divide-y divide-border">
+                      {list.items.map((alert) => (
+                        <AlertRow key={alert.id} alert={alert} projects={projects} />
+                      ))}
+                    </ul>
+                  )}
                   {list.items.some(
                     (alert) => alert.mapping_state !== "mapped",
                   ) ? (
