@@ -1,0 +1,93 @@
+# Tracesis → Tracesis onboarding manifest.
+#
+# Tracesis watches its own production the way it watches every other app:
+# one environment (the drake-prod namespace on duosis-prod-1), its four
+# services, and its state stores. Values were read from deploy/drake (the
+# chart and values-drake-prod.yaml) and observed read-only on the cluster
+# (selectors of the live Deployments and StatefulSet, 2026-11-22).
+#
+# Technical names keep the project's former name (`drake-*`), as everywhere
+# else in this repository; the product is Tracesis.
+
+apiVersion: drake.duosis.com/v1alpha1
+kind: ProjectObservability
+
+metadata:
+  name: tracesis
+  displayName: Tracesis
+
+spec:
+  repository:
+    provider: github
+    owner: Duosis-Developer-Team
+    name: Tracesis
+    defaultBranch: main
+
+  # UNVERIFIED like the other projects: no CODEOWNERS. The owner-team
+  # catalog decides; this resolves to an `unmapped` plan item.
+  owners:
+    - team: platform
+      role: primary
+
+  environments:
+    - name: prod
+      runtime: kubernetes
+      branch: main
+      clusterRef: duosis-prod-1
+      namespace: drake-prod
+      criticality: high
+
+  # Selectors are the chart's own labels, verified against the live
+  # workloads. Profiles are `kubernetes-service-v1` throughout: Tracesis
+  # publishes no application metrics of its own today, and its request
+  # numbers come from the traces OBI records — claiming fastapi-v1 or
+  # nextjs-v1 would promise series nothing collects.
+  services:
+    - name: api
+      component: api
+      runtime: fastapi
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: drake, app.kubernetes.io/component: api}
+      health: {livePath: /health/live, readyPath: /health/ready}
+
+    - name: web
+      component: web
+      runtime: nextjs
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: drake, app.kubernetes.io/component: web}
+      health: {livePath: /, readyPath: /}
+
+    - name: agent-gateway
+      component: api
+      runtime: fastapi
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: drake, app.kubernetes.io/component: agent-gateway}
+
+    - name: edge
+      component: other
+      runtime: nginx
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: drake, app.kubernetes.io/component: edge}
+
+    # Both a workload (a StatefulSet with its own readiness) and a
+    # datastore, as LogiSlot's database is — see that manifest for why.
+    - name: postgres
+      component: database
+      runtime: postgresql
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: drake-postgres}
+
+    - name: redis
+      component: cache
+      runtime: redis
+      metricsProfile: kubernetes-service-v1
+      workloadSelector: {app.kubernetes.io/name: drake-redis}
+
+  tenantModel:
+    mode: none
+
+  dataStores:
+    - name: tracesis-db
+      engine: postgresql
+      scope: environment
+      measurementProfile: postgres-v1
