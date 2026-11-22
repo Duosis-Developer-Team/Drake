@@ -12,7 +12,7 @@ import { useState } from "react";
 import type { AgentConnect } from "@/lib/agents";
 import { useT } from "@/lib/i18n";
 
-function Snippet({ text }: { text: string }) {
+export function Snippet({ text }: { text: string }) {
   const t = useT("agents");
   const [copied, setCopied] = useState(false);
   return (
