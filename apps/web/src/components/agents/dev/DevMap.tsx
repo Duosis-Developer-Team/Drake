@@ -34,7 +34,7 @@ import {
   type DevRepository,
 } from "@/lib/devAgents";
 
-import { loadAvatar, mayHaveAvatar, settledAvatar } from "./pixelAvatar";
+import { avatarBackdrop, crispSize, loadAvatar, mayHaveAvatar, settledAvatar } from "./pixelAvatar";
 
 export type Pick =
   | { kind: "person"; key: string }
@@ -61,9 +61,9 @@ const MAX_REPOSITORIES = 18;
 const cardHeight = (repo: DevRepository) => (repo.catalogued ? PROJECT_H : REPO_H);
 
 /**
- * A person: their GitHub picture as an arcade character when Tracesis has
- * one, their initials otherwise. The tile is a rounded square with a stepped
- * "pixel" border in the person's colour and faint scanlines; nothing moves.
+ * A person: an arcade character coloured from their GitHub picture when
+ * Tracesis has one, their initials otherwise. The tile is a rounded square
+ * with a stepped "pixel" border in the person's colour; nothing moves.
  */
 export function Avatar({ person, size = 36 }: { person: Pick_ | DevPerson; size?: number }) {
   const colour = personColour(person.key);
@@ -81,16 +81,17 @@ export function Avatar({ person, size = 36 }: { person: Pick_ | DevPerson; size?
   }, [person.key, wanted]);
   if (wanted && pixels) {
     const step = Math.max(1, Math.round(size / 18));
+    const sprite = crispSize(size, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
     return (
       <span
         aria-hidden
         data-testid={`dev-avatar-pixel-${person.key}`}
-        className="relative inline-block shrink-0 overflow-hidden"
+        className="relative grid shrink-0 place-items-center overflow-hidden"
         style={{
           width: size,
           height: size,
           borderRadius: Math.round(size * 0.22),
-          background: "var(--surface-2)",
+          background: avatarBackdrop(person.key) ?? "var(--surface-2)",
           // A stepped border: the surface, then the person's colour, then a
           // darker edge — read as a sprite frame rather than a photo ring.
           boxShadow: `0 0 0 ${step}px var(--surface-1), 0 0 0 ${step * 2}px ${colour}, 0 0 0 ${step * 3}px color-mix(in srgb, ${colour} 45%, black)`,
@@ -99,19 +100,11 @@ export function Avatar({ person, size = 36 }: { person: Pick_ | DevPerson; size?
         <img
           src={pixels}
           alt=""
-          width={size}
-          height={size}
+          width={sprite}
+          height={sprite}
           draggable={false}
-          className="block h-full w-full"
-          style={{ imageRendering: "pixelated" }}
-        />
-        <span
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              "repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.16) 0 1px, transparent 1px 3px)",
-            boxShadow: `inset 0 -${step * 2}px 0 rgb(0 0 0 / 0.18), inset 0 ${step}px 0 rgb(255 255 255 / 0.12)`,
-          }}
+          className="block"
+          style={{ width: sprite, height: sprite, imageRendering: "pixelated" }}
         />
       </span>
     );
