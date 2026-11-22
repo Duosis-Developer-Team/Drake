@@ -51,6 +51,10 @@ agent:
 # --- gateway (Deployment) -------------------------------------------------
 gateway:
   replicas: 1
+  # The namespace Tracesis itself runs in, when OBI traces it. Its
+  # background clockwork (root client spans, the Postgres server side,
+  # Redis) is dropped at the door; empty means no such filter.
+  selfNamespace: ""
   memoryLimitMiB: 320
   resources:
     requests: {cpu: 100m, memory: 192Mi}

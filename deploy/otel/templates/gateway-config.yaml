@@ -111,6 +111,21 @@ data:
           log_record:
             - 'IsMatch(event_name, "^gen_ai\\.")'
             - 'IsMatch(attributes["event.name"], "^gen_ai\\.")'
+      {{- with .Values.gateway.selfNamespace }}
+      # Tracesis traced by its own OBI: keep what its users ask of it, drop
+      # its clockwork. Root client spans are calls no request made (the
+      # background loops' SQL, Redis leases, Prometheus reads); the Postgres
+      # server side repeats every client SQL span; Redis calls are lease and
+      # queue mechanics. Requests and the work they cause stay.
+      filter/self-clockwork:
+        error_mode: ignore
+        traces:
+          span:
+            - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and kind == SPAN_KIND_CLIENT and IsRootSpan()'
+            - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and resource.attributes["k8s.statefulset.name"] != nil and kind == SPAN_KIND_SERVER'
+            - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and attributes["db.system"] == "redis"'
+            - 'resource.attributes["k8s.namespace.name"] == {{ . | quote }} and attributes["db.system.name"] == "redis"'
+      {{- end }}
       {{- if .Values.gateway.externalIngest.enabled }}
       resource/external:
         attributes:
@@ -174,7 +189,7 @@ data:
           exporters: [clickhouse/logs]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, resource/cluster, gen_ai_normalizer, transform/genai-content, filter/genai-content, batch]
+          processors: [memory_limiter, {{ if .Values.gateway.selfNamespace }}filter/self-clockwork, {{ end }}resource/cluster, gen_ai_normalizer, transform/genai-content, filter/genai-content, batch]
           exporters: [clickhouse/traces]
         {{- if .Values.gateway.externalIngest.enabled }}
         traces/external:
