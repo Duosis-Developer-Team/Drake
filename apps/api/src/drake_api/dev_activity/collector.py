@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from drake_api.dev_activity import classify
 from drake_api.observability.scope import clickhouse_time
+from drake_api.observability.signals import MAX_GROUPS as SIGNAL_MAX_GROUPS
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,11 @@ RETENTION = timedelta(days=90)
 COMMIT_PERMISSIONS = {"metadata": "read", "contents": "read"}
 MAX_COMMIT_PAGES = 10
 USAGE_BACKFILL = timedelta(days=7)
-MAX_USAGE_ROWS = 20000
+# The reader profile refuses any max_result_rows above its ceiling (1000,
+# deploy/otel clickhouse-config): asking for more fails the whole read. The
+# rows are already grouped per day, project, person and tool, so the
+# ceiling holds a week of a team's usage. A unit test pins it.
+MAX_USAGE_ROWS = SIGNAL_MAX_GROUPS
 
 
 class CommitSource(Protocol):
@@ -513,10 +518,17 @@ async def harvest_usage(
                 correlation_id="dev-activity",
             )
             results[name] = result.rows if isinstance(result.rows, list) else []
-        except Exception:
+        except Exception as error:
             # The metrics table exists only once a counter has arrived; a
-            # failed read keeps what was kept rather than wiping it.
+            # failed read keeps what was kept rather than wiping it. It is
+            # said out loud: a silent failure here once hid every cost.
             report.usage_failed_reads += 1
+            logger.warning(
+                "dev activity: usage read %s failed: %s %s",
+                name,
+                type(error).__name__,
+                getattr(error, "code", "") or str(error)[:200],
+            )
             results[name] = None
     if results["days"] is None:
         return
