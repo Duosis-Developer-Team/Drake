@@ -457,6 +457,47 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/environments", token.token, key="environments"
         )
 
+    # --- development activity (Agent Visibility, Contents: read) ---------
+
+    async def list_commits_page(
+        self,
+        token: InstallationToken,
+        owner: str,
+        repo: str,
+        *,
+        branch: str,
+        since: str,
+        page: int,
+    ) -> list[dict[str, Any]]:
+        """One page of a branch's commits since a moment, newest first.
+
+        Paged by the caller, which owns the budget: the development-activity
+        loop stops when a page holds nothing new, not when GitHub runs out.
+        """
+        response = await self._request(
+            "GET",
+            f"/repos/{self._segment(owner, 'owner')}/{self._segment(repo, 'repo')}/commits",
+            token.token,
+            params={"sha": branch, "since": since, "per_page": _PER_PAGE, "page": page},
+        )
+        if not isinstance(response.payload, list):
+            raise GitHubContractError("commits response was not a list")
+        return [item for item in response.payload if isinstance(item, dict)]
+
+    async def get_commit(
+        self, token: InstallationToken, owner: str, repo: str, sha: str
+    ) -> dict[str, Any]:
+        """One commit with its stats and changed file names."""
+        response = await self._request(
+            "GET",
+            f"/repos/{self._segment(owner, 'owner')}/{self._segment(repo, 'repo')}"
+            f"/commits/{self._segment(sha, 'sha')}",
+            token.token,
+        )
+        if not isinstance(response.payload, dict):
+            raise GitHubContractError("commit response was not an object")
+        return response.payload
+
     # --- source metadata (Sprint 5B, Contents: read) ---------------------
 
     async def resolve_branch_head(

@@ -314,7 +314,8 @@ export function PillTabs<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="inline-flex items-center gap-1 rounded-full border border-border bg-surface p-1 shadow-panel"
+      // On a narrow screen the row scrolls inside itself instead of the page.
+      className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-border bg-surface p-1 shadow-panel [scrollbar-width:none]"
     >
       {tabs.map((tab) => {
         const selected = tab.key === value;
@@ -326,7 +327,7 @@ export function PillTabs<T extends string>({
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(tab.key)}
-            className={`inline-flex h-9 items-center gap-2 rounded-full px-4 text-body font-medium transition-colors ${
+            className={`inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 text-body font-medium transition-colors ${
               selected
                 ? "bg-accent text-ink-inverse"
                 : "text-ink-secondary hover:bg-surface-hover hover:text-ink"

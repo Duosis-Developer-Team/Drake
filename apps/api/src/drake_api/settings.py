@@ -482,6 +482,13 @@ class Settings(BaseSettings):
     # ones on agents in a project environment open incidents.
     agent_guardrails_enabled: bool = False
     agent_guardrails_interval_seconds: float = 300.0
+    # Development agents: who changes the catalog's repositories and with
+    # which coding agent (commits through the GitHub App), and what Claude
+    # Code cost them (its own telemetry, from the trace store). Off by
+    # default; each half runs only when its source is configured.
+    dev_activity_enabled: bool = False
+    dev_activity_interval_seconds: float = 900.0
+    dev_activity_commit_budget: int = 300
 
     slo_evaluator_enabled: bool = False
     slo_evaluator_interval_seconds: float = 300.0

@@ -15,6 +15,7 @@ import { catalog } from "./catalog";
 import { clusters } from "./clusters";
 import { commandCenter } from "./commandCenter";
 import { dashboards } from "./dashboards";
+import { devAgents } from "./devAgents";
 import { common } from "./common";
 import { deployments } from "./deployments";
 import { explore } from "./explore";
@@ -51,6 +52,7 @@ export const MESSAGES = {
   serviceHealth,
   serviceMap,
   agents,
+  devAgents,
   scheduledJobs,
   logs,
   traces,

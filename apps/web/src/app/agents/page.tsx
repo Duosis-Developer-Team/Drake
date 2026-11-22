@@ -12,6 +12,7 @@ import {
   Activity,
   Bot,
   Coins,
+  GitBranch,
   LayoutGrid,
   Network,
   Plug,
@@ -23,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AgentCard, CONFIDENCE_ICON } from "@/components/agents/AgentCard";
 import { ConnectPanel } from "@/components/agents/ConnectPanel";
+import { DevelopmentView } from "@/components/agents/dev/DevelopmentView";
 import { dayTicks, useHourLabel } from "@/components/agents/useHourLabel";
 import { ActivityBars, ProviderMix } from "@/components/agents/visuals";
 import { AgentMap } from "@/components/agents/AgentMap";
@@ -66,9 +68,10 @@ export default function AgentsPage() {
   const fmt = useFormat();
   const { locale } = useLocale();
   const [span, setSpan] = useState<Window>("24h");
-  const [view, setView] = useState<"inventory" | "map" | "mcp" | "governance">(
-    "inventory",
-  );
+  const [view, setView] = useState<
+    "inventory" | "map" | "mcp" | "governance" | "development"
+  >("inventory");
+  const dev = view === "development";
   const [metric, setMetric] = useState<"calls" | "cost">("calls");
   const [state, setState] = useState<State>({ kind: "loading" });
   const [connect, setConnect] = useState<AgentConnect | null>(null);
@@ -157,10 +160,16 @@ export default function AgentsPage() {
                 label: t("view.governance"),
                 icon: ShieldCheck,
               },
+              {
+                key: "development",
+                label: t("view.development"),
+                icon: GitBranch,
+              },
             ]}
           />
         }
         actions={
+          dev ? null : (
           <>
             <SegmentedControl
               label={t("window.label")}
@@ -179,6 +188,7 @@ export default function AgentsPage() {
               {t("connect.open")}
             </Button>
           </>
+          )
         }
       />
       <Drawer
@@ -190,12 +200,14 @@ export default function AgentsPage() {
         <ConnectPanel connect={connect} />
       </Drawer>
 
-      {state.kind === "loading" ? (
+      {dev ? <DevelopmentView /> : null}
+
+      {!dev && state.kind === "loading" ? (
         <Panel>
           <DataState kind="loading" />
         </Panel>
       ) : null}
-      {state.kind === "error" ? (
+      {!dev && state.kind === "error" ? (
         <Panel>
           <DataState
             kind={state.denied ? "permission-denied" : "error"}
@@ -204,7 +216,7 @@ export default function AgentsPage() {
         </Panel>
       ) : null}
 
-      {data && data.items.length === 0 && view === "mcp" ? (
+      {!dev && data && data.items.length === 0 && view === "mcp" ? (
         <McpServers span={span} />
       ) : null}
       {data && data.items.length === 0 && view === "governance" ? (
@@ -233,7 +245,7 @@ export default function AgentsPage() {
         </Panel>
       ) : null}
 
-      {data && summary && data.items.length > 0 ? (
+      {!dev && data && summary && data.items.length > 0 ? (
         <div className="space-y-6">
           <div className="page-grid" data-cols="4">
             <KpiTile

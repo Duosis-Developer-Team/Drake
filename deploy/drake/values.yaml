@@ -307,6 +307,11 @@ agents:
   # minutes; critical ones open incidents. Off: guardrails can be set but
   # are not judged.
   guardrailsEnabled: false
+  # Development agents: who changes the catalog's repositories and with
+  # which coding agent (commit trailers, read through the GitHub App), and
+  # what Claude Code cost (its own telemetry through the external door).
+  # Needs the GitHub App and/or observability traces.
+  devActivityEnabled: false
 
 slo:
   # Objectives (migration 0031): the evaluator judges every enabled
