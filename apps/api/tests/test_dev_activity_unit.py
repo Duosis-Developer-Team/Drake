@@ -175,3 +175,19 @@ def test_a_session_belongs_to_a_project_only_by_what_it_says() -> None:
     )
     assert resolve_project(projects, "", "") is None
     assert resolve_project(projects, "elsewhere", "github.com/someone/else") is None
+
+
+def test_usage_reads_stay_under_the_reader_ceiling() -> None:
+    """The reader profile refuses max_result_rows above 1000; asking for more
+    fails every usage read, silently, and the map shows no cost at all."""
+    import re
+    from pathlib import Path
+
+    from drake_api.dev_activity.collector import MAX_USAGE_ROWS
+
+    config = Path(__file__).resolve().parents[3] / "deploy/otel/templates/clickhouse-config.yaml"
+    ceilings = [
+        int(v) for v in re.findall(r"<max>(\d+)</max></max_result_rows>", config.read_text())
+    ]
+    assert ceilings, "the reader profile's max_result_rows ceiling must be declared"
+    assert 0 < MAX_USAGE_ROWS <= min(ceilings)
