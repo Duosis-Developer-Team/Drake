@@ -2451,27 +2451,21 @@ def test_the_agent_door_routes_otlp_to_the_gateway_unrewritten() -> None:
     assert {p["path"] for p in main["spec"]["rules"][0]["http"]["paths"]} == {"/v1", "/"}
 
 
-def test_the_former_name_redirects_and_keeps_only_the_webhook_path() -> None:
+def test_the_former_name_redirects_everything() -> None:
     """Renamed to Tracesis: the old sslip.io name is a 308 to the new
-    origin — except GitHub's webhook path, which GitHub will not follow
-    through a redirect. No `$request_uri` in the target: ingress-nginx
-    rejects the annotation, and the redirect silently disappears."""
+    origin. GitHub's webhook now points at the new origin, so no path is
+    kept answering on the old name. No `$request_uri` in the target:
+    ingress-nginx rejects the annotation, and the redirect silently
+    disappears."""
     docs = render_prod()
     by_name = {i["metadata"]["name"]: i for i in by_kind(docs, "Ingress")}
-    redirect, keep = by_name["drake-redirect"], by_name["drake-redirect-keep"]
+    redirect = by_name["drake-redirect"]
+    assert "drake-redirect-keep" not in by_name
     notes = redirect["metadata"]["annotations"]
     assert notes["nginx.ingress.kubernetes.io/permanent-redirect"] == (
         "https://tracesis-84-247-180-173.sslip.io:30773/"
     )
     assert notes["nginx.ingress.kubernetes.io/permanent-redirect-code"] == "308"
-    for aux in (redirect, keep):
-        assert [r["host"] for r in aux["spec"]["rules"]] == ["drake-84-247-180-173.sslip.io"]
-        assert aux["spec"]["tls"][0]["secretName"] == "drake-edge-tls"
-        assert aux["spec"]["ingressClassName"] == "drake-nginx"
-    kept = [
-        (p["path"], p["backend"]["service"]["name"])
-        for r in keep["spec"]["rules"]
-        for p in r["http"]["paths"]
-    ]
-    # The real webhook route (github_app/router_webhook.py).
-    assert kept == [("/v1/integrations/github/", "drake-api")]
+    assert [r["host"] for r in redirect["spec"]["rules"]] == ["drake-84-247-180-173.sslip.io"]
+    assert redirect["spec"]["tls"][0]["secretName"] == "drake-edge-tls"
+    assert redirect["spec"]["ingressClassName"] == "drake-nginx"
