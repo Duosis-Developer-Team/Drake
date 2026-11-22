@@ -485,7 +485,6 @@ function Detail({ map, pick, window }: { map: MapData; pick: Pick; window: DevWi
 function ConnectClaudeCode({ connect }: { connect: DevConnect | null }) {
   const t = useT("devAgents");
   if (!connect) return <DataState kind="loading" />;
-  const project = connect.projects[0] ?? "<project>";
   const env = [
     "CLAUDE_CODE_ENABLE_TELEMETRY=1",
     "OTEL_METRICS_EXPORTER=otlp",
@@ -495,7 +494,9 @@ function ConnectClaudeCode({ connect }: { connect: DevConnect | null }) {
     'OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <ingest token>"',
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta",
     "OTEL_METRICS_INCLUDE_REPOSITORY=true",
-    `OTEL_RESOURCE_ATTRIBUTES="tracesis.project=${project},tracesis.person=<your-github-login>"`,
+    // The project comes from the repository Claude Code reports (2.1.269+);
+    // a fixed tracesis.project would pin every session to one project.
+    `OTEL_RESOURCE_ATTRIBUTES="tracesis.person=<your-github-login>"`,
   ];
   const managed = JSON.stringify(
     {
