@@ -138,38 +138,45 @@ export default function AgentsPage() {
     : 0;
   const failed = summary && calls ? summary.totals.errors / calls : null;
 
+  const tabs = (
+    <PillTabs
+      label={t("view.label")}
+      compact={view === "office"}
+      value={view}
+      onChange={setView}
+      tabs={[
+        {
+          key: "inventory",
+          label: t("view.inventory"),
+          icon: LayoutGrid,
+        },
+        { key: "map", label: t("view.map"), icon: Network },
+        { key: "mcp", label: t("view.mcp"), icon: Plug },
+        {
+          key: "governance",
+          label: t("view.governance"),
+          icon: ShieldCheck,
+        },
+        {
+          key: "development",
+          label: t("view.development"),
+          icon: GitBranch,
+        },
+        { key: "office", label: t("view.office"), icon: Building2 },
+      ]}
+    />
+  );
+
+  // The office takes the whole content area under the app header; the tabs
+  // float over it with its own controls.
+  if (view === "office") return <DevelopmentView key="office" mode="office" overlay={tabs} />;
+
   return (
     <PageFrame>
       <PageHeader
         title={t("title")}
         description={t("description")}
-        tabs={
-          <PillTabs
-            label={t("view.label")}
-            value={view}
-            onChange={setView}
-            tabs={[
-              {
-                key: "inventory",
-                label: t("view.inventory"),
-                icon: LayoutGrid,
-              },
-              { key: "map", label: t("view.map"), icon: Network },
-              { key: "mcp", label: t("view.mcp"), icon: Plug },
-              {
-                key: "governance",
-                label: t("view.governance"),
-                icon: ShieldCheck,
-              },
-              {
-                key: "development",
-                label: t("view.development"),
-                icon: GitBranch,
-              },
-              { key: "office", label: t("view.office"), icon: Building2 },
-            ]}
-          />
-        }
+        tabs={tabs}
         actions={
           dev ? null : (
           <>
@@ -202,7 +209,7 @@ export default function AgentsPage() {
         <ConnectPanel connect={connect} />
       </Drawer>
 
-      {dev ? <DevelopmentView key={view} mode={view === "office" ? "office" : "map"} /> : null}
+      {dev ? <DevelopmentView key={view} mode="map" /> : null}
 
       {!dev && state.kind === "loading" ? (
         <Panel>

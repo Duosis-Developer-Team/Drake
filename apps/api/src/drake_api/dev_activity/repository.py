@@ -919,6 +919,7 @@ async def office(
             "project_id": r["project_id"],
             "project_key": r["project_key"],
             "project_name": r["project_name"],
+            "commits": r["commits"],
             "desks": [],
         }
         for r in seen["repositories"]
@@ -968,6 +969,7 @@ async def office(
             "project_id": project_id if project else None,
             "project_key": project["key"] if project else None,
             "project_name": project["name"] if project else None,
+            "commits": 0,
             "desks": [],
         }
         return rooms[rid]
@@ -1110,6 +1112,7 @@ async def office(
         "as_of": moment.isoformat(),
         "day_start": day_start.isoformat(),
         "configured": seen["configured"],
+        "cluster": await _office_cluster(connection, principal, project_ids, moment),
         "people": [
             {**p, "portrait": p["key"] in portraits}
             for p in sorted(person_out.values(), key=lambda p: str(p["name"]).lower())
@@ -1121,6 +1124,68 @@ async def office(
         ],
         "events": events,
         "truncated": len(commit_rows) >= OFFICE_MAX_COMMITS,
+    }
+
+
+async def _office_cluster(
+    connection: AsyncConnection,
+    principal: Principal,
+    project_ids: Iterable[uuid.UUID],
+    now: datetime,
+) -> dict[str, Any] | None:
+    """The cluster at the office's centre: the visible cluster the visible
+    projects deployed to most in the last 30 days (else the first visible
+    one), and how its workloads are doing. None when no cluster is visible.
+
+    The status reads only the newest revision of each workload of a visible
+    project seen in the last day: cheap, and nothing of anyone else's.
+    """
+    scopes = list(await visible_scope_ids(connection, principal, "cluster.view"))
+    if not scopes:
+        return None
+    ids = list(project_ids) or [uuid.UUID(int=0)]
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT c.id, c.cluster_ref, c.display_name
+                FROM clusters c
+                LEFT JOIN deployment_revisions d
+                  ON d.cluster_id = c.id AND d.project_id = ANY(:ids)
+                 AND d.rollout_started_at >= :since
+                WHERE c.scope_id = ANY(:scopes) AND c.lifecycle = 'active'
+                GROUP BY c.id, c.cluster_ref, c.display_name
+                ORDER BY count(d.id) DESC, c.display_name
+                LIMIT 1
+                """
+            ),
+            {"ids": ids, "scopes": scopes, "since": now - timedelta(days=30)},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    cluster_id, ref, name = row
+    status = (
+        await connection.execute(
+            text(
+                """
+                SELECT count(*), count(*) FILTER (WHERE rollout_state = 'healthy')
+                FROM (
+                    SELECT DISTINCT ON (workload_uid) rollout_state
+                    FROM deployment_revisions
+                    WHERE cluster_id = :c AND project_id = ANY(:ids) AND last_seen_at >= :since
+                    ORDER BY workload_uid, revision DESC
+                ) latest
+                """
+            ),
+            {"c": cluster_id, "ids": ids, "since": now - timedelta(days=1)},
+        )
+    ).one()
+    return {
+        "ref": str(ref),
+        "name": str(name),
+        "workloads": int(status[0] or 0),
+        "healthy": int(status[1] or 0),
     }
 
 

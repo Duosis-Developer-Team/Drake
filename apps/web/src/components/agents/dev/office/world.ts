@@ -1,123 +1,70 @@
 /**
- * The office's floor plan, in art pixels (one pixel of the drawing).
+ * The office's floor plan, in art pixels: one connected building from the
+ * map's layout (layout.ts), with the repositories given out to its rooms.
  *
- * Pure: rooms, corridors, desks, doors and the walk grid come from the
- * number of product rooms and their desks alone, so the plan is the same
- * for every viewer and testable without a canvas.
- *
- *   [P] : [P] : [P]            further product rooms, three a row (A)
- *   ═══════════ corridor ═══
- *   [P] : [ CLUSTER ] : [P]    row B: the server room centred
- *   ═══════════ corridor ═══
- *   desks [  LOBBY  ] desks    row C: the base, open floor either side
- *   ═══════════ corridor ═══
- *
- * The first two rooms sit beside the cluster; a slot no repository fills is
- * an empty office. ":" is a walkway between rooms, joining the corridors.
- * Product rooms and the cluster are open at the front (their bottom edge);
- * the lobby has a door there. A product room with a corridor behind it also
- * has a back door.
+ * Pure: rooms, desks, doors and the walk grid come from the layout and the
+ * repositories alone, so the plan is the same for every viewer and testable
+ * without a canvas. People walk the open floor of a room, out through its
+ * doors, along the corridors and in through another room's doors.
  */
 
+import { DEFAULT_LAYOUT, SLOT_ORDER, type MapRect, type MapSlot, type OfficeLayout } from "./layout";
+
 export const CELL = 8;
-/** A product room's back wall: its floor starts here (the art's back threshold). */
-export const WALL = 72;
-export const SIDE = 6;
-/** The corridor between two rows of rooms. */
-export const CORRIDOR = 32;
-/** The walkway between two rooms of a row. */
-export const PASS = 24;
 export const SIZE = {
-  product: { w: 320, h: 224 },
-  cluster: { w: 384, h: 224 },
-  lobby: { w: 448, h: 192 },
-  desk: { w: 64, h: 48 },
+  /** The desk's front (`desk-front.png`): monitor from behind, the top, the legs. */
+  desk: { w: 64, h: 40 },
+  /** The chair (`chair.png`), drawn behind the person sitting in it. */
+  chair: { w: 32, h: 32 },
   frame: { w: 32, h: 48 },
   head: 32,
   box: 16,
   tile: 32,
 } as const;
-/** Where a back door sits in a product room, from its left edge (the art's back threshold). */
-export const BACKDOOR_X = 198;
-/** The lobby's front door: a gap in its low front wall. */
-export const LOBBY_DOOR = { x: 180, w: 88 };
-export const DOOR_WIDTH = LOBBY_DOOR.w;
-/** The row of a desk sprite where its top surface starts: the chair is above it. */
-export const DESK_SURFACE = 20;
+/** The row of the desk's front where its top surface starts (its monitor stands above). */
+export const DESK_SURFACE = 17;
+/** Where the chair is drawn, from the desk's top-left: centred, its base behind the monitor. */
+export const CHAIR = { x: 16, y: -14 };
 /**
- * A seated person, in desk coordinates: centred on the chair, head and
- * shoulders above the desk top, the cross-legged legs hidden behind it.
+ * A seated person's feet, from the desk's top-left: in the chair, the head
+ * just clearing the monitor, the body behind the desk.
  */
-export const SEATED = { x: 34, y: 31 };
+export const SEATED = { x: 32, y: 20 };
+/** How much floor a desk takes, chair included: from the chair's top to the desk's legs. */
+const FOOTPRINT = { top: CHAIR.y, h: SIZE.desk.h - CHAIR.y };
 /** Where a character stands in its frame (the art's anchor). */
 export const ANCHOR = { x: 16, y: 45 };
-/** Plaques and slots on the room art, in room coordinates (the art's manifest). */
-export const PLAQUE = {
-  product: { x: 125, y: 18, w: 36, h: 9 },
-  cluster: { x: 167, y: 33, w: 51, h: 15 },
-  lobby: { x: 324, y: 155, w: 107, h: 17 },
-} as const;
-/** Each room's open floor, and what stands on it, in room coordinates. */
-const FLOOR: Record<"product" | "cluster" | "lobby", Rect> = {
-  product: { x: SIDE + 2, y: WALL + 4, w: SIZE.product.w - 2 * SIDE - 4, h: SIZE.product.h - WALL - 4 },
-  cluster: { x: 36, y: 88, w: 312, h: SIZE.cluster.h - 88 },
-  lobby: { x: 8, y: 68, w: 432, h: 116 },
-};
-const FURNITURE: Record<"product" | "cluster" | "lobby", Rect[]> = {
-  // The bookcase on the left wall, the plant on the right.
-  product: [
-    { x: 0, y: 0, w: 28, h: 124 },
-    { x: 290, y: 0, w: 30, h: 90 },
-  ],
-  cluster: [],
-  // Sofas with their tables, the plants, the reception desk.
-  lobby: [
-    { x: 0, y: 40, w: 104, h: 82 },
-    { x: 344, y: 40, w: 104, h: 82 },
-    { x: 0, y: 80, w: 34, h: 58 },
-    { x: 416, y: 72, w: 32, h: 58 },
-    { x: 296, y: 124, w: 152, h: 68 },
-  ],
-};
-export const ROW_PER = 3;
-/** A strip of corridor above the top row, where its rooms' names sit. */
-export const TOP = 16;
-/** The corridor along the bottom, in front of the lobby. */
-export const BOTTOM = 32;
-/**
- * The office is as narrow as its widest row (two rooms and the cluster, a
- * passage between each) so the whole of it fits a laptop's panel at one CSS
- * pixel per art pixel.
- */
-export const WORLD_W = SIZE.product.w * 2 + SIZE.cluster.w + PASS * 2;
+/** People stand at least a character's width apart (a 4× character drawn at Z = 3 is ~43 wide). */
+export const SPACING = 44;
+/** The id of the room the least active repositories share when there are more than rooms. */
+export const OTHER = "other";
 
+export type Rect = MapRect;
 export interface Point {
   x: number;
   y: number;
 }
-export interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 export interface Desk {
   x: number;
   y: number;
-  /** Where a seated person's feet are. */
+  /** Where one walks to sit: in the chair, behind the desk. */
   seat: Point;
   owner: string | null;
 }
 export type RoomKind = "product" | "cluster" | "lobby";
 export interface Room extends Rect {
+  /** A repository id, OTHER, "cluster", "lobby", or the slot's id when vacant. */
   id: string;
+  slot: string;
   kind: RoomKind;
-  /** A product room with a door in its back wall too. */
-  backdoor: boolean;
-  /** Just outside the front door, on the corridor. */
-  door: Point;
+  screen: Rect;
+  doors: { side: "N" | "S"; x: number; width: number }[];
   desks: Desk[];
-  plaque: Rect;
+  /** Places to stand when every desk is taken. */
+  standing: Point[];
+  vacant: boolean;
+  /** The repositories this room stands for (one, or several for OTHER). */
+  members: string[];
 }
 export interface World {
   w: number;
@@ -126,144 +73,128 @@ export interface World {
   rows: number;
   /** 1 = walkable, per CELL × CELL cell, row-major. */
   grid: Uint8Array;
+  /** Product rooms with a repository (or OTHER). */
   rooms: Room[];
+  /** Product rooms nobody uses: dark, door closed. */
+  vacant: Room[];
   cluster: Room;
   lobby: Room;
   corridors: Rect[];
-  /** The open floor either side of the lobby. */
-  plazas: Rect[];
-  /** Free desks on the plazas (scenery; nobody owns them). */
-  hotDesks: Desk[];
-  /** Product slots no repository fills (drawn as empty offices). */
-  vacant: Rect[];
   lobbySpots: Point[];
-  coffee: Point;
+  /** The cluster's loading spot. */
   drop: Point;
+  /** Just inside the main entrance. */
+  entrance: Point;
+  /** Repository id → the room it is in. */
+  roomOf: Record<string, string>;
+  layout: OfficeLayout;
 }
 
 export interface RoomInput {
   id: string;
   desks: string[];
+  catalogued?: boolean;
+  commits?: number;
 }
 
-const MAX_DESKS = 6;
+/** Between two desks of a row: room for a plant, not for a person (they sit from behind). */
+const DESK_GAP = 12;
+/** Between two rows of desks: the first's legs, a walkway, the second's chair. */
+const ROW_STEP = FOOTPRINT.h + 16;
 
-function desksFor(room: Rect, owners: string[]): Desk[] {
-  const out: Desk[] = [];
-  const count = Math.min(MAX_DESKS, Math.max(owners.length, 2));
-  // One row in the middle of the floor, or two; each row centred.
-  const rows = count > 3 ? 2 : 1;
-  const perRow = Math.ceil(count / rows);
-  const ys = rows === 1 ? [room.y + 108] : [room.y + 88, room.y + 156];
+/**
+ * Desks for these owners, spaced and centred on the free floor (as many as
+ * fit). The free floor may be borrowed into by a chair's height above it.
+ */
+function desksIn(free: Rect | null, owners: string[]): { desks: Desk[]; standing: Point[] } {
+  if (!free) return { desks: [], standing: [] };
+  const floor = { ...free, y: free.y - 16, h: free.h + 16 };
+  const perRow = Math.max(1, Math.floor((floor.w + DESK_GAP) / (SIZE.desk.w + DESK_GAP)));
+  const rowsFit = floor.h >= ROW_STEP + FOOTPRINT.h ? 2 : 1;
+  const capacity = perRow * rowsFit;
+  const count = Math.min(capacity, Math.max(2, owners.length));
+  const rows = count > perRow ? 2 : 1;
+  const height = rows === 1 ? FOOTPRINT.h : ROW_STEP + FOOTPRINT.h;
+  // Whole cells, so a seat behind a desk is always free to sit in.
+  const top = floor.y + Math.floor((floor.h - height) / 2 / CELL) * CELL;
+  const desks: Desk[] = [];
   for (let i = 0; i < count; i += 1) {
     const row = Math.floor(i / perRow);
     const inRow = row === rows - 1 ? count - perRow * row : perRow;
+    const rowSpan = inRow * SIZE.desk.w + (inRow - 1) * DESK_GAP;
     const col = i - row * perRow;
-    const span = inRow * SIZE.desk.w + (inRow - 1) * 24;
-    const x = room.x + Math.round((room.w - span) / 2) + col * (SIZE.desk.w + 24);
-    const y = ys[row];
-    // The seat is where one walks to: in the chair, behind the desk.
-    out.push({ x, y, seat: { x: x + SEATED.x, y: y + 16 }, owner: owners[i] ?? null });
+    const x = floor.x + Math.round((floor.w - rowSpan) / 2) + col * (SIZE.desk.w + DESK_GAP);
+    const y = top - FOOTPRINT.top + row * ROW_STEP;
+    desks.push({ x, y, seat: { x: x + SEATED.x, y: y + 4 }, owner: owners[i] ?? null });
   }
-  return out;
+  // Anyone without a desk stands in a spaced row along the front of the floor.
+  const standing: Point[] = [];
+  for (let x = free.x + SPACING / 2; x <= free.x + free.w - SPACING / 2; x += SPACING)
+    standing.push({ x, y: free.y + free.h - 6 });
+  return { desks, standing };
 }
 
-function plaqueOf(room: Rect, kind: RoomKind): Rect {
-  const p = PLAQUE[kind];
-  return { x: room.x + p.x, y: room.y + p.y, w: p.w, h: p.h };
+/** Repositories in the order they get rooms: the catalog's first, then the busiest. */
+export function byActivity(rooms: RoomInput[]): RoomInput[] {
+  return rooms
+    .map((r, i) => ({ r, i }))
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.r.catalogued)) - Number(Boolean(a.r.catalogued)) ||
+        (b.r.commits ?? 0) - (a.r.commits ?? 0) ||
+        b.r.desks.length - a.r.desks.length ||
+        a.i - b.i,
+    )
+    .map((x) => x.r);
 }
 
-function rowStart(count: number, width: number): number {
-  const total = count * width + Math.max(0, count - 1) * PASS;
-  return Math.round((WORLD_W - total) / 2);
-}
-
-export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World {
-  const products = input.slice();
-  const middle = products.slice(0, 2);
-  const upper = products.slice(2);
-  const upperRows = Math.ceil(upper.length / ROW_PER);
-  const rowH = SIZE.product.h + CORRIDOR;
-  const yB = TOP + upperRows * rowH;
-  const yC = yB + rowH;
-  // The bottom row is as tall as the lobby: the office stays short enough to see whole.
-  const h = yC + SIZE.lobby.h + BOTTOM;
+export function layoutOffice(input: RoomInput[], layout: OfficeLayout = DEFAULT_LAYOUT): World {
+  const products = layout.slots.filter((s) => s.kind === "product");
+  const order = [
+    ...SLOT_ORDER.map((id) => products.find((s) => s.id === id)).filter((s): s is MapSlot => Boolean(s)),
+    ...products.filter((s) => !SLOT_ORDER.includes(s.id)),
+  ];
+  const ranked = byActivity(input);
+  // More repositories than rooms: the last room is shared by the least active.
+  const own = ranked.length > order.length ? ranked.slice(0, order.length - 1) : ranked;
+  const rest = ranked.length > order.length ? ranked.slice(order.length - 1) : [];
+  const roomOf: Record<string, string> = {};
+  const build = (slot: MapSlot, id: string, members: string[], owners: string[], vacant: boolean): Room => {
+    // Only product rooms have desks; the cluster and the lobby keep their floor clear.
+    const placed = vacant || slot.kind !== "product" ? { desks: [], standing: [] } : desksIn(slot.free, owners);
+    return {
+      ...slot.rect,
+      id,
+      slot: slot.id,
+      kind: slot.kind,
+      screen: slot.screen,
+      doors: slot.doors,
+      desks: placed.desks,
+      standing: placed.standing,
+      vacant,
+      members,
+    };
+  };
   const rooms: Room[] = [];
-  const vacant: Rect[] = [];
-  const passages: Rect[] = [];
-
-  const make = (id: string, kind: RoomKind, rect: Rect, backdoor: boolean, owners: string[]): Room => ({
-    ...rect,
-    id,
-    kind,
-    backdoor,
-    door: { x: rect.x + Math.round(rect.w / 2), y: rect.y + rect.h + CORRIDOR / 2 },
-    desks: kind === "product" ? desksFor(rect, owners) : [],
-    plaque: plaqueOf(rect, kind),
+  const vacant: Room[] = [];
+  order.forEach((slot, i) => {
+    const repo = own[i];
+    if (repo) {
+      rooms.push(build(slot, repo.id, [repo.id], repo.desks, false));
+      roomOf[repo.id] = repo.id;
+    } else if (rest.length && i === order.length - 1) {
+      const owners = [...new Set(rest.flatMap((r) => r.desks))];
+      rooms.push(build(slot, OTHER, rest.map((r) => r.id), owners, false));
+      for (const r of rest) roomOf[r.id] = OTHER;
+    } else vacant.push(build(slot, slot.id, [], [], true));
   });
+  const clusterSlot = layout.slots.find((s) => s.kind === "cluster") as MapSlot;
+  const lobbySlot = layout.slots.find((s) => s.kind === "lobby") as MapSlot;
+  const cluster = build(clusterSlot, "cluster", [], [], false);
+  const lobby = build(lobbySlot, "lobby", [], [], false);
 
-  for (let r = 0; r < upperRows; r += 1) {
-    const inRow = upper.slice(r * ROW_PER, r * ROW_PER + ROW_PER);
-    const start = rowStart(inRow.length, SIZE.product.w);
-    const y = TOP + r * rowH;
-    inRow.forEach((room, i) => {
-      const rect = { x: start + i * (SIZE.product.w + PASS), y, ...SIZE.product };
-      // A back door only where a corridor runs behind (not along the top edge).
-      rooms.push(make(room.id, "product", rect, r > 0, room.desks));
-      if (i > 0) passages.push({ x: rect.x - PASS, y, w: PASS, h: SIZE.product.h });
-    });
-    // Around a short row, the floor is open too.
-    passages.push({ x: 0, y, w: start, h: SIZE.product.h });
-    const end = start + inRow.length * SIZE.product.w + (inRow.length - 1) * PASS;
-    passages.push({ x: end, y, w: WORLD_W - end, h: SIZE.product.h });
-  }
-  // Beside the cluster, left then right; a back door when a corridor runs behind.
-  const slots: Rect[] = [
-    { x: 0, y: yB, ...SIZE.product },
-    { x: WORLD_W - SIZE.product.w, y: yB, ...SIZE.product },
-  ];
-  slots.forEach((rect, i) => {
-    const room = middle[i];
-    if (room) rooms.push(make(room.id, "product", rect, upperRows > 0, room.desks));
-    else vacant.push(rect);
-  });
-  const cluster = make(
-    "cluster",
-    "cluster",
-    { x: Math.round((WORLD_W - SIZE.cluster.w) / 2), y: yB, ...SIZE.cluster },
-    false,
-    [],
-  );
-  passages.push({ x: SIZE.product.w, y: yB, w: cluster.x - SIZE.product.w, h: SIZE.product.h });
-  passages.push({ x: cluster.x + cluster.w, y: yB, w: WORLD_W - SIZE.product.w - cluster.x - cluster.w, h: SIZE.product.h });
-  // The lobby at the bottom, its front in line with the rows above, open floor either side.
-  const lobby = make(
-    "lobby",
-    "lobby",
-    { x: Math.round((WORLD_W - SIZE.lobby.w) / 2), y: yC, ...SIZE.lobby },
-    false,
-    [],
-  );
-  const plazas: Rect[] = [
-    { x: 0, y: yC, w: lobby.x, h: SIZE.lobby.h },
-    { x: lobby.x + lobby.w, y: yC, w: WORLD_W - lobby.x - lobby.w, h: SIZE.lobby.h },
-  ];
-  // A few free desks in each, anyone's to use: an open-plan corner.
-  const hotDesks: Desk[] = plazas.flatMap((p) =>
-    [0, 1].map((i) => {
-      const x = p.x + Math.round(p.w / 2) - SIZE.desk.w - 12 + i * (SIZE.desk.w + 24);
-      const y = p.y + 72;
-      return { x, y, seat: { x: x + SEATED.x, y: y + 16 }, owner: null };
-    }),
-  );
-  const corridors: Rect[] = [{ x: 0, y: 0, w: WORLD_W, h: TOP }, ...passages, ...plazas];
-  for (let r = 0; r < upperRows; r += 1)
-    corridors.push({ x: 0, y: TOP + r * rowH + SIZE.product.h, w: WORLD_W, h: CORRIDOR });
-  corridors.push({ x: 0, y: yB + SIZE.product.h, w: WORLD_W, h: CORRIDOR });
-  // The corridor along the bottom, in front of the lobby's door.
-  corridors.push({ x: 0, y: yC + SIZE.lobby.h, w: WORLD_W, h: BOTTOM });
-
-  const cols = Math.ceil(WORLD_W / CELL);
+  const { w, h, backWall } = layout;
+  const cols = Math.ceil(w / CELL);
   const rows = Math.ceil(h / CELL);
   const grid = new Uint8Array(cols * rows);
   const mark = (rect: Rect, value: 0 | 1) => {
@@ -273,43 +204,49 @@ export function layoutOffice(input: RoomInput[], backdoorX = BACKDOOR_X): World 
     const r1 = Math.min(rows, Math.ceil((rect.y + rect.h) / CELL));
     for (let r = r0; r < r1; r += 1) for (let c = c0; c < c1; c += 1) grid[r * cols + c] = value;
   };
-  for (const c of corridors) mark(c, 1);
-  const all = [...rooms, cluster, lobby];
-  const at = (room: Rect, r: Rect): Rect => ({ x: room.x + r.x, y: room.y + r.y, w: r.w, h: r.h });
-  for (const room of all) {
-    mark(at(room, FLOOR[room.kind]), 1);
-    // Product rooms and the cluster are open at the front; the lobby has a door.
-    if (room.kind === "lobby") mark({ x: room.x + LOBBY_DOOR.x, y: room.y + room.h - 16, w: LOBBY_DOOR.w, h: 16 }, 1);
-    else mark({ x: room.x + FLOOR[room.kind].x, y: room.y + room.h - 16, w: FLOOR[room.kind].w, h: 16 }, 1);
-    if (room.backdoor) mark({ x: room.x + backdoorX - 12, y: room.y, w: 24, h: WALL + 8 }, 1);
-    for (const f of FURNITURE[room.kind]) mark(at(room, f), 0);
-    // A desk blocks from its surface down; the chair behind it stays free to sit in.
-    for (const desk of room.desks) mark({ x: desk.x + 2, y: desk.y + 24, w: SIZE.desk.w - 4, h: SIZE.desk.h - 24 }, 0);
+  for (const c of layout.corridors) mark(c, 1);
+  for (const room of [...rooms, cluster, lobby]) {
+    // The floor, clear of the walls: a room is left only by its doors.
+    mark({ x: room.x + 8, y: room.y + backWall + 4, w: room.w - 16, h: room.h - backWall - 12 }, 1);
+    for (const d of room.doors) {
+      if (d.side === "S") mark({ x: d.x, y: room.y + room.h - 8, w: d.width, h: 16 }, 1);
+      else mark({ x: d.x, y: room.y - 8, w: d.width, h: backWall + 16 }, 1);
+    }
+    // A desk blocks from its top surface down; the chair behind it stays free to sit in.
+    for (const desk of room.desks)
+      mark({ x: desk.x + 2, y: desk.y + DESK_SURFACE + 1, w: SIZE.desk.w - 4, h: SIZE.desk.h - DESK_SURFACE - 1 }, 0);
+    for (const f of layout.slots.find((s) => s.id === room.slot)?.blocked ?? []) mark(f, 0);
   }
-  for (const desk of hotDesks) mark({ x: desk.x + 2, y: desk.y + 24, w: SIZE.desk.w - 4, h: SIZE.desk.h - 24 }, 0);
+  const entranceDoor = lobbySlot.entrance;
+  if (entranceDoor) mark({ x: entranceDoor.x, y: lobby.y + lobby.h - 8, w: entranceDoor.width, h: h - lobby.y - lobby.h + 8 }, 1);
 
+  // Standing room in the lobby: a spaced grid, a character's width and more apart.
   const lobbySpots: Point[] = [];
-  for (let r = 0; r < 3; r += 1)
-    for (let c = 0; c < 5; c += 1)
-      lobbySpots.push({ x: lobby.x + 124 + c * 38 + (r % 2) * 18, y: lobby.y + 92 + r * 30 });
+  const lf = lobbySlot.free ?? { x: lobby.x + 24, y: lobby.y + backWall + 24, w: lobby.w - 48, h: 80 };
+  for (let y = lf.y + 8; y <= lf.y + lf.h; y += SPACING)
+    for (let x = lf.x + SPACING / 2; x <= lf.x + lf.w - SPACING / 2 + 1; x += SPACING) {
+      const p = { x, y };
+      if (walkable({ cols, rows, grid } as World, p)) lobbySpots.push(p);
+    }
+  const loading = clusterSlot.loading ?? { x: cluster.x + cluster.w / 2, y: cluster.y + cluster.h - 48 };
   return {
-    w: WORLD_W,
+    w,
     h,
     cols,
     rows,
     grid,
     rooms,
+    vacant,
     cluster,
     lobby,
-    corridors,
-    plazas,
-    hotDesks,
-    vacant,
+    corridors: layout.corridors,
     lobbySpots,
-    // In front of the coffee machine on the kitchen counter.
-    coffee: { x: lobby.x + 258, y: lobby.y + 74 },
-    // The cluster's loading square (the art's loading target).
-    drop: { x: cluster.x + 192, y: cluster.y + 147 },
+    drop: loading,
+    entrance: entranceDoor
+      ? { x: entranceDoor.x + entranceDoor.width / 2, y: lobby.y + lobby.h - 12 }
+      : { x: lobby.x + lobby.w / 2, y: lobby.y + lobby.h - 12 },
+    roomOf,
+    layout,
   };
 }
 

@@ -76,6 +76,25 @@
       "width": 16,
       "height": 16,
       "alpha": true
+    },
+    "office-map": {
+      "file": "office-map.png",
+      "width": 768,
+      "height": 480,
+      "alpha": false,
+      "layout": "office-map.json"
+    },
+    "chair": {
+      "file": "chair.png",
+      "width": 32,
+      "height": 32,
+      "alpha": true
+    },
+    "desk-front": {
+      "file": "desk-front.png",
+      "width": 64,
+      "height": 40,
+      "alpha": true
     }
   },
   "characters": {

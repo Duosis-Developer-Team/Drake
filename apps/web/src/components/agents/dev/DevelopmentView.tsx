@@ -618,7 +618,14 @@ export function catalogOnly(map: MapData): MapData {
   };
 }
 
-export function DevelopmentView({ mode = "map" }: { mode?: "map" | "office" } = {}) {
+export function DevelopmentView({
+  mode = "map",
+  overlay,
+}: {
+  mode?: "map" | "office";
+  /** The office floats the page's own navigation (its tabs) over the scene. */
+  overlay?: React.ReactNode;
+} = {}) {
   const office = mode === "office";
   const t = useT("devAgents");
   const to = useT("devOffice");
@@ -676,10 +683,33 @@ export function DevelopmentView({ mode = "map" }: { mode?: "map" | "office" } = 
         ? t("empty.noRepos")
         : t("empty.quiet");
 
+  if (office)
+    return (
+      <div ref={ref} data-testid="dev-view">
+        <DevOffice
+          window={window}
+          onWindow={(next) => {
+            setWindow(next);
+            setPick(null);
+          }}
+          onPick={setPick}
+          onConnect={() => setConnectOpen(true)}
+          overlay={overlay}
+          lead={to("lead")}
+        />
+        <Drawer open={Boolean(pick && map)} onClose={() => setPick(null)} title={pickTitle} width="lg">
+          {pick && map ? <Detail map={map} pick={pick} window={window} /> : null}
+        </Drawer>
+        <Drawer open={connectOpen} onClose={() => setConnectOpen(false)} title={t("connect.title")} width="lg">
+          <ConnectClaudeCode connect={connect} />
+        </Drawer>
+      </div>
+    );
+
   return (
     <div ref={ref} className="space-y-5" data-testid="dev-view">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-3xl text-body text-ink-secondary">{office ? to("lead") : t("lead")}</p>
+        <p className="max-w-3xl text-body text-ink-secondary">{t("lead")}</p>
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedControl
             label={t("window.label")}
@@ -700,12 +730,6 @@ export function DevelopmentView({ mode = "map" }: { mode?: "map" | "office" } = 
         <Panel><DataState kind="loading" /></Panel>
       ) : state.failed ? (
         <Panel><DataState kind="error" /></Panel>
-      ) : null}
-
-      {office && map ? (
-        <Panel className="overflow-hidden">
-          <DevOffice window={window} onPick={setPick} />
-        </Panel>
       ) : null}
 
       {!office && map && summary ? (
