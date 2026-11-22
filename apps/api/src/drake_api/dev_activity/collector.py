@@ -55,6 +55,9 @@ USAGE_BACKFILL = timedelta(days=7)
 # rows are already grouped per day, project, person and tool, so the
 # ceiling holds a week of a team's usage. A unit test pins it.
 MAX_USAGE_ROWS = SIGNAL_MAX_GROUPS
+# Reads are paged at that ceiling, so a team's week is read whole however
+# large it grows; this bounds one cycle (50 pages = 50000 grouped rows).
+MAX_USAGE_PAGES = 50
 
 
 class CommitSource(Protocol):
@@ -396,7 +399,8 @@ def usage_statements(database: str) -> tuple[str, str, str]:
         WHERE {where}
         GROUP BY day, project_tag, vcs, identity
         HAVING identity != ''
-        LIMIT {{max_rows:UInt32}}
+        ORDER BY day, project_tag, vcs, identity
+        LIMIT {{max_rows:UInt32}} OFFSET {{offset:UInt32}}
     """  # noqa: S608 - fixed fragments; values are bound parameters
     breakdown = f"""
         SELECT toString(toDate(Timestamp)) AS day, {_PROJECT_TAG} AS project_tag,
@@ -416,7 +420,8 @@ def usage_statements(database: str) -> tuple[str, str, str]:
         WHERE {where} AND {_EVENT} IN ('api_request', 'tool_result')
         GROUP BY day, project_tag, vcs, identity, kind, name
         HAVING identity != '' AND name != ''
-        LIMIT {{max_rows:UInt32}}
+        ORDER BY day, project_tag, vcs, identity, kind, name
+        LIMIT {{max_rows:UInt32}} OFFSET {{offset:UInt32}}
     """  # noqa: S608 - fixed fragments; values are bound parameters
     metrics = f"""
         SELECT toString(toDate(TimeUnix)) AS day,
@@ -439,7 +444,8 @@ def usage_statements(database: str) -> tuple[str, str, str]:
                              'claude_code.code_edit_tool.decision')
         GROUP BY day, project_tag, vcs, identity, metric, type, decision, language
         HAVING identity != ''
-        LIMIT {{max_rows:UInt32}}
+        ORDER BY day, project_tag, vcs, identity, metric, type, decision, language
+        LIMIT {{max_rows:UInt32}} OFFSET {{offset:UInt32}}
     """  # noqa: S608 - fixed fragments; values are bound parameters
     return days, breakdown, metrics
 
@@ -487,6 +493,29 @@ def _safe_identity(value: Any) -> str | None:
     return text_value[:200]
 
 
+async def _read_pages(
+    store: UsageStore, sql: str, params: dict[str, str], name: str
+) -> list[dict[str, Any]]:
+    """Every row of a grouped read, in pages at the store's row ceiling."""
+    rows: list[dict[str, Any]] = []
+    for page in range(MAX_USAGE_PAGES):
+        result = await store.query(
+            sql,
+            {**params, "offset": str(page * MAX_USAGE_ROWS)},
+            max_rows=MAX_USAGE_ROWS,
+            timeout_seconds=20.0,
+            correlation_id="dev-activity",
+        )
+        batch = result.rows if isinstance(result.rows, list) else []
+        rows.extend(batch)
+        if len(batch) < MAX_USAGE_ROWS:
+            return rows
+    logger.warning(
+        "dev activity: usage read %s stopped at %d pages; the rest waits", name, MAX_USAGE_PAGES
+    )
+    return rows
+
+
 async def harvest_usage(
     engine: AsyncEngine,
     store: UsageStore,
@@ -510,14 +539,7 @@ async def harvest_usage(
     results: dict[str, list[dict[str, Any]] | None] = {}
     for name, sql in (("days", days_sql), ("breakdown", breakdown_sql), ("metrics", metrics_sql)):
         try:
-            result = await store.query(
-                sql,
-                params,
-                max_rows=MAX_USAGE_ROWS,
-                timeout_seconds=20.0,
-                correlation_id="dev-activity",
-            )
-            results[name] = result.rows if isinstance(result.rows, list) else []
+            results[name] = await _read_pages(store, sql, params, name)
         except Exception as error:
             # The metrics table exists only once a counter has arrived; a
             # failed read keeps what was kept rather than wiping it. It is
