@@ -262,13 +262,16 @@ describe("alert rules screen", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: /Create rule/ }));
     const dialog = await screen.findByRole("dialog");
-    const picker = within(dialog).getByLabelText("Signal");
-    const groups = Array.from(picker.querySelectorAll("optgroup")).map((g) => g.getAttribute("label"));
+    // The signal step: one choice, grouped by where the signal is measured.
+    const picker = within(dialog).getByRole("radiogroup", { name: "Signal" });
+    const groups = within(picker)
+      .getAllByRole("group")
+      .map((g) => g.getAttribute("aria-label"));
     expect(groups).toEqual(["Metrics", "Logs", "Traces"]);
     // The deployment's own interval, not a default.
     expect(within(dialog).getByText("Checked every 2m")).toBeInTheDocument();
-    expect(within(picker).getByRole("option", { name: "Fatal log lines (5 min)" })).toBeInTheDocument();
-    expect(within(picker).getByRole("option", { name: "Slowest endpoint p95" })).toBeInTheDocument();
+    expect(within(picker).getByRole("radio", { name: /Fatal log lines \(5 min\)/ })).toBeInTheDocument();
+    expect(within(picker).getByRole("radio", { name: /Slowest endpoint p95/ })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: /A fatal log line/ }));
     await waitFor(() =>
       expect(
@@ -312,7 +315,7 @@ describe("alert rules screen", () => {
         }),
       ).toBe(true),
     );
-    expect(within(dialog).getByText(/“payment failed”/)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/“payment failed”/).length).toBeGreaterThan(0);
   });
 
   it("judges against normal with a sensitivity instead of a threshold", async () => {
@@ -327,7 +330,8 @@ describe("alert rules screen", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /Unusual error logs/ }));
     expect(await within(dialog).findByLabelText("Sensitivity")).toBeInTheDocument();
     expect(within(dialog).getByText("3 × the usual spread")).toBeInTheDocument();
-    expect(within(dialog).getByText(/rises above its normal|stays above its normal/)).toBeInTheDocument();
+    // In the review step and in the side summary alike.
+    expect(within(dialog).getAllByText(/rises above its normal|stays above its normal/).length).toBeGreaterThan(0);
     await waitFor(() =>
       expect(
         calls.some(
