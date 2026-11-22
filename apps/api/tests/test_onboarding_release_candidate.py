@@ -347,13 +347,14 @@ async def test_no_scope_or_gate_guarantee_was_relaxed_to_get_here(
     assert refused.value.status == 404
     assert fake.calls == []
 
-    # The Datalake security gate is still closed, and still refuses before
-    # any provider call.
+    # A configured security gate still refuses before any provider call
+    # (Datalake's own gate was closed on 2026-11-22).
     from drake_api.github_app import catalog as repo_catalog
 
-    assert repo_catalog.security_gate_for("Duosis-Developer-Team/Datalake-Platform-GUI") == (
-        "manual_env_review"
+    assert repo_catalog.security_gate_for("Duosis-Developer-Team/Gated-Fixture") == (
+        "manual_review"
     )
+    assert repo_catalog.security_gate_for("Duosis-Developer-Team/Datalake-Platform-GUI") is None
 
 
 def test_the_recording_provider_is_never_the_production_default() -> None:

@@ -47,8 +47,8 @@ missing inputs — never their values.
 4. Point the webhook URL at the Drake API and set the secret.
 5. Set the environment references and restart the API.
 6. Install the App on the organization, selecting repositories
-   explicitly. **Do not select `Datalake-Platform-GUI`** while its
-   security gate is open.
+   explicitly. (`Datalake-Platform-GUI` may be selected since its gate was
+   closed on 2026-11-22; see below.)
 7. Confirm the installation webhook arrived: the installation appears
    with its repositories in `DISCOVERED`.
 8. Reconcile a repository (dry run) and read the policy snapshot.
@@ -98,19 +98,20 @@ drive a fake GitHub through an injected transport; the E2E suite runs a
 local fake GitHub server. Never point a local Drake at the real
 organization.
 
-## The Datalake security gate
+## Security gates
 
-`Duosis-Developer-Team/Datalake-Platform-GUI` is blocked in code. While
-the gate is open Drake performs **no** credential read, no installation
-access, no reconciliation and no API call against it — the block is
-enforced before any network path exists.
+**Closed 2026-11-22 by owner decision:** the Datalake `.env` gate on
+`Duosis-Developer-Team/Datalake-Platform-GUI` (Sprint 5A) no longer exists.
+Tracesis reads that repository like any other (migration 0041 cleared the
+stored gate and re-derived its state). Writing to it — commits, pull
+requests, issues, comments — stays out of bounds.
 
-Closing the gate requires, in order: authorized operator review,
-credential rotation where the exposed values warrant it, git-history
-containment, `.gitignore` remediation, and a safe `.env.example`
-contract. Only then may the gate be removed from
-`apps/api/src/drake_api/github_app/catalog.py` — a reviewed code change,
-never a runtime toggle.
+The mechanism stays. A repository listed in `github_gated_repositories`
+(owner/name, `DRAKE_GITHUB_GATED_REPOSITORIES`) is BLOCKED: Drake performs
+**no** credential read, no installation access, no reconciliation and no
+API call against it — the block is enforced before any network path
+exists. A gate, once stored on a repository's row, outlives a rename and
+is closed only by an explicit operator step (a migration, as 0041 was).
 
 ## Production activation
 
@@ -211,11 +212,8 @@ expressed.
 
 The first real repository is `Duosis-Developer-Team/Hermes`.
 
-`Duosis-Developer-Team/Datalake-Platform-GUI` remains **excluded**. Its
-manual `.env` security gate is still open, and both the scan and the
-import refuse it before any token is minted or any provider call is made.
-Closing that gate is an authorized-operator process, unchanged by this
-sprint.
+`Duosis-Developer-Team/Datalake-Platform-GUI` was **excluded** here by its
+manual `.env` security gate; the owner closed that gate on 2026-11-22.
 
 ### Still requiring operator action
 
@@ -223,4 +221,3 @@ sprint.
   Contents: read permission.
 - Production activation, which still inherits the unresolved Sprint 3
   production ingress `/v1` requirement.
-- Closing the Datalake `.env` security gate, if and when that is decided.

@@ -40,6 +40,7 @@ from drake_api.dev_activity.avatars import Avatars
 from drake_api.dev_activity.collector import DevActivity
 from drake_api.dev_activity.router import router as dev_activity_router
 from drake_api.errors import register_error_handlers
+from drake_api.github_app import catalog as github_catalog
 from drake_api.github_app.auth import GitHubAppAuth
 from drake_api.github_app.auth import validate_credentials as validate_github_credentials
 from drake_api.github_app.client import GitHubClient
@@ -187,6 +188,7 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = settings
+    github_catalog.configure_security_gates(settings.github_gated_repositories)
 
     app.add_middleware(CorrelationIdMiddleware)
     if settings.cors_origins:

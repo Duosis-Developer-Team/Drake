@@ -37,7 +37,7 @@ from drake_api.settings import Settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     _seed_admin,
@@ -72,9 +72,8 @@ def golden() -> dict[str, Any]:
 def datalake_manifest(repository_name: str = "Hermes") -> str:
     """The sanitized example, retargeted at the fixture repository.
 
-    Retargeted because the REAL Datalake repository is closed by a manual
-    security gate and must never be scanned. The golden path proves the
-    mechanism; it does not touch that repository.
+    Retargeted so the golden path proves the mechanism against Drake's own
+    sanitized fixture; it never touches the real Datalake repository.
     """
     return (
         EXAMPLE_MANIFEST.read_text()
@@ -307,15 +306,14 @@ def test_the_example_manifest_passes_schema_and_policy() -> None:
     assert result.valid, [finding.rule for finding in result.findings]
 
 
-def test_the_real_datalake_repository_stays_closed_by_its_security_gate() -> None:
-    """Sprint 5A gated it over a tracked `.env`. Sprint 11 does not open it.
-
-    Onboarding the real repository would mean scanning it, and the gate is
-    exactly the mechanism that says not yet. The golden path is proven
-    against Drake's own sanitized fixture instead.
-    """
-    gate = repo_catalog.security_gate_for(f"{OWNER}/Datalake-Platform-GUI")
-    assert gate == "manual_env_review"
+def test_the_real_datalake_repository_is_no_longer_gated() -> None:
+    """Sprint 5A gated it over a tracked `.env`; the owner closed that gate
+    on 2026-11-22. It is read like any other repository now — the gate
+    mechanism itself is proven against the configured fixture."""
+    assert repo_catalog.security_gate_for(f"{OWNER}/Datalake-Platform-GUI") is None
+    assert repo_catalog.is_dry_run_eligible(f"{OWNER}/Datalake-Platform-GUI")
+    assert repo_catalog.security_gate_for(f"{OWNER}/Gated-Fixture") == "manual_review"
+    assert not repo_catalog.is_dry_run_eligible(f"{OWNER}/Gated-Fixture")
 
 
 # ===========================================================================
@@ -917,8 +915,8 @@ async def test_a_gated_repository_produces_no_session_and_no_provider_call(
 ) -> None:
     """The Datalake gate, enforced before any network path."""
     harness, fake = github_harness(tmp_path)
-    fake.branch_heads["Datalake-Platform-GUI"] = HEAD_SHA
-    fake.trees["Datalake-Platform-GUI"] = golden_tree()
+    fake.branch_heads["Gated-Fixture"] = HEAD_SHA
+    fake.trees["Gated-Fixture"] = golden_tree()
     await _seed_admin(harness, engine)
     async with harness.api_client() as client:
         await deliver(
@@ -927,17 +925,17 @@ async def test_a_gated_repository_produces_no_session_and_no_provider_call(
             installation_payload(
                 repositories=[
                     {
-                        "id": DATALAKE_ID,
+                        "id": GATED_ID,
                         "node_id": "R_datalake",
-                        "name": "Datalake-Platform-GUI",
-                        "full_name": f"{OWNER}/Datalake-Platform-GUI",
+                        "name": "Gated-Fixture",
+                        "full_name": f"{OWNER}/Gated-Fixture",
                         "private": True,
                     }
                 ]
             ),
             str(uuidlib.uuid4()),
         )
-    row_id = await _row_id(engine, DATALAKE_ID)
+    row_id = await _row_id(engine, GATED_ID)
     actor = await _identity(engine)
 
     before = len(fake.calls)

@@ -20,7 +20,7 @@ from drake_api.github_app.client import GitHubError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     LOGISLOT_ID,
@@ -370,26 +370,26 @@ async def test_no_lifecycle_observation_unblocks_a_gated_repository(
             "installation",
             installation_payload(
                 repositories=[
-                    _repo(DATALAKE_ID, "Datalake-Platform-GUI"),
+                    _repo(GATED_ID, "Gated-Fixture"),
                     _repo(HERMES_ID, "Hermes"),
                 ]
             ),
             str(uuidlib.uuid4()),
         )
-    assert (await _repository(engine, DATALAKE_ID))["onboarding_state"] == "blocked"
+    assert (await _repository(engine, GATED_ID))["onboarding_state"] == "blocked"
 
     for event, action, extra in (
         ("installation", "suspend", {}),
         ("installation", "unsuspend", {}),
-        ("repository", "renamed", {"repository": _repo(DATALAKE_ID, "Datalake-Platform-GUI")}),
+        ("repository", "renamed", {"repository": _repo(GATED_ID, "Gated-Fixture")}),
         (
             "installation_repositories",
             "added",
-            {"repositories_added": [_repo(DATALAKE_ID, "Datalake-Platform-GUI")]},
+            {"repositories_added": [_repo(GATED_ID, "Gated-Fixture")]},
         ),
     ):
         await _send(harness, event, action, **extra)
-        assert (await _repository(engine, DATALAKE_ID))["onboarding_state"] == "blocked", (
+        assert (await _repository(engine, GATED_ID))["onboarding_state"] == "blocked", (
             f"{event}.{action} moved a gated repository out of BLOCKED"
         )
 

@@ -664,7 +664,7 @@ async def test_a_static_catalogue_gate_stops_the_dispatch_too(
         if not gated:
             gated.append(1)
             monkeypatch.setattr(
-                gitops.repo_catalog, "security_gate_for", lambda _name: "manual_env_review"
+                gitops.repo_catalog, "security_gate_for", lambda _name: "manual_review"
             )
         return await original(*args, **kwargs)
 

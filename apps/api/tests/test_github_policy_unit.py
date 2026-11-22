@@ -352,13 +352,13 @@ def test_same_state_transition_is_a_legal_no_op() -> None:
 def test_resolve_target_precedence_is_fail_closed() -> None:
     # A security gate outranks everything, including a good reconcile.
     state, reason = onboarding.resolve_target(
-        security_gate="manual_env_review",
+        security_gate="manual_review",
         access_state="accessible",
         reconciled=True,
         had_error=False,
     )
     assert state == onboarding.BLOCKED
-    assert reason == "security_gate_manual_env_review"
+    assert reason == "security_gate_manual_review"
 
     # Lost access beats a transient error.
     state, _ = onboarding.resolve_target(
