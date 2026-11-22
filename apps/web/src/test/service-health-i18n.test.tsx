@@ -13,10 +13,13 @@ import ServiceHealthPage from "@/app/service-health/page";
 import { LocaleProvider } from "@/lib/i18n";
 import { installFetchMock } from "@/test/mock-api";
 
+// The list tests read the table; the launcher test clears this to get the
+// default view.
+const nav = vi.hoisted(() => ({ search: "view=list" }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/service-health",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
   useParams: () => ({ bindingId: "b1" }),
 }));
 

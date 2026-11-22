@@ -7,10 +7,13 @@ import { BindingForm } from "@/components/service-health/BindingForm";
 import { SessionProvider } from "@/lib/session";
 import { installFetchMock, makeMe } from "@/test/mock-api";
 
+// The list tests read the table; the launcher test clears this to get the
+// default view.
+const nav = vi.hoisted(() => ({ search: "view=list" }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/service-health",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
   useParams: () => ({ bindingId: "b1" }),
 }));
 
@@ -225,6 +228,32 @@ const UNBOUND_ROW = {
     resources: {},
   },
 };
+
+describe("service health launcher", () => {
+  afterEach(() => {
+    nav.search = "view=list";
+  });
+
+  it("opens on the apps, and with one app and one environment shows its services as cards", async () => {
+    nav.search = "";
+    installFetchMock({
+      "/v1/service-health/services": { status: 200, body: listBody([BOUND_ROW, UNBOUND_ROW]) },
+      "/v1/projects": { status: 200, body: { items: [{ id: "p1", display_name: "Pilot" }], next_cursor: null } },
+    });
+    render(<ServiceHealthPage />);
+
+    expect(await screen.findByTestId("app-grid")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Pilot/ })).toHaveAttribute("aria-pressed", "true");
+    const card = await screen.findByTestId("service-card-api");
+    expect(within(card).getByText("Healthy")).toBeInTheDocument();
+    const unbound = screen.getByTestId("service-card-web");
+    expect(within(unbound).getByRole("link", { name: /bind/i })).toHaveAttribute(
+      "href",
+      "/service-health/bind?environment_service_id=es2",
+    );
+    expect(screen.queryByTestId("service-health-table")).not.toBeInTheDocument();
+  });
+});
 
 describe("service health list", () => {
   it("lists unbound services as not configured rather than omitting them", async () => {

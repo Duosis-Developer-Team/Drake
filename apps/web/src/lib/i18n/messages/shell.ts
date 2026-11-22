@@ -118,7 +118,12 @@ export const shell = defineMessages({
       },
     },
     hero: {
-      eyebrow: "Observability · Operations · AI agents",
+      mark: {
+        root: "request",
+        child: "service call",
+        slow: "the slowest call",
+        caption: "Our mark is a trace: a request, the service it calls and, in gold, the slowest call — the one Tracesis exists to find.",
+      },
       titleLead: "Every service, every trace,",
       titleMark: "every agent",
       titleTail: "understood in one place.",
@@ -281,7 +286,12 @@ export const shell = defineMessages({
       },
     },
     hero: {
-      eyebrow: "Gözlemlenebilirlik · Operasyon · Yapay zekâ ajanları",
+      mark: {
+        root: "istek",
+        child: "servis çağrısı",
+        slow: "en yavaş çağrı",
+        caption: "Logomuz bir iz: bir istek, onun çağırdığı servis ve altınla, en yavaş çağrı — Tracesis'in bulmak için var olduğu şey.",
+      },
       titleLead: "Her servis, her iz,",
       titleMark: "her ajan",
       titleTail: "tek yerde, anlaşılır.",

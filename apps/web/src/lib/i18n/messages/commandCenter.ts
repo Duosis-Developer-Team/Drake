@@ -21,6 +21,17 @@ import { defineMessages } from "../define";
 
 export const commandCenter = defineMessages({
   en: {
+    pulse: {
+      title: "Platform pulse",
+      description: "Every app's traffic, speed and errors on one time axis · last {range}",
+      none: "No service is bound yet",
+      noneHint: "Bind a service to a workload and its traffic appears here.",
+      failed: "Traffic could not be read right now.",
+    },
+    apps: {
+      title: "Your apps",
+      description: "Each environment with its services' health and its day of traffic. Open one for its dashboard.",
+    },
     page: {
       title: "Overview",
       description: "Everything that needs attention across your authorized scope, worst first.",
@@ -299,6 +310,17 @@ export const commandCenter = defineMessages({
     },
   },
   tr: {
+    pulse: {
+      title: "Platform nabzı",
+      description: "Tüm uygulamaların trafiği, hızı ve hataları tek zaman ekseninde · son {range}",
+      none: "Henüz bağlı bir servis yok",
+      noneHint: "Bir servisi iş yüküne bağladığınızda trafiği burada görünür.",
+      failed: "Trafik şu anda okunamadı.",
+    },
+    apps: {
+      title: "Uygulamalarınız",
+      description: "Her ortam, servislerinin sağlığı ve günlük trafiğiyle. Panosunu açmak için birine tıklayın.",
+    },
     page: {
       title: "Genel bakış",
       description: "Yetkili olduğunuz kapsamda dikkat gerektiren her şey, en kötüsü önce.",

@@ -26,10 +26,11 @@
 
 import { ArrowRight, Server } from "lucide-react";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { RingProgress } from "@/components/charts/visuals";
 import { AttentionQueue } from "@/components/command-center/AttentionQueue";
+import { AppsBoard, PlatformPulse } from "@/components/command-center/Platform";
 import { EvidenceCoverage } from "@/components/command-center/EvidenceCoverage";
 import { VerdictPanel } from "@/components/command-center/VerdictPanel";
 import { CapacityRiskBoard } from "@/components/data-viz/CapacityRiskBoard";
@@ -68,6 +69,8 @@ import { buildHealthMatrix } from "@/lib/view-models/health-matrix";
 import { buildTimeline, type TimelineLane } from "@/lib/view-models/timeline";
 import { buildVerdict } from "@/lib/view-models/verdict";
 import { useClusterInventorySummaries } from "@/lib/clusterSummaries";
+import type { OverviewRange } from "@/lib/dashboards";
+import { groupApps, usePlatformOverview, useProjectNames } from "@/lib/platform";
 import type { InventorySummary } from "@/lib/inventory";
 import { useMediaQuery } from "@/lib/useMediaQuery";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
@@ -108,6 +111,14 @@ export default function CommandCenterPage() {
     deploymentListPath({ startedWithin: "24h" }),
     { refreshMs: REFRESH_MS },
   );
+
+  // The platform's own picture: one overview read over every bound
+  // service, drawn the way an environment dashboard draws its own. Additive
+  // like the timeline reads, never one of the verdict's sources.
+  const [pulseRange, setPulseRange] = useState<OverviewRange>("24h");
+  const platform = usePlatformOverview(services.data?.items ?? null, pulseRange);
+  const projectNames = useProjectNames();
+  const apps = useMemo(() => groupApps(services.data?.items ?? [], projectNames), [services.data, projectNames]);
 
   const sources = [
     { key: "incidents", label: t("source.incidents"), resource: incidents },
@@ -217,6 +228,21 @@ export default function CommandCenterPage() {
     />
   );
 
+  const platformSection = (
+    <>
+      <PlatformPulse
+        overview={platform.overview}
+        failed={platform.failed}
+        truncated={platform.truncated}
+        deploys={recentDeployments.data?.items ?? []}
+        range={pulseRange}
+        onRange={setPulseRange}
+        hasServices={boundIds(services.data?.items ?? []).length > 0}
+      />
+      <AppsBoard apps={apps} overview={platform.overview} />
+    </>
+  );
+
   const kpis = (
     <OverviewKpis
       services={services}
@@ -245,6 +271,7 @@ export default function CommandCenterPage() {
 
       <div className="flex flex-col gap-5">
         {verdict}
+        {platformSection}
         {kpis}
         {isNarrow ? (
           <>
