@@ -238,6 +238,15 @@ export interface AgentRun {
   output_tokens: number;
   models: string[];
   tools: string[];
+  /** Who the run was for, when its spans say so; null is unknown. */
+  user?: RunPerson | null;
+}
+
+/** A person named by the telemetry (`user.id` / `user.name`) — never an email. */
+export interface RunPerson {
+  key: string;
+  id: string | null;
+  name: string | null;
 }
 
 export interface AgentRuns {
@@ -286,6 +295,7 @@ export interface AgentRunDetail {
   truncated?: boolean;
   spans?: RunSpan[];
   cost_usd?: number | null;
+  user?: RunPerson | null;
 }
 
 export const fetchRuns = (
@@ -621,11 +631,38 @@ export function edgeWidth(calls: number, max: number): number {
 
 // --- MCP servers (phase 3c) --------------------------------------------------
 
+/** A person who used an MCP server, as its calls name them. */
+export interface McpPerson {
+  key: string;
+  id: string | null;
+  name: string | null;
+  calls: number;
+  errors: number;
+  last_seen_at: string;
+  clients?: string[];
+}
+
 export interface McpUse {
   name: string | null;
   calls: number;
   errors: number;
   avg_ms: number | null;
+  /** Who used this tool or client (top five); absent on older APIs. */
+  users?: McpPerson[];
+}
+
+/** Initials for a person chip: "Gencay Coskun" → "GC"; an id → its first two. */
+export function initials(person: { name: string | null; id: string | null }): string {
+  const name = (person.name ?? "").trim();
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    const letters =
+      parts.length > 1
+        ? (parts[0]?.[0] ?? "") + (parts[parts.length - 1]?.[0] ?? "")
+        : name.slice(0, 2);
+    return letters.toLocaleUpperCase();
+  }
+  return (person.id ?? "?").slice(0, 2).toUpperCase();
 }
 
 export interface McpServer {
@@ -645,6 +682,9 @@ export interface McpServer {
   clients: McpUse[];
   methods: McpUse[];
   series: { t: string; calls: number; errors: number }[];
+  /** Who used it (top twenty), and how many calls named anyone at all. */
+  users?: McpPerson[];
+  attributed_calls?: number;
 }
 
 export const fetchMcpServers = (window: Window) =>

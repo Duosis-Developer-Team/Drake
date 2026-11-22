@@ -10,6 +10,7 @@ import { ChevronRight, Sparkles, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { Avatar, displayName } from "@/components/agents/People";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { SegmentedControl } from "@/components/ui/controls";
@@ -165,6 +166,15 @@ export function RunsPanel({
                     {failed ? (
                       <span className="font-medium text-critical">
                         {t("runs.failedSteps", { count: run.errors })}
+                      </span>
+                    ) : null}
+                    {run.user ? (
+                      <span
+                        className="inline-flex shrink-0 items-center"
+                        title={`${t("runs.user")}: ${displayName(run.user, t("mcp.unnamedPerson"))}`}
+                        data-testid={`run-user-${run.trace_id}`}
+                      >
+                        <Avatar person={run.user} size="xs" />
                       </span>
                     ) : null}
                     <span className="min-w-0 flex-1 truncate font-mono text-ink-muted">

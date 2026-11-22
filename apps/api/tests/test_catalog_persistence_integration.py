@@ -45,6 +45,7 @@ async def reset_catalog(engine: AsyncEngine) -> None:
         for table in (
             # Dashboards (ADR-0033) reference environments and projects with
             # RESTRICT, so their history clears before either.
+            "mcp_server_callers",
             "mcp_server_rollups",
             "mcp_servers",
             "agent_edges",

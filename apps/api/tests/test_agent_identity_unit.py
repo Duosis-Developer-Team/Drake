@@ -1,6 +1,6 @@
 """Who an agent is, from the best signal present — and how sure we are."""
 
-from drake_api.ai_agents.discovery import Bucket, identity_of, real_name
+from drake_api.ai_agents.discovery import Bucket, caller_of, identity_of, real_name, statements
 
 
 def row(**over: object) -> dict[str, object]:
@@ -51,3 +51,32 @@ def test_tokens_come_from_model_calls_or_the_agent_span_never_both() -> None:
     agent_only = Bucket()
     agent_only.add({"invocations": 1, "in_agent": 40, "out_agent": 4})
     assert (agent_only.input_tokens, agent_only.output_tokens) == (40, 4)
+
+
+def test_a_caller_is_an_id_or_a_name_and_never_an_email() -> None:
+    full = caller_of("8C1F0B2A-7d3e", "  Gencay   Coskun ")
+    assert full is not None
+    assert (full.key, full.user_id, full.user_name) == (
+        "id:8C1F0B2A-7d3e",
+        "8C1F0B2A-7d3e",
+        "Gencay Coskun",
+    )
+    named = caller_of("", "Ayse")
+    assert named is not None and (named.key, named.user_id) == ("name:Ayse", None)
+    # An email is never kept, as an id or as a name.
+    assert caller_of("gencay@example.com", "") is None
+    only_id = caller_of("u-1", "gencay@example.com")
+    assert only_id is not None and only_id.user_name is None
+    assert caller_of("", "line\nbreak") is None
+    assert caller_of("has space", "") is None
+    assert caller_of(None, None) is None
+    long = caller_of("", "x" * 500)
+    assert long is not None and len(long.user_name or "") == 120
+
+
+def test_the_callers_statement_is_bounded_and_separate() -> None:
+    *_, mcp, callers = statements("otel")
+    assert "caller_key" in callers and "caller_key" not in mcp
+    assert "LIMIT {max_rows:UInt16}" in callers
+    assert "user.name" in callers and "enduser.id" in callers
+    assert "email" not in callers

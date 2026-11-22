@@ -208,3 +208,38 @@ def test_steps_are_named_by_what_they_did() -> None:
     assert runs.step_kind({"op": "", "mcp_method": "tools/list"}) == "mcp"
     assert runs.step_kind({"op": "", "genai": 1}) == "genai"
     assert runs.step_kind({}) == "other"
+
+
+def test_a_run_names_the_person_it_was_for_and_never_an_email() -> None:
+    row = {
+        "trace_id": TRACE,
+        "started": "2026-11-21 17:00:00.000000000",
+        "span_ns": "1",
+        "model_calls": "0",
+        "user_id": "8c1f0b2a-7d3e-4c55-9e10-2b6a4f3c9d01",
+        "user_name": "Gencay Coskun",
+    }
+    (run,) = runs.normalize_runs([row])
+    assert run["user"] == {
+        "key": "id:8c1f0b2a-7d3e-4c55-9e10-2b6a4f3c9d01",
+        "id": "8c1f0b2a-7d3e-4c55-9e10-2b6a4f3c9d01",
+        "name": "Gencay Coskun",
+    }
+    (unknown,) = runs.normalize_runs([{**row, "user_id": "", "user_name": ""}])
+    assert unknown["user"] is None
+    (email,) = runs.normalize_runs([{**row, "user_id": "", "user_name": "gencay@example.com"}])
+    assert email["user"] is None
+
+
+def test_a_run_takes_its_person_from_the_first_visible_span_that_names_one() -> None:
+    rows = [
+        {**ROWS[0]},
+        {**ROWS[1], "user_id": "u-42", "user_name": "Ayse"},
+        *ROWS[2:],
+        {**ROWS[4], "user_id": "u-99", "user_name": "Hidden Person"},
+    ]
+    run = runs.assemble_run(rows, trace_id=TRACE, agent=STABLE, visible_agents={})
+    assert run is not None
+    assert run.user == {"key": "id:u-42", "id": "u-42", "name": "Ayse"}
+    plain = runs.assemble_run(ROWS, trace_id=TRACE, agent=STABLE, visible_agents={})
+    assert plain is not None and plain.user is None

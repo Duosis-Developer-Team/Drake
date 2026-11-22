@@ -27,6 +27,7 @@ __all__ = ["engine", "migrated_db"]
 
 NOW = datetime.now(UTC).replace(minute=30, second=0, microsecond=0)
 HOUR = int(NOW.replace(minute=0).timestamp())
+GENCAY = "8c1f0b2a-7d3e-4c55-9e10-2b6a4f3c9d01"
 
 
 class Result:
@@ -44,6 +45,7 @@ class FakeStore:
     ) -> None:
         self.rollups, self.tools, self.edges = rollups, tools, edges or []
         self.mcp = mcp or []
+        self.callers: list[dict[str, Any]] = []
         self.calls = 0
 
     async def query(self, statement: str, parameters: dict[str, str], **_: Any) -> Result:
@@ -53,6 +55,8 @@ class FakeStore:
         end = datetime.fromisoformat(parameters["end"].replace(" ", "T")).replace(tzinfo=UTC)
         if "p_agent_name" in statement:
             source = self.edges
+        elif "AS caller_key" in statement:
+            source = self.callers
         elif "user_agent.name'] AS client" in statement:
             source = self.mcp
         elif "gen_ai.tool.name'] AS tool" in statement:
@@ -244,6 +248,47 @@ async def seed(engine: AsyncEngine, redis: Any) -> dict[str, Any]:
             "calls": 5,
         },
     ]
+    person = {**in_catalog, "svc": "hermes-mcp", "hour": HOUR, "errors": 0}
+    store.callers = [
+        {
+            **person,
+            "tool": "hermes_list_tasks",
+            "client": "claude-ai",
+            "user_id": GENCAY,
+            "user_name": "Gencay Coskun",
+            "calls": 5,
+            "last_seen": HOUR + 600,
+        },
+        {
+            **person,
+            "tool": "hermes_create_task",
+            "client": "Cursor",
+            "user_id": GENCAY,
+            "user_name": "Gencay Coskun",
+            "calls": 1,
+            "errors": 1,
+            "last_seen": HOUR + 1200,
+        },
+        {
+            **person,
+            "tool": "hermes_list_tasks",
+            "client": "claude-ai",
+            "user_id": "",
+            "user_name": "Ayse",
+            "calls": 2,
+            "last_seen": HOUR + 300,
+        },
+        # An email is never a person here: dropped, the call stays unknown.
+        {
+            **person,
+            "tool": "hermes_list_tasks",
+            "client": "claude-ai",
+            "user_id": "",
+            "user_name": "someone@example.com",
+            "calls": 1,
+            "last_seen": HOUR + 60,
+        },
+    ]
     report = await discovery.run_once(engine, store, redis, database="otel", now=NOW)  # type: ignore[arg-type]
     assert report.lease_acquired and report.failed_reads == 0
     return {"world": world, "store": store}
@@ -373,6 +418,24 @@ async def test_the_inventory_is_scoped_like_the_catalog(engine: AsyncEngine, red
         assert {c["name"]: c["calls"] for c in hermes["clients"]} == {"claude-ai": 8, "Cursor": 2}
         assert hermes["project"] is not None and len(hermes["series"]) == 24
         assert sum(p["calls"] for p in hermes["series"]) == 10
+        # Who used it: by name, never by email; the email-named call is
+        # simply not attributed (8 of 10 calls name a person).
+        assert hermes["attributed_calls"] == 8
+        assert [(u["name"], u["calls"], u["errors"]) for u in hermes["users"]] == [
+            ("Gencay Coskun", 6, 1),
+            ("Ayse", 2, 0),
+        ]
+        gencay = hermes["users"][0]
+        assert gencay["id"] == GENCAY and gencay["clients"] == ["Cursor", "claude-ai"]
+        assert datetime.fromisoformat(gencay["last_seen_at"]).timestamp() == HOUR + 1200
+        assert "example.com" not in str(mcp)
+        tools = {t["name"]: t for t in hermes["tools"]}
+        assert [u["name"] for u in tools["hermes_list_tasks"]["users"]] == ["Gencay Coskun", "Ayse"]
+        assert [u["name"] for u in tools["hermes_create_task"]["users"]] == ["Gencay Coskun"]
+        clients = {c["name"]: c for c in hermes["clients"]}
+        assert [u["calls"] for u in clients["claude-ai"]["users"]] == [5, 2]
+        shadow = by_service["shadow-mcp"]
+        assert shadow["users"] == [] and shadow["attributed_calls"] == 0
         focused = (await client.get(f"/v1/agents/topology?focus={triager['id']}")).json()
         assert {n["label"] for n in focused["nodes"] if n["kind"] == "agent"} == {
             "ticket-triager",

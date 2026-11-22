@@ -257,6 +257,78 @@ describe("Agents inventory", () => {
     const card = await screen.findByTestId("mcp-server-hermes-mcp");
     expect(within(card).getByText("hermes_whoami")).toBeTruthy();
     expect(within(card).getByText("claude-code")).toBeTruthy();
+    // An older API without people: unknown is said plainly, not "no one".
+    expect(within(card).getByText(/No call names a person yet/)).toBeTruthy();
+    MCP = { window: "24h", servers: [] };
+  });
+
+  it("names who used an MCP server, by name", async () => {
+    const gencay = {
+      key: "id:8c1f0b2a",
+      id: "8c1f0b2a",
+      name: "Gencay Coskun",
+      calls: 6,
+      errors: 1,
+      last_seen_at: "2026-11-21T21:40:00Z",
+    };
+    const ayse = {
+      key: "name:Ayse",
+      id: null,
+      name: "Ayse",
+      calls: 2,
+      errors: 0,
+      last_seen_at: "2026-11-21T21:10:00Z",
+    };
+    MCP = {
+      window: "24h",
+      servers: [
+        {
+          id: "m1",
+          service_name: "hermes-mcp",
+          cluster_ref: "c1",
+          namespace: "hermes-test",
+          workload: "hermes-mcp",
+          first_seen_at: "2026-11-21T21:00:00Z",
+          last_seen_at: "2026-11-21T21:59:59Z",
+          project: null,
+          environment: null,
+          calls: 10,
+          errors: 1,
+          avg_ms: 70,
+          tools: [
+            {
+              name: "hermes_list_tasks",
+              calls: 8,
+              errors: 0,
+              avg_ms: 50,
+              users: [gencay, ayse],
+            },
+          ],
+          clients: [
+            { name: "claude-code", calls: 10, errors: 1, avg_ms: 70, users: [gencay] },
+          ],
+          methods: [],
+          series: [],
+          users: [{ ...gencay, clients: ["claude-code"] }, ayse],
+          attributed_calls: 8,
+        },
+      ],
+    };
+    serve(inventory([]));
+    renderPage();
+    fireEvent.click(await screen.findByTestId("agents-mcp-teaser"));
+    const usedBy = await screen.findByTestId("mcp-used-by-hermes-mcp");
+    const people = within(usedBy).getAllByTestId("mcp-person");
+    expect(people.map((p) => p.textContent)).toEqual([
+      expect.stringContaining("Gencay Coskun"),
+      expect.stringContaining("Ayse"),
+    ]);
+    expect(within(usedBy).getByText("GC")).toBeTruthy();
+    expect(within(usedBy).getByText(/via claude-code/)).toBeTruthy();
+    expect(within(usedBy).getByText("8 of 10 calls name a person")).toBeTruthy();
+    expect(within(usedBy).getByText(/2 people/)).toBeTruthy();
+    const toolUsers = screen.getByTestId("mcp-tool-users-hermes_list_tasks");
+    expect(toolUsers.getAttribute("aria-label")).toBe("Used by: Gencay Coskun, Ayse");
     MCP = { window: "24h", servers: [] };
   });
 });

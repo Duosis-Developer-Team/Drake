@@ -22,6 +22,10 @@ trace: two agents in one trace stay two.
 Tokens are counted on model-call spans; an agent whose SDK reports usage
 only on its agent span is counted from there instead, never both.
 
+MCP servers are kept too (the server side of `tools/call`), and — when a
+tool span names the person behind the call (`user.id`, `user.name`) — who
+used them. A person is an id and a display name, never an email.
+
 Read-only against the store, counts and names only, one lease per cycle.
 """
 
@@ -111,6 +115,11 @@ AGENT_NAME = _first(
     _s("gen_ai.agent.name"), _r("gen_ai.main_agent.name"), last="a.trace_agent_name"
 )
 INGEST = _r("tracesis.ingest")
+# Who is behind a call, when the span says so (OpenTelemetry `user.*`; the
+# older `enduser.id` too): an id and a display name, never an email —
+# `caller_of` drops anything that looks like one.
+USER_ID = _first(_s("user.id"), _s("enduser.id"), _r("user.id"), last="''")
+USER_NAME = _first(_s("user.name"), _r("user.name"), last="''")
 
 _IDENTITY = f"""
     {SVC} AS svc,
@@ -281,15 +290,72 @@ WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:Date
 GROUP BY svc, cluster, ns, wk, method, tool, client, hour
 LIMIT {{max_rows:UInt16}}"""  # noqa: S608 - fixed fragments; values are bound parameters
 
+# Who used an MCP server: the calls that name a person, per server, hour,
+# tool, client and person (the id; the name when there is no id). A
+# statement of its own so the per-person breakdown never pushes the
+# server's own counts past the row ceiling.
+CALLERS = f"""
+SELECT {SVC} AS svc, {CLUSTER} AS cluster, {NAMESPACE} AS ns, {WORKLOAD} AS wk,
+       if(t.SpanAttributes['gen_ai.tool.name'] != '', t.SpanAttributes['gen_ai.tool.name'],
+          t.SpanAttributes['mcp.tool.name']) AS tool,
+       t.SpanAttributes['user_agent.name'] AS client,
+       toUnixTimestamp(toStartOfHour(t.Timestamp)) AS hour,
+       {USER_ID} AS user_id,
+       if(user_id = '', {USER_NAME}, '') AS caller_key,
+       argMax({USER_NAME}, t.Timestamp) AS user_name,
+       count() AS calls,
+       countIf(t.StatusCode = 'Error') AS errors,
+       toUnixTimestamp(max(t.Timestamp)) AS last_seen
+FROM __DATABASE__.otel_traces AS t
+WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
+  AND {MCP_SERVER_SIDE}
+  AND ({USER_ID} != '' OR {USER_NAME} != '')
+GROUP BY svc, cluster, ns, wk, tool, client, hour, user_id, caller_key
+LIMIT {{max_rows:UInt16}}"""  # noqa: S608 - fixed fragments; values are bound parameters
 
-def statements(database: str) -> tuple[str, str, str, str]:
+
+def statements(database: str) -> tuple[str, str, str, str, str]:
     db = safe_identifier(database)
     return (
         _ROLLUPS.replace("__DATABASE__", db),
         _TOOLS.replace("__DATABASE__", db),
         EDGES.replace("__DATABASE__", db),
         MCP.replace("__DATABASE__", db),
+        CALLERS.replace("__DATABASE__", db),
     )
+
+
+_CALLER_ID = re.compile(r"^[A-Za-z0-9._:/+=-]{1,128}$")
+_NAME_MAX = 120
+
+
+@dataclass(frozen=True)
+class Caller:
+    key: str
+    user_id: str | None
+    user_name: str | None
+
+
+def caller_of(user_id: Any, user_name: Any) -> Caller | None:
+    """The person behind a call, as far as the span says — or None.
+
+    Names only: an id or a name that looks like an email (anything with
+    `@`) is dropped, as is one with control characters. A name alone is a
+    person too; neither means unknown, and unknown is not counted.
+    """
+    uid = str(user_id or "").strip()
+    if not _CALLER_ID.match(uid):
+        uid = ""
+    raw = str(user_name or "")
+    name = " ".join(raw.split())
+    if "@" in name or any(ord(c) < 32 or ord(c) == 127 for c in raw):
+        name = ""
+    name = name[:_NAME_MAX]
+    if uid:
+        return Caller(key=f"id:{uid}", user_id=uid, user_name=name or None)
+    if name:
+        return Caller(key=f"name:{name}", user_id=None, user_name=name)
+    return None
 
 
 def real_name(value: str) -> bool:
@@ -429,6 +495,9 @@ class Harvest:
     servers: dict[str, dict[str, str]] = field(default_factory=dict)
     server_seen: dict[str, tuple[datetime, datetime]] = field(default_factory=dict)
     mcp: dict[tuple[str, datetime, str, str, str], list[int]] = field(default_factory=dict)
+    # (server key, hour, tool, client, caller key) → [calls, errors, last seen]
+    callers: dict[tuple[str, datetime, str, str, str], list[int]] = field(default_factory=dict)
+    caller_seen: dict[str, tuple[int, Caller]] = field(default_factory=dict)
 
     def _see(self, ident: Identity, hour: datetime) -> None:
         self.identities.setdefault(ident.key, ident)
@@ -463,14 +532,45 @@ class Harvest:
             agg[1] += _int(row.get("errors"))
             agg[2] += _int(row.get("duration_ms"))
 
+    def _server(self, row: dict[str, Any], hour: datetime) -> str:
+        place = {k: str(row.get(k) or "") for k in ("svc", "cluster", "ns", "wk")}
+        key = f"mcp:{place['svc']}:{place['cluster']}/{place['ns']}/{place['wk']}"[:512]
+        self.servers.setdefault(key, place)
+        first, last = self.server_seen.get(key, (hour, hour))
+        self.server_seen[key] = (min(first, hour), max(last, hour))
+        return key
+
+    def take_callers(self, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            caller = caller_of(row.get("user_id"), row.get("user_name"))
+            if caller is None:
+                continue
+            hour = datetime.fromtimestamp(_int(row.get("hour")), tz=UTC)
+            key = self._server(row, hour)
+            bucket = (
+                key,
+                hour,
+                str(row.get("tool") or "")[:128],
+                str(row.get("client") or "")[:64],
+                caller.key,
+            )
+            seen = _int(row.get("last_seen"))
+            agg = self.callers.setdefault(bucket, [0, 0, 0])
+            agg[0] += _int(row.get("calls"))
+            agg[1] += _int(row.get("errors"))
+            agg[2] = max(agg[2], seen)
+            # The latest name a person was seen with is the one shown; a
+            # nameless sighting never erases a name.
+            latest = self.caller_seen.get(caller.key)
+            if latest is None or (seen >= latest[0] and caller.user_name):
+                self.caller_seen[caller.key] = (seen, caller)
+            elif not latest[1].user_name and caller.user_name:
+                self.caller_seen[caller.key] = (latest[0], caller)
+
     def take_mcp(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
-            place = {k: str(row.get(k) or "") for k in ("svc", "cluster", "ns", "wk")}
-            key = f"mcp:{place['svc']}:{place['cluster']}/{place['ns']}/{place['wk']}"[:512]
             hour = datetime.fromtimestamp(_int(row.get("hour")), tz=UTC)
-            self.servers.setdefault(key, place)
-            first, last = self.server_seen.get(key, (hour, hour))
-            self.server_seen[key] = (min(first, hour), max(last, hour))
+            key = self._server(row, hour)
             bucket = (
                 key,
                 hour,
@@ -725,6 +825,45 @@ async def _store_mcp(
             for (key, hour, method, tool, client), v in harvest.mcp.items()
         ],
     )
+    if not harvest.callers:
+        return
+    await connection.execute(
+        text(
+            """
+            INSERT INTO mcp_server_callers
+                (server_id, hour, tool_name, client, caller_key, user_id, user_name,
+                 calls, errors, last_seen_at)
+            VALUES (:server, :hour, :tool, :client, :caller, :user_id, :user_name,
+                    :calls, :errors, :last_seen)
+            ON CONFLICT (server_id, hour, tool_name, client, caller_key) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                user_name = coalesce(EXCLUDED.user_name, mcp_server_callers.user_name),
+                calls = EXCLUDED.calls, errors = EXCLUDED.errors,
+                last_seen_at = greatest(mcp_server_callers.last_seen_at, EXCLUDED.last_seen_at)
+            """
+        ),
+        [
+            {
+                "server": server_ids[key],
+                "hour": hour,
+                "tool": tool,
+                "client": client,
+                "caller": caller_key,
+                "user_id": harvest.caller_seen[caller_key][1].user_id,
+                "user_name": harvest.caller_seen[caller_key][1].user_name,
+                "calls": v[0],
+                "errors": v[1],
+                # A store that leaves the moment out still places the call
+                # inside its hour.
+                "last_seen": (
+                    datetime.fromtimestamp(v[2], tz=UTC)
+                    if hour.timestamp() <= v[2] < hour.timestamp() + 3600
+                    else hour
+                ),
+            }
+            for (key, hour, tool, client, caller_key), v in harvest.callers.items()
+        ],
+    )
 
 
 @dataclass
@@ -763,7 +902,7 @@ async def run_once(
         # Whole hours are re-read and replaced: the previous one (closing)
         # and the current one; on a first run, everything the store holds.
         start = floor_hour(end) - timedelta(hours=1) if known else floor_hour(end - BACKFILL)
-        rollups_sql, tools_sql, edges_sql, mcp_sql = statements(database)
+        rollups_sql, tools_sql, edges_sql, mcp_sql, callers_sql = statements(database)
         harvest = Harvest()
         chunk = start
         while chunk < end:
@@ -778,6 +917,7 @@ async def run_once(
                 (tools_sql, harvest.take_tools),
                 (edges_sql, harvest.take_edges),
                 (mcp_sql, harvest.take_mcp),
+                (callers_sql, harvest.take_callers),
             ):
                 report.reads += 1
                 try:

@@ -2,13 +2,20 @@
 
 /**
  * MCP servers: what agents call. One card per server — how busy it is,
- * which tools it serves (bar per tool, failures in red) and which AI
- * clients call it (one share bar, a colour per client).
+ * which tools it serves (bar per tool, failures in red), which AI
+ * clients call it (one share bar, a colour per client) and who used it
+ * (the people the calls name, by name — never by email).
  */
 
-import { Plug, Server } from "lucide-react";
+import { Plug, Server, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import {
+  Avatar,
+  AvatarStack,
+  displayName,
+  personColor,
+} from "@/components/agents/People";
 import { MiniArea } from "@/components/agents/visuals";
 import { DataState } from "@/components/state/DataState";
 import { Panel } from "@/components/ui/Panel";
@@ -130,11 +137,17 @@ function ServerCard({ server }: { server: McpServer }) {
               return (
                 <li key={tool.name ?? ""} className="space-y-1">
                   <div className="flex items-baseline justify-between gap-2 text-micro">
-                    <span
-                      className="truncate font-mono text-ink"
-                      title={tool.name ?? ""}
-                    >
-                      {tool.name ?? "—"}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="truncate font-mono text-ink"
+                        title={tool.name ?? ""}
+                      >
+                        {tool.name ?? "—"}
+                      </span>
+                      <AvatarStack
+                        people={tool.users ?? []}
+                        testId={`mcp-tool-users-${tool.name ?? ""}`}
+                      />
                     </span>
                     <span className="shrink-0 tabular-nums text-ink-secondary">
                       <span className="font-semibold text-ink">
@@ -226,6 +239,7 @@ function ServerCard({ server }: { server: McpServer }) {
                   >
                     {c.name ?? t("mcp.unknownClient")}
                   </span>
+                  <AvatarStack people={c.users ?? []} max={2} />
                 </span>
                 <span className="shrink-0 tabular-nums text-ink-secondary">
                   {fmt.number((c.calls / totalClients) * 100, {
@@ -238,7 +252,110 @@ function ServerCard({ server }: { server: McpServer }) {
           </ul>
         </section>
       </div>
+
+      <UsedBy server={server} />
     </Panel>
+  );
+}
+
+/** Who used the server: one row per person, busiest first, with the
+ * clients they came through and when they were last seen. */
+function UsedBy({ server }: { server: McpServer }) {
+  const t = useT("agents");
+  const fmt = useFormat();
+  const { locale } = useLocale();
+  const people = server.users ?? [];
+  const named = server.attributed_calls ?? 0;
+  const busiest = Math.max(1, ...people.map((p) => p.calls));
+  return (
+    <section
+      className="border-t border-border pt-4"
+      data-testid={`mcp-used-by-${server.service_name ?? server.id}`}
+    >
+      <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="flex items-center gap-1.5 text-micro font-semibold tracking-wide text-ink-muted uppercase">
+          <Users aria-hidden className="h-3.5 w-3.5" />
+          {t("mcp.usedBy")}
+          {people.length ? (
+            <span className="font-normal tracking-normal normal-case">
+              · {t("mcp.people", { count: people.length })}
+            </span>
+          ) : null}
+        </h3>
+        {people.length ? (
+          <p className="text-micro text-ink-muted tabular-nums">
+            {named >= server.calls
+              ? t("mcp.attributedAll")
+              : t("mcp.attributed", {
+                  named: compact(named, locale),
+                  total: compact(server.calls, locale),
+                })}
+          </p>
+        ) : null}
+      </div>
+      {people.length === 0 ? (
+        <p className="text-micro text-ink-muted">{t("mcp.noPeople")}</p>
+      ) : (
+        <ul className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
+          {people.slice(0, 8).map((person) => {
+            const name = displayName(person, t("mcp.unnamedPerson"));
+            return (
+              <li
+                key={person.key}
+                className="flex min-w-0 items-center gap-2.5"
+                data-testid="mcp-person"
+              >
+                <Avatar person={person} size="md" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span
+                      className="truncate text-caption font-medium text-ink"
+                      title={person.id ? `${name} · ${person.id}` : name}
+                    >
+                      {name}
+                    </span>
+                    <span className="shrink-0 text-micro tabular-nums text-ink-secondary">
+                      <span className="font-semibold text-ink">
+                        {compact(person.calls, locale)}
+                      </span>
+                      {person.errors ? (
+                        <span className="text-critical">
+                          {" "}
+                          · {compact(person.errors, locale)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                  <span
+                    className="mt-1 block h-1 overflow-hidden rounded-full bg-surface-3"
+                    aria-hidden
+                  >
+                    <span
+                      className="block h-full rounded-full"
+                      style={{
+                        width: `${(person.calls / busiest) * 100}%`,
+                        background: personColor(person.key),
+                      }}
+                    />
+                  </span>
+                  <p className="mt-1 truncate text-micro text-ink-muted">
+                    {person.clients?.length
+                      ? `${t("mcp.via", { clients: person.clients.join(", ") })} · `
+                      : ""}
+                    <time
+                      dateTime={person.last_seen_at}
+                      title={fmt.utc(person.last_seen_at)}
+                    >
+                      {fmt.relative(person.last_seen_at)}
+                    </time>
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
