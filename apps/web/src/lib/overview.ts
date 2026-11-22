@@ -59,6 +59,9 @@ export interface AttentionItem {
   /** The structured form of `state` (and, for alerts and clusters, of
    *  `subject`/`context`) — what a component translates. */
   reason?: AttentionReason;
+  /** The project the row belongs to, when it belongs to one — so the row
+   *  can wear the app's logo. */
+  projectKey?: string;
 }
 
 /** Tones that mean "somebody should look at this". */
@@ -81,6 +84,7 @@ export function incidentItems(incidents: IncidentSummary[]): AttentionItem[] {
       asOf: incident.last_critical_at || incident.opened_at,
       origin: "incident" as const,
       reason: { kind: "incident" as const, state: incident.state === "open" ? ("open" as const) : ("acknowledged" as const) },
+      projectKey: incident.project_key || undefined,
     }));
 }
 
@@ -147,6 +151,7 @@ export function serviceItems(services: ServiceHealthRow[]): AttentionItem[] {
       asOf: row.health.newest_sample_at ?? row.health.computed_at,
       origin: "service" as const,
       reason: { kind: "service" as const, state: row.health.status },
+      projectKey: row.project_key,
     }));
 }
 
@@ -300,6 +305,7 @@ export function signalItems(ranked: RankedSignal[]): AttentionItem[] {
         context: `${row.project_key} / ${row.environment_key}`,
         href: `/service-health/${item.binding_id}`,
         origin: "service" as const,
+        projectKey: row.project_key,
       };
       if (verdict.cause === "requests") {
         const ratio = item.traces?.error_ratio ?? 0;

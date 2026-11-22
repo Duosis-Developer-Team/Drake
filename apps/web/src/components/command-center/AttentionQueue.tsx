@@ -15,15 +15,22 @@
  * A row's words come from its `reason` (data) through the catalogue; the
  * English `state`/`subject`/`context` strings on the item are the fallback
  * for an item built without one.
+ *
+ * Drawn as severity-led cards: the tone is the card's rail and its icon,
+ * the app's logo says whose it is, and each card ends in what to do next.
+ * The three counts at the top are filters, so a long queue can be read one
+ * severity at a time.
  */
 
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, EyeOff } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { RelativeTime } from "@/components/ui/identifiers";
 import { LoadingSkeleton } from "@/components/ui/states";
-import { toneSpec } from "@/lib/design/status";
+import { toneSpec, type StatusTone } from "@/lib/design/status";
 import { useT, type Translator } from "@/lib/i18n";
 import { groupByRootCause, rootCauseKeyOf, type AttentionItem } from "@/lib/overview";
 import { percent } from "@/lib/signals";
@@ -95,55 +102,105 @@ function describe(
   }
 }
 
-function AttentionRow({ item }: { item: AttentionItem }) {
+function AttentionCard({ item, projectIds }: { item: AttentionItem; projectIds?: Map<string, string> }) {
   const t = useT("commandCenter");
   const ts = useT("signals");
   const spec = toneSpec(item.tone);
   const Icon = spec.icon;
   const words = describe(item, t, ts);
+  const projectId = item.projectKey ? projectIds?.get(item.projectKey) : undefined;
   return (
     <Link
       href={item.href}
-      className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-hover"
+      className={`group relative flex items-center gap-4 overflow-hidden rounded-xl border bg-surface py-3.5 pr-4 pl-5 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_14px_30px_-22px_rgb(0_0_0/0.5)] ${
+        item.tone === "critical" ? "border-critical/45" : "border-border"
+      }`}
     >
-      <span aria-hidden className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${spec.chip}`}>
-        <Icon className="h-4 w-4" />
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${spec.dot}`} />
+      <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${spec.chip}`}>
+        <Icon className="h-5 w-5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-body font-semibold text-ink">{words.subject}</span>
-        <span className="mt-0.5 block truncate text-micro text-ink-muted">{words.context}</span>
-      </span>
-      <span className={`hidden shrink-0 rounded-full px-2.5 py-1 text-micro font-medium sm:inline-flex ${spec.chip}`}>
-        {words.state}
-      </span>
-      {item.asOf ? (
-        <span className="w-14 shrink-0 text-right text-micro text-ink-muted">
-          <RelativeTime value={item.asOf} />
+        <span className="flex min-w-0 items-center gap-2">
+          {projectId && item.projectKey ? (
+            <ProjectLogo projectId={projectId} name={item.projectKey} size="sm" variant="mark" />
+          ) : null}
+          <span className="truncate text-body font-semibold text-ink">{words.subject}</span>
         </span>
-      ) : null}
+        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-micro font-semibold ${spec.chip}`}>
+            {words.state}
+          </span>
+          <span className="truncate font-mono text-micro text-ink-muted">{words.context}</span>
+        </span>
+      </span>
+      <span className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+        {item.asOf ? (
+          <span className="text-micro text-ink-muted">
+            <RelativeTime value={item.asOf} />
+          </span>
+        ) : null}
+        <span className="inline-flex items-center gap-1 text-micro font-semibold text-brand-accent">
+          {t(`attention.action.${item.origin}`)}
+          <ArrowRight aria-hidden className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </span>
     </Link>
   );
+}
+
+type Filter = "critical" | "warning" | "other" | null;
+
+/** Cards shown before "show more": the rest are counted on the button,
+ *  never dropped silently. */
+const CAP = 6;
+
+function matches(item: AttentionItem, filter: Filter): boolean {
+  if (filter === null) return true;
+  if (filter === "other") return item.tone !== "critical" && item.tone !== "warning";
+  return item.tone === filter;
+}
+
+export interface CheckedSource {
+  key: string;
+  label: string;
+  /** True when the source answered this time; false when it did not. */
+  answered: boolean;
 }
 
 export function AttentionQueue({
   items,
   loading,
+  projectIds,
+  checked = [],
 }: {
   items: AttentionItem[];
   loading: boolean;
+  /** Project key → id, so a row can show its app's logo. */
+  projectIds?: Map<string, string>;
+  /** The sources behind an empty queue, named rather than implied. */
+  checked?: CheckedSource[];
 }) {
   const t = useT("commandCenter");
   const common = useT("common");
   const ts = useT("signals");
-  const groups = groupByRootCause(items);
-  const tally = (["critical", "warning"] as const).map((tone) => ({
-    tone,
-    count: items.filter((item) => item.tone === tone).length,
-  }));
-  const otherCount = items.length - tally.reduce((sum, entry) => sum + entry.count, 0);
+  const [filter, setFilter] = useState<Filter>(null);
+  const [expanded, setExpanded] = useState(false);
+  const counts: { key: Exclude<Filter, null>; label: string; count: number; tone: StatusTone }[] = [
+    { key: "critical", label: t("tone.critical"), count: items.filter((i) => i.tone === "critical").length, tone: "critical" },
+    { key: "warning", label: t("tone.warning"), count: items.filter((i) => i.tone === "warning").length, tone: "warning" },
+    {
+      key: "other",
+      label: t("attention.cannotSee"),
+      count: items.filter((i) => i.tone !== "critical" && i.tone !== "warning").length,
+      tone: "unknown",
+    },
+  ];
+  const visible = items.filter((item) => matches(item, filter));
+  const groups = groupByRootCause(visible);
 
   return (
-    <Panel flush data-testid="needs-attention">
+    <Panel flush data-testid="needs-attention" className="flex flex-col">
       <PanelHeader
         flush
         title={t("attention.title")}
@@ -163,21 +220,38 @@ export function AttentionQueue({
       />
 
       {!loading ? (
-        /* One line, not three tiles: the verdict strip above already carries
-           the big numbers. "Can't see" is the one count only this list has. */
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-5 py-2.5 text-caption text-ink-muted">
-          {[
-            ...tally.map((entry) => ({ key: entry.tone, label: t(`tone.${entry.tone}`), count: entry.count, spec: toneSpec(entry.tone) })),
-            { key: "other", label: t("attention.cannotSee"), count: otherCount, spec: toneSpec("unknown") },
-          ].map((entry) => (
-            <span key={entry.key} className="inline-flex items-center gap-1.5">
-              <span aria-hidden className={`h-2 w-2 rounded-full ${entry.spec.dot}`} />
-              {entry.label}
-              <span data-tabular className={`font-semibold ${entry.count > 0 ? entry.spec.text : "text-ink"}`}>
-                {entry.count}
-              </span>
-            </span>
-          ))}
+        <div className="grid grid-cols-3 gap-2 px-5 pb-4" role="group" aria-label={t("attention.title")}>
+          {counts.map((entry) => {
+            const spec = toneSpec(entry.tone);
+            const Icon = entry.key === "other" ? EyeOff : spec.icon;
+            const active = filter === entry.key;
+            return (
+              <button
+                key={entry.key}
+                type="button"
+                aria-pressed={active}
+                disabled={entry.count === 0 && !active}
+                onClick={() => setFilter(active ? null : entry.key)}
+                title={active ? t("attention.showAll") : t("attention.filterBy", { label: entry.label })}
+                className={`flex items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-colors disabled:cursor-default ${
+                  active ? "border-brand-accent/60 bg-surface-selected" : "border-border bg-surface-2/60 enabled:hover:bg-surface-hover"
+                }`}
+              >
+                <span aria-hidden className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${entry.count > 0 ? spec.chip : "bg-surface-3 text-ink-muted"}`}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span
+                    data-tabular
+                    className={`block font-[family-name:var(--font-display)] text-[1.375rem] leading-none font-bold ${entry.count > 0 ? spec.text : "text-ink-muted"}`}
+                  >
+                    {entry.count}
+                  </span>
+                  <span className="mt-0.5 block truncate text-micro text-ink-muted">{entry.label}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       ) : null}
 
@@ -186,34 +260,50 @@ export function AttentionQueue({
           <LoadingSkeleton variant="table" rows={4} label={t("attention.loading")} />
         </div>
       ) : items.length === 0 ? (
-        <div className="flex flex-col items-center px-5 py-10 text-center" data-testid="attention-empty">
-          <span aria-hidden className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-healthy-soft">
+        <div className="flex flex-1 flex-col items-center justify-center border-t border-border px-6 py-8 text-center" data-testid="attention-empty">
+          <span aria-hidden className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-healthy-soft">
             <CheckCircle2 className="h-7 w-7 text-healthy" />
           </span>
-          <p className="text-body font-medium text-ink">{t("attention.emptyTitle")}</p>
+          <p className="text-body font-semibold text-ink">{t("attention.emptyTitle")}</p>
           <p className="mt-1 max-w-prose text-caption text-ink-secondary">{t("attention.emptyBody")}</p>
+          {checked.length > 0 ? (
+            <ul className="mt-5 flex flex-wrap justify-center gap-1.5" aria-label={t("attention.checked")}>
+              {checked.map((source) => (
+                <li
+                  key={source.key}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-micro font-medium ${
+                    source.answered ? "border-healthy/35 bg-healthy-soft text-healthy" : "border-dashed border-border text-ink-muted"
+                  }`}
+                >
+                  {source.answered ? <Check aria-hidden className="h-3 w-3" /> : <EyeOff aria-hidden className="h-3 w-3" />}
+                  {source.label}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : (
-        <ul className="divide-y divide-border" data-testid="attention-list">
-          {groups.map((group) => {
+        <div className="@container/attention border-t border-border bg-surface-2/40 p-4">
+        <ul className="grid gap-2 @min-[52rem]/attention:grid-cols-2" data-testid="attention-list">
+          {(expanded ? groups : groups.slice(0, CAP)).map((group) => {
             const testId = testIdOf(rootCauseKeyOf(group[0]));
             if (group.length === 1) {
               return (
                 <li key={testId} data-testid={testId}>
-                  <AttentionRow item={group[0]} />
+                  <AttentionCard item={group[0]} projectIds={projectIds} />
                 </li>
               );
             }
             return (
-              <li key={testId} data-testid={testId}>
-                <details open className="group">
-                  <summary className="cursor-pointer list-none px-5 py-2.5 text-micro text-ink-muted hover:bg-surface-hover">
+              <li key={testId} data-testid={testId} className="col-span-full">
+                <details open className="group rounded-xl border border-dashed border-border-strong p-2">
+                  <summary className="cursor-pointer list-none px-2 pt-0.5 pb-2 text-micro text-ink-muted hover:text-ink">
                     {t("attention.group", { count: group.length, subject: describe(group[0], t, ts).subject })}
                   </summary>
-                  <ul className="divide-y divide-border border-t border-border">
+                  <ul className="flex flex-col gap-2">
                     {group.map((item) => (
                       <li key={item.key}>
-                        <AttentionRow item={item} />
+                        <AttentionCard item={item} projectIds={projectIds} />
                       </li>
                     ))}
                   </ul>
@@ -222,6 +312,17 @@ export function AttentionQueue({
             );
           })}
         </ul>
+        {groups.length > CAP ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border-strong py-2 text-caption font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            {expanded ? t("attention.showFewer") : t("attention.showMore", { count: groups.length - CAP })}
+          </button>
+        ) : null}
+        </div>
       )}
     </Panel>
   );
