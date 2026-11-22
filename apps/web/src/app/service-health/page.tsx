@@ -20,7 +20,8 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useMemo } from "react";
 
-import { ServicesLauncher, sortServiceRows } from "@/components/apps/ServicesLauncher";
+import { ServicesBoard } from "@/components/apps/ServicesBoard";
+import { sortServiceRows } from "@/components/apps/ServicesLauncher";
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
   BindingStateBadge,
@@ -71,7 +72,9 @@ type Filters = {
   project: string;
   environment: string;
   status: ServiceHealthStatus | "";
-  view: "apps" | "list" | "map";
+  view: "board" | "list" | "map";
+  /** The board's environment filter: an environment key (prod, test…). */
+  env: string;
 };
 
 function useFilters(): [Filters, (patch: Partial<Filters>) => void] {
@@ -83,7 +86,8 @@ function useFilters(): [Filters, (patch: Partial<Filters>) => void] {
     project: params.get("project_id") ?? "",
     environment: params.get("environment_id") ?? "",
     status: (params.get("status") as ServiceHealthStatus | null) ?? "",
-    view: params.get("view") === "map" ? "map" : params.get("view") === "list" ? "list" : "apps",
+    view: params.get("view") === "map" ? "map" : params.get("view") === "list" ? "list" : "board",
+    env: params.get("env") ?? "",
   };
   const update = useCallback(
     (patch: Partial<Filters>) => {
@@ -96,7 +100,8 @@ function useFilters(): [Filters, (patch: Partial<Filters>) => void] {
       if ("project" in patch) set("project_id", patch.project);
       if ("environment" in patch) set("environment_id", patch.environment);
       if ("status" in patch) set("status", patch.status);
-      if ("view" in patch) set("view", patch.view === "apps" ? undefined : patch.view);
+      if ("view" in patch) set("view", patch.view === "board" ? undefined : patch.view);
+      if ("env" in patch) set("env", patch.env);
       const query = next.toString();
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
@@ -364,6 +369,7 @@ function StatusChips({
 
 function ServicesBody({ data }: { data: ServiceHealthPage }) {
   const t = useT("serviceHealth");
+  const tb = useT("boards");
   const ts = useT("signals");
   const [filters, update] = useFilters();
   const signals = useResource<SignalPage>(signalsPath(boundIds(data.items)), { refreshMs: 60_000 });
@@ -422,14 +428,15 @@ function ServicesBody({ data }: { data: ServiceHealthPage }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-caption text-ink-muted">
+        {/* The board carries its own summary; the list and map keep theirs. */}
+        <p className={`text-caption text-ink-muted ${filters.view === "board" ? "invisible" : ""}`}>
           {t("list.summary", { projects: projectCount, environments: environmentCount, services: scoped.length })}
         </p>
         <SegmentedControl
           label={t("list.view.label")}
           value={filters.view}
           options={[
-            { value: "apps", label: t("list.view.apps"), icon: LayoutGrid },
+            { value: "board", label: tb("services.viewBoard"), icon: LayoutGrid },
             { value: "list", label: t("list.view.list"), icon: Rows3 },
             { value: "map", label: t("list.view.map"), icon: MapIcon },
           ]}
@@ -437,18 +444,22 @@ function ServicesBody({ data }: { data: ServiceHealthPage }) {
         />
       </div>
 
-      {filters.view === "apps" ? (
-        <ServicesLauncher
+      {filters.view === "board" ? (
+        <ServicesBoard
           rows={data.items}
           signalById={signalById}
-          project={filters.project}
-          environment={filters.environment}
-          onProject={(project) => update({ project, environment: "" })}
-          onEnvironment={(environment) => update({ environment })}
+          filters={{ q: filters.q, project: filters.project, environment: filters.env }}
+          onFilters={(patch) =>
+            update({
+              ...("q" in patch ? { q: patch.q } : {}),
+              ...("project" in patch ? { project: patch.project } : {}),
+              ...("environment" in patch ? { env: patch.environment } : {}),
+            })
+          }
         />
       ) : null}
 
-      <div className={`flex flex-wrap items-center gap-2 ${filters.view === "apps" ? "hidden" : ""}`}>
+      <div className={`flex flex-wrap items-center gap-2 ${filters.view === "board" ? "hidden" : ""}`}>
         <SearchInput
           label={t("list.search")}
           placeholder={t("list.search")}
@@ -475,7 +486,7 @@ function ServicesBody({ data }: { data: ServiceHealthPage }) {
         ) : null}
       </div>
 
-      {filters.view === "apps" ? null : filters.view === "map" ? (
+      {filters.view === "board" ? null : filters.view === "map" ? (
         mapEnvironment ? (
           <div className="space-y-3">
             {mapEnvironments.length > 1 ? (

@@ -11,11 +11,12 @@ import { ArrowUpRight, Plus } from "lucide-react";
 import Link from "next/link";
 
 import { HealthBadge } from "@/components/service-health/primitives";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { useFormat, useT } from "@/lib/i18n";
 import type { ServiceHealthRow } from "@/lib/serviceHealth";
 import type { SignalItem } from "@/lib/signals";
 
-import { Sparkline } from "./AppLauncher";
+import { kindColour, Sparkline } from "./AppLauncher";
 
 function Meter({ label, ratio }: { label: string; ratio: number | null }) {
   const fmt = useFormat();
@@ -41,12 +42,15 @@ export function ServiceCard({
   item,
   traffic,
   index = 0,
+  context,
 }: {
   row: ServiceHealthRow;
   item: SignalItem | undefined;
   /** Requests per bucket over the day, when the overview read answered. */
   traffic: number[] | null;
   index?: number;
+  /** Where the service lives, for boards that mix apps (Services). */
+  context?: { projectId: string; projectName: string };
 }) {
   const t = useT("apps");
   const fmt = useFormat();
@@ -69,6 +73,18 @@ export function ServiceCard({
           : "self-start border-dashed border-border-strong bg-transparent"
       }`}
     >
+      {context ? (
+        <p className="mb-2.5 flex min-w-0 items-center gap-1.5 text-[11px] text-ink-muted">
+          <ProjectLogo projectId={context.projectId} name={context.projectName} size="sm" variant="mark" />
+          <span className="truncate font-medium text-ink-secondary">{context.projectName}</span>
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface-2 px-1.5 py-px font-mono text-[10.5px]"
+          >
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: kindColour(row.environment_key) }} />
+            {row.environment_key}
+          </span>
+        </p>
+      ) : null}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {binding ? (
