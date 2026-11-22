@@ -20,20 +20,20 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment, Suspense, useMemo } from "react";
+import { Fragment, Suspense, useMemo, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { CountTile, ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
 import {
   AppTag,
   BandCard,
-  DayBars,
+  DurationBuckets,
   Figure,
   Legend,
   ListDivider,
   RankBar,
-  dayAxis,
-  dayIndex,
+  ShareBar,
+  SpanTimeline,
   median,
   useProjectIndex,
   useSample,
@@ -253,10 +253,13 @@ function LifecycleRule() {
 }
 
 /**
- * The last 30 days in one card: incidents opened per day by where the signal
- * came from, how quickly they were acknowledged and resolved (medians of the
- * window), and what is open right now, per app. Drawn from a bounded sample;
- * the tiles above keep the server's exact totals.
+ * The last 30 days in one card. Each incident is drawn on its app's lane
+ * from when it opened to when it resolved (still-open ones run to now,
+ * hatched), coloured by where the signal came from — so the card says which
+ * app, how long and how often at once, and a quiet month reads as a few
+ * marks where they happened rather than a mostly-empty histogram. Beside it:
+ * how quickly they were acknowledged and resolved, and what is open now.
+ * Drawn from a bounded sample; the tiles above keep the server's totals.
  */
 function IncidentBand({
   scope,
@@ -269,26 +272,35 @@ function IncidentBand({
   const fmt = useFormat();
   const window = useSample<IncidentSummary>(incidentListPath({ ...scope, openedWithin: "30d" }), { max: 200 });
   const open = useSample<IncidentSummary>(incidentListPath({ ...scope, state: "open" }), { max: 100 });
-  const axis = useMemo(() => dayAxis(30), []);
-  const counts = useMemo(() => {
-    const days = axis.map(() => ({}) as Record<string, number>);
-    for (const incident of window.items ?? []) {
-      const i = dayIndex(axis, incident.opened_at);
-      if (i < 0) continue;
-      const key = incident.source && SOURCES.includes(incident.source) ? incident.source : "other";
-      days[i][key] = (days[i][key] ?? 0) + 1;
+  const [now] = useState(() => Date.now());
+  const from = now - 30 * 86_400_000;
+  const items = useMemo(() => window.items ?? [], [window.items]);
+  const sourceOf = (i: IncidentSummary) => (i.source && SOURCES.includes(i.source) ? i.source : "other");
+
+  const lanes = useMemo(() => {
+    const byPlace = new Map<string, { project: string; env: string; spans: IncidentSummary[] }>();
+    for (const incident of items) {
+      const key = `${incident.project_key}/${incident.environment_key}`;
+      const lane = byPlace.get(key) ?? { project: incident.project_key, env: incident.environment_key, spans: [] };
+      lane.spans.push(incident);
+      byPlace.set(key, lane);
     }
-    return days;
-  }, [axis, window.items]);
-  const series = [...SOURCES, "other" as const]
-    .filter((key) => counts.some((day) => day[key]))
-    .map((key) => ({ key, label: t(`list.source.${key}`), colour: SOURCE_COLOUR[key] }));
-  const items = window.items ?? [];
+    return [...byPlace.entries()].sort((a, b) => b[1].spans.length - a[1].spans.length);
+  }, [items]);
+  const shownLanes = lanes.slice(0, 6);
+  const hiddenLanes = lanes.length - shownLanes.length;
+
+  const durations = items.flatMap((i) => (i.resolved_at ? [durationSeconds(i.opened_at, i.resolved_at) ?? 0] : []));
+  const stillOpen = items.filter((i) => !i.resolved_at).length;
   const ack = median(
     items.flatMap((i) => (i.acknowledged_at ? [durationSeconds(i.opened_at, i.acknowledged_at) ?? 0] : [])),
   );
-  const resolve = median(items.flatMap((i) => (i.resolved_at ? [durationSeconds(i.opened_at, i.resolved_at) ?? 0] : [])));
-  const resolved = items.filter((i) => i.resolved_at).length;
+  const resolve = median(durations);
+  const resolved = items.length - stillOpen;
+  const sources = [...SOURCES, "other" as const]
+    .map((key) => ({ key, count: items.filter((i) => sourceOf(i) === key).length }))
+    .filter((s) => s.count > 0);
+
   const byApp = new Map<string, { key: string; env: Set<string>; count: number }>();
   for (const incident of open.items ?? []) {
     const entry = byApp.get(incident.project_key) ?? { key: incident.project_key, env: new Set<string>(), count: 0 };
@@ -309,9 +321,55 @@ function IncidentBand({
         <p className="text-caption text-ink-muted">{t("list.band.failed")}</p>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-          <div className="flex min-w-0 flex-col gap-3">
-            <DayBars axis={axis} series={series} counts={counts} label={t("list.band.note")} />
-            <Legend items={series.map((s) => ({ label: s.label, colour: s.colour }))} />
+          <div className="flex min-w-0 flex-col gap-4">
+            {window.items && items.length === 0 ? (
+              <p className="rounded-control border border-dashed border-border px-4 py-5 text-center text-caption text-ink-muted">
+                {t("list.band.none")}
+              </p>
+            ) : (
+              <>
+                <SpanTimeline
+                  from={from}
+                  to={now}
+                  tickDays={5}
+                  label={t("list.band.note")}
+                  lanes={shownLanes.map(([key, lane]) => {
+                    const total = lane.spans.reduce(
+                      (sum, i) => sum + (durationSeconds(i.opened_at, i.resolved_at ?? new Date(now).toISOString()) ?? 0),
+                      0,
+                    );
+                    return {
+                      key,
+                      label: <AppTag projectKey={lane.project} environmentKey={lane.env} projects={projects} outside="" />,
+                      meta: t("list.band.laneMeta", { count: lane.spans.length, time: fmt.duration(total, { compact: true }) }),
+                      spans: lane.spans.map((i) => ({
+                        id: i.id,
+                        start: Date.parse(i.opened_at),
+                        end: i.resolved_at ? Date.parse(i.resolved_at) : null,
+                        colour: SOURCE_COLOUR[sourceOf(i)],
+                        title: `${i.title} · ${t(`list.source.${sourceOf(i)}`)}`,
+                      })),
+                    };
+                  })}
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Legend items={sources.map((s) => ({ label: t(`list.source.${s.key}`), colour: SOURCE_COLOUR[s.key] }))} />
+                  <span className="text-micro text-ink-muted">
+                    {hiddenLanes > 0 ? `${t("list.band.morePlaces", { count: hiddenLanes })} · ` : ""}
+                    {t("list.band.hatched")}
+                  </span>
+                </div>
+                <div className="min-w-0 border-t border-border pt-4">
+                  <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.lasted")}</p>
+                  <DurationBuckets
+                    seconds={durations}
+                    ongoing={stillOpen}
+                    colour="var(--status-critical)"
+                    ongoingLabel={t("list.band.stillOpen")}
+                  />
+                </div>
+              </>
+            )}
           </div>
           <div className="flex min-w-0 flex-col gap-5 lg:border-l lg:border-border lg:pl-6">
             <div className="grid grid-cols-3 gap-4">
@@ -359,6 +417,19 @@ function IncidentBand({
                 </ul>
               )}
             </div>
+            {sources.length ? (
+              <div>
+                <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.cameFrom")}</p>
+                <ShareBar
+                  segments={sources.map((s) => ({
+                    key: s.key,
+                    label: t(`list.source.${s.key}`),
+                    colour: SOURCE_COLOUR[s.key],
+                    count: s.count,
+                  }))}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       )}

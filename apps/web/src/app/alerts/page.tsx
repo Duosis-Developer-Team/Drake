@@ -23,7 +23,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import {
@@ -37,13 +37,13 @@ import { CountTile, ListFooter, useCursorList, useUrlFilters } from "@/component
 import {
   AppTag,
   BandCard,
+  APP_PALETTE,
   Chip,
-  DayBars,
   Figure,
   Legend,
   RankBar,
-  bucketAxis,
-  bucketIndex,
+  ShareBar,
+  SpanTimeline,
   median,
   useProjectIndex,
   useSample,
@@ -219,34 +219,48 @@ function AlertRow({ alert, projects }: { alert: AlertInstance; projects: Map<str
 }
 
 /**
- * The last 7 days in one card: alerts that started every six hours, by
- * priority; how long they usually lasted and how many became incidents;
- * which rules fire most and where. Drawn from a bounded sample of the
- * window — the tiles above keep the server's exact counts of what is firing.
+ * The last 7 days in one card. Each alert sits on its app's lane from when
+ * it started to when it ended (still-firing ones run to now, hatched),
+ * coloured by priority — which app, how long and how often in one picture.
+ * A quiet week reads as a few marks where they happened instead of one bar
+ * in an empty chart. Beside it: the noisiest rules and where alerts came
+ * from. Drawn from a bounded sample of the window — the tiles above keep the
+ * server's exact counts of what is firing.
  */
 function AlertBand({ projects }: { projects: Map<string, ProjectRef> }) {
   const t = useT("alerting");
   const fmt = useFormat();
   const sample = useSample<AlertInstance>(alertListPath({ window: "7d" }), { paging: "offset", max: 250 });
-  const axis = useMemo(() => bucketAxis(28, 6), []);
+  const [now] = useState(() => Date.now());
+  const from = now - 7 * 86_400_000;
   const items = useMemo(() => sample.items ?? [], [sample.items]);
-  const counts = useMemo(() => {
-    const buckets = axis.map(() => ({}) as Record<string, number>);
-    for (const alert of items) {
-      const i = bucketIndex(axis, 6, alert.starts_at);
-      if (i >= 0) buckets[i][alert.priority] = (buckets[i][alert.priority] ?? 0) + 1;
-    }
-    return buckets;
-  }, [axis, items]);
-  const series = PRIORITIES.map((p) => ({ key: p, label: PRIORITY_LABELS[p], colour: PRIORITY_COLOUR[p] }));
-  const lasted = median(
-    items.flatMap((a) => {
-      const end = a.ends_at ?? a.resolved_at;
-      const seconds = end ? durationSeconds(a.starts_at, end) : null;
-      return seconds === null ? [] : [seconds];
-    }),
-  );
+  const endOf = (a: AlertInstance): number | null => {
+    const end = a.ends_at ?? a.resolved_at;
+    if (end) return Date.parse(end);
+    // Resolved without an end time: a moment, not an open span.
+    return a.status === "firing" ? null : Date.parse(a.starts_at);
+  };
+  const resolvedSeconds = items.flatMap((a) => {
+    const end = a.ends_at ?? a.resolved_at;
+    const seconds = end ? durationSeconds(a.starts_at, end) : null;
+    return seconds === null ? [] : [seconds];
+  });
+  const lasted = median(resolvedSeconds);
+  const firing = items.filter((a) => a.status === "firing").length;
   const toIncident = items.filter((a) => a.incident).length;
+
+  const lanes = useMemo(() => {
+    const byPlace = new Map<string, { project: string | null; env: string | null; alerts: AlertInstance[] }>();
+    for (const alert of items) {
+      const key = alert.project_key ? `${alert.project_key}/${alert.environment_key ?? ""}` : "";
+      const lane = byPlace.get(key) ?? { project: alert.project_key, env: alert.environment_key, alerts: [] };
+      lane.alerts.push(alert);
+      byPlace.set(key, lane);
+    }
+    return [...byPlace.entries()].sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : b[1].alerts.length - a[1].alerts.length));
+  }, [items]);
+  const present = PRIORITIES.filter((p) => items.some((a) => a.priority === p));
+
   const rules = new Map<string, number>();
   const apps = new Map<string, number>();
   for (const alert of items) {
@@ -255,9 +269,8 @@ function AlertBand({ projects }: { projects: Map<string, ProjectRef> }) {
     apps.set(key, (apps.get(key) ?? 0) + 1);
   }
   const topRules = [...rules.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const topApps = [...apps.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const appShares = [...apps.entries()].sort((a, b) => b[1] - a[1]);
   const rulePeak = Math.max(1, ...topRules.map(([, n]) => n));
-  const appPeak = Math.max(1, ...topApps.map(([, n]) => n));
 
   return (
     <BandCard
@@ -268,14 +281,18 @@ function AlertBand({ projects }: { projects: Map<string, ProjectRef> }) {
       {sample.failed ? (
         <p className="text-caption text-ink-muted">{t("list.band.failed")}</p>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col gap-4">
             <div className="grid grid-cols-3 gap-4">
               <Figure label={t("list.band.started")} value={sample.items ? fmt.number(items.length) : "—"} note={t("list.band.startedNote")} />
               <Figure
                 label={t("list.band.duration")}
                 value={lasted === null ? "—" : fmt.duration(lasted, { compact: true })}
-                note={t("list.band.durationNote")}
+                note={
+                  lasted === null && firing > 0
+                    ? t("list.band.durationOpen", { count: firing })
+                    : t("list.band.durationNote")
+                }
               />
               <Figure
                 label={t("list.band.toIncident")}
@@ -283,8 +300,43 @@ function AlertBand({ projects }: { projects: Map<string, ProjectRef> }) {
                 note={t("list.band.toIncidentNote", { count: toIncident, total: items.length })}
               />
             </div>
-            <DayBars axis={axis} hours={6} series={series} counts={counts} height={148} label={t("list.band.note")} />
-            <Legend items={series.map((s) => ({ label: s.label, colour: s.colour }))} />
+            {sample.items && items.length === 0 ? (
+              <p className="rounded-control border border-dashed border-border px-4 py-5 text-center text-caption text-ink-muted">
+                {t("list.band.none")}
+              </p>
+            ) : (
+              <>
+                <SpanTimeline
+                  from={from}
+                  to={now}
+                  tickDays={1}
+                  label={t("list.band.note")}
+                  lanes={lanes.slice(0, 6).map(([key, lane]) => ({
+                    key: key || "outside",
+                    label: (
+                      <AppTag
+                        projectKey={lane.project}
+                        environmentKey={lane.env}
+                        projects={projects}
+                        outside={t("list.band.outside")}
+                      />
+                    ),
+                    meta: fmt.number(lane.alerts.length),
+                    spans: lane.alerts.map((a) => ({
+                      id: a.id,
+                      start: Date.parse(a.starts_at),
+                      end: endOf(a),
+                      colour: PRIORITY_COLOUR[a.priority],
+                      title: `${a.alert_name} · ${PRIORITY_LABELS[a.priority]}`,
+                    })),
+                  }))}
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Legend items={present.map((p) => ({ label: PRIORITY_LABELS[p], colour: PRIORITY_COLOUR[p] }))} />
+                  <span className="text-micro text-ink-muted">{t("list.band.hatched")}</span>
+                </div>
+              </>
+            )}
           </div>
           <div className="grid min-w-0 gap-5 sm:grid-cols-2 xl:grid-cols-1 xl:border-l xl:border-border xl:pl-6">
             <div className="min-w-0">
@@ -301,27 +353,27 @@ function AlertBand({ projects }: { projects: Map<string, ProjectRef> }) {
             </div>
             <div className="min-w-0">
               <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.byApp")}</p>
-              {topApps.length === 0 ? (
+              {appShares.length === 0 ? (
                 <p className="text-caption text-ink-secondary">{sample.items ? t("list.band.none") : "…"}</p>
               ) : (
-                <ul className="flex flex-col gap-2.5">
-                  {topApps.map(([key, n]) => {
+                <ShareBar
+                  segments={appShares.map(([key, n], i) => {
                     const project = key ? projects.get(key) : undefined;
-                    return (
-                      <RankBar
-                        key={key || "outside"}
-                        value={n}
-                        peak={appPeak}
-                        label={
-                          <span className="inline-flex items-center gap-1.5">
-                            {project ? <ProjectLogo projectId={project.id} name={project.name} size="sm" variant="mark" /> : null}
-                            <span className={key ? "font-medium" : "text-ink-muted"}>{key ? (project?.name ?? key) : t("list.band.outside")}</span>
+                    return {
+                      key: key || "outside",
+                      count: n,
+                      colour: key ? APP_PALETTE[i % APP_PALETTE.length] : "var(--text-muted)",
+                      label: (
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                          {project ? <ProjectLogo projectId={project.id} name={project.name} size="sm" variant="mark" /> : null}
+                          <span className={key ? "truncate font-medium" : "truncate text-ink-muted"}>
+                            {key ? (project?.name ?? key) : t("list.band.outside")}
                           </span>
-                        }
-                      />
-                    );
+                        </span>
+                      ),
+                    };
                   })}
-                </ul>
+                />
               )}
             </div>
           </div>

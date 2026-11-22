@@ -90,6 +90,36 @@ describe("deployment list", () => {
     expect(within(row).getByText("3 / 3")).toBeInTheDocument();
   });
 
+  it("places a rollout with no binding under its app by its namespace", async () => {
+    const recent = new Date(Date.now() - 3_600_000).toISOString();
+    const unbound = deployment({
+      project_key: null,
+      environment_key: null,
+      service_key: null,
+      environment_service_id: null,
+      binding_id: null,
+      rollout_started_at: recent,
+    });
+    installFetchMock({
+      "/v1/deployments": { status: 200, body: { items: [unbound], next_cursor: null, total: 1, limit: 25 } },
+      "/v1/clusters/c1": {
+        status: 200,
+        body: { id: "c1", referenced_environments: [{ project_key: "pilot", environment_key: "dev", namespace: "pilot-dev" }] },
+      },
+      "/v1/projects": {
+        status: 200,
+        body: { projects: [{ id: "p1", project_key: "pilot", display_name: "Pilot" }], next_cursor: null },
+      },
+    });
+    render(<DeploymentsPage />);
+
+    const band = await screen.findByTestId("deployment-band");
+    // The cluster says pilot-dev is Pilot's dev environment, so the rollout
+    // is drawn there, not under a bare namespace.
+    expect((await within(band).findAllByText("Pilot")).length).toBeGreaterThan(0);
+    expect(within(band).queryByText("pilot-dev")).not.toBeInTheDocument();
+  });
+
   it("marks an unverified deployment without calling it a failure", async () => {
     installFetchMock({
       "/v1/deployments": {

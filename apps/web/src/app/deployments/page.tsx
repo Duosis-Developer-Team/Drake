@@ -16,21 +16,25 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment, Suspense, useMemo, type ReactNode } from "react";
+import { Fragment, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 
 import { kindColour } from "@/components/apps/AppLauncher";
 import { CountTile, ListFooter, useCursorList, useTotal, useUrlFilters } from "@/components/ops/ListKit";
 import {
+  APP_PALETTE,
   AppTag,
   BandCard,
   Figure,
   HeatGrid,
   Legend,
   ListDivider,
+  RankBar,
+  ShareBar as SplitBar,
   dayAxis,
   dayIndex,
   useDayName,
+  useNamespaceIndex,
   useProjectIndex,
   useSample,
   type ProjectRef,
@@ -269,7 +273,14 @@ const VERDICTS: ComparisonVerdict[] = ["improved", "stable", "regressed", "insuf
 /**
  * The last 30 days of rollouts in one card: a heat grid of rollouts per day
  * for each app's environment (a ring on a day that failed or regressed),
- * the window's figures, what health did afterwards, and the evidence lanes.
+ * where they went and what rolled out most, the window's figures, what
+ * health did afterwards, and the evidence lanes.
+ *
+ * A rollout carries its app only when its workload is bound to a service;
+ * many are not. Those are placed by their namespace, through the cluster's
+ * own record of which environment runs there — so an unbound rollout still
+ * lands under its app instead of one "not bound" lane. One whose namespace
+ * no environment claims is shown under that namespace, never guessed.
  * Drawn from a bounded sample; the tiles above are the server's totals.
  */
 function DeployBand({
@@ -284,37 +295,76 @@ function DeployBand({
   const sample = useSample<DeploymentRow>(deploymentListPath({ startedWithin: "30d" }), { max: 250 });
   const axis = useMemo(() => dayAxis(30), []);
   const items = useMemo(() => sample.items ?? [], [sample.items]);
+  const places = useNamespaceIndex(items.map((r) => r.cluster.id));
+  const placeOf = useCallback(
+    (row: DeploymentRow): { key: string; project: string | null; env: string | null; namespace: string } => {
+      if (row.project_key)
+        return { key: `${row.project_key}/${row.environment_key}`, project: row.project_key, env: row.environment_key, namespace: row.namespace };
+      const found = places.get(`${row.cluster.id}/${row.namespace}`);
+      if (found)
+        return { key: `${found.projectKey}/${found.environmentKey}`, project: found.projectKey, env: found.environmentKey, namespace: row.namespace };
+      return { key: `ns:${row.namespace}`, project: null, env: null, namespace: row.namespace };
+    },
+    [places],
+  );
   const rows = useMemo(() => {
-    const places = new Map<string, { key: string; project: string | null; env: string | null; counts: number[]; bad: boolean[]; total: number }>();
+    const byPlace = new Map<
+      string,
+      { key: string; project: string | null; env: string | null; namespace: string; counts: number[]; bad: boolean[]; total: number }
+    >();
     for (const row of items) {
       const i = dayIndex(axis, row.rollout_started_at);
       if (i < 0) continue;
-      const key = row.project_key ? `${row.project_key}/${row.environment_key}` : "";
-      const place = places.get(key) ?? {
-        key,
-        project: row.project_key,
-        env: row.environment_key,
-        counts: axis.map(() => 0),
-        bad: axis.map(() => false),
-        total: 0,
-      };
+      const where = placeOf(row);
+      const place = byPlace.get(where.key) ?? { ...where, counts: axis.map(() => 0), bad: axis.map(() => false), total: 0 };
       place.counts[i] += 1;
       place.total += 1;
       if (row.rollout_state === "failed" || row.health_comparison?.verdict === "regressed") place.bad[i] = true;
-      places.set(key, place);
+      byPlace.set(where.key, place);
     }
-    return [...places.values()].sort((a, b) => (a.key === "" ? 1 : b.key === "" ? -1 : b.total - a.total));
-  }, [axis, items]);
+    return [...byPlace.values()].sort((a, b) =>
+      (a.project === null) === (b.project === null) ? b.total - a.total : a.project === null ? 1 : -1,
+    );
+  }, [axis, items, placeOf]);
+  const workloads = useMemo(() => {
+    const byWorkload = new Map<string, { name: string; project: string | null; env: string | null; count: number }>();
+    for (const row of items) {
+      const where = placeOf(row);
+      const key = `${where.key}/${row.workload_name}`;
+      const entry = byWorkload.get(key) ?? { name: row.service_key ?? row.workload_name, project: where.project, env: where.env, count: 0 };
+      entry.count += 1;
+      byWorkload.set(key, entry);
+    }
+    return [...byWorkload.values()].sort((a, b) => b.count - a.count).slice(0, 4);
+  }, [items, placeOf]);
   const days = new Set(items.map((r) => dayIndex(axis, r.rollout_started_at)).filter((i) => i >= 0)).size;
   const clean = items.filter((r) => r.rollout_state === "healthy").length;
   const verdicts = VERDICTS.map((v) => ({ v, n: items.filter((r) => r.health_comparison?.verdict === v).length }));
   const verdictTotal = verdicts.reduce((a, b) => a + b.n, 0);
+  const placeLabel = (place: { project: string | null; env: string | null; namespace: string }) => {
+    const project = place.project ? projects.get(place.project) : undefined;
+    return place.project ? (
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        {project ? <ProjectLogo projectId={project.id} name={project.name} size="sm" variant="mark" /> : null}
+        <span className="truncate text-caption font-medium text-ink">{project?.name ?? place.project}</span>
+        <span className="inline-flex items-center gap-1 font-mono text-[10.5px] text-ink-muted">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: kindColour(place.env ?? "") }} />
+          {place.env}
+        </span>
+      </span>
+    ) : (
+      <span className="inline-flex min-w-0 items-center gap-1.5" title={t("list.band.outside")}>
+        <span className="truncate font-mono text-[11.5px] text-ink-secondary">{place.namespace}</span>
+      </span>
+    );
+  };
+  const workloadPeak = Math.max(1, ...workloads.map((w) => w.count));
 
   return (
     <BandCard
       data-testid="deployment-band"
       title={t("list.band.title")}
-      note={sample.items && !sample.complete ? t("list.band.truncated", { count: items.length }) : undefined}
+      note={sample.items && !sample.complete ? t("list.band.truncated", { count: items.length }) : t("list.band.note")}
     >
       {sample.failed ? (
         <p className="text-caption text-ink-muted">{t("list.band.failed")}</p>
@@ -324,9 +374,9 @@ function DeployBand({
             <div className="grid grid-cols-3 gap-4">
               <Figure label={t("list.band.total")} value={sample.items ? fmt.number(items.length) : "—"} note={t("list.band.totalNote")} />
               <Figure
-                label={t("list.band.perDay")}
-                value={days ? fmt.number(items.length / days, { maximumFractionDigits: 1 }) : "—"}
-                note={t("list.band.perDayNote")}
+                label={t("list.band.activeDays")}
+                value={sample.items ? fmt.number(days) : "—"}
+                note={t("list.band.activeDaysNote", { places: rows.length })}
               />
               <Figure
                 label={t("list.band.success")}
@@ -340,30 +390,55 @@ function DeployBand({
                 {sample.items ? t("list.band.none") : "…"}
               </p>
             ) : (
-              <HeatGrid
-                axis={axis}
-                label={t("list.band.note")}
-                rows={rows.slice(0, 8).map((place) => {
-                  const project = place.project ? projects.get(place.project) : undefined;
-                  return {
-                    key: place.key || "outside",
+              <>
+                <HeatGrid
+                  axis={axis}
+                  label={t("list.band.note")}
+                  rows={rows.slice(0, 8).map((place) => ({
+                    key: place.key,
                     counts: place.counts,
                     bad: place.bad,
-                    label: place.project ? (
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        {project ? <ProjectLogo projectId={project.id} name={project.name} size="sm" variant="mark" /> : null}
-                        <span className="truncate text-caption font-medium text-ink">{project?.name ?? place.project}</span>
-                        <span className="inline-flex items-center gap-1 font-mono text-[10.5px] text-ink-muted">
-                          <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: kindColour(place.env ?? "") }} />
-                          {place.env}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="text-caption text-ink-muted">{t("list.band.outside")}</span>
-                    ),
-                  };
-                })}
-              />
+                    meta: fmt.number(place.total),
+                    label: placeLabel(place),
+                  }))}
+                />
+                <div className="grid gap-5 border-t border-border pt-4 sm:grid-cols-2">
+                  <div className="min-w-0">
+                    <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.where")}</p>
+                    <SplitBar
+                      segments={rows.map((place, i) => ({
+                        key: place.key,
+                        count: place.total,
+                        colour: place.project ? APP_PALETTE[i % APP_PALETTE.length] : "var(--text-muted)",
+                        label: placeLabel(place),
+                      }))}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="mb-2.5 text-[11px] font-medium text-ink-muted">{t("list.band.mostRolled")}</p>
+                    <ul className="flex flex-col gap-2.5">
+                      {workloads.map((w) => {
+                        const project = w.project ? projects.get(w.project) : undefined;
+                        return (
+                          <RankBar
+                            key={`${w.project}/${w.env}/${w.name}`}
+                            value={w.count}
+                            peak={workloadPeak}
+                            colour="var(--brand-accent)"
+                            label={
+                              <span className="inline-flex min-w-0 items-center gap-1.5">
+                                {project ? <ProjectLogo projectId={project.id} name={project.name} size="sm" variant="mark" /> : null}
+                                <span className="truncate font-medium">{w.name}</span>
+                                {w.env ? <span className="font-mono text-[10.5px] text-ink-muted">{w.env}</span> : null}
+                              </span>
+                            }
+                          />
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </div>
+              </>
             )}
           </div>
           <div className="flex min-w-0 flex-col gap-5 xl:border-l xl:border-border xl:pl-6">
@@ -372,7 +447,13 @@ function DeployBand({
               <span className="flex h-2.5 overflow-hidden rounded-full bg-surface-3">
                 {verdictTotal
                   ? verdicts.map(({ v, n }) =>
-                      n ? <span key={v} style={{ flexGrow: n, background: VERDICT_COLOUR[v] }} title={`${t.dyn("verdict", v, VERDICT_LABELS[v])}: ${n}`} /> : null,
+                      n ? (
+                        <span
+                          key={v}
+                          style={{ flexGrow: n, background: VERDICT_COLOUR[v] }}
+                          title={`${t.dyn("verdict", v, VERDICT_LABELS[v])}: ${n}`}
+                        />
+                      ) : null,
                     )
                   : null}
               </span>
