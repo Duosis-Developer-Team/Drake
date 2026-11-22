@@ -376,7 +376,7 @@ export function KindsViz({ byKind, clusterId }: { byKind: Record<string, HealthR
                 style={{ flexGrow: r.total, background: KIND_COLOURS[i] }}
               >
                 {r.total / total > 0.07 ? (
-                  <span className="truncate px-2 font-mono text-[10.5px] font-semibold text-white/95">{kind}</span>
+                  <span className="truncate px-2 font-mono text-[10.5px] font-semibold text-ink-inverse">{kind}</span>
                 ) : null}
               </Link>
             ))}
