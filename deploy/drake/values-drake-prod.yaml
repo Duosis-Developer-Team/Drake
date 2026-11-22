@@ -195,8 +195,6 @@ ingress:
   # webhook URL is updated to the new name.
   redirectHosts:
     - drake-84-247-180-173.sslip.io
-  redirectKeepPaths:
-    - /v1/integrations/github/
   tls:
     enabled: true
     mode: secret
@@ -221,11 +219,11 @@ api:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-api
-    # Source commit cb35c28d93308789bf4b64cd192abb38f579de5f
+    # Source commit b88afe6a3e62cdedf094f7f18089fbf6d3d69814
     # Published as the tag of the same name; pinned here by digest because
     # the chart accepts only one immutable reference in production, and a
     # tag — even a commit-SHA tag — can in principle be repointed.
-    digest: "sha256:804666b6a1073da0816d3cf3f7f7875a4f2b7348575f3c142549fce9cdf77191"
+    digest: "sha256:bd5a8c668b5afeef86e59304419cd664c615987eec835339a1f9779398cda9a7"
   # Created out of band; see docs/runbooks/STANDARD_KUBERNETES_DEPLOYMENT.md
   # for the exact key list. The chart creates no Secret.
   existingSecret: drake-api-config
@@ -248,8 +246,8 @@ web:
   replicas: 2
   image:
     repository: ghcr.io/duosis-developer-team/drake-web
-    # Source commit cb35c28d93308789bf4b64cd192abb38f579de5f
-    digest: "sha256:06d71f4f8c6a232cc73ea4f715e2f13fa402216f66640325ca15dab4a7481bde"
+    # Source commit b88afe6a3e62cdedf094f7f18089fbf6d3d69814
+    digest: "sha256:d7d3f50c06a905a277d9ed2930a48bec3f6e9d844ee4187b3123463f1aef4ef3"
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -271,7 +269,7 @@ migration:
     repository: ghcr.io/duosis-developer-team/drake-api
     # Same digest as the API: the migration must run the exact code that
     # is about to serve.
-    digest: "sha256:804666b6a1073da0816d3cf3f7f7875a4f2b7348575f3c142549fce9cdf77191"
+    digest: "sha256:bd5a8c668b5afeef86e59304419cd664c615987eec835339a1f9779398cda9a7"
   backoffLimit: 0
 
 networkPolicy:

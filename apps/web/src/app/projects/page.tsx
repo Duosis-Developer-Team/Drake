@@ -28,8 +28,10 @@ import {
   ChevronRight,
   FolderGit2,
   FolderKanban,
+  LayoutGrid,
   Layers,
   Radar,
+  Rows3,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -44,7 +46,9 @@ import {
   useToneLabel,
 } from "@/components/catalog/visuals";
 import { ProjectRiskMap } from "@/components/data-viz/ProjectRiskMap";
+import { OpenProjectLink, ServicesLauncher } from "@/components/apps/ServicesLauncher";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
+import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -267,6 +271,9 @@ function ProjectsInner() {
   const lifecycle = params.get("lifecycle") ?? "active";
   const criticality = params.get("criticality") ?? "";
   const risk = params.get("risk");
+  // Apps first, as on Services; the catalogue list is one tap away.
+  const view = params.get("view") === "list" ? "list" : "apps";
+  const tv = useT("serviceHealth");
   const [draft, setDraft] = useState(search);
 
   // Debounced: the search parameter is what drives the request, and typing
@@ -382,6 +389,17 @@ function ProjectsInner() {
       <PageHeader
         title={t("list.title")}
         description={t("list.description")}
+        actions={
+          <SegmentedControl
+            label={tv("list.view.label")}
+            value={view}
+            options={[
+              { value: "apps", label: tv("list.view.apps"), icon: LayoutGrid },
+              { value: "list", label: tv("list.view.list"), icon: Rows3 },
+            ]}
+            onChange={(next) => updateParams({ view: next === "apps" ? "" : next })}
+          />
+        }
         meta={
           projects.length > 0 ? (
             <>
@@ -399,6 +417,18 @@ function ProjectsInner() {
         }
       />
 
+      {view === "apps" && servicesCollection.loading && servicesCollection.items.length === 0 ? (
+        <DataState kind="loading" />
+      ) : view === "apps" && servicesCollection.items.length > 0 ? (
+        <ServicesLauncher
+          rows={servicesCollection.items}
+          project={params.get("project_id") ?? ""}
+          environment={params.get("environment_id") ?? ""}
+          onProject={(project) => updateParams({ project_id: project, environment_id: "" })}
+          onEnvironment={(environment) => updateParams({ environment_id: environment })}
+          shelfAction={(projectId) => <OpenProjectLink projectId={projectId} />}
+        />
+      ) : (
       <div className="flex flex-col gap-8">
         {projects.length > 0 ? (
           <div className="page-grid motion-safe:animate-[fade-in_320ms_var(--ease-entrance)_backwards]">
@@ -660,6 +690,7 @@ function ProjectsInner() {
           ) : null}
         </div>
       </div>
+      )}
     </PageFrame>
   );
 }

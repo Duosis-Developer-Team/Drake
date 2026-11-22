@@ -66,7 +66,7 @@ export function ServiceCard({
       className={`group relative flex animate-[rise-in_.4s_cubic-bezier(.2,.8,.2,1)_both] flex-col rounded-2xl border p-4 transition-[transform,border-color,box-shadow] duration-200 ${
         binding
           ? `bg-surface hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_16px_36px_-24px_rgb(0_0_0/0.45)] ${critical ? "border-critical/50" : "border-border"}`
-          : "border-dashed border-border-strong bg-transparent"
+          : "self-start border-dashed border-border-strong bg-transparent"
       }`}
     >
       <div className="flex items-start justify-between gap-3">

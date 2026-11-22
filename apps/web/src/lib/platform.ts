@@ -56,6 +56,8 @@ export interface PlatformApp {
   name: string;
   envs: PlatformEnv[];
   services: number;
+  /** Every service of the app by health, across its environments. */
+  tally: Map<ServiceHealthStatus, number>;
   worst: ServiceHealthStatus | null;
 }
 
@@ -107,6 +109,7 @@ export function groupApps(
         name: names.get(row.project_id) ?? row.project_key,
         envs: [],
         services: 0,
+        tally: new Map(),
         worst: null,
       };
       apps.set(row.project_id, app);
@@ -129,6 +132,7 @@ export function groupApps(
     env.rows.push(row);
     if (row.binding) env.bindingIds.push(row.binding.id);
     env.tally.set(row.health.status, (env.tally.get(row.health.status) ?? 0) + 1);
+    app.tally.set(row.health.status, (app.tally.get(row.health.status) ?? 0) + 1);
     app.services += 1;
   }
   for (const app of apps.values()) {
@@ -165,11 +169,11 @@ export function pulseOf(overview: Overview | null, bindingIds: string[]): Pulse 
 
 /** Project display names, keyed by id; keys stand in until they arrive. */
 export function useProjectNames(): Map<string, string> {
-  const projects = useResource<{ items: { id: string; display_name: string }[] }>(
+  const projects = useResource<{ projects: { id: string; display_name: string }[] }>(
     "/v1/projects?lifecycle=active&limit=100",
   );
   return useMemo(
-    () => new Map((projects.data?.items ?? []).map((p) => [p.id, p.display_name])),
+    () => new Map((projects.data?.projects ?? []).map((p) => [p.id, p.display_name])),
     [projects.data],
   );
 }

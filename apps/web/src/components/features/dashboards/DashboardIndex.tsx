@@ -74,7 +74,7 @@ export function DashboardIndex() {
           <AppGrid apps={apps} selectedId={selectedId} onSelect={select} />
           {selected ? (
             <AppShelf key={selected.projectId} app={selected} onClose={() => select(null)} title={ta("pickEnv")}>
-              <EnvGrid>
+              <EnvGrid count={selected.envs.length}>
                 {selected.envs.map((env) => {
                   const item = shown.find((i) => i.environment_id === env.environmentId);
                   return (
