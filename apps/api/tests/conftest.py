@@ -19,6 +19,19 @@ from test_catalog_persistence_integration import reset_catalog
 API_ROOT = Path(__file__).resolve().parents[1]
 
 
+#: The repository every gate test closes. No real repository is gated any
+#: more (Datalake's gate was closed on 2026-11-22), so the mechanism is
+#: proven against this name, configured exactly as an operator would.
+GATED_FIXTURE = "Duosis-Developer-Team/Gated-Fixture"
+
+
+@pytest.fixture(autouse=True)
+def _gated_fixture_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    from drake_api.github_app import catalog
+
+    monkeypatch.setattr(catalog, "_CONFIGURED_GATES", {GATED_FIXTURE.lower()})
+
+
 @pytest.fixture
 def app() -> FastAPI:
     return create_app(make_settings())

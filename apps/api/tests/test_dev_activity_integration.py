@@ -589,7 +589,7 @@ async def test_every_repository_of_a_watched_org_is_on_the_map(
     _, service, catalog_repo = await seed_repository(engine, world)
     loose = await seed_org_repository(engine, org, "zabake")
     archived = await seed_org_repository(engine, org, "old-thing", archived=True)
-    gated = await seed_org_repository(engine, org, "closed", gate="manual_env_review")
+    gated = await seed_org_repository(engine, org, "closed", gate="manual_review")
     elsewhere = await seed_org_repository(engine, f"x{org}", "not-watched")
     github = PerRepoGitHub(
         {

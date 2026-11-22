@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     LOGISLOT_ID,
@@ -242,10 +242,10 @@ async def test_an_already_gated_repository_makes_no_provider_call(
             installation_payload(
                 repositories=[
                     {
-                        "id": DATALAKE_ID,
+                        "id": GATED_ID,
                         "node_id": "R_dl",
-                        "name": "Datalake-Platform-GUI",
-                        "full_name": f"{OWNER}/Datalake-Platform-GUI",
+                        "name": "Gated-Fixture",
+                        "full_name": f"{OWNER}/Gated-Fixture",
                         "private": True,
                     }
                 ]
@@ -254,7 +254,7 @@ async def test_an_already_gated_repository_makes_no_provider_call(
         )
     fake.calls.clear()
     with pytest.raises(service.SecurityGateBlockedError):
-        await _reconcile(harness, engine, DATALAKE_ID)
+        await _reconcile(harness, engine, GATED_ID)
     assert fake.calls == [], "the gate must refuse before the network"
 
 
@@ -268,8 +268,8 @@ async def test_a_rename_into_the_gated_name_blocks_before_policy_reads(
     await _onboard(harness)
 
     # logislot was renamed to the gated name while we were not looking.
-    fake.repositories["logislot"]["name"] = "Datalake-Platform-GUI"
-    fake.repositories["logislot"]["full_name"] = f"{OWNER}/Datalake-Platform-GUI"
+    fake.repositories["logislot"]["name"] = "Gated-Fixture"
+    fake.repositories["logislot"]["full_name"] = f"{OWNER}/Gated-Fixture"
     fake.calls.clear()
 
     with pytest.raises(service.SecurityGateBlockedError):
@@ -277,7 +277,7 @@ async def test_a_rename_into_the_gated_name_blocks_before_policy_reads(
 
     row = await _repository(engine, LOGISLOT_ID)
     assert row["onboarding_state"] == "blocked"
-    assert row["security_gate"] == "manual_env_review"
+    assert row["security_gate"] == "manual_review"
     # The metadata read that revealed the name is allowed; nothing after it.
     policy_calls = [
         call
@@ -304,10 +304,10 @@ async def test_renaming_away_from_the_gated_name_does_not_open_the_gate(
             installation_payload(
                 repositories=[
                     {
-                        "id": DATALAKE_ID,
+                        "id": GATED_ID,
                         "node_id": "R_dl",
-                        "name": "Datalake-Platform-GUI",
-                        "full_name": f"{OWNER}/Datalake-Platform-GUI",
+                        "name": "Gated-Fixture",
+                        "full_name": f"{OWNER}/Gated-Fixture",
                         "private": True,
                     }
                 ]
@@ -318,7 +318,7 @@ async def test_renaming_away_from_the_gated_name_does_not_open_the_gate(
     payload = installation_payload(action="renamed", repositories=None)
     payload.pop("repositories", None)
     payload["repository"] = {
-        "id": DATALAKE_ID,
+        "id": GATED_ID,
         "node_id": "R_dl",
         "name": "datalake-renamed",
         "full_name": f"{OWNER}/datalake-renamed",
@@ -327,7 +327,7 @@ async def test_renaming_away_from_the_gated_name_does_not_open_the_gate(
     async with harness.api_client() as client:
         await deliver(client, "repository", payload, str(uuidlib.uuid4()))
 
-    row = await _repository(engine, DATALAKE_ID)
+    row = await _repository(engine, GATED_ID)
     assert row["onboarding_state"] == "blocked", "a rename must not close a manual security gate"
 
 
@@ -337,11 +337,11 @@ async def test_installation_reconciliation_makes_no_call_for_a_gated_repository(
     harness, fake = github_harness(tmp_path)
     await _seed_admin(harness, engine)
     await _onboard(harness)
-    fake.repositories["Datalake-Platform-GUI"] = {
-        "id": DATALAKE_ID,
+    fake.repositories["Gated-Fixture"] = {
+        "id": GATED_ID,
         "node_id": "R_dl",
-        "name": "Datalake-Platform-GUI",
-        "full_name": f"{OWNER}/Datalake-Platform-GUI",
+        "name": "Gated-Fixture",
+        "full_name": f"{OWNER}/Gated-Fixture",
         "private": True,
         "visibility": "private",
         "archived": False,
@@ -354,9 +354,9 @@ async def test_installation_reconciliation_makes_no_call_for_a_gated_repository(
     reconciler = service.GitHubReconciler(engine, harness.app.state.github_client)
     await reconciler.reconcile_installation(INSTALLATION_ID, scope_id=scope_id)
 
-    per_repo = [call for call in fake.calls if "Datalake-Platform-GUI" in call]
+    per_repo = [call for call in fake.calls if "Gated-Fixture" in call]
     assert per_repo == [], f"reconciliation touched a gated repository: {per_repo}"
-    assert (await _repository(engine, DATALAKE_ID))["onboarding_state"] == "blocked"
+    assert (await _repository(engine, GATED_ID))["onboarding_state"] == "blocked"
 
 
 # --- §8 partial evidence cannot be promoted by a webhook -----------------

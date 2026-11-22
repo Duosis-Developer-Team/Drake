@@ -19,7 +19,7 @@ from drake_api.github_app import service
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (  # noqa: F401 - imported helpers
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     LOGISLOT_ID,

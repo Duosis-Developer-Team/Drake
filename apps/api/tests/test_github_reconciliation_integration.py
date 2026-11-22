@@ -15,7 +15,7 @@ from drake_api.github_app.client import GitHubContractError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from test_github_integration import (
-    DATALAKE_ID,
+    GATED_ID,
     HERMES_ID,
     INSTALLATION_ID,
     LOGISLOT_ID,
@@ -239,7 +239,7 @@ async def test_a_failed_reconciliation_does_not_mark_anything_ready(
     assert ready == 0
 
 
-async def test_a_truncated_event_including_datalake_makes_no_call_for_it(
+async def test_a_truncated_event_including_a_gated_repository_makes_no_call_for_it(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     """The gate holds through the reconciliation path too."""
@@ -248,10 +248,10 @@ async def test_a_truncated_event_including_datalake_makes_no_call_for_it(
 
     repositories = [
         {
-            "id": DATALAKE_ID,
-            "node_id": "R_datalake",
-            "name": "Datalake-Platform-GUI",
-            "full_name": f"{OWNER}/Datalake-Platform-GUI",
+            "id": GATED_ID,
+            "node_id": "R_gated",
+            "name": "Gated-Fixture",
+            "full_name": f"{OWNER}/Gated-Fixture",
             "private": True,
         },
         *_hostile(100),
@@ -267,14 +267,14 @@ async def test_a_truncated_event_including_datalake_makes_no_call_for_it(
     reconciler = service.GitHubReconciler(engine, harness.app.state.github_client)
     await service.drain_reconciliation_jobs(engine, reconciler)
 
-    datalake_calls = [call for call in fake.calls if "Datalake" in call]
-    assert datalake_calls == [], f"the gate was bypassed by reconciliation: {datalake_calls}"
+    gated_calls = [call for call in fake.calls if "Gated-Fixture" in call]
+    assert gated_calls == [], f"the gate was bypassed by reconciliation: {gated_calls}"
 
     async with engine.connect() as connection:
         state = (
             await connection.execute(
                 text("SELECT onboarding_state FROM github_repositories WHERE external_id = :id"),
-                {"id": DATALAKE_ID},
+                {"id": GATED_ID},
             )
         ).scalar_one()
     assert state == "blocked"

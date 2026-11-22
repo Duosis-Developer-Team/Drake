@@ -336,6 +336,22 @@ class Settings(BaseSettings):
     github_app_private_key_file: str = ""
     github_webhook_secret_file: str = ""
     github_api_base_url: str = "https://api.github.com"
+    # Repositories (owner/name) closed by a manual security gate: BLOCKED,
+    # never read, never reconciled. Empty in every deployment today; a gate
+    # is a values change, not a release.
+    github_gated_repositories: list[str] = []
+
+    @field_validator("github_gated_repositories")
+    @classmethod
+    def _github_gated_repositories(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for full_name in value:
+            name = full_name.strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}", name):
+                raise ValueError(f"not an owner/name repository: {full_name!r}")
+            cleaned.append(name)
+        return cleaned
+
     github_http_timeout_seconds: float = 10.0
     # JWT lifetime stays under GitHub's hard 10-minute ceiling.
     github_jwt_ttl_seconds: int = 540

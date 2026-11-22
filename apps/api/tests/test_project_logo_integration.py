@@ -193,7 +193,7 @@ async def test_gated_repository_makes_no_provider_call(engine: AsyncEngine, tmp_
     async with engine.begin() as connection:
         await connection.execute(
             text(
-                "UPDATE github_repositories SET security_gate = 'manual_env_review' "
+                "UPDATE github_repositories SET security_gate = 'manual_review' "
                 "WHERE external_id = :id"
             ),
             {"id": HERMES_ID},

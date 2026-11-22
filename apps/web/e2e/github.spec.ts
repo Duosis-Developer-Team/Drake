@@ -22,7 +22,7 @@ const INSTALLATION_ID = 55501;
 const REPOSITORIES = [
   { id: 900001, name: "Hermes", private: true },
   { id: 900002, name: "logislot", private: true },
-  { id: 900003, name: "Datalake-Platform-GUI", private: true },
+  { id: 900003, name: "Gated-Fixture", private: true },
   { id: 900004, name: "Fikir-Sepeti", private: true },
 ].map((repo) => ({
   ...repo,
@@ -130,19 +130,19 @@ test("a signed installation delivery onboards the catalog", async ({ page }) => 
   }
 });
 
-test("the Datalake manual security gate blocks onboarding and every upstream call", async ({
+test("a manual security gate blocks onboarding and every upstream call", async ({
   page,
 }) => {
   await signInAs(page, "user-owner");
   await page.goto("/integrations/github");
   await expect(page.getByTestId("repository-list")).toBeVisible();
 
-  const datalake = page
+  const gated = page
     .getByTestId("repository-card")
-    .filter({ hasText: "Datalake-Platform-GUI" });
-  await expect(datalake.getByText("blocked", { exact: true })).toBeVisible();
-  await expect(datalake.getByTestId("security-gate-warning")).toBeVisible();
-  await expect(datalake.getByTestId("reconcile-button")).toBeDisabled();
+    .filter({ hasText: "Gated-Fixture" });
+  await expect(gated.getByText("blocked", { exact: true })).toBeVisible();
+  await expect(gated.getByTestId("security-gate-warning")).toBeVisible();
+  await expect(gated.getByTestId("reconcile-button")).toBeDisabled();
 
   const request = page.request;
   // The gate is enforced by the API too, not only by a disabled button —
@@ -152,7 +152,7 @@ test("the Datalake manual security gate blocks onboarding and every upstream cal
   const body = (await listed.json()) as {
     repositories: { id: string; full_name: string; onboarding_state: string }[];
   };
-  const row = body.repositories.find((entry) => entry.full_name.endsWith("Datalake-Platform-GUI"))!;
+  const row = body.repositories.find((entry) => entry.full_name.endsWith("Gated-Fixture"))!;
   expect(row.onboarding_state).toBe("blocked");
 
   const refused = await reconcile(page, row.id);
@@ -489,8 +489,8 @@ test("onboarding refuses the gated repository and leaks nothing", async ({ page 
   const listed = (await (
     await request.get("/v1/integrations/github/repositories?limit=50")
   ).json()) as { repositories: { id: string; full_name: string }[] };
-  const datalake = listed.repositories.find((r) =>
-    r.full_name.endsWith("Datalake-Platform-GUI"),
+  const gated = listed.repositories.find((r) =>
+    r.full_name.endsWith("Gated-Fixture"),
   )!;
   const csrf = await csrfToken(page);
   const before = await fakeGitHubCalls(request);
@@ -500,7 +500,7 @@ test("onboarding refuses the gated repository and leaks nothing", async ({ page 
   // to touch the repository, so that is where it refuses.
   const opened = await request.post("/v1/onboarding/sessions", {
     headers: { "x-csrf-token": csrf },
-    data: { repository_id: datalake.id },
+    data: { repository_id: gated.id },
     failOnStatusCode: false,
   });
   expect([201, 409]).toContain(opened.status());
@@ -522,7 +522,7 @@ test("onboarding refuses the gated repository and leaks nothing", async ({ page 
   await signInAs(page, "user-plain");
   const denied = await page.request.post("/v1/onboarding/sessions", {
     headers: { "x-csrf-token": await csrfToken(page) },
-    data: { repository_id: datalake.id },
+    data: { repository_id: gated.id },
     failOnStatusCode: false,
   });
   expect(denied.status()).toBe(404);
