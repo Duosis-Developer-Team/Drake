@@ -89,12 +89,11 @@ export function isPortrait(personKey: string): boolean {
   return portraits.has(personKey);
 }
 
-async function dataUrl(blob: Blob): Promise<string | null> {
+function dataUrl(type: string, bytes: Uint8Array): string | null {
   try {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
     let binary = "";
     for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    return `data:${blob.type};base64,${btoa(binary)}`;
+    return `data:${type};base64,${btoa(binary)}`;
   } catch {
     return null;
   }
@@ -117,13 +116,14 @@ export function loadAvatar(personKey: string): Promise<string | null> {
       try {
         const response = await fetch(avatarUrl(personKey), { credentials: "include" });
         if (response.status !== 200) return null;
-        const blob = await response.blob();
         if (response.headers.get("X-Tracesis-Avatar") === "portrait") {
-          if (!PORTRAIT_TYPES.has(blob.type)) return null;
-          const url = await dataUrl(blob);
+          const type = (response.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+          if (!PORTRAIT_TYPES.has(type)) return null;
+          const url = dataUrl(type, new Uint8Array(await response.arrayBuffer()));
           if (url) portraits.add(personKey);
           return url;
         }
+        const blob = await response.blob();
         if (blob.type !== "image/png" && blob.type !== "image/jpeg") return null;
         const url = URL.createObjectURL(blob);
         try {
