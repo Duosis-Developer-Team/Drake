@@ -57,11 +57,18 @@ obi:
   # namespaces (frontend, minio, clamav) has no SDK and stays with OBI.
   # hermes-dev was briefly out of the list that morning; it is back, so
   # its frontend and minio are traced again.
+  #
+  # 2026-11-22: drake-prod joins. Tracesis is now a catalog project (it
+  # watches itself) and its services showed logs but no requests, because
+  # nothing traced them. Its pods run on node2, so OBI sees them. drake-otel
+  # stays OUT on purpose: tracing the collector and the store would trace
+  # the export of its own spans, a loop that only grows.
   namespaces:
     - hermes-dev
     - logislot-dev
     - hermes-test
     - fikirsepeti-prod
+    - drake-prod
   # Exact names, checked by validate.sh: a workload is added here the day it
   # ships an SDK, not before, so nothing goes untraced in between.
   sdkWorkloads:
