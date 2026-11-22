@@ -84,6 +84,7 @@ export const shell = defineMessages({
     breadcrumb: {
       label: "Breadcrumb",
       commandCenter: "Overview",
+      back: "Back",
     },
     identity: {
       accountMenu: "Account menu",
@@ -252,6 +253,7 @@ export const shell = defineMessages({
     breadcrumb: {
       label: "Sayfa yolu",
       commandCenter: "Genel bakış",
+      back: "Geri",
     },
     identity: {
       accountMenu: "Hesap menüsü",
