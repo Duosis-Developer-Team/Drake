@@ -565,6 +565,13 @@ table,
   }
 }
 
+@keyframes rise-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+
 @keyframes scale-in {
   from {
     transform: scale(0.97);
@@ -593,6 +600,14 @@ table,
   }
   to {
     transform: scaleX(1);
+  }
+}
+@keyframes signin-drop {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
   }
 }
 @keyframes signin-float {

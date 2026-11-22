@@ -256,7 +256,7 @@ export function DashboardScreen({ environmentId }: { environmentId: string }) {
       <div className={s.root}>
         <div className={s.head}>
           <div>
-            <Link href="/dashboards" className={s.back}><ArrowLeft size={14} />{t("all")}</Link>
+            <Link href={`/dashboards?project=${dashboard.project_id}`} className={s.back}><ArrowLeft size={14} />{t("all")}</Link>
             <div className={s.headMain}>
             <ProjectLogo projectId={dashboard.project_id} name={dashboard.project_name} size="lg" variant="mark" />
             <div className="min-w-0">

@@ -92,6 +92,7 @@ export const serviceHealth = defineMessages({
       description: "Every service in your scope, bound or not, worst first.",
       view: {
         label: "View",
+        apps: "Apps",
         list: "List",
         map: "Map",
       },
@@ -434,6 +435,7 @@ export const serviceHealth = defineMessages({
       description: "Kapsamınızdaki her servis, bağlı olsun olmasın, önce sorunlu olanlar.",
       view: {
         label: "Görünüm",
+        apps: "Uygulamalar",
         list: "Liste",
         map: "Harita",
       },

@@ -2,7 +2,7 @@
  * The environment dashboard draws the overview read in the approved layout,
  * finds what needs attention, and saves a changed layout as a new version.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import DashboardsPage from "@/app/dashboards/page";
@@ -87,11 +87,15 @@ const DEPLOY = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("dashboards", () => {
-  it("lists the environments with services", async () => {
+  it("lists the environments with services, reached through their app", async () => {
     routes();
     render(<SessionProvider><DashboardsPage /></SessionProvider>);
-    expect(await screen.findByText("Hermes · test")).toBeInTheDocument();
-    expect(screen.getByText("2 services")).toBeInTheDocument();
+    // One app: its environments are open straight away, each linking to
+    // its dashboard and saying how many services it has.
+    const card = await screen.findByTestId("env-hermes-test");
+    expect(card).toHaveAttribute("href", "/dashboards/e1");
+    expect(within(card).getByText("2 services")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Hermes/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("draws the overview, the services and what needs attention", async () => {
