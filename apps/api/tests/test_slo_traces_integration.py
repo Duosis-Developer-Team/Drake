@@ -315,6 +315,11 @@ async def test_objectives_are_defined_changed_and_removed_in_the_screen(
         )
         assert stale.status_code == 409
 
+        # The detail page reads the objective with what happened around it;
+        # an objective bound to a service reads that service's rollouts.
+        detail = await client.get(f"/v1/slo/{slo_id}")
+        assert detail.status_code == 200, detail.text
+
         # A manifest objective is the manifest's.
         assert (
             await client.delete(f"/v1/slo/{manifest}", headers=await _csrf(client))

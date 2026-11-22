@@ -657,11 +657,11 @@ async def slo_context(
                 await connection.execute(
                     text(
                         """
-                        SELECT r.id, r.observed_at, r.rollout_state, r.evidence_state,
-                               r.generation
+                        SELECT r.id, r.rollout_started_at, r.rollout_state, r.evidence_state,
+                               r.observed_generation
                         FROM deployment_revisions r
                         WHERE r.environment_service_id = :es
-                        ORDER BY r.observed_at DESC
+                        ORDER BY r.rollout_started_at DESC
                         LIMIT 5
                         """
                     ),
