@@ -272,6 +272,8 @@ export function EnvCard({
   onSelect,
   active = false,
   cta,
+  stats,
+  series,
 }: {
   env: PlatformEnv;
   pulse: Pulse | null;
@@ -281,6 +283,10 @@ export function EnvCard({
   onSelect?: () => void;
   active?: boolean;
   cta?: string;
+  /** Figures to show instead of the traffic ones (Logs shows log lines). */
+  stats?: { label: string; value: string; tone?: string }[];
+  /** A series to draw instead of requests per bucket. */
+  series?: { values: number[]; colour?: string } | null;
 }) {
   const t = useT("apps");
   const ts = useT("serviceHealth");
@@ -288,6 +294,14 @@ export function EnvCard({
   const kind = envKind(env.key);
   const colour = KIND_COLOUR[kind];
   const errorRatio = pulse?.requests ? (pulse.errors ?? 0) / pulse.requests : null;
+  const drawn =
+    series !== undefined
+      ? series && series.values.length > 1 && series.values.some((v) => v > 0)
+        ? series
+        : null
+      : pulse && pulse.perBucket.length > 1 && pulse.requests
+        ? { values: pulse.perBucket, colour: kind === "prod" ? "var(--gold)" : "var(--brand-accent)" }
+        : null;
   const body = (
     <>
       <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: colour }} />
@@ -307,8 +321,8 @@ export function EnvCard({
       </div>
 
       <div className="relative mt-4 -mx-1">
-        {pulse && pulse.perBucket.length > 1 && pulse.requests ? (
-          <Sparkline values={pulse.perBucket} height={52} colour={kind === "prod" ? "var(--gold)" : "var(--brand-accent)"} />
+        {drawn ? (
+          <Sparkline values={drawn.values} height={52} colour={drawn.colour ?? "var(--brand-accent)"} />
         ) : (
           <div className="grid h-[52px] place-items-center rounded-lg border border-dashed border-border text-micro text-ink-muted">
             {pending ? t("trafficPending") : t("noTraffic")}
@@ -316,6 +330,18 @@ export function EnvCard({
         )}
       </div>
 
+      {stats ? (
+        <dl className="mt-4 grid grid-cols-3 gap-3">
+          {stats.map((stat) => (
+            <div key={stat.label} className="min-w-0">
+              <dt className="truncate text-[11px] text-ink-muted">{stat.label}</dt>
+              <dd data-tabular className={`mt-0.5 truncate font-mono text-[0.9375rem] font-semibold ${stat.tone ?? (stat.value === "—" ? "text-ink-muted" : "text-ink")}`}>
+                {stat.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
       <dl className="mt-4 grid grid-cols-3 gap-3">
         <div>
           <dt className="text-[11px] text-ink-muted">{t("stat.requests")}</dt>
@@ -341,6 +367,7 @@ export function EnvCard({
           </dd>
         </div>
       </dl>
+      )}
 
       <div className="mt-4 flex items-center gap-3 border-t border-border pt-3.5">
         <HealthBar tally={env.tally} className="max-w-[7rem]" />
