@@ -15,9 +15,10 @@
  * header, and they would land after the page already had.
  */
 
-import { ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { useCrumbLabels } from "@/lib/crumbs";
 import { useT, type Translator } from "@/lib/i18n";
@@ -54,7 +55,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   traces: "Traces",
 };
 
-/** Routes that exist as pages; anything else is rendered as plain text. */
+/** Routes that exist as pages. Static ones by path; entity pages by shape. */
 const LINKABLE = new Set<string>([
   ...NAV_ITEMS.map((item) => item.href),
   "/notifications",
@@ -62,6 +63,30 @@ const LINKABLE = new Set<string>([
   "/integrations/github",
   "/service-health/bind",
 ]);
+
+/** Every `[id]` route in `app/`, as the shape of its path. */
+const ENTITY_ROUTES: RegExp[] = [
+  /^\/agents\/[^/]+$/,
+  /^\/agents\/[^/]+\/runs\/[^/]+$/,
+  /^\/alerts\/[^/]+$/,
+  /^\/clusters\/[^/]+$/,
+  /^\/clusters\/[^/]+\/inventory$/,
+  /^\/clusters\/[^/]+\/inventory\/[^/]+$/,
+  /^\/dashboards\/[^/]+$/,
+  /^\/deployments\/[^/]+$/,
+  /^\/incidents\/[^/]+$/,
+  /^\/onboarding\/[^/]+$/,
+  /^\/projects\/[^/]+$/,
+  /^\/projects\/[^/]+\/environments\/[^/]+$/,
+  /^\/projects\/[^/]+\/environments\/[^/]+\/services\/[^/]+$/,
+  /^\/protection\/[^/]+$/,
+  /^\/service-health\/[^/]+$/,
+  /^\/slo\/[^/]+$/,
+];
+
+export function isPage(path: string): boolean {
+  return LINKABLE.has(path) || ENTITY_ROUTES.some((route) => route.test(path));
+}
 
 export interface Crumb {
   label: string;
@@ -82,14 +107,19 @@ export function buildCrumbs(
 
   const crumbs: Crumb[] = [];
   let path = "";
+  // The nearest ancestor that is a page: a grouping segment with no page of
+  // its own ("Environments" under a project) opens the page that lists it.
+  let lastPage: string | null = null;
   for (const segment of segments) {
     path += `/${segment}`;
     const source = SEGMENT_LABELS[segment];
     const known = source === undefined ? undefined : t ? t.dyn("crumb", segment, source) : source;
     const published = known ? undefined : labelFor(decodeURIComponent(segment));
+    const page = isPage(path);
+    if (page) lastPage = path;
     crumbs.push({
       label: known ?? published ?? decodeURIComponent(segment),
-      href: LINKABLE.has(path) ? path : null,
+      href: page ? path : lastPage,
       // An identifier reads as a value; a name the page published reads as a
       // word, and takes the same type as the rest of the trail.
       mono: !known && !published,
@@ -100,14 +130,47 @@ export function buildCrumbs(
   return crumbs;
 }
 
+/**
+ * How many pages this tab has shown inside the app. Back goes back only when
+ * there is somewhere in the app to go back to; a page opened from a link
+ * goes up to its parent instead of leaving Tracesis.
+ */
+let visited = 0;
+
+function BackButton({ parent }: { parent: string | null }) {
+  const t = useT("shell");
+  const router = useRouter();
+  const pathname = usePathname() || "/";
+  const [inApp, setInApp] = useState(false);
+  useEffect(() => {
+    visited += 1;
+    setInApp(visited > 1);
+  }, [pathname]);
+  if (!inApp && !parent) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => (inApp ? router.back() : parent && router.push(parent))}
+      aria-label={t("breadcrumb.back")}
+      title={t("breadcrumb.back")}
+      data-testid="nav-back"
+      className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+    >
+      <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
 export function Breadcrumbs() {
   const pathname = usePathname() || "/";
   const labelFor = useCrumbLabels();
   const t = useT("shell");
   const crumbs = buildCrumbs(pathname, labelFor, t);
+  const parent = crumbs.length > 1 ? crumbs[crumbs.length - 2].href : null;
 
   return (
-    <nav aria-label={t("breadcrumb.label")} className="min-w-0">
+    <nav aria-label={t("breadcrumb.label")} className="flex min-w-0 items-center">
+      <BackButton parent={parent} />
       <ol className="flex min-w-0 items-center gap-1 text-caption">
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1;
