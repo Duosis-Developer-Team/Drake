@@ -73,7 +73,7 @@ test("language: the sign-in screen and the search palette are translated too", a
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Tekrar hoş geldin" })).toBeVisible();
   // The marketing panel beside the form is translated too.
-  await expect(page.getByTestId("signin-hero")).toContainText("Her servisi, her izi");
+  await expect(page.getByTestId("signin-hero")).toContainText("Her servis, her iz");
   await expect(page.getByRole("link", { name: "Giriş yap" })).toBeVisible();
 
   await signIn(page);
