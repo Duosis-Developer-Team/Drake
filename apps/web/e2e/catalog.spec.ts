@@ -44,6 +44,8 @@ test("owner: full catalog walk — projects → overview → environment → ser
   await expect(page.getByTestId("catalog-counts")).toContainText("Projects");
 
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await expect(page.getByTestId("project-list")).toBeVisible();
   await expect(page.getByTestId("project-list")).toContainText("Alpha");
   await expect(page.getByTestId("project-list")).toContainText("Beta");
@@ -89,6 +91,8 @@ test("narrow environment user: only own environment/service; siblings 404", asyn
   await signInAs(page, "user-env");
 
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await expect(page.getByTestId("project-list")).toBeVisible();
   await expect(page.getByTestId("project-list")).toContainText("Alpha");
   await expect(page.getByTestId("project-list")).not.toContainText("Beta");
@@ -211,6 +215,8 @@ test("owner: the portfolio risk map's health filter round-trips through the URL,
 }) => {
   await signInAs(page, "user-owner");
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await expect(page.getByTestId("project-risk-map")).toBeVisible();
 
   // Neither fixture project has a bound workload in this lightweight stack,
@@ -240,6 +246,8 @@ test("narrow environment user: project topology shows only the authorized enviro
 }) => {
   await signInAs(page, "user-env");
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
 
@@ -251,7 +259,7 @@ test("narrow environment user: project topology shows only the authorized enviro
 
 test("catalog accessibility smoke: no critical violations", async ({ page }) => {
   await signInAs(page, "user-owner");
-  await page.goto("/projects");
+  await page.goto("/projects?view=list");
   await expect(page.getByTestId("project-list")).toBeVisible();
   const listScan = await new AxeBuilder({ page }).analyze();
   expect(listScan.violations.filter((v) => v.impact === "critical")).toEqual([]);

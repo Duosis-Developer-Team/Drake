@@ -39,6 +39,7 @@ export const apps = defineMessages({
     openDashboard: "Open dashboard",
     unbound: "Not bound to a workload",
     bind: "Bind",
+    openProject: "Open project",
   },
   tr: {
     title: "Uygulamalar",
@@ -73,5 +74,6 @@ export const apps = defineMessages({
     openDashboard: "Panoyu aç",
     unbound: "Bir iş yüküne bağlı değil",
     bind: "Bağla",
+    openProject: "Projeyi aç",
   },
 });

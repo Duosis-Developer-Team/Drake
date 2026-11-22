@@ -20,8 +20,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useMemo } from "react";
 
-import { AppGrid, AppShelf, EnvCard, EnvGrid } from "@/components/apps/AppLauncher";
-import { ServiceCard } from "@/components/apps/ServiceCard";
+import { ServicesLauncher, sortServiceRows } from "@/components/apps/ServicesLauncher";
 import { LoadGate, useApi } from "@/components/catalog/primitives";
 import {
   BindingStateBadge,
@@ -53,8 +52,6 @@ import {
   type SignalPage,
   type SignalVerdict,
 } from "@/lib/signals";
-import { answered } from "@/lib/dashboards";
-import { groupApps, pulseOf, usePlatformOverview, useProjectNames } from "@/lib/platform";
 import { useResource } from "@/lib/useResource";
 import { ProjectLogo } from "@/components/ui/ProjectLogo";
 
@@ -108,20 +105,7 @@ function useFilters(): [Filters, (patch: Partial<Filters>) => void] {
   return [filters, update];
 }
 
-const TONE_RANK: Record<string, number> = { critical: 0, warning: 1, success: 2 };
-
-function sortRows(rows: ServiceHealthRow[], signals: Map<string, SignalItem>): ServiceHealthRow[] {
-  const verdict = (row: ServiceHealthRow) => {
-    const item = row.binding ? signals.get(row.binding.id) : undefined;
-    return item ? (TONE_RANK[judgeSignal(item).tone] ?? 3) : 3;
-  };
-  return [...rows].sort(
-    (a, b) =>
-      STATUS_ORDER.indexOf(a.health.status) - STATUS_ORDER.indexOf(b.health.status) ||
-      verdict(a) - verdict(b) ||
-      (a.display_name || a.service_key).localeCompare(b.display_name || b.service_key),
-  );
-}
+const sortRows = sortServiceRows;
 
 function Cell({ label, children, align = "right" }: { label: string; children: React.ReactNode; align?: "left" | "right" }) {
   return (
@@ -576,87 +560,6 @@ function ServicesBody({ data }: { data: ServiceHealthPage }) {
           </div>
         </Panel>
       )}
-    </div>
-  );
-}
-
-/**
- * Apps, then the chosen app's environments, then that environment's
- * services as cards. Project and environment are the same URL filters the
- * list uses, so switching views keeps the place.
- */
-function ServicesLauncher({
-  rows,
-  signalById,
-  project,
-  environment,
-  onProject,
-  onEnvironment,
-}: {
-  rows: ServiceHealthRow[];
-  signalById: Map<string, SignalItem>;
-  project: string;
-  environment: string;
-  onProject: (project: string) => void;
-  onEnvironment: (environment: string) => void;
-}) {
-  const ta = useT("apps");
-  const names = useProjectNames();
-  const apps = useMemo(() => groupApps(rows, names), [rows, names]);
-  const { overview, failed } = usePlatformOverview(rows);
-  const traffic = answered(overview?.traffic);
-
-  const selected = apps.find((a) => a.projectId === project) ?? (apps.length === 1 ? apps[0] : null);
-  const env =
-    selected?.envs.find((e) => e.environmentId === environment) ??
-    (selected && selected.envs.length === 1 ? selected.envs[0] : null);
-  const services = env ? sortRows(env.rows, signalById) : [];
-
-  return (
-    <div className="flex flex-col gap-6" data-testid="services-launcher">
-      <AppGrid apps={apps} selectedId={selected?.projectId ?? null} onSelect={(id) => onProject(id ?? "")} />
-      {selected ? (
-        <AppShelf key={selected.projectId} app={selected} onClose={() => onProject("")} title={ta("pickEnv")}>
-          <EnvGrid>
-            {selected.envs.map((e) => (
-              <EnvCard
-                key={e.environmentId}
-                env={e}
-                pulse={pulseOf(overview, e.bindingIds)}
-                pending={!overview && !failed}
-                active={env?.environmentId === e.environmentId}
-                onSelect={() => onEnvironment(env?.environmentId === e.environmentId ? "" : e.environmentId)}
-                cta={ta("pickService")}
-              />
-            ))}
-          </EnvGrid>
-          {env ? (
-            <div className="mt-6" key={env.environmentId}>
-              <h3 className="mb-3 flex items-baseline gap-2 text-[0.9375rem] font-semibold text-ink">
-                {ta("pickService")}
-                <span className="font-mono text-micro font-normal text-ink-muted">
-                  {selected.projectKey}/{env.key} · {ta("services", { count: services.length })}
-                </span>
-              </h3>
-              <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {services.map((row, i) => (
-                  <ServiceCard
-                    key={row.environment_service_id}
-                    row={row}
-                    index={i}
-                    item={row.binding ? signalById.get(row.binding.id) : undefined}
-                    traffic={
-                      row.binding
-                        ? (traffic?.find((x) => x.binding_id === row.binding!.id)?.buckets.map((b) => b.requests) ?? null)
-                        : null
-                    }
-                  />
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </AppShelf>
-      ) : null}
     </div>
   );
 }

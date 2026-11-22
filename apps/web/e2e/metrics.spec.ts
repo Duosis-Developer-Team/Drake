@@ -78,6 +78,8 @@ async function setProviderMode(page: Page, mode: "ok" | "fail" | "slow") {
 
 async function openAlphaOverview(page: Page) {
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
 }
@@ -193,6 +195,8 @@ test("provider outage: stale last-good, then honest unavailable with correlation
 test("beta project: telemetry honestly not configured", async ({ page }) => {
   await signInAs(page, "user-beta"); // Developer @ project beta (dedicated)
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await page.getByTestId("project-list").getByText("Beta", { exact: true }).click();
   const metrics = page.getByTestId("project-metrics");
   await expect(metrics.getByTestId("state-not-configured").first()).toBeVisible();
@@ -205,6 +209,8 @@ test("narrow environment grant: selector offers only the authorized environment"
 }) => {
   await signInAs(page, "user-env"); // Developer @ alpha/dev only
   await page.getByRole("link", { name: "Projects", exact: true }).click();
+  // Projects open on the apps; these steps read the catalogue list.
+  await page.getByRole("radio", { name: "List" }).click();
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   const metrics = page.getByTestId("project-metrics");
   await expect(metrics).toBeVisible();
@@ -233,7 +239,7 @@ test("keyboard access and axe on the metrics screens", async ({ page }) => {
 test("mobile 390px: dashboards render without horizontal overflow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signInAs(page, "user-owner");
-  await page.goto("/projects");
+  await page.goto("/projects?view=list");
   await page.getByTestId("project-list").getByText("Alpha", { exact: true }).click();
   await expect(page.getByTestId("project-metrics")).toBeVisible();
   // The range control is hidden below sm — URL state still works (and keeps
