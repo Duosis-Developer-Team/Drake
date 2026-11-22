@@ -34,6 +34,11 @@ data:
           http:
             endpoint: 0.0.0.0:4319
             traces_url_path: /otlp/v1/traces
+            # Claude Code sends its usage as metrics and events (log
+            # records); both come through the same door, and only Claude
+            # Code's are kept (filter/claude-code below).
+            logs_url_path: /otlp/v1/logs
+            metrics_url_path: /otlp/v1/metrics
             auth:
               authenticator: bearertokenauth/external
       {{- end }}
@@ -112,6 +117,50 @@ data:
             - 'IsMatch(event_name, "^gen_ai\\.")'
             - 'IsMatch(attributes["event.name"], "^gen_ai\\.")'
       {{- if .Values.gateway.externalIngest.enabled }}
+      # --- Development agents (Agent Visibility: coding agents) ------------
+      # Claude Code's own telemetry: counts, cost, tokens, tool names and
+      # durations. Through the external door only Claude Code is accepted,
+      # and only what says which catalog project it worked on is useful —
+      # Tracesis keeps the rest out at ingest.
+      filter/claude-code:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'resource.attributes["service.name"] != "claude-code"'
+            # Content-bearing events, whole: answers and raw API bodies.
+            - 'IsMatch(attributes["event.name"], "^(claude_code\\.)?(assistant_response|api_request_body|api_response_body|system_prompt)$")'
+        metrics:
+          metric:
+            - 'resource.attributes["service.name"] != "claude-code"'
+      # Never kept from Claude Code: the person's email (a standard attribute
+      # on every record), prompt and answer text, tool parameters and inputs,
+      # error text, workspace paths. Names, counts, durations and models stay.
+      transform/claude-code:
+        error_mode: ignore
+        log_statements:
+          - context: resource
+            statements:
+              - delete_key(attributes, "user.email")
+              - delete_matching_keys(attributes, "^host\\.(name|id)$")
+          - context: log
+            statements:
+              - delete_key(attributes, "user.email")
+              - delete_key(attributes, "prompt")
+              - delete_key(attributes, "prompt_text")
+              - delete_key(attributes, "response")
+              - delete_key(attributes, "tool_parameters")
+              - delete_key(attributes, "tool_input")
+              - delete_key(attributes, "error")
+              - delete_key(attributes, "workspace.host_paths")
+              - set(body, "") where body != nil
+        metric_statements:
+          - context: resource
+            statements:
+              - delete_key(attributes, "user.email")
+              - delete_matching_keys(attributes, "^host\\.(name|id)$")
+          - context: datapoint
+            statements:
+              - delete_key(attributes, "user.email")
       resource/external:
         attributes:
           - key: tracesis.ingest
@@ -145,6 +194,23 @@ data:
         retry_on_failure:
           enabled: true
           max_elapsed_time: 120s
+      {{- if .Values.gateway.externalIngest.enabled }}
+      # Claude Code's counters (delta sums), for active time and lines.
+      clickhouse/metrics:
+        endpoint: tcp://drake-otel-clickhouse:9000
+        database: otel
+        username: drake_ingest
+        password: ${env:DRAKE_CH_INGEST_PASSWORD}
+        create_schema: true
+        ttl: {{ .Values.clickhouse.retention.logs }}
+        timeout: 10s
+        sending_queue:
+          enabled: true
+          queue_size: {{ .Values.gateway.queueSize }}
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+      {{- end }}
       clickhouse/traces:
         endpoint: tcp://drake-otel-clickhouse:9000
         database: otel
@@ -181,4 +247,12 @@ data:
           receivers: [otlp/external]
           processors: [memory_limiter, resource/external, gen_ai_normalizer, transform/genai-content, filter/genai-content, batch]
           exporters: [clickhouse/traces]
+        logs/external:
+          receivers: [otlp/external]
+          processors: [memory_limiter, filter/claude-code, transform/claude-code, filter/genai-content, transform/redact, resource/external, batch]
+          exporters: [clickhouse/logs]
+        metrics/external:
+          receivers: [otlp/external]
+          processors: [memory_limiter, filter/claude-code, transform/claude-code, resource/external, batch]
+          exporters: [clickhouse/metrics]
         {{- end }}

@@ -36,6 +36,8 @@ from drake_api.dashboards.router import router as dashboards_router
 from drake_api.db import dispose_engines, get_engine
 from drake_api.deployments.router import router as deployments_router
 from drake_api.deployments.worker import DeploymentIngestWorker
+from drake_api.dev_activity.collector import DevActivity
+from drake_api.dev_activity.router import router as dev_activity_router
 from drake_api.errors import register_error_handlers
 from drake_api.github_app.auth import GitHubAppAuth
 from drake_api.github_app.auth import validate_credentials as validate_github_credentials
@@ -113,6 +115,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     agent_guardrails = getattr(app.state, "agent_guardrails", None)
     if agent_guardrails is not None:
         await agent_guardrails.start()
+    dev_activity = getattr(app.state, "dev_activity", None)
+    if dev_activity is not None:
+        await dev_activity.start()
     protection_evaluator = getattr(app.state, "protection_evaluator", None)
     if protection_evaluator is not None:
         await protection_evaluator.start()
@@ -135,6 +140,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await agent_prices.stop()
         if agent_guardrails is not None:
             await agent_guardrails.stop()
+        if dev_activity is not None:
+            await dev_activity.stop()
         if sli_writer is not None:
             await sli_writer.stop()
         if protection_evaluator is not None:
@@ -352,6 +359,30 @@ def create_app(
         if settings.agent_guardrails_enabled and app.state.telemetry_redis is not None
         else None
     )
+    # Development agents: commits through the GitHub App, Claude Code's own
+    # usage from the store. Either half alone is useful; the loop runs when
+    # at least one source is there.
+    dev_source = github_client if settings.github_app_enabled else None
+    dev_store = (
+        app.state.observability_store
+        if settings.observability_traces_enabled and store_connector is not None
+        else None
+    )
+    app.state.dev_activity = (
+        DevActivity(
+            get_engine(settings),
+            app.state.telemetry_redis,
+            source=dev_source,
+            store=dev_store,
+            database=store_connector.database if store_connector is not None else "otel",
+            interval_seconds=settings.dev_activity_interval_seconds,
+            budget=settings.dev_activity_commit_budget,
+        )
+        if settings.dev_activity_enabled
+        and app.state.telemetry_redis is not None
+        and (dev_source is not None or dev_store is not None)
+        else None
+    )
     # Backup posture is judged on a timer too, so a reporter that falls
     # silent reads as overdue rather than as its last good report.
     app.state.protection_evaluator = (
@@ -418,6 +449,7 @@ def create_app(
     app.include_router(github_webhook_router)
     app.include_router(deployments_router)
     app.include_router(protection_router)
+    app.include_router(dev_activity_router)
     app.include_router(agents_router)
     app.include_router(protection_ingest_router)
     app.include_router(service_health_router)

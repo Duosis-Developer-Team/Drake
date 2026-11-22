@@ -120,6 +120,45 @@ def check(docs, by_kind, label, expect_obi):
     for key in ("user.id", "user.name", "user\\\\."):
         if key in content_rules:
             fail(f"{label}: gateway content removal must keep user.id and user.name")
+    # Coding agents' telemetry (Claude Code) through the external door: only
+    # Claude Code is accepted, and the person's email, prompt and answer
+    # text and tool parameters are removed before anything is stored.
+    # Checked against a real Claude Code 2.1.260 payload on 0.162.0.
+    for pname in ("logs/external", "metrics/external"):
+        pipe = gw["service"]["pipelines"].get(pname)
+        if pipe is None:
+            continue
+        for required in ("filter/claude-code", "transform/claude-code"):
+            if required not in pipe.get("processors", []):
+                fail(f"{label}: gateway {pname} must run {required}")
+    if any(p in gw["service"]["pipelines"] for p in ("logs/external", "metrics/external")):
+        cc = gw["processors"].get("transform/claude-code", {})
+
+        def deletes(statements, context):
+            return {
+                stmt.split('"')[1]
+                for group in statements
+                if group.get("context") == context
+                for stmt in group.get("statements", [])
+                if stmt.startswith("delete_key(attributes, ")
+            }
+
+        logs_cc = cc.get("log_statements", [])
+        metrics_cc = cc.get("metric_statements", [])
+        # The email is on the resource AND on every record: both levels.
+        for context in ("resource", "log"):
+            if "user.email" not in deletes(logs_cc, context):
+                fail(f"{label}: gateway must delete user.email from Claude Code events ({context})")
+        for context in ("resource", "datapoint"):
+            if "user.email" not in deletes(metrics_cc, context):
+                fail(f"{label}: gateway must delete user.email from Claude Code metrics ({context})")
+        for key in ("prompt", "prompt_text", "response", "tool_parameters", "tool_input"):
+            if key not in deletes(logs_cc, "log"):
+                fail(f"{label}: gateway must delete {key} from Claude Code events")
+        dropped = json.dumps(gw["processors"].get("filter/claude-code", {}))
+        for event in ("assistant_response", "api_request_body", "api_response_body"):
+            if event not in dropped:
+                fail(f"{label}: gateway must drop Claude Code {event} events")
     external = [r for r in gw["receivers"] if r.startswith("otlp/external")]
     for r in external:
         if not gw["receivers"][r]["protocols"]["http"].get("auth"):

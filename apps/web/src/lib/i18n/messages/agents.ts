@@ -98,7 +98,7 @@ export const agents = defineMessages({
       copy: "Copy",
       copied: "Copied",
     },
-    view: { label: "View", inventory: "Inventory", map: "Map", mcp: "MCP servers", governance: "Governance" },
+    view: { label: "View", inventory: "Inventory", map: "Map", mcp: "MCP servers", governance: "Governance", development: "Development" },
     mcpTeaser: {
       title: "{count} MCP server reporting",
       body: "No agent has reported yet, but the MCP servers agents call already do: their tools, their clients, how it went.",
@@ -448,7 +448,7 @@ export const agents = defineMessages({
       copy: "Kopyala",
       copied: "Kopyalandı",
     },
-    view: { label: "Görünüm", inventory: "Envanter", map: "Harita", mcp: "MCP sunucuları", governance: "Yönetişim" },
+    view: { label: "Görünüm", inventory: "Envanter", map: "Harita", mcp: "MCP sunucuları", governance: "Yönetişim", development: "Geliştirme" },
     mcpTeaser: {
       title: "{count} MCP sunucusu raporluyor",
       body: "Henüz rapor eden ajan yok ama ajanların çağırdığı MCP sunucuları raporluyor: araçları, istemcileri, nasıl gittiği.",

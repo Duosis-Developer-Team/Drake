@@ -136,6 +136,10 @@ spec:
               value: {{ (.Values.agents).pricesEnabled | default false | quote }}
             - name: DRAKE_AGENT_GUARDRAILS_ENABLED
               value: {{ (.Values.agents).guardrailsEnabled | default false | quote }}
+            # Development agents: commits via the GitHub App, Claude Code
+            # usage from the trace store (both states).
+            - name: DRAKE_DEV_ACTIVITY_ENABLED
+              value: {{ (.Values.agents).devActivityEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_ENABLED
               value: {{ (.Values.slo).evaluatorEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_INTERVAL_SECONDS
