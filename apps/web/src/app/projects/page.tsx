@@ -46,7 +46,7 @@ import {
   useToneLabel,
 } from "@/components/catalog/visuals";
 import { ProjectRiskMap } from "@/components/data-viz/ProjectRiskMap";
-import { OpenProjectLink, ServicesLauncher } from "@/components/apps/ServicesLauncher";
+import { Portfolio } from "@/components/apps/Portfolio";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { DataState } from "@/components/state/DataState";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
@@ -271,9 +271,10 @@ function ProjectsInner() {
   const lifecycle = params.get("lifecycle") ?? "active";
   const criticality = params.get("criticality") ?? "";
   const risk = params.get("risk");
-  // Apps first, as on Services; the catalogue list is one tap away.
-  const view = params.get("view") === "list" ? "list" : "apps";
+  // The portfolio first; the catalogue list is one tap away.
+  const view = params.get("view") === "list" ? "list" : "portfolio";
   const tv = useT("serviceHealth");
+  const tb = useT("boards");
   const [draft, setDraft] = useState(search);
 
   // Debounced: the search parameter is what drives the request, and typing
@@ -394,10 +395,10 @@ function ProjectsInner() {
             label={tv("list.view.label")}
             value={view}
             options={[
-              { value: "apps", label: tv("list.view.apps"), icon: LayoutGrid },
+              { value: "portfolio", label: tb("portfolio.viewPortfolio"), icon: LayoutGrid },
               { value: "list", label: tv("list.view.list"), icon: Rows3 },
             ]}
-            onChange={(next) => updateParams({ view: next === "apps" ? "" : next })}
+            onChange={(next) => updateParams({ view: next === "portfolio" ? "" : next })}
           />
         }
         meta={
@@ -417,17 +418,10 @@ function ProjectsInner() {
         }
       />
 
-      {view === "apps" && servicesCollection.loading && servicesCollection.items.length === 0 ? (
+      {view === "portfolio" && projectsCollection.loading && projects.length === 0 ? (
         <DataState kind="loading" />
-      ) : view === "apps" && servicesCollection.items.length > 0 ? (
-        <ServicesLauncher
-          rows={servicesCollection.items}
-          project={params.get("project_id") ?? ""}
-          environment={params.get("environment_id") ?? ""}
-          onProject={(project) => updateParams({ project_id: project, environment_id: "" })}
-          onEnvironment={(environment) => updateParams({ environment_id: environment })}
-          shelfAction={(projectId) => <OpenProjectLink projectId={projectId} />}
-        />
+      ) : view === "portfolio" && projects.length > 0 ? (
+        <Portfolio projects={projects} rows={servicesCollection.items} />
       ) : (
       <div className="flex flex-col gap-8">
         {projects.length > 0 ? (
