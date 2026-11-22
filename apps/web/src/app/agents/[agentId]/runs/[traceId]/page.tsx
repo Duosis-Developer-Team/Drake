@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { PersonChip } from "@/components/agents/People";
 import { RunWaterfall, StepDetail } from "@/components/agents/RunWaterfall";
 import { KpiTile } from "@/components/features/configure/kit";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
@@ -209,6 +210,12 @@ export default function RunPage() {
             {mine.length && agentName ? (
               <span>
                 {t("run.mine", { count: mine.length, name: agentName })}
+              </span>
+            ) : null}
+            {run.user ? (
+              <span className="inline-flex items-center gap-1.5">
+                {t("runs.user")}
+                <PersonChip person={run.user} />
               </span>
             ) : null}
           </>

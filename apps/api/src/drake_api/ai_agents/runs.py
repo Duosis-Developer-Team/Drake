@@ -47,7 +47,10 @@ from drake_api.ai_agents.discovery import (
     OP,
     PROVIDER,
     SVC,
+    USER_ID,
+    USER_NAME,
     WORKLOAD,
+    caller_of,
     identity_of,
     tokens,
 )
@@ -133,7 +136,9 @@ SELECT
     sumIf({tokens("gen_ai.usage.input_tokens")}, {OP} = 'invoke_agent') AS in_agent,
     sumIf({tokens("gen_ai.usage.output_tokens")}, {OP} = 'invoke_agent') AS out_agent,
     groupUniqArrayIf(4)({_MODEL}, {INFERENCE} AND {_MODEL} != '') AS models,
-    groupUniqArrayIf(6)({_TOOL}, {OP} = 'execute_tool' AND {_TOOL} != '') AS tools
+    groupUniqArrayIf(6)({_TOOL}, {OP} = 'execute_tool' AND {_TOOL} != '') AS tools,
+    argMinIf({USER_ID}, t.Timestamp, {USER_ID} != '') AS user_id,
+    argMinIf({USER_NAME}, t.Timestamp, {USER_NAME} != '') AS user_name
 FROM __DATABASE__.otel_traces AS t
 LEFT JOIN ({AGENT_OF_TRACE}) AS a ON a.TraceId = t.TraceId
 WHERE t.Timestamp >= {{start:DateTime64(9, 'UTC')}} AND t.Timestamp < {{end:DateTime64(9, 'UTC')}}
@@ -177,7 +182,9 @@ SELECT
     t.SpanAttributes['server.address'] AS server,
     t.SpanAttributes['error.type'] AS error_type,
     t.SpanAttributes['http.response.status_code'] AS http_status,
-    t.SpanAttributes['http.route'] AS http_route
+    t.SpanAttributes['http.route'] AS http_route,
+    {USER_ID} AS user_id,
+    {USER_NAME} AS user_name
 FROM __DATABASE__.otel_traces AS t
 LEFT JOIN ({AGENT_OF_TRACE} ) AS a ON a.TraceId = t.TraceId
 WHERE t.TraceId = {{trace_id:String}}
@@ -247,6 +254,15 @@ def _text(value: Any) -> str | None:
     return str(value) if value not in (None, "") else None
 
 
+def person(user_id: Any, user_name: Any) -> dict[str, Any] | None:
+    """Who a run or a call was for, when its spans say so: an id and a name,
+    never an email (`caller_of` drops one). None is unknown."""
+    caller = caller_of(user_id, user_name)
+    if caller is None:
+        return None
+    return {"key": caller.key, "id": caller.user_id, "name": caller.user_name}
+
+
 def normalize_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for row in rows:
@@ -266,6 +282,7 @@ def normalize_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "output_tokens": as_int(row.get("out_inf" if has_inf else "out_agent")),
                 "models": [str(m) for m in (row.get("models") or []) if m][:4],
                 "tools": [str(x) for x in (row.get("tools") or []) if x][:6],
+                "user": person(row.get("user_id"), row.get("user_name")),
             }
         )
     return out
@@ -293,6 +310,7 @@ class Run:
     duration_ms: float
     spans: list[dict[str, Any]]
     hidden: int
+    user: dict[str, Any] | None = None
 
 
 def assemble_run(
@@ -375,6 +393,18 @@ def assemble_run(
                 "http_route": _text(row.get("http_route")),
             }
         )
+    # The person the run was for: the first visible span that names one.
+    user = next(
+        (
+            found
+            for found in (
+                person(r.get("user_id"), r.get("user_name"))
+                for r, _ in sorted(shown.values(), key=lambda item: as_int(item[0].get("start_ns")))
+            )
+            if found
+        ),
+        None,
+    )
     first = min(shown.values(), key=lambda item: as_int(item[0].get("start_ns")))[0]
     started = datetime.fromtimestamp(as_int(first.get("start_ns")) / 1e9, tz=UTC)
     return Run(
@@ -383,4 +413,5 @@ def assemble_run(
         duration_ms=_ms(t1 - t0),
         spans=spans,
         hidden=len(rows) - len(shown),
+        user=user,
     )

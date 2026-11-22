@@ -248,6 +248,7 @@ async def agent_run(
         "started_at": run.started_at,
         "duration_ms": run.duration_ms,
         "hidden_spans": run.hidden,
+        "user": run.user,
         "truncated": len(rows) >= run_views.MAX_RUN_SPANS,
         "spans": run.spans,
     }

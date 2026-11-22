@@ -63,6 +63,7 @@ render -f values-drake-prod.yaml --set obi.enabled=false >"$OUT"
 render -f values-drake-prod.yaml "${OBI_SETS[@]}" >"$OUT_OBI"
 
 python3 - "$OUT" "$OUT_OBI" <<'PYEOF'
+import json
 import sys
 
 import yaml
@@ -112,6 +113,13 @@ def check(docs, by_kind, label, expect_obi):
                     fail(f"{label}: gateway {pname} must run {required}")
         if pname.startswith("logs") and "filter/genai-content" not in procs:
             fail(f"{label}: gateway {pname} must drop GenAI content events")
+    # Who called a tool (`user.id`, `user.name`) is not content: Agent
+    # Visibility reads it to say who used an MCP server. No content rule may
+    # delete it (the normaliser leaves it alone; checked against 0.162.0).
+    content_rules = json.dumps(gw["processors"].get("transform/genai-content", {}))
+    for key in ("user.id", "user.name", "user\\\\."):
+        if key in content_rules:
+            fail(f"{label}: gateway content removal must keep user.id and user.name")
     external = [r for r in gw["receivers"] if r.startswith("otlp/external")]
     for r in external:
         if not gw["receivers"][r]["protocols"]["http"].get("auth"):

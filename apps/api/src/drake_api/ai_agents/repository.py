@@ -940,10 +940,91 @@ async def list_mcp_servers(
         if i is not None:
             servers[str(sid)]["series"][i]["calls"] += int(calls)
             servers[str(sid)]["series"][i]["errors"] += int(errors)
+    await _mcp_users(connection, servers, params)
     for server in servers.values():
         server["tools"] = server["tools"][:20]
         server["clients"] = server["clients"][:10]
     return {"window": window, "servers": list(servers.values())}
+
+
+# The name a person was last seen with, across every row kept for them.
+_LATEST_NAME = (
+    "(array_agg(user_name ORDER BY last_seen_at DESC) FILTER (WHERE user_name IS NOT NULL))[1]"
+)
+
+
+def _person(row: Any) -> dict[str, Any]:
+    calls = int(row.calls)
+    return {
+        "key": row.caller_key,
+        "id": row.user_id,
+        "name": row.name,
+        "calls": calls,
+        "errors": int(row.errors),
+        "last_seen_at": row.last_seen.isoformat(),
+    }
+
+
+async def _mcp_users(
+    connection: AsyncConnection, servers: dict[str, dict[str, Any]], params: dict[str, Any]
+) -> None:
+    """Who used each server, and each of its tools and clients: the people
+    the calls name (`user.id` / `user.name`), with calls and when last
+    seen. `attributed_calls` says how many calls named someone at all, so
+    the rest reads as unknown — never as nobody."""
+    for server in servers.values():
+        server["users"] = []
+        server["attributed_calls"] = 0
+        for item in server["tools"] + server["clients"]:
+            item["users"] = []
+    rows = (
+        await connection.execute(
+            text(
+                f"""
+                SELECT server_id, caller_key, max(user_id) AS user_id,
+                       {_LATEST_NAME} AS name,
+                       sum(calls) AS calls, sum(errors) AS errors,
+                       max(last_seen_at) AS last_seen,
+                       (array_agg(DISTINCT client) FILTER (WHERE client <> '')) AS clients
+                FROM mcp_server_callers
+                WHERE server_id = ANY(:ids) AND hour >= :since
+                GROUP BY server_id, caller_key
+                ORDER BY calls DESC, last_seen DESC
+                """  # noqa: S608 - fixed fragments
+            ),
+            params,
+        )
+    ).all()
+    for row in rows:
+        server = servers[str(row.server_id)]
+        server["attributed_calls"] += int(row.calls)
+        if len(server["users"]) < 20:
+            server["users"].append({**_person(row), "clients": sorted(row.clients or [])[:5]})
+    for column, key in (("tool_name", "tools"), ("client", "clients")):
+        by_item: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in (
+            await connection.execute(
+                text(
+                    f"""
+                    SELECT server_id, {column} AS item, caller_key, max(user_id) AS user_id,
+                           {_LATEST_NAME} AS name,
+                           sum(calls) AS calls, sum(errors) AS errors,
+                           max(last_seen_at) AS last_seen
+                    FROM mcp_server_callers
+                    WHERE server_id = ANY(:ids) AND hour >= :since
+                    GROUP BY server_id, {column}, caller_key
+                    ORDER BY calls DESC, last_seen DESC
+                    """  # noqa: S608 - column from a fixed tuple
+                ),
+                params,
+            )
+        ).all():
+            people = by_item.setdefault((str(row.server_id), row.item or ""), [])
+            if len(people) < 5:
+                people.append(_person(row))
+        for sid, server in servers.items():
+            for item in server[key]:
+                item["users"] = by_item.get((sid, item["name"] or ""), [])
 
 
 async def price_status(connection: AsyncConnection, principal: Principal) -> dict[str, Any]:
