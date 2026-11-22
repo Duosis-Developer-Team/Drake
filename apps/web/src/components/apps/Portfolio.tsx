@@ -340,6 +340,7 @@ export function Portfolio({
           onProject={onProject}
           onEnvironment={onEnvironment}
           shelfAction={(id) => <OpenProjectLink projectId={id} />}
+          envHref={(projectId, environmentId) => `/projects/${projectId}/environments/${environmentId}`}
         />
       ) : null}
     </div>

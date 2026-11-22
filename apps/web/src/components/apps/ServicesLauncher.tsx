@@ -47,7 +47,11 @@ export function ServicesLauncher({
   onEnvironment,
   shelfAction,
   hideGrid = false,
+  envHref,
 }: {
+  /** Environment cards open this page instead of listing services
+   *  (Projects: the environment's own project page). */
+  envHref?: (projectId: string, environmentId: string) => string;
   rows: ServiceHealthRow[];
   /** The page draws its own app picker (Projects' portfolio cards). */
   hideGrid?: boolean;
@@ -99,13 +103,14 @@ export function ServicesLauncher({
                 env={e}
                 pulse={pulseOf(overview, e.bindingIds)}
                 pending={!overview && !failed}
-                active={env?.environmentId === e.environmentId}
-                onSelect={() => onEnvironment(env?.environmentId === e.environmentId ? "" : e.environmentId)}
-                cta={ta("pickService")}
+                active={!envHref && env?.environmentId === e.environmentId}
+                href={envHref ? envHref(selected.projectId, e.environmentId) : undefined}
+                onSelect={envHref ? undefined : () => onEnvironment(env?.environmentId === e.environmentId ? "" : e.environmentId)}
+                cta={envHref ? ta("openEnvironment") : ta("pickService")}
               />
             ))}
           </EnvGrid>
-          {env ? (
+          {env && !envHref ? (
             <div className="mt-6" key={env.environmentId}>
               <h3 className="mb-3 flex items-baseline gap-2 text-[0.9375rem] font-semibold text-ink">
                 {ta("pickService")}
