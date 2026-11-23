@@ -1,0 +1,129 @@
+{{- if .Values.metrics.enabled }}
+{{- include "drake-otel.require" . -}}
+{{- /*
+The OpenTelemetry metrics collector (ADR-0038, phase 1). Exactly one
+replica: two would report every cluster-level value twice.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drake-otel-metrics
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-drake-otel-metrics-read
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+# Read-only: what k8s_cluster, k8s_observer and kubeletstats read, and no
+# Secret, ConfigMap or write verb. Not `nodes/proxy`: read access to it has
+# been shown to reach a kubelet's exec, and kubeletstats needs only
+# `nodes/stats`. Not `events`: nothing here reads them.
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - namespaces/status
+      - nodes
+      - nodes/spec
+      - nodes/stats
+      - pods
+      - pods/status
+      - replicationcontrollers
+      - replicationcontrollers/status
+      - resourcequotas
+      - services
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-drake-otel-metrics-read
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-drake-otel-metrics-read
+subjects:
+  - kind: ServiceAccount
+    name: drake-otel-metrics
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drake-otel-metrics
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+    app.kubernetes.io/name: drake-otel-metrics
+spec:
+  # Fixed, not a value: a second replica would double every cluster-level
+  # metric. Recreate, so an upgrade never runs two side by side either.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: drake-otel-metrics
+  template:
+    metadata:
+      labels:
+        {{- include "drake-otel.podLabels" . | nindent 8 }}
+        app.kubernetes.io/name: drake-otel-metrics
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/metrics-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: drake-otel-metrics
+      # The collector authenticates to the API server and to each kubelet
+      # with this service account.
+      automountServiceAccountToken: true
+      # Next to the store by default, never on a node it was not given.
+      nodeSelector:
+        {{- toYaml (.Values.metrics.nodeSelector | default .Values.clickhouse.nodeSelector) | nindent 8 }}
+      {{- with .Values.metrics.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: collector
+          image: {{ include "drake-otel.image" (dict "root" . "name" "collector") }}
+          args: ["--config=/etc/otelcol/collector.yaml"]
+          env:
+            - name: DRAKE_CH_INGEST_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.clickhouse.existingSecret }}, key: ingest-password}
+          resources:
+            {{- toYaml .Values.metrics.resources | nindent 12 }}
+          securityContext:
+            {{- include "drake-otel.securityContext" . | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /, port: 13133}
+          livenessProbe:
+            httpGet: {path: /, port: 13133}
+            initialDelaySeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/otelcol}
+      volumes:
+        - name: config
+          configMap: {name: drake-otel-metrics}
+{{- end }}

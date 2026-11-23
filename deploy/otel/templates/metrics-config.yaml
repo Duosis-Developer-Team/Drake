@@ -1,0 +1,114 @@
+{{- if .Values.metrics.enabled }}
+{{- include "drake-otel.require" . -}}
+{{- /*
+Infrastructure metrics through OpenTelemetry (ADR-0038, phase 1): the
+cluster's state and every node's kubelet, into ClickHouse, next to
+Prometheus. One replica, its own process and queue: the log agent and the
+gateway are not touched.
+*/ -}}
+{{- /* Metric names as one regex; dots escaped, and the escape doubled
+for the OTTL string literal the regex sits in. */ -}}
+{{- $quoted := list -}}
+{{- range .Values.metrics.names -}}
+{{- $quoted = append $quoted (regexQuoteMeta . | replace "\\" "\\\\") -}}
+{{- end -}}
+{{- if not $quoted -}}
+{{- fail "metrics.names is required: metrics are an allowlist" -}}
+{{- end -}}
+{{- $allNamespaces := has "*" .Values.agent.namespaces -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drake-otel-metrics
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+data:
+  collector.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      # Finds every node, so each kubelet is read from one place (no agent
+      # change, nothing added on the control-plane node's agent).
+      k8s_observer:
+        auth_type: serviceAccount
+        observe_nodes: true
+        observe_pods: false
+    receivers:
+      receiver_creator/kubelet:
+        watch_observers: [k8s_observer]
+        receivers:
+          kubeletstats:
+            rule: type == "k8s.node"
+            config:
+              auth_type: serviceAccount
+              collection_interval: {{ .Values.metrics.interval }}
+              endpoint: "`endpoint`:`kubelet_endpoint_port`"
+              # Kubelet serving certificates are usually self-signed; the
+              # connection is still authenticated with the service account.
+              insecure_skip_verify: true
+              metric_groups: [node, pod, container]
+      k8s_cluster:
+        auth_type: serviceAccount
+        collection_interval: {{ .Values.metrics.interval }}
+        node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
+        allocatable_types_to_report: [cpu, memory]
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.metrics.memoryLimitMiB }}
+        spike_limit_mib: {{ div .Values.metrics.memoryLimitMiB 4 }}
+      # Only what Tracesis reads, and only where logs are collected: the
+      # volume is known before anything is widened (ADR-0038).
+      filter/scope:
+        error_mode: ignore
+        metrics:
+          metric:
+            - 'not IsMatch(name, "^({{ join "|" $quoted }})$")'
+            {{- if $allNamespaces }}
+            {{- with .Values.agent.excludeNamespaces }}
+            - 'resource.attributes["k8s.namespace.name"] != nil and IsMatch(resource.attributes["k8s.namespace.name"], "^({{ join "|" (append . $.Release.Namespace) }})$")'
+            {{- end }}
+            {{- else }}
+            - 'resource.attributes["k8s.namespace.name"] != nil and not IsMatch(resource.attributes["k8s.namespace.name"], "^({{ join "|" .Values.agent.namespaces }})$")'
+            {{- end }}
+      resource/cluster:
+        attributes:
+          - key: k8s.cluster.name
+            value: {{ .Values.clusterName | quote }}
+            action: upsert
+          - key: tracesis.source
+            value: otel-metrics
+            action: upsert
+      batch:
+        send_batch_size: 2000
+        timeout: 10s
+    exporters:
+      clickhouse/metrics:
+        endpoint: tcp://drake-otel-clickhouse:9000
+        database: otel
+        username: drake_ingest
+        password: ${env:DRAKE_CH_INGEST_PASSWORD}
+        create_schema: true
+        ttl: {{ .Values.clickhouse.retention.metrics }}
+        timeout: 10s
+        # Bounded: when ClickHouse is down, points are retried, then queued,
+        # then dropped, never memory (ADR-0029 §3, ADR-0038).
+        sending_queue:
+          enabled: true
+          queue_size: {{ .Values.metrics.queueSize }}
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+    service:
+      extensions: [health_check, k8s_observer]
+      telemetry:
+        logs:
+          level: warn
+        metrics:
+          level: none
+      pipelines:
+        metrics:
+          receivers: [receiver_creator/kubelet, k8s_cluster]
+          processors: [memory_limiter, filter/scope, resource/cluster, batch]
+          exporters: [clickhouse/metrics]
+{{- end }}
