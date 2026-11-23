@@ -15,13 +15,14 @@
  * the canvas; the text alternative lists who is where.
  */
 
-import { ChevronLeft, ChevronRight, Expand, Minus, Pause, Play, Plug, Plus, Scan, Shrink } from "lucide-react";
+import { ChevronLeft, ChevronRight, Expand, FolderGit2, Minus, Pause, Play, Plug, Plus, Scan, Shrink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isDuosis } from "@/components/clusters/ClusterCard";
-import { TracesisWordmark } from "@/components/shell/Brand";
+import { TracesisMark, TracesisWordmark } from "@/components/shell/Brand";
 import { DataState } from "@/components/state/DataState";
 import { Button, SegmentedControl } from "@/components/ui/controls";
+import { ProjectLogo } from "@/components/ui/ProjectLogo";
 import { useT } from "@/lib/i18n";
 import {
   fetchDevOffice,
@@ -108,6 +109,33 @@ function signature(intents: Map<string, Intent>): string {
 function clockLabel(ms: number): string {
   const minutes = Math.max(0, Math.min(1439, Math.floor(ms / 60_000)));
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/** ProjectLogo's unframed "icon" mark is this many CSS pixels square. */
+const ICON_MARK_PX = 56;
+
+/**
+ * A room screen's project mark, `height` CSS pixels tall. It is laid out at
+ * exactly that size, whatever the logo's own size table says, so it can never
+ * spill over the name strip under it.
+ */
+function ScreenMark({ room, height }: { room: OfficeData["rooms"][number]; height: number }) {
+  if (room.catalogued && room.project_id && room.project_key) {
+    if (room.project_key === "tracesis") return <TracesisMark height={height} />;
+    return (
+      <span className="flex shrink-0 items-center justify-center" style={{ width: height, height }}>
+        <span className="flex shrink-0" style={{ transform: `scale(${height / ICON_MARK_PX})` }}>
+          <ProjectLogo
+            projectId={room.project_id}
+            name={room.project_name ?? room.name}
+            size="icon"
+            variant="mark"
+          />
+        </span>
+      </span>
+    );
+  }
+  return <FolderGit2 aria-hidden className="text-[#cfe0ff]" style={{ width: height, height }} strokeWidth={1.75} />;
 }
 
 function asRepository(room: OfficeData["rooms"][number]): DevRepository {
@@ -825,8 +853,10 @@ export function DevOffice({
   const productScreen = (world?.rooms[0] ?? world?.vacant[0])?.screen.h ?? 24;
   const productPx = productScreen * scale;
   const stripFont = Math.max(7, Math.min(14, Math.round(productPx * 0.27)));
-  // The project's mark is about 22 CSS pixels tall at "lg": fit it above the strip.
-  const screenMark = Math.min(2, Math.max(0.5, (productPx * (scale >= 0.8 ? 0.5 : 0.8)) / 22));
+  // The project's mark fills most of what the name strip leaves of the screen
+  // (its 1px border top and bottom, the strip's text and padding).
+  const stripPx = scale >= 0.8 ? stripFont + 3 * scale : 0;
+  const screenMark = Math.max(6, Math.round((productPx - 2 - stripPx) * 0.8));
   const clusterPx = (world?.cluster.screen.h ?? 28) * scale;
   const lobbyPx = (world?.lobby.screen.h ?? 28) * scale;
   const duosis = Boolean(data?.cluster && isDuosis({ cluster_ref: data.cluster.ref, site: data.cluster.name }));
@@ -983,9 +1013,7 @@ export function DevOffice({
                   >
                     <div className="flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(circle_at_50%_40%,#183066,#07102a_70%)]">
                       {r && !other ? (
-                        <span className="flex items-center justify-center" style={{ transform: `scale(${screenMark})` }}>
-                          <RepositoryMark repo={asRepository(r)} size="lg" />
-                        </span>
+                        <ScreenMark room={r} height={screenMark} />
                       ) : (
                         <span className="font-bold text-[#cfe0ff]" style={{ fontSize: Math.max(8, Math.round(productPx * 0.36)) }}>
                           +{room.members.length}
