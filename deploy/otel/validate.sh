@@ -60,8 +60,8 @@ trap 'rm -f "$OUT" "$OUT_OBI" "$OUT_METRICS"' EXIT
 # Both directions are checked by forcing each state, so the invariant holds
 # no matter what the committed values happen to say today: OBI renders when
 # obi.enabled, and only then.
-render -f values-drake-prod.yaml --set obi.enabled=false >"$OUT"
-render -f values-drake-prod.yaml "${OBI_SETS[@]}" >"$OUT_OBI"
+render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=false >"$OUT"
+render -f values-drake-prod.yaml "${OBI_SETS[@]}" --set metrics.enabled=false >"$OUT_OBI"
 # ADR-0038: the OpenTelemetry metrics collector, forced on.
 render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=true >"$OUT_METRICS"
 
