@@ -77,6 +77,63 @@ gateway:
     enabled: false
     existingSecret: ""
 
+# --- metrics (Deployment, one replica) ------------------------------------
+# Infrastructure metrics through OpenTelemetry, into ClickHouse (ADR-0038,
+# phase 1): the cluster's state (k8s_cluster) and every node's kubelet
+# (kubeletstats), next to Prometheus, which keeps running unchanged. Off by
+# default: with it off nothing here renders. Namespaced metrics follow the
+# log agent's own allowlist (`agent.namespaces`).
+metrics:
+  enabled: false
+  interval: 60s
+  # Empty: the store's node (clickhouse.nodeSelector).
+  nodeSelector: {}
+  tolerations: []
+  memoryLimitMiB: 256
+  queueSize: 200
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 320Mi}
+  # The only metric names kept: what Tracesis reads or will read. Widening
+  # this list is a decision, made with the volume in view.
+  names:
+    # node (kubeletstats)
+    - k8s.node.cpu.usage
+    - k8s.node.memory.working_set
+    - k8s.node.memory.available
+    - k8s.node.filesystem.usage
+    - k8s.node.filesystem.capacity
+    - k8s.node.network.io
+    # pod and container (kubeletstats)
+    - k8s.pod.cpu.usage
+    - k8s.pod.memory.working_set
+    - k8s.pod.network.io
+    - container.cpu.usage
+    - container.memory.working_set
+    # cluster state (k8s_cluster)
+    - k8s.container.restarts
+    - k8s.container.ready
+    - k8s.container.cpu_request
+    - k8s.container.cpu_limit
+    - k8s.container.memory_request
+    - k8s.container.memory_limit
+    - k8s.pod.phase
+    - k8s.deployment.desired
+    - k8s.deployment.available
+    - k8s.statefulset.desired_pods
+    - k8s.statefulset.ready_pods
+    - k8s.daemonset.desired_scheduled_nodes
+    - k8s.daemonset.ready_nodes
+    - k8s.hpa.current_replicas
+    - k8s.hpa.desired_replicas
+    - k8s.job.failed_pods
+    - k8s.node.condition_ready
+    - k8s.node.condition_memory_pressure
+    - k8s.node.condition_disk_pressure
+    - k8s.node.condition_pid_pressure
+    - k8s.node.allocatable_cpu
+    - k8s.node.allocatable_memory
+
 # --- OBI: eBPF traces (DaemonSet) ----------------------------------------
 # OpenTelemetry eBPF Instrumentation observes HTTP/gRPC/SQL at the kernel
 # and emits spans without touching the process (ADR-0029 §2). It is the one
@@ -139,6 +196,10 @@ clickhouse:
   retention:
     logs: 168h
     traces: 72h
+    # Infrastructure metrics (ADR-0038). Applies when the exporter creates
+    # the metrics tables; tables that already exist keep the TTL they were
+    # created with.
+    metrics: 168h
   # Existing Secret, created out of band, with keys `ingest-password` and
   # `reader-password`. The chart never templates credential material.
   existingSecret: ""

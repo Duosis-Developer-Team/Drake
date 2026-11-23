@@ -55,14 +55,23 @@ fi
 
 OUT="$(mktemp)"
 OUT_OBI="$(mktemp)"
-trap 'rm -f "$OUT" "$OUT_OBI"' EXIT
+OUT_METRICS="$(mktemp)"
+trap 'rm -f "$OUT" "$OUT_OBI" "$OUT_METRICS"' EXIT
 # Both directions are checked by forcing each state, so the invariant holds
 # no matter what the committed values happen to say today: OBI renders when
 # obi.enabled, and only then.
-render -f values-drake-prod.yaml --set obi.enabled=false >"$OUT"
-render -f values-drake-prod.yaml "${OBI_SETS[@]}" >"$OUT_OBI"
+render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=false >"$OUT"
+render -f values-drake-prod.yaml "${OBI_SETS[@]}" --set metrics.enabled=false >"$OUT_OBI"
+# ADR-0038: the OpenTelemetry metrics collector, forced on.
+render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=true >"$OUT_METRICS"
 
-python3 - "$OUT" "$OUT_OBI" <<'PYEOF'
+echo "[policy] metrics fail-closed renders"
+if render -f values-drake-prod.yaml --set metrics.enabled=true --set-json 'metrics.names=[]' >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: metrics rendered without a metric allowlist" >&2
+  exit 1
+fi
+
+python3 - "$OUT" "$OUT_OBI" "$OUT_METRICS" <<'PYEOF'
 import json
 import sys
 
@@ -88,7 +97,18 @@ OBI_CAPS = {"BPF", "PERFMON", "SYS_PTRACE", "NET_RAW", "CHECKPOINT_RESTORE", "DA
 OBI_HOST_PATHS = {"/sys/kernel/tracing", "/sys/fs/cgroup"}
 
 
-def check(docs, by_kind, label, expect_obi):
+METRICS_NAME = "drake-otel-metrics"
+# What k8s_cluster, k8s_observer and kubeletstats read (ADR-0038); still
+# get/list/watch only, and never nodes/proxy, secrets or configmaps.
+METRICS_RESOURCES = {
+    "namespaces", "namespaces/status", "nodes", "nodes/spec", "nodes/stats",
+    "pods", "pods/status", "replicationcontrollers", "replicationcontrollers/status",
+    "resourcequotas", "services", "daemonsets", "deployments", "replicasets",
+    "statefulsets", "jobs", "cronjobs", "horizontalpodautoscalers",
+}
+
+
+def check(docs, by_kind, label, expect_obi, expect_metrics=False):
     [sc] = by_kind["StorageClass"]
     if sc.get("reclaimPolicy") != "Retain":
         fail(f"{label}: StorageClass must be Retain")
@@ -168,6 +188,13 @@ def check(docs, by_kind, label, expect_obi):
     names = {w["metadata"]["name"] for w in workloads}
     if (OBI_NAME in names) != expect_obi:
         fail(f"{label}: OBI must render exactly when obi.enabled")
+    if (METRICS_NAME in names) != expect_metrics:
+        fail(f"{label}: the metrics collector must render exactly when metrics.enabled")
+    for w in by_kind["Deployment"]:
+        if w["metadata"]["name"] == METRICS_NAME:
+            # Two would report every cluster-level value twice.
+            if w["spec"].get("replicas") != 1 or w["spec"].get("strategy", {}).get("type") != "Recreate":
+                fail(f"{label}: the metrics collector must be exactly one replica, recreated on upgrade")
 
     for w in workloads:
         name = w["metadata"]["name"]
@@ -238,11 +265,14 @@ def check(docs, by_kind, label, expect_obi):
 
     allowed_resources = {"pods", "namespaces", "replicasets", "jobs", "services", "nodes"}
     for role in by_kind.get("ClusterRole", []):
+        permitted_resources = (
+            METRICS_RESOURCES if role["metadata"]["name"].endswith("drake-otel-metrics-read") else allowed_resources
+        )
         for rule in role["rules"]:
             if not set(rule["verbs"]) <= {"get", "list", "watch"}:
                 fail(f"{label}: {role['metadata']['name']}: only get/list/watch are allowed")
             for resource in rule["resources"]:
-                if resource not in allowed_resources:
+                if resource not in permitted_resources:
                     fail(f"{label}: {role['metadata']['name']}: resource {resource} is not allowed")
 
     if "Secret" in by_kind:
@@ -295,10 +325,12 @@ off_docs, off_kinds = load(sys.argv[1])
 on_docs, on_kinds = load(sys.argv[2])
 n_off = check(off_docs, off_kinds, "obi off", expect_obi=False)
 n_on = check(on_docs, on_kinds, "obi on", expect_obi=True)
+metrics_docs, metrics_kinds = load(sys.argv[3])
+n_metrics = check(metrics_docs, metrics_kinds, "metrics on", expect_obi=False, expect_metrics=True)
 
 if failures:
     for f in failures:
         print("POLICY VIOLATION:", f, file=sys.stderr)
     sys.exit(1)
-print(f"[policy] {n_off} rendered objects pass; with OBI enabled, {n_on} pass")
+print(f"[policy] {n_off} rendered objects pass; with OBI enabled, {n_on} pass; with metrics enabled, {n_metrics} pass")
 PYEOF

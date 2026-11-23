@@ -102,6 +102,14 @@ agent:
     - fikirsepeti-prod
     - drake-prod
 
+# Infrastructure metrics through OpenTelemetry, side by side with Prometheus
+# (ADR-0038 phase 1, 2026-11-23). One replica on the store's node (node2,
+# via clickhouse.nodeSelector); the log agent, the gateway and Prometheus
+# are unchanged, and Tracesis keeps reading Prometheus. Only the allowlisted
+# metric names, for the namespaces in agent.namespaces. Off is one flag.
+metrics:
+  enabled: true
+
 clickhouse:
   # The worker node. The control-plane node is saturated (load far above
   # its core count, little free memory, no swap); the store and the gateway
