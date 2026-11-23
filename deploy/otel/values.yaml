@@ -104,12 +104,17 @@ metrics:
     - k8s.node.filesystem.usage
     - k8s.node.filesystem.capacity
     - k8s.node.network.io
+    # CPU time counters (cumulative): a rate over them is how Prometheus
+    # computes CPU, so the two can be compared like for like (ADR-0038).
+    - k8s.node.cpu.time
     # pod and container (kubeletstats)
     - k8s.pod.cpu.usage
     - k8s.pod.memory.working_set
     - k8s.pod.network.io
     - container.cpu.usage
     - container.memory.working_set
+    - k8s.pod.cpu.time
+    - container.cpu.time
     # cluster state (k8s_cluster)
     - k8s.container.restarts
     - k8s.container.ready
