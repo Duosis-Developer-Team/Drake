@@ -1,0 +1,36 @@
+{{- if .Values.metrics.enabled }}
+{{- /*
+Prometheus's configuration, rendered here instead of by the Prometheus chart
+(`server.configMapOverrideName`) for one reason: every series must carry this
+cluster's `cluster_ref`, and the Prometheus chart cannot template a value
+into its scrape jobs. The jobs are the chart's own defaults
+(files/scrape-configs.yaml); the recording rules are Tracesis's workload
+normalisation layer, the same file duosis-prod-1 runs
+(deploy/monitoring/recording-rules.yaml).
+*/ -}}
+{{- $jobs := list }}
+{{- range $job := (.Files.Get "files/scrape-configs.yaml" | fromYamlArray) }}
+{{- $relabel := append (default list (get $job "relabel_configs")) (dict "target_label" "cluster_ref" "replacement" $.Values.cluster.name) }}
+{{- $_ := set $job "relabel_configs" $relabel }}
+{{- $jobs = append $jobs $job }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.metrics.server.configMapOverrideName }}
+  labels:
+    {{- include "tracesis-agent.labels" . | nindent 4 }}
+data:
+  allow-snippet-annotations: "false"
+  prometheus.yml: |
+    global:
+      scrape_interval: 1m
+      scrape_timeout: 10s
+      evaluation_interval: 1m
+    rule_files:
+      - /etc/config/recording_rules.yml
+    scrape_configs:
+      {{- toYaml $jobs | nindent 6 }}
+  recording_rules.yml: |
+    {{- .Files.Get "files/recording-rules.yaml" | nindent 4 }}
+{{- end }}

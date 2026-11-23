@@ -1,0 +1,179 @@
+# tracesis-agent — one install per cluster (ADR-0037).
+#
+# Tracesis generates the file you install with for each cluster (Clusters →
+# Connect a cluster). It sets `cluster`, `tracesis` and `enrollment`, and
+# repeats the cluster's id and name for the agent and the collector. Every
+# other value below is a product default you may override.
+#
+# Nothing here leaves the cluster: logs, traces and metrics are stored in
+# this release's namespace. Tracesis reads them through the agent's own
+# outbound connection; it never connects into the cluster.
+
+cluster:
+  # The cluster's id and name in Tracesis. Generated; do not edit.
+  id: ""
+  name: ""
+
+tracesis:
+  # The CA that signs Tracesis's agent listener (public material). The agent
+  # refuses to talk to anything else.
+  serverCA: ""
+
+enrollment:
+  # One-time, ten-minute token. Needed for the first install only: the agent
+  # keeps its identity on its own volume afterwards, and an upgrade without
+  # a token is normal.
+  token: ""
+
+# Pull credentials for Tracesis's images, when the registry is private, go
+# to `clusterAgent.imagePullSecrets` and `telemetry.imagePullSecrets`
+# (existing Secrets in this namespace).
+
+# --- the cluster agent (deploy/agent) ---------------------------------------
+clusterAgent:
+  image:
+    repository: ghcr.io/duosis-developer-team/drake-cluster-agent
+    # Stamped by the release that publishes this chart.
+    digest: ""
+  clusterId: ""
+  clusterName: ""
+  apiBaseUrl: ""
+  enrollmentBaseUrl: ""
+  serverCA:
+    existingSecret: tracesis-agent-server-ca
+    key: ca.pem
+  enrollmentToken:
+    existingSecret: tracesis-agent-enrollment
+    key: token
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 64Mi
+  relay:
+    clickhouse:
+      url: http://drake-otel-clickhouse:8123
+      user: drake_reader
+      existingSecret: tracesis-clickhouse
+      key: reader-password
+    prometheus:
+      url: http://tracesis-prometheus
+    workers: 4
+  # Egress hardening needs the cluster's own API server and DNS addresses,
+  # which only the operator knows. Off by default; see deploy/agent/values.yaml.
+  networkPolicy:
+    enabled: false
+
+# --- logs and traces (deploy/otel) -----------------------------------------
+telemetry:
+  clusterName: ""
+  # Only meaningful where Datadog runs with admission injection.
+  datadogOptOut: false
+  images:
+    collector:
+      # Tracesis's own collector distribution (apps/tracesis-collector).
+      repository: ghcr.io/duosis-developer-team/tracesis-collector
+      digest: ""
+    clickhouse:
+      repository: clickhouse/clickhouse-server
+      # 26.8.36.3, the 26.8 LTS line (same as duosis-prod-1).
+      digest: "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
+  agent:
+    # Every namespace's container logs, except these and this release's own.
+    namespaces: ["*"]
+    excludeNamespaces: [kube-system, kube-public, kube-node-lease]
+  clickhouse:
+    anyNode: true
+    existingSecret: tracesis-clickhouse
+    # Refuse writes while the node has less than this free.
+    keepFreeSpaceBytes: 10737418240
+    storage:
+      createStorageClass: false
+      # Empty: the cluster's default StorageClass.
+      storageClassName: ""
+      size: 20Gi
+    retention:
+      logs: 168h
+      traces: 72h
+  gateway:
+    externalIngest:
+      enabled: false
+  obi:
+    # eBPF traces without touching applications. Opt in: it needs a
+    # namespace allowlist and the nodes to run on (deploy/otel/values.yaml).
+    enabled: false
+    image:
+      repository: otel/ebpf-instrument
+      digest: "sha256:a68d70e934260f72540f157ccf4fb4adfa38f11de060d7d905696dad6a3fca02"
+
+# --- metrics (prometheus-community/prometheus) ------------------------------
+metrics:
+  enabled: true
+  # The server's ClusterRole is this chart's (templates/prometheus-rbac.yaml):
+  # the Prometheus chart's own grants `configmaps`, which scraping never needs.
+  rbac:
+    create: false
+  alertmanager:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  # Every image pinned by digest: the same builds duosis-prod-1 runs with
+  # this chart version (read from its pods, 2026-11-23).
+  configmapReload:
+    prometheus:
+      image:
+        # prometheus-config-reloader v0.86.1
+        digest: "sha256:bb94799c84286eea0aad22d83ba4889264ae9af26a7fb3023b7fae75e541e87e"
+  server:
+    image:
+      # prometheus v3.7.3
+      digest: "sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038"
+    fullnameOverride: tracesis-prometheus
+    # The chart renders its own configuration (templates/prometheus-config.yaml)
+    # so every series carries this cluster's `cluster_ref`.
+    configMapOverrideName: tracesis-prometheus-config
+    retention: 15d
+    persistentVolume:
+      enabled: true
+      size: 8Gi
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+      limits: {memory: 2Gi}
+  kube-state-metrics:
+    enabled: true
+    image:
+      # kube-state-metrics v2.17.0
+      sha: "sha256:2bbc915567334b13632bf62c0a97084aff72a36e13c4dabd5f2f11c898c5bacd"
+    # The chart default minus `secrets` and `configmaps`: kube-state-metrics
+    # would otherwise be granted list/watch on every Secret in the cluster.
+    collectors:
+      - certificatesigningrequests
+      - cronjobs
+      - daemonsets
+      - deployments
+      - endpoints
+      - horizontalpodautoscalers
+      - ingresses
+      - jobs
+      - leases
+      - limitranges
+      - mutatingwebhookconfigurations
+      - namespaces
+      - networkpolicies
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - poddisruptionbudgets
+      - pods
+      - replicasets
+      - replicationcontrollers
+      - resourcequotas
+      - services
+      - statefulsets
+      - storageclasses
+      - validatingwebhookconfigurations
+      - volumeattachments
+  prometheus-node-exporter:
+    enabled: true
+    image:
+      # node-exporter v1.10.2
+      digest: "sha256:337ff1d356b68d39cef853e8c6345de11ce7556bb34cda8bd205bcf2ed30b565"

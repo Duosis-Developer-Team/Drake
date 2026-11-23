@@ -83,6 +83,10 @@ spec:
         # nothing else root could otherwise do.
         runAsUser: 0
         runAsGroup: 0
+{{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: collector
           image: {{ include "drake-otel.image" (dict "root" . "name" "collector") }}

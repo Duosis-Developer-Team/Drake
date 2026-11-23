@@ -63,6 +63,27 @@ spec:
               value: {{ .Values.logLevel | quote }}
             - name: DRAKE_AGENT_HEALTH_LISTEN_ADDR
               value: "127.0.0.1:{{ .Values.healthPort }}"
+            {{- /* The store relay (ADR-0037): reads of this cluster's own
+                   ClickHouse and Prometheus, pulled over the agent's own
+                   connection. Off unless a store URL is set. */}}
+            {{- with .Values.relay }}
+            {{- if .clickhouse.url }}
+            - name: DRAKE_AGENT_RELAY_CLICKHOUSE_URL
+              value: {{ .clickhouse.url | quote }}
+            - name: DRAKE_AGENT_RELAY_CLICKHOUSE_USER
+              value: {{ required "relay.clickhouse.user is required with relay.clickhouse.url" .clickhouse.user | quote }}
+            - name: DRAKE_AGENT_RELAY_CLICKHOUSE_PASSWORD_FILE
+              value: /etc/drake-agent/store-reader/{{ .clickhouse.key }}
+            {{- end }}
+            {{- if .prometheus.url }}
+            - name: DRAKE_AGENT_RELAY_PROMETHEUS_URL
+              value: {{ .prometheus.url | quote }}
+            {{- end }}
+            {{- if or .clickhouse.url .prometheus.url }}
+            - name: DRAKE_AGENT_RELAY_WORKERS
+              value: {{ .workers | quote }}
+            {{- end }}
+            {{- end }}
           # Liveness stays loopback-only: the agent binary's own
           # healthcheck subcommand (contract with apps/cluster-agent/
           # Dockerfile — no shell/curl/wget exists in the image). It
@@ -91,6 +112,11 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.relay.clickhouse.url }}
+            - name: store-reader
+              mountPath: /etc/drake-agent/store-reader
+              readOnly: true
+            {{- end }}
       volumes:
         # Identity state — the agent's private key and certificate.
         #
@@ -125,3 +151,11 @@ spec:
           secret:
             secretName: {{ required "enrollmentToken.existingSecret is required (existing secrets only)" .Values.enrollmentToken.existingSecret }}
             optional: true
+        {{- if .Values.relay.clickhouse.url }}
+        - name: store-reader
+          secret:
+            secretName: {{ required "relay.clickhouse.existingSecret is required with relay.clickhouse.url" .Values.relay.clickhouse.existingSecret }}
+            items:
+              - key: {{ .Values.relay.clickhouse.key }}
+                path: {{ .Values.relay.clickhouse.key }}
+        {{- end }}

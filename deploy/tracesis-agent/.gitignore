@@ -1,0 +1,2 @@
+# Built by `helm dependency build` (validate.sh, the publish workflow).
+charts/

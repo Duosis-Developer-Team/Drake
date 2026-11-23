@@ -94,6 +94,7 @@ case "$JOB" in
     run bash deploy/agent/validate.sh
     run bash deploy/dev/observability/validate.sh
     run bash deploy/otel/validate.sh
+    run bash deploy/tracesis-agent/validate.sh
     run uv run --directory apps/api pytest \
       tests/test_production_chart_unit.py tests/test_agent_chart_unit.py -q
     ;;

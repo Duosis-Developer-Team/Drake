@@ -1,0 +1,12 @@
+Tracesis agent installed for cluster "{{ .Values.cluster.name }}".
+
+The agent enrols with its one-time token and starts reporting within a
+minute. Watch it connect:
+
+  kubectl -n {{ .Release.Namespace }} logs deploy/drake-cluster-agent -f
+
+Logs, traces and metrics are stored in this namespace and stay here.
+Tracesis reads them through the agent's own outbound connection.
+
+The cluster's page in Tracesis shows "connected" once the first heartbeat
+arrives.

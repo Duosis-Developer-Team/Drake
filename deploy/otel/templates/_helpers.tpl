@@ -26,8 +26,8 @@ admission.datadoghq.com/enabled: "false"
 {{- if not .Values.agent.namespaces -}}
 {{- fail "agent.namespaces is required: log collection is an allowlist" -}}
 {{- end -}}
-{{- if not .Values.clickhouse.nodeSelector -}}
-{{- fail "clickhouse.nodeSelector is required: the store must be pinned to a node with headroom" -}}
+{{- if and (not .Values.clickhouse.nodeSelector) (not .Values.clickhouse.anyNode) -}}
+{{- fail "clickhouse.nodeSelector is required: the store must be pinned to a node with headroom (or set clickhouse.anyNode)" -}}
 {{- end -}}
 {{- if not .Values.clickhouse.existingSecret -}}
 {{- fail "clickhouse.existingSecret is required: credentials are created out of band" -}}

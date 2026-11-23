@@ -15,6 +15,10 @@ clusterName: ""
 # Nothing here changes Datadog's behaviour for any other workload.
 datadogOptOut: true
 
+# Pull credentials for the collector image when it comes from a private
+# registry. Existing Secrets only.
+imagePullSecrets: []
+
 images:
   collector:
     repository: otel/opentelemetry-collector-contrib
@@ -29,6 +33,9 @@ agent:
   # denylist: a new namespace is not collected until someone decides it
   # should be. Empty refuses to render.
   namespaces: []
+  # Only when `namespaces` is ["*"]: namespaces whose logs are still not
+  # collected. The release's own namespace is always excluded.
+  excludeNamespaces: [kube-system, kube-public, kube-node-lease]
   # Where a file the agent has never seen starts: at its end, so a first
   # install does not replay a node's whole log history. Every file it has
   # read continues from the offset saved in `checkpointDir`, so a restart or
@@ -105,6 +112,10 @@ clickhouse:
   # REQUIRED. Where the store runs. Must select a node with headroom and
   # never the saturated control-plane node. Empty refuses to render.
   nodeSelector: {}
+  # Explicitly allow the scheduler to place the store on any node. A
+  # deliberate opt-out of `nodeSelector`, for clusters Tracesis does not
+  # know (the tracesis-agent chart sets it); never an accident.
+  anyNode: false
   resources:
     requests: {cpu: 250m, memory: 1Gi}
     limits: {cpu: "1500m", memory: 2Gi}
@@ -122,6 +133,9 @@ clickhouse:
     # modified.
     storageClassName: drake-otel-retain
     provisioner: rancher.io/local-path
+    # false: use `storageClassName` as it is (empty means the cluster's
+    # default class) and create no StorageClass.
+    createStorageClass: true
   retention:
     logs: 168h
     traces: 72h
