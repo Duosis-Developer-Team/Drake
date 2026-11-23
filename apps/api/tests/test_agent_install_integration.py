@@ -127,6 +127,22 @@ async def test_a_central_cluster_gets_no_install_file(
     assert response.json()["error"]["code"] == "cluster_reads_central_store"
 
 
+async def test_the_connect_screen_can_ask_first(
+    engine: AsyncEngine,  # noqa: F811
+    tmp_path: Path,
+) -> None:
+    await seed_catalog_world(engine)
+    for settings, expected in (
+        (install_settings(tmp_path), True),
+        (install_settings(tmp_path, agent_server_ca_file=""), False),
+    ):
+        harness = build_harness(settings)
+        async with harness.api_client() as owner:
+            await harness.login(owner, "user-owner")
+            body = (await owner.get("/v1/agent-install")).json()
+        assert body["configured"] is expected
+
+
 async def test_without_a_public_listener_nothing_is_printed(
     engine: AsyncEngine,  # noqa: F811
     tmp_path: Path,

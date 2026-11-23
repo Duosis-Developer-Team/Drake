@@ -82,7 +82,7 @@ What the agent will run is closed and small:
 
 | Kind | Target | Allowed |
 |---|---|---|
-| `clickhouse.query` | in-cluster ClickHouse, the read-only `tracesis_reader` user | the statement plus typed `param_*` values; settings only `max_result_rows`, `result_overflow_mode`, `max_execution_time`, `default_format=JSON` |
+| `clickhouse.query` | in-cluster ClickHouse, as the read-only `drake_reader` user | the statement plus typed `param_*` values; settings only `max_result_rows`, `result_overflow_mode`, `max_execution_time`, `default_format=JSON` |
 | `prometheus.query_range` | in-cluster Prometheus | `POST /api/v1/query_range` with `query`, `start`, `end`, `step` |
 
 Anything else is refused by the agent, not just ignored. The reader's

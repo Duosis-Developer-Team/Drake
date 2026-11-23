@@ -13,6 +13,39 @@ import { defineMessages } from "../define";
 
 export const clusters = defineMessages({
   en: {
+    connect: {
+      open: "Connect a cluster",
+      title: "Connect a cluster",
+      description: "One install puts the agent, log and trace collection and metrics into the cluster.",
+      field: {
+        name: "Cluster name",
+        namePlaceholder: "Acme production",
+        ref: "Cluster ID",
+        refHint: "Lower case, digits and dashes. It names this cluster in queries and cannot be changed later.",
+      },
+      dataStays: "Logs, traces and metrics are stored inside your cluster and stay there. Tracesis reads them through the agent's own outbound connection; no inbound port is opened.",
+      submit: "Create install file",
+      working: "Creating…",
+      cancel: "Cancel",
+      done: "Done",
+      copy: "Copy",
+      copied: "Copied",
+      step: {
+        download: "1. Download this cluster's install file",
+        downloadHint: "It holds a one-time enrollment token valid until {time}. Create a new file if it expires.",
+        run: "2. Run this where kubectl points at the cluster",
+        runHint: "Helm 3.8 or later. The cluster must be able to pull images from ghcr.io.",
+        wait: "3. Wait for the agent",
+        waitHint: "It enrols within a minute and the cluster's card shows it as connected. Its pods run in the {namespace} namespace.",
+      },
+      error: {
+        generic: "The install file could not be created. Try again.",
+        agent_install_not_configured: "This Tracesis does not accept agents from other clusters yet: its public agent listener is not configured.",
+        cluster_reads_central_store: "This cluster is read from Tracesis's own store and needs no install.",
+        cluster_ref_taken: "That cluster ID already names a cluster with a different name.",
+        invalid_cluster_ref: "The cluster ID must be lower case letters, digits and dashes.",
+      },
+    },
     card: {
       open: "Open {cluster}",
       agent: "Agent",
@@ -357,6 +390,39 @@ export const clusters = defineMessages({
     },
   },
   tr: {
+    connect: {
+      open: "Küme bağla",
+      title: "Küme bağla",
+      description: "Tek kurulum; ajanı, log ve trace toplamayı ve metrikleri kümeye kurar.",
+      field: {
+        name: "Küme adı",
+        namePlaceholder: "Acme üretim",
+        ref: "Küme kimliği",
+        refHint: "Küçük harf, rakam ve tire. Sorgularda bu kümeyi adlandırır ve sonradan değiştirilemez.",
+      },
+      dataStays: "Loglar, trace'ler ve metrikler kümenizin içinde saklanır ve orada kalır. Tracesis bunları ajanın kendi açtığı dış bağlantı üzerinden okur; kümeye içeri doğru port açılmaz.",
+      submit: "Kurulum dosyası oluştur",
+      working: "Oluşturuluyor…",
+      cancel: "Vazgeç",
+      done: "Tamam",
+      copy: "Kopyala",
+      copied: "Kopyalandı",
+      step: {
+        download: "1. Bu kümenin kurulum dosyasını indir",
+        downloadHint: "İçinde {time} saatine kadar geçerli, tek kullanımlık bir kayıt anahtarı var. Süresi dolarsa yeni dosya oluştur.",
+        run: "2. kubectl'in bu kümeyi gösterdiği yerde çalıştır",
+        runHint: "Helm 3.8 veya üstü. Kümenin ghcr.io'dan imaj çekebilmesi gerekir.",
+        wait: "3. Ajanı bekle",
+        waitHint: "Bir dakika içinde kaydolur ve küme kartında bağlı görünür. Pod'ları {namespace} namespace'inde çalışır.",
+      },
+      error: {
+        generic: "Kurulum dosyası oluşturulamadı. Tekrar dene.",
+        agent_install_not_configured: "Bu Tracesis henüz başka kümelerden ajan kabul etmiyor: dış ajan dinleyicisi yapılandırılmamış.",
+        cluster_reads_central_store: "Bu küme Tracesis'in kendi deposundan okunuyor, kurulum gerektirmiyor.",
+        cluster_ref_taken: "Bu küme kimliği zaten farklı adlı bir kümeye ait.",
+        invalid_cluster_ref: "Küme kimliği küçük harf, rakam ve tireden oluşmalı.",
+      },
+    },
     card: {
       open: "{cluster} kümesini aç",
       agent: "Ajan",

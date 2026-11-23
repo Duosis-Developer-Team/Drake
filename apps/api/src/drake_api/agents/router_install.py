@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 
 from drake_api.agents.router_tokens import TOKEN_TTL_SECONDS_DEFAULT, issue_enrollment_token
-from drake_api.auth.dependencies import AuthContext, require_csrf
+from drake_api.auth.dependencies import AuthContext, require_auth, require_csrf
 from drake_api.catalog.authz import visible_scope_ids
 from drake_api.db import get_engine
 from drake_api.settings import Settings
@@ -84,6 +84,23 @@ def install_command(settings: Settings, file_name: str) -> str:
         f"--version {settings.agent_chart_version} "
         f"--namespace {NAMESPACE} --create-namespace -f {file_name}"
     )
+
+
+@router.get("/agent-install")
+async def agent_install_status(
+    request: Request, auth: AuthContext = Depends(require_auth)
+) -> dict[str, Any]:
+    """Whether this Tracesis can connect clusters other than its own.
+
+    Asked before anything is created, so the Connect screen can say "not
+    yet" instead of registering a cluster it then cannot install.
+    """
+    settings: Settings = request.app.state.settings
+    return {
+        "configured": install_configured(settings),
+        "chart_ref": settings.agent_chart_ref,
+        "chart_version": settings.agent_chart_version or None,
+    }
 
 
 @router.post("/clusters/{cluster_id}/agent-install", status_code=201)
