@@ -70,6 +70,7 @@ from drake_api.protection.router_ingest import router as protection_ingest_route
 from drake_api.protection.setup import ProtectionEvaluator
 from drake_api.rbac.options_router import router as rbac_options_router
 from drake_api.rbac.router import router as rbac_router
+from drake_api.relay import AgentRelay
 from drake_api.service_health.cache import HealthCache
 from drake_api.service_health.orchestrator import HealthOrchestrator
 from drake_api.service_health.router import router as service_health_router
@@ -236,18 +237,27 @@ def create_app(
         if settings.github_app_enabled
         else None
     )
+    # Clusters that keep their telemetry in their own stores are read through
+    # their agents (ADR-0037). Opens nothing until such a cluster is read.
+    app.state.agent_relay = AgentRelay(
+        settings, redis=app.state.telemetry_redis, engine=get_engine(settings)
+    )
     app.state.telemetry_broker = TelemetryBroker(
         settings=settings,
         engine=get_engine(settings),
         redis=app.state.telemetry_redis,
         registry=app.state.telemetry_registry,
-        adapter=PrometheusAdapter(settings, transport=telemetry_transport),
+        adapter=PrometheusAdapter(
+            settings, transport=telemetry_transport, relay=app.state.agent_relay
+        ),
         metrics=app.state.telemetry_metrics,
     )
     # Logs and traces (ADR-0029). Constructing the adapter opens nothing and
     # reads no credential; it does so per query, and only when the feature
     # is on and a store is configured.
-    app.state.observability_store = ClickHouseStore(settings, transport=observability_transport)
+    app.state.observability_store = ClickHouseStore(
+        settings, transport=observability_transport, relay=app.state.agent_relay
+    )
     # The evaluator reuses the Sprint 5 read path exactly as the API does —
     # same orchestrator, same broker, same budgets — so a scheduled
     # evaluation and a screen refresh can never disagree about a service.

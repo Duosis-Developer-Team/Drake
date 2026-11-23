@@ -20,6 +20,7 @@ execution time, result rows and memory, and is read-only. The settings sent
 here can narrow those, never widen them.
 """
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from typing import Any
 
 import httpx
 
+from drake_api.relay import AgentRelay, RelayUnavailableError
 from drake_api.settings import ObservabilityStoreConnector, Settings
 from drake_api.telemetry.provider import ConnectorRefusedError, validate_connector
 
@@ -74,10 +76,38 @@ def _read_password(connector: ObservabilityStoreConnector) -> str:
         raise StoreUnavailableError("store_credential_unreadable") from error
 
 
+#: A ClickHouse array literal of cluster refs, as the statement builders
+#: write it (`['a','b']`). Cluster refs are DNS labels, so no escapes occur.
+_ARRAY_ITEM = re.compile(r"'([^'\\]*)'")
+
+
+def named_clusters(parameters: dict[str, str]) -> list[str]:
+    """The clusters a statement is scoped to, from its own typed parameters.
+
+    Every scoped statement names them: one as `{cluster:String}`, several
+    as `{clusters:Array(String)}` (ADR-0037 §3). A statement that names none
+    reads the central store.
+    """
+    names: list[str] = []
+    single = parameters.get("cluster")
+    if single:
+        names.append(single)
+    many = parameters.get("clusters")
+    if many:
+        names.extend(_ARRAY_ITEM.findall(many))
+    return list(dict.fromkeys(names))
+
+
 class ClickHouseStore:
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        relay: AgentRelay | None = None,
+    ):
         self._settings = settings
         self._transport = transport
+        self._relay = relay
 
     @property
     def connector(self) -> ObservabilityStoreConnector | None:
@@ -95,12 +125,6 @@ class ClickHouseStore:
         connector = self.connector
         if connector is None:
             raise StoreUnavailableError("store_not_configured")
-        try:
-            base_url = await validate_connector(connector, self._settings)
-        except ConnectorRefusedError as error:
-            # The SSRF boundary refused the target: for every caller that is
-            # "the store cannot be reached", never an unhandled 500.
-            raise StoreUnavailableError(error.code) from error
         timeout_seconds = min(timeout_seconds, connector.timeout_seconds)
 
         params: dict[str, str] = {f"param_{key}": value for key, value in parameters.items()}
@@ -114,6 +138,52 @@ class ClickHouseStore:
                 "default_format": "JSON",
             }
         )
+
+        # Which stores hold the clusters this statement names. Clusters kept
+        # in their own stores are read through their agents; the rest, and
+        # every statement that names no cluster, read the central store.
+        relayed: list[str] = []
+        central = True
+        if self._relay is not None:
+            names = named_clusters(parameters)
+            if names:
+                kept = await self._relay.clusters()
+                relayed = [name for name in names if name in kept]
+                central = len(relayed) < len(names)
+
+        reads = []
+        if central:
+            reads.append(
+                self._central(connector, statement, params, timeout_seconds, correlation_id)
+            )
+        for cluster in relayed:
+            reads.append(self._relayed(cluster, statement, params, timeout_seconds))
+        if len(reads) == 1:
+            rows = _parse_rows(await reads[0], max_rows)
+        else:
+            # Every multi-cluster statement keys its rows by cluster, so the
+            # union of the stores' answers is the answer.
+            rows = []
+            for body in await asyncio.gather(*reads):
+                rows.extend(_parse_rows(body, max_rows))
+            if len(rows) > max_rows:
+                raise StoreContractError("store_too_many_rows")
+        return QueryResult(rows=rows)
+
+    async def _central(
+        self,
+        connector: ObservabilityStoreConnector,
+        statement: str,
+        params: dict[str, str],
+        timeout_seconds: float,
+        correlation_id: str,
+    ) -> bytes:
+        try:
+            base_url = await validate_connector(connector, self._settings)
+        except ConnectorRefusedError as error:
+            # The SSRF boundary refused the target: for every caller that is
+            # "the store cannot be reached", never an unhandled 500.
+            raise StoreUnavailableError(error.code) from error
         headers = {"X-Correlation-ID": correlation_id}
         if connector.username:
             headers["X-ClickHouse-User"] = connector.username
@@ -130,17 +200,7 @@ class ClickHouseStore:
                 async with client.stream(
                     "POST", "/", params=params, content=statement.encode(), headers=headers
                 ) as response:
-                    if response.status_code in (301, 302, 303, 307, 308):
-                        raise StoreContractError("store_redirect_refused")
-                    if response.status_code >= 500:
-                        raise StoreUnavailableError("store_upstream_error")
-                    if response.status_code in (401, 403):
-                        raise StoreUnavailableError("store_auth_refused")
-                    if response.status_code != 200:
-                        # The statement is ours, so a 4xx is a contract
-                        # failure. The body (which may quote the query) is
-                        # not read.
-                        raise StoreContractError("store_rejected_query")
+                    _check_status(response.status_code)
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
                         body.extend(chunk)
@@ -150,16 +210,64 @@ class ClickHouseStore:
             raise StoreUnavailableError("store_timeout") from error
         except httpx.HTTPError as error:
             raise StoreUnavailableError("store_unreachable") from error
+        return bytes(body)
 
+    async def _relayed(
+        self, cluster: str, statement: str, params: dict[str, str], timeout_seconds: float
+    ) -> bytes:
+        """The same request, run by the cluster's agent against its own store.
+
+        The agent adds the reader's credential from its own Secret; Tracesis
+        never holds it. The answer is checked exactly like a direct one.
+        """
+        assert self._relay is not None
         try:
-            document = json.loads(bytes(body))
-        except ValueError as error:
-            raise StoreContractError("store_malformed_response") from error
-        if not isinstance(document, dict) or not isinstance(document.get("data"), list):
-            raise StoreContractError("store_malformed_response")
-        rows = document["data"]
-        if not all(isinstance(row, dict) for row in rows):
-            raise StoreContractError("store_malformed_response")
-        if len(rows) > max_rows:
-            raise StoreContractError("store_too_many_rows")
-        return QueryResult(rows=rows)
+            reply = await self._relay.call(
+                cluster,
+                "clickhouse.query",
+                {"statement": statement, "params": params},
+                # The agent's store timeout plus the trip both ways.
+                timeout_seconds=timeout_seconds + 3.0,
+            )
+        except RelayUnavailableError as error:
+            if error.code in _CONTRACT_CODES:
+                raise StoreContractError(error.code) from error
+            raise StoreUnavailableError(error.code) from error
+        _check_status(reply.status_code)
+        if len(reply.body) > _MAX_RESPONSE_BYTES:
+            raise StoreContractError("store_response_too_large")
+        return reply.body
+
+
+#: Relay failures that are the contract's, not the network's.
+_CONTRACT_CODES = frozenset(
+    {"store_response_too_large", "store_redirect_refused", "store_relay_refused"}
+)
+
+
+def _check_status(status_code: int) -> None:
+    if status_code in (301, 302, 303, 307, 308):
+        raise StoreContractError("store_redirect_refused")
+    if status_code >= 500:
+        raise StoreUnavailableError("store_upstream_error")
+    if status_code in (401, 403):
+        raise StoreUnavailableError("store_auth_refused")
+    if status_code != 200:
+        # The statement is ours, so a 4xx is a contract failure. The body
+        # (which may quote the query) is not read.
+        raise StoreContractError("store_rejected_query")
+
+
+def _parse_rows(body: bytes, max_rows: int) -> list[dict[str, Any]]:
+    try:
+        document = json.loads(body)
+    except ValueError as error:
+        raise StoreContractError("store_malformed_response") from error
+    if not isinstance(document, dict) or not isinstance(document.get("data"), list):
+        raise StoreContractError("store_malformed_response")
+    rows: list[dict[str, Any]] = document["data"]
+    if not all(isinstance(row, dict) for row in rows):
+        raise StoreContractError("store_malformed_response")
+    if len(rows) > max_rows:
+        raise StoreContractError("store_too_many_rows")
+    return rows
