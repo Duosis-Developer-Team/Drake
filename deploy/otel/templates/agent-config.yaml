@@ -20,13 +20,24 @@ data:
     receivers:
       filelog:
         include:
+          {{- if has "*" .Values.agent.namespaces }}
+          # Every namespace (the tracesis-agent product default), minus the
+          # ones named in agent.excludeNamespaces below.
+          - /var/log/pods/*/*/*.log
+          {{- else }}
           {{- range .Values.agent.namespaces }}
           - /var/log/pods/{{ . }}_*/*/*.log
+          {{- end }}
           {{- end }}
         exclude:
           # Never collect Drake's own collection pipeline: a collector
           # that reads its own output is a feedback loop.
           - /var/log/pods/{{ .Release.Namespace }}_*/*/*.log
+          {{- if has "*" .Values.agent.namespaces }}
+          {{- range .Values.agent.excludeNamespaces }}
+          - /var/log/pods/{{ . }}_*/*/*.log
+          {{- end }}
+          {{- end }}
         # Applies only to a file the checkpoints have never seen. A file the
         # agent was reading continues from its saved offset.
         start_at: {{ .Values.agent.startAt }}

@@ -62,6 +62,10 @@ spec:
       # crash-looped until ClickHouse was up. Waiting here instead turns
       # that into one ordered start. Bounded: after five minutes it fails
       # and Kubernetes retries, rather than waiting forever.
+{{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: wait-for-clickhouse
           image: {{ include "drake-otel.image" (dict "root" . "name" "clickhouse") }}

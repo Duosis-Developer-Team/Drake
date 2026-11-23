@@ -297,6 +297,18 @@ class Settings(BaseSettings):
     agent_ca_cert_file: str = ""
     agent_ca_key_file: str = ""
     agent_cert_ttl_days: int = 14
+
+    # --- Connecting a customer's cluster (ADR-0037) ---
+    # Where an agent OUTSIDE this deployment reaches the two listeners, and
+    # the CA that signed them (public material, embedded in the generated
+    # install file). All three empty: the Connect flow answers
+    # `agent_install_not_configured` and prints nothing to install.
+    agent_public_enrollment_url: str = ""
+    agent_public_ingest_url: str = ""
+    agent_server_ca_file: str = ""
+    # The chart the generated command installs.
+    agent_chart_ref: str = "oci://ghcr.io/duosis-developer-team/charts/tracesis-agent"
+    agent_chart_version: str = ""
     # Inventory retention/cleanup bounds (ADR-0017 bounded completion
     # window). Safe production defaults; local/test may shrink them, and
     # validate_runtime_security refuses unsafe values elsewhere.

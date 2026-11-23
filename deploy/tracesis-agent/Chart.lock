@@ -1,0 +1,12 @@
+dependencies:
+- name: drake-cluster-agent
+  repository: file://../agent
+  version: 0.4.0
+- name: drake-otel
+  repository: file://../otel
+  version: 0.1.0
+- name: prometheus
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 27.44.0
+digest: sha256:f2f708c4ca05a28d10c801f4ac93a71921f1feab9300c071b8cfeca8de04abf4
+generated: "2026-11-23T12:24:07.62598+03:00"

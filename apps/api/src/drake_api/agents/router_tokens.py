@@ -42,6 +42,24 @@ async def create_enrollment_token(
         if row is None or row[0] not in manage_scopes:
             raise HTTPException(status_code=404, detail="not found")
 
+    token, expires_at = await issue_enrollment_token(engine, cluster_id, auth.principal.identity_id)
+    # The plaintext token appears EXACTLY once: here.
+    return {
+        "token": token,
+        "cluster_id": str(cluster_id),
+        "expires_at": expires_at.isoformat(),
+        "ttl_seconds": TOKEN_TTL_SECONDS_DEFAULT,
+    }
+
+
+async def issue_enrollment_token(
+    engine: Any, cluster_id: uuid.UUID, identity_id: uuid.UUID
+) -> tuple[str, datetime]:
+    """Mint one token for a cluster the caller was already authorized for.
+
+    Stored as a hash only and audited without its value. The plaintext is
+    returned to the caller, who shows it exactly once.
+    """
     token = secrets.token_urlsafe(32)  # 256 bits of entropy
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     expires_at = datetime.now(UTC) + timedelta(seconds=TOKEN_TTL_SECONDS_DEFAULT)
@@ -57,7 +75,7 @@ async def create_enrollment_token(
             {
                 "cluster_id": cluster_id,
                 "token_hash": token_hash,
-                "created_by": auth.principal.identity_id,
+                "created_by": identity_id,
                 "expires_at": expires_at,
             },
         )
@@ -65,7 +83,7 @@ async def create_enrollment_token(
         engine,
         AuditEventData(
             actor_type="user",
-            actor_id=str(auth.principal.identity_id),
+            actor_id=str(identity_id),
             action="agent.enrollment_token.create",
             result="success",
             scope_type="cluster",
@@ -74,10 +92,4 @@ async def create_enrollment_token(
             target_id="redacted",
         ),
     )
-    # The plaintext token appears EXACTLY once: here.
-    return {
-        "token": token,
-        "cluster_id": str(cluster_id),
-        "expires_at": expires_at.isoformat(),
-        "ttl_seconds": TOKEN_TTL_SECONDS_DEFAULT,
-    }
+    return token, expires_at

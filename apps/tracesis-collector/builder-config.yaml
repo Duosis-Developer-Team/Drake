@@ -1,0 +1,49 @@
+# Tracesis Collector: an OpenTelemetry Collector distribution (ADR-0037 §5).
+#
+# Built with the OpenTelemetry Collector Builder (ocb) from exactly the
+# components Tracesis's collector configurations use (deploy/otel/templates/
+# agent-config.yaml and gateway-config.yaml), plus `opamp` for remote
+# management later. Versions are the ones the contrib image duosis-prod-1
+# runs reports (`otelcol-contrib components`, 0.162.0), so the configs behave
+# the same under either image.
+#
+# Every module is Apache-2.0. The image ships the licence and a NOTICE.
+# "Tracesis Collector" is our name for this build; it is built on
+# OpenTelemetry and does not use the OpenTelemetry name or logo as its own.
+
+dist:
+  module: github.com/Duosis-Developer-Team/Tracesis/apps/tracesis-collector
+  name: tracesis-collector
+  description: Tracesis Collector, built on OpenTelemetry
+  version: 0.162.0-tracesis.1
+  output_path: ./out
+
+receivers:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver v0.162.0
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.162.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.162.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v1.1.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/genainormalizerprocessor v0.162.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.162.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.162.0
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter v0.162.0
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/bearertokenauthextension v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/opampextension v0.162.0
+
+providers:
+  - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.68.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.68.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/yamlprovider v1.68.0

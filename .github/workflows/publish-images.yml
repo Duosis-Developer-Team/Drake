@@ -47,6 +47,12 @@ jobs:
           - component: cluster-agent
             dockerfile: apps/cluster-agent/Dockerfile
             context: apps/cluster-agent
+          # Tracesis's own OpenTelemetry Collector build (ADR-0037 §5), the
+          # collector image of the tracesis-agent chart.
+          - component: collector
+            image: tracesis-collector
+            dockerfile: apps/tracesis-collector/Dockerfile
+            context: apps/tracesis-collector
     steps:
       - name: refuse without explicit confirmation
         if: inputs.confirm != 'publish'
@@ -88,19 +94,86 @@ jobs:
           push: true
           # Immutable by construction: the tag is the commit SHA and is
           # never moved. `latest` is not produced at all.
-          tags: ghcr.io/${{ steps.ns.outputs.owner }}/drake-${{ matrix.component }}:${{ github.sha }}
+          tags: ghcr.io/${{ steps.ns.outputs.owner }}/${{ matrix.image || format('drake-{0}', matrix.component) }}:${{ github.sha }}
           provenance: false
 
       - name: record the release mapping
         run: |
           {
-            echo "### drake-${{ matrix.component }}"
+            echo "### ${{ matrix.image || format('drake-{0}', matrix.component) }}"
             echo
             echo "| field | value |"
             echo "|---|---|"
             echo "| source commit | \`${{ github.sha }}\` |"
-            echo "| image | \`ghcr.io/${{ steps.ns.outputs.owner }}/drake-${{ matrix.component }}\` |"
+            echo "| image | \`ghcr.io/${{ steps.ns.outputs.owner }}/${{ matrix.image || format('drake-{0}', matrix.component) }}\` |"
             echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
             echo
             echo "Pin this digest in \`values-production.yaml\`; never a tag."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  chart:
+    # The tracesis-agent chart (ADR-0037), with the agent and collector
+    # images this same run built stamped into it by digest. A chart version
+    # is published once: a run whose Chart.yaml version already exists in the
+    # registry skips this job's push (bump the version to ship new images to
+    # customers), so an ordinary release never rewrites what customers pinned.
+    name: publish the tracesis-agent chart
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: resolve the registry namespace
+        id: ns
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: log in to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: package, stamp and push
+        env:
+          OWNER: ${{ steps.ns.outputs.owner }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd deploy/tracesis-agent
+          version="$(awk '/^version:/ {print $2}' Chart.yaml)"
+          ref="oci://ghcr.io/${OWNER}/charts/tracesis-agent"
+          echo "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+          if helm show chart "$ref" --version "$version" >/dev/null 2>&1; then
+            echo "### tracesis-agent $version already published; not rewritten" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          digest() {
+            docker buildx imagetools inspect "ghcr.io/${OWNER}/$1:${SHA}" --format '{{json .Manifest}}' \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])'
+          }
+          agent="$(digest drake-cluster-agent)"
+          collector="$(digest tracesis-collector)"
+          sed -i "s|digest: \"\"  # @stamp:cluster-agent|digest: \"${agent}\"  # @stamp:cluster-agent|" values.yaml
+          sed -i "s|digest: \"\"  # @stamp:collector|digest: \"${collector}\"  # @stamp:collector|" values.yaml
+          grep -q "${agent}" values.yaml && grep -q "${collector}" values.yaml
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+          helm dependency build . >/dev/null
+          helm package . --destination /tmp/chart >/dev/null
+          helm push "/tmp/chart/tracesis-agent-${version}.tgz" "oci://ghcr.io/${OWNER}/charts"
+          {
+            echo "### tracesis-agent ${version}"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| chart | \`${ref}\` |"
+            echo "| source commit | \`${SHA}\` |"
+            echo "| cluster agent | \`${agent}\` |"
+            echo "| collector | \`${collector}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

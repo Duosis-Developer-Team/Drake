@@ -59,6 +59,20 @@ enrollmentToken:
 
 logLevel: info
 
+# The store relay (ADR-0037): Tracesis reads this cluster's own ClickHouse
+# and Prometheus through the agent's outbound connection. Off unless a URL
+# is set. The reader's password comes from an existing Secret and is read
+# by the agent at query time; Tracesis never holds it.
+relay:
+  clickhouse:
+    url: ""
+    user: ""
+    existingSecret: ""
+    key: reader-password
+  prometheus:
+    url: ""
+  workers: 4
+
 resources:
   requests:
     cpu: 50m
@@ -71,6 +85,9 @@ resources:
 healthPort: 8090
 
 networkPolicy:
+  # Pod ports of the relayed stores in this namespace, opened only when the
+  # relay is on: ClickHouse HTTP and the Prometheus server.
+  relayPodPorts: [8123, 9090]
   enabled: true
   # FAIL-CLOSED egress: every destination is explicit. Rendering fails on
   # empty values, and the policy gate refuses 0.0.0.0/0 and ::/0 — "the

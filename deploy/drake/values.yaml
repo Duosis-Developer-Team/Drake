@@ -451,6 +451,22 @@ internalAgentApi:
   agentNamespace: drake-agent
   agentPodSelector:
     app.kubernetes.io/name: drake-cluster-agent
+  # Agents in OTHER clusters (ADR-0037 §4). Off: the listeners stay
+  # ClusterIP-only, as ADR-0026 left them. On: a second Service publishes
+  # both on fixed NodePorts and the ingress policy admits any source on
+  # those two ports. The client certificate and the proof of possession are
+  # what authenticate an agent, with or without this; the listener's server
+  # certificate must also name the host agents dial (`host`).
+  external:
+    enabled: false
+    host: ""
+    enrollNodePort: 30844
+    ingestNodePort: 30843
+    # Existing Secret with `ca.crt`: the CA that signed the listener's server
+    # certificate (public material). Embedded in every generated install file.
+    serverCASecret: ""
+    # The tracesis-agent chart version the generated command installs.
+    chartVersion: ""
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 256Mi}

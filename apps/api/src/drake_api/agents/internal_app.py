@@ -14,6 +14,7 @@ from drake_api.agents.ca import AgentCertificateAuthority
 from drake_api.agents.router_ingest import router as agent_ingest_router
 from drake_api.agents.router_internal import certificate_router, enrollment_router
 from drake_api.agents.router_internal import router as agent_internal_router
+from drake_api.agents.router_relay import router as agent_relay_router
 from drake_api.correlation import CorrelationIdMiddleware
 from drake_api.errors import register_error_handlers
 from drake_api.settings import Settings, get_settings
@@ -137,7 +138,9 @@ def create_internal_agent_app(settings: Settings | None = None, *, surface: str 
         # be exchangeable on a listener a certificate already opened.
         app.include_router(certificate_router)
         app.include_router(agent_ingest_router)
+        app.include_router(agent_relay_router)
     else:
         app.include_router(agent_internal_router)
         app.include_router(agent_ingest_router)
+        app.include_router(agent_relay_router)
     return app

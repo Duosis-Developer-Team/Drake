@@ -24,6 +24,7 @@ import {
   StateCard,
 } from "@/components/clusters/primitives";
 import { ClusterCard } from "@/components/clusters/ClusterCard";
+import { ConnectCluster } from "@/components/clusters/ConnectCluster";
 import { PageFrame, PageHeader } from "@/components/shell/AppShell";
 import { Panel } from "@/components/ui/Panel";
 import {
@@ -116,7 +117,11 @@ export default function ClustersPage() {
 
   return (
     <PageFrame>
-      <PageHeader title={t("list.title")} description={t("list.description")} />
+      <PageHeader
+        title={t("list.title")}
+        description={t("list.description")}
+        actions={<ConnectCluster onConnected={resource.reload} />}
+      />
 
       {resource.data && total > 0 ? (
         <div className="page-grid mb-6">

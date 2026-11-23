@@ -108,4 +108,15 @@ spec:
         - protocol: TCP
           port: {{ $port }}
         {{- end }}
+    {{- if and (or .Values.relay.clickhouse.url .Values.relay.prometheus.url) $np.relayPodPorts }}
+    # The relayed stores, in this release's namespace (ADR-0037). Pod ports:
+    # an egress policy matches after the Service's port translation.
+    - to:
+        - podSelector: {}
+      ports:
+        {{- range $port := $np.relayPodPorts }}
+        - protocol: TCP
+          port: {{ $port }}
+        {{- end }}
+    {{- end }}
 {{- end }}

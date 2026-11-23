@@ -89,6 +89,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
+/**
+ * The session when there is one, `null` outside a SessionProvider. For a
+ * control that is simply absent without a session (a page rendered on its
+ * own in a test), rather than an error.
+ */
+export function useOptionalSession(): SessionContextValue | null {
+  return useContext(SessionContext);
+}
+
 export function useSession(): SessionContextValue {
   const context = useContext(SessionContext);
   if (!context) throw new Error("useSession must be used inside SessionProvider");

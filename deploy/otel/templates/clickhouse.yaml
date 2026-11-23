@@ -4,6 +4,7 @@
 # not change that class or any claim that uses it. `keep` means
 # `helm uninstall` leaves the class (and therefore the volume's policy) in
 # place.
+{{- if .Values.clickhouse.storage.createStorageClass }}
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -17,6 +18,7 @@ reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: false
 ---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -70,6 +72,10 @@ spec:
         runAsGroup: 101
         fsGroup: 101
       terminationGracePeriodSeconds: 60
+{{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: clickhouse
           image: {{ include "drake-otel.image" (dict "root" . "name" "clickhouse") }}
@@ -113,7 +119,9 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: {{ .Values.clickhouse.storage.storageClassName }}
+        {{- with .Values.clickhouse.storage.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
         resources:
           requests:
             storage: {{ .Values.clickhouse.storage.size }}

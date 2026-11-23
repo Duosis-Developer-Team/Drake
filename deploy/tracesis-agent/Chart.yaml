@@ -1,0 +1,26 @@
+apiVersion: v2
+name: tracesis-agent
+description: >-
+  Everything Tracesis needs to observe a Kubernetes cluster, in one install
+  (ADR-0037). The read-only cluster agent, an OpenTelemetry collector on
+  every node, a log and trace store, and Prometheus, all inside the
+  customer's cluster. The data stays there; Tracesis reads it through the
+  agent's own outbound connection. Built on OpenTelemetry.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [observability, opentelemetry, kubernetes, tracesis]
+dependencies:
+  - name: drake-cluster-agent
+    version: 0.4.0
+    repository: file://../agent
+    alias: clusterAgent
+  - name: drake-otel
+    version: 0.1.0
+    repository: file://../otel
+    alias: telemetry
+  - name: prometheus
+    version: 27.44.0
+    repository: https://prometheus-community.github.io/helm-charts
+    alias: metrics
+    condition: metrics.enabled

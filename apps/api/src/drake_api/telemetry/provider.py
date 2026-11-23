@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from drake_api.relay import AgentRelay, RelayUnavailableError
 from drake_api.settings import Settings, TelemetryConnector
 
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -143,17 +144,40 @@ async def validate_connector(
     return connector.url
 
 
+#: `integrations.config_ref` naming a cluster whose Prometheus runs inside
+#: that cluster and is read through its agent (ADR-0037 §3).
+RELAY_PREFIX = "agent:"
+
+
+@dataclass(frozen=True)
+class RelayConnector:
+    """A Prometheus reached through a cluster's agent, never dialled."""
+
+    cluster_ref: str
+
+
 class PrometheusAdapter:
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        relay: AgentRelay | None = None,
+    ):
         self._settings = settings
         self._transport = transport
+        self._relay = relay
 
-    def resolve_connector(self, config_ref: str) -> TelemetryConnector | None:
+    def resolve_connector(self, config_ref: str) -> TelemetryConnector | RelayConnector | None:
+        if config_ref.startswith(RELAY_PREFIX):
+            cluster_ref = config_ref[len(RELAY_PREFIX) :]
+            if self._relay is None or not cluster_ref:
+                return None
+            return RelayConnector(cluster_ref=cluster_ref)
         return self._settings.telemetry_connectors.get(config_ref)
 
     async def query_range(
         self,
-        connector: TelemetryConnector,
+        connector: TelemetryConnector | RelayConnector,
         query: str,
         *,
         start: int,
@@ -162,6 +186,43 @@ class PrometheusAdapter:
         timeout_seconds: float,
         correlation_id: str,
     ) -> RangeQueryResult:
+        form = {"query": query, "start": str(start), "end": str(end), "step": str(step_seconds)}
+        if isinstance(connector, RelayConnector):
+            body = await self._relayed(connector, form, timeout_seconds)
+        else:
+            body = await self._direct(connector, form, timeout_seconds, correlation_id)
+        return _parse_matrix(body)
+
+    async def _relayed(
+        self, connector: RelayConnector, form: dict[str, str], timeout_seconds: float
+    ) -> bytes:
+        assert self._relay is not None
+        try:
+            reply = await self._relay.call(
+                connector.cluster_ref,
+                "prometheus.query_range",
+                form,
+                timeout_seconds=timeout_seconds + 3.0,
+            )
+        except RelayUnavailableError as error:
+            code = "provider_" + error.code.removeprefix("store_")
+            if error.code in ("store_response_too_large", "store_redirect_refused"):
+                raise ProviderContractError(code) from error
+            raise ProviderUnavailableError(code) from error
+        _check_status(reply.status_code)
+        if reply.content_type.split(";", 1)[0].strip().lower() != "application/json":
+            raise ProviderContractError("provider_unexpected_content_type")
+        if len(reply.body) > _MAX_RESPONSE_BYTES:
+            raise ProviderContractError("provider_response_too_large")
+        return reply.body
+
+    async def _direct(
+        self,
+        connector: TelemetryConnector,
+        form: dict[str, str],
+        timeout_seconds: float,
+        correlation_id: str,
+    ) -> bytes:
         base_url = await validate_connector(connector, self._settings)
         timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 3.0))
         try:
@@ -177,23 +238,10 @@ class PrometheusAdapter:
                 async with client.stream(
                     "POST",
                     "/api/v1/query_range",
-                    data={
-                        "query": query,
-                        "start": str(start),
-                        "end": str(end),
-                        "step": str(step_seconds),
-                    },
+                    data=form,
                     headers={"X-Correlation-ID": correlation_id},
                 ) as response:
-                    if response.status_code in (301, 302, 303, 307, 308):
-                        raise ProviderContractError("provider_redirect_refused")
-                    if response.status_code >= 500:
-                        raise ProviderUnavailableError("provider_upstream_error")
-                    if response.status_code != 200:
-                        # 4xx from Prometheus (bad query etc.) — our compiler
-                        # produced it, so this is a contract failure, never
-                        # echoed to the caller. The body is not read.
-                        raise ProviderContractError("provider_rejected_query")
+                    _check_status(response.status_code)
                     media_type = (
                         response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
                     )
@@ -212,25 +260,40 @@ class PrometheusAdapter:
             raise ProviderUnavailableError("provider_timeout") from error
         except httpx.HTTPError as error:
             raise ProviderUnavailableError("provider_unreachable") from error
+        return bytes(body)
 
-        try:
-            document = json.loads(bytes(body))
-        except ValueError as error:
-            raise ProviderContractError("provider_malformed_response") from error
-        if not isinstance(document, dict):
+
+def _check_status(status_code: int) -> None:
+    if status_code in (301, 302, 303, 307, 308):
+        raise ProviderContractError("provider_redirect_refused")
+    if status_code >= 500:
+        raise ProviderUnavailableError("provider_upstream_error")
+    if status_code != 200:
+        # 4xx from Prometheus (bad query etc.) — our compiler produced it,
+        # so this is a contract failure, never echoed to the caller. The
+        # body is not read.
+        raise ProviderContractError("provider_rejected_query")
+
+
+def _parse_matrix(body: bytes) -> RangeQueryResult:
+    try:
+        document = json.loads(body)
+    except ValueError as error:
+        raise ProviderContractError("provider_malformed_response") from error
+    if not isinstance(document, dict):
+        raise ProviderContractError("provider_malformed_response")
+    if document.get("status") == "error":
+        # Upstream error strings are redacted to a bounded code.
+        raise ProviderContractError("provider_query_error")
+    data = document.get("data")
+    if not isinstance(data, dict) or data.get("resultType") != "matrix":
+        raise ProviderContractError("provider_malformed_response")
+    result = data.get("result")
+    if not isinstance(result, list):
+        raise ProviderContractError("provider_malformed_response")
+    for entry in result:
+        if not isinstance(entry, dict) or not isinstance(entry.get("metric"), dict):
             raise ProviderContractError("provider_malformed_response")
-        if document.get("status") == "error":
-            # Upstream error strings are redacted to a bounded code.
-            raise ProviderContractError("provider_query_error")
-        data = document.get("data")
-        if not isinstance(data, dict) or data.get("resultType") != "matrix":
+        if not isinstance(entry.get("values"), list):
             raise ProviderContractError("provider_malformed_response")
-        result = data.get("result")
-        if not isinstance(result, list):
-            raise ProviderContractError("provider_malformed_response")
-        for entry in result:
-            if not isinstance(entry, dict) or not isinstance(entry.get("metric"), dict):
-                raise ProviderContractError("provider_malformed_response")
-            if not isinstance(entry.get("values"), list):
-                raise ProviderContractError("provider_malformed_response")
-        return RangeQueryResult(result=result)
+    return RangeQueryResult(result=result)

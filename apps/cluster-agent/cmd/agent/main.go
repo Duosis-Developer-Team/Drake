@@ -28,6 +28,7 @@ import (
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/identity"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/kube"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/logging"
+	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/relay"
 	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/transport"
 )
 
@@ -46,6 +47,13 @@ func (s *swappableSender) Post(ctx context.Context, path string, payload any) (i
 	client := s.client
 	s.mu.RUnlock()
 	return client.Post(ctx, path, payload)
+}
+
+func (s *swappableSender) PostOnce(ctx context.Context, path string, payload any, timeout time.Duration) (int, []byte, error) {
+	s.mu.RLock()
+	client := s.client
+	s.mu.RUnlock()
+	return client.PostOnce(ctx, path, payload, timeout)
 }
 
 func (s *swappableSender) swap(client *transport.Client) {
@@ -185,6 +193,17 @@ func main() {
 			stop()
 		}
 	}()
+	// Reads of this cluster's own stores, pulled over this agent's own
+	// connection (ADR-0037). Off unless a store URL is configured.
+	if cfg.Relay.Enabled() {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			relay.New(cfg.Relay, sender, logger).Run(ctx)
+		}()
+		logger.Info("store relay started", "workers", cfg.Relay.Workers,
+			"clickhouse", cfg.Relay.ClickHouseURL != "", "prometheus", cfg.Relay.PrometheusURL != "")
+	}
 
 	group.Wait()
 	logger.Info("agent stopped gracefully")

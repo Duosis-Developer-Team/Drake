@@ -75,6 +75,10 @@ spec:
       # find in the host's PID namespace. This is the one host namespace it
       # gets: no hostNetwork, no hostIPC.
       hostPID: true
+{{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: obi
           image: "{{ .Values.obi.image.repository }}@{{ .Values.obi.image.digest }}"

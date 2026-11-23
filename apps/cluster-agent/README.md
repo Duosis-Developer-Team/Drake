@@ -16,7 +16,11 @@ These are enforced in code and tests, not just documented:
 5. **No Kubernetes write verbs.** `create`/`update`/`patch`/`delete` are never requested.
 6. **No wildcard RBAC.** Resources and verbs are always enumerated explicitly.
 7. **No inbound control port.** The only listener is a loopback-bound liveness
-   probe endpoint; commands can never be pushed to the agent.
+   probe endpoint; commands can never be pushed to the agent. The store relay
+   (ADR-0037) PULLS reads over the agent's own outbound connection and runs
+   exactly two kinds — a ClickHouse read as the read-only reader user and a
+   Prometheus range query — against the store URLs in its own configuration.
+   It has no code path to the Kubernetes API, a Secret or a write verb.
 8. **Outbound-only connectivity.** The agent dials the Drake API (TLS);
    nothing dials the agent.
 9. **No secret/token logging.** All log output passes redaction.

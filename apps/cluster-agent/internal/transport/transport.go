@@ -36,6 +36,7 @@ var ErrReconcileRequired = errors.New("server requires reconcile")
 type Client struct {
 	base     string
 	http     *http.Client
+	long     *http.Client
 	identity *identity.Identity
 }
 
@@ -61,16 +62,17 @@ func New(base, serverCAFile string, id *identity.Identity) (*Client, error) {
 			MinVersion:   tls.VersionTLS12,
 		},
 	}
+	noRedirects := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{
 		base: base,
 		http: &http.Client{
 			Timeout:   requestTimeout,
 			Transport: httpTransport,
 			// Redirects are never followed.
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
+			CheckRedirect: noRedirects,
 		},
+		// Long polls set their own deadline per call (PostOnce).
+		long:     &http.Client{Transport: httpTransport, CheckRedirect: noRedirects},
 		identity: id,
 	}, nil
 }
@@ -113,7 +115,23 @@ func (c *Client) Post(ctx context.Context, path string, payload any) (int, []byt
 	return 0, nil, fmt.Errorf("request failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
+// PostOnce sends one signed request with its own timeout and no retry. A
+// long poll is retried by its caller, at the caller's pace.
+func (c *Client) PostOnce(ctx context.Context, path string, payload any, timeout time.Duration) (int, []byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, nil, fmt.Errorf("encode payload: %w", err)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return c.send(callCtx, c.long, path, body)
+}
+
 func (c *Client) once(ctx context.Context, path string, body []byte) (int, []byte, error) {
+	return c.send(ctx, c.http, path, body)
+}
+
+func (c *Client) send(ctx context.Context, client *http.Client, path string, body []byte) (int, []byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -126,7 +144,7 @@ func (c *Client) once(ctx context.Context, path string, body []byte) (int, []byt
 	for name, value := range pop {
 		request.Header.Set(name, value)
 	}
-	response, err := c.http.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return 0, nil, err
 	}

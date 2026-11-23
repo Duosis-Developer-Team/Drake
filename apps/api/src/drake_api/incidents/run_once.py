@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from drake_api.incidents.runner import run_cycle
 from drake_api.observability.application import TraceGoldenReader
 from drake_api.observability.store import ClickHouseStore
+from drake_api.relay import AgentRelay
 from drake_api.service_health.cache import HealthCache
 from drake_api.service_health.orchestrator import HealthOrchestrator
 from drake_api.settings import get_settings
@@ -37,12 +38,13 @@ async def run(batch_size: int, concurrency: int) -> dict[str, int | bool]:
     redis = aioredis.from_url(settings.redis_url)
     try:
         registry = get_registry()
+        relay = AgentRelay(settings, redis=redis, engine=engine)
         broker = TelemetryBroker(
             settings=settings,
             engine=engine,
             redis=redis,
             registry=registry,
-            adapter=PrometheusAdapter(settings),
+            adapter=PrometheusAdapter(settings, relay=relay),
             metrics=BrokerMetrics(),
         )
         orchestrator = HealthOrchestrator(
@@ -51,7 +53,8 @@ async def run(batch_size: int, concurrency: int) -> dict[str, int | bool]:
             registry,
             HealthCache(redis),
             trace_golden=TraceGoldenReader(
-                ClickHouseStore(settings), enabled=settings.observability_traces_enabled
+                ClickHouseStore(settings, relay=relay),
+                enabled=settings.observability_traces_enabled,
             ),
         )
         report = await run_cycle(
