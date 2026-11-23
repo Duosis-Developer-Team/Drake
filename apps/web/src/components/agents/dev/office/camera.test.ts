@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { anchorFor, boxReduce, densityOf, safePath } from "./art";
-import { clampCamera, defaultCamera, defaultZoom, fitCamera, fitZoom, frameRoom, tween, zoomLevels, type Camera } from "./camera";
+import { clampCamera, defaultCamera, defaultZoom, fitCamera, fitZoom, frameRoom, stageZoom, tween, zoomLevels, type Camera } from "./camera";
 import { spriteScale } from "./engine";
 import { layoutOffice, roomOrder } from "./world";
 
@@ -47,16 +47,33 @@ describe("the camera", () => {
     expect(fitZoom(4, 3, 358, 700, world)).toBe(1);
   });
 
-  it("opens a step closer than the whole office, the office spanning the stage edge to edge", () => {
+  it("opens at the whole office as large as it can be, never cut at the top or the bottom", () => {
     const levels = zoomLevels(4, 2);
-    // The MacBook: fit 3, the first look 4 (3072 ≥ 2560 device pixels).
-    expect(defaultZoom(levels, 3, 768, mac.w)).toBe(4);
-    // 1440 × 900: 2416 wide, the same.
-    expect(defaultZoom(levels, 3, 768, 2416)).toBe(4);
-    // One step up not wide enough: another.
-    expect(defaultZoom(levels, 2, 768, 2800)).toBe(4);
-    // A wide 1× screen: fit 2, then 3 already covers 1688.
-    expect(defaultZoom(zoomLevels(4, 1), 2, 768, 1688)).toBe(3);
+    // A 13-inch MacBook Air, sidebar open: 1280 × 663 CSS under the toolbar.
+    // Z = 3 needs 1440 device pixels down: drawn at 3, shown 8% smaller.
+    const air = stageZoom(levels, 2560, 1326, office);
+    expect(air.z).toBe(3);
+    expect(air.shrink).toBeCloseTo(1326 / 1440, 5);
+    // Full screen on it (1512 × 939): Z = 4 is 2% too tall: 4, a hair smaller.
+    const full = stageZoom(levels, 3024, 1878, office);
+    expect(full.z).toBe(4);
+    expect(full.shrink).toBeGreaterThan(0.97);
+    // Where a whole level fits, nothing is shrunk.
+    expect(stageZoom(levels, 2560, 1522, office)).toEqual({ z: 3, shrink: 1 });
+    // Never more than 15% smaller: a short stage takes the level below.
+    expect(stageZoom(levels, 2560, 1100, office)).toEqual({ z: 2, shrink: 1 });
+    // A phone gets the smallest whole level, and pans.
+    expect(stageZoom(zoomLevels(4, 3), 1074, 2100, office)).toEqual({ z: 1, shrink: 1 });
+  });
+
+  it("opens no closer than the whole office unless the scene leaves the sides empty", () => {
+    const levels = zoomLevels(4, 2);
+    // The exterior (1280 wide) covers the MacBook's width at 3: the whole office.
+    expect(defaultZoom(levels, 3, exterior.w, mac.w)).toBe(3);
+    // A very wide stage: closer until the scene spans it.
+    expect(defaultZoom(levels, 2, exterior.w, 3200)).toBe(3);
+    // Without an exterior, the office itself spans the width.
+    expect(defaultZoom(levels, 3, office.w, mac.w)).toBe(4);
   });
 
   it("shows no space beyond the office's sides in the first look, and the band where people are", () => {
