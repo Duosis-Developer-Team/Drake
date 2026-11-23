@@ -180,6 +180,20 @@ spec:
             - name: DRAKE_OBSERVABILITY_STORE
               value: {{ include "drake.observabilityStore" . | quote }}
             {{- end }}
+            {{- with .Values.internalAgentApi.external }}
+            {{- if .enabled }}
+            {{- /* Connect a cluster (ADR-0037): what the generated install file
+                   points a customer's agent at. Public material only. */}}
+            - name: DRAKE_AGENT_PUBLIC_ENROLLMENT_URL
+              value: {{ printf "https://%s:%v" (required "internalAgentApi.external.host is required" .host) .enrollNodePort | quote }}
+            - name: DRAKE_AGENT_PUBLIC_INGEST_URL
+              value: {{ printf "https://%s:%v" .host .ingestNodePort | quote }}
+            - name: DRAKE_AGENT_SERVER_CA_FILE
+              value: /etc/drake/agent-server-ca/ca.crt
+            - name: DRAKE_AGENT_CHART_VERSION
+              value: {{ required "internalAgentApi.external.chartVersion is required" .chartVersion | quote }}
+            {{- end }}
+            {{- end }}
           envFrom:
             # Secret REFERENCES only; no value is ever rendered here.
             - secretRef:
@@ -187,7 +201,8 @@ spec:
           {{- $observability := or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
           {{- $emailMount := $emailSender }}
           {{- $reporters := (.Values.protection).connectors }}
-          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability $emailMount $reporters }}
+          {{- $agentExternal := .Values.internalAgentApi.external.enabled }}
+          {{- $secretVolumes := or .Values.github.enabled ((.Values.alerting).existingSecret) $observability $emailMount $reporters $agentExternal }}
           {{- if $secretVolumes }}
           volumeMounts:
             {{- if $observability }}
@@ -215,6 +230,11 @@ spec:
               mountPath: {{ $email.secretMountPath | default "/etc/drake/email" | quote }}
               readOnly: true
             {{- end }}
+            {{- if $agentExternal }}
+            - name: agent-server-ca
+              mountPath: /etc/drake/agent-server-ca
+              readOnly: true
+            {{- end }}
           {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -226,8 +246,17 @@ spec:
             httpGet: {path: /health/ready, port: http}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) $emailMount }}
+      {{- if or .Values.github.enabled ((.Values.alerting).existingSecret) ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) $emailMount .Values.internalAgentApi.external.enabled }}
       volumes:
+        {{- if .Values.internalAgentApi.external.enabled }}
+        # The CA that signed the agent listener's server certificate: a
+        # certificate only, never its key (that stays off the cluster).
+        - name: agent-server-ca
+          secret:
+            secretName: {{ required "internalAgentApi.external.serverCASecret is required" .Values.internalAgentApi.external.serverCASecret }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+        {{- end }}
         {{- if or ((.Values.observability).logsEnabled) ((.Values.observability).tracesEnabled) }}
         - name: observability-store
           secret:

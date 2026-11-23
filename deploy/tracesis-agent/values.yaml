@@ -34,7 +34,7 @@ clusterAgent:
   image:
     repository: ghcr.io/duosis-developer-team/drake-cluster-agent
     # Stamped by the release that publishes this chart.
-    digest: ""
+    digest: ""  # @stamp:cluster-agent
   clusterId: ""
   clusterName: ""
   apiBaseUrl: ""
@@ -72,7 +72,8 @@ telemetry:
     collector:
       # Tracesis's own collector distribution (apps/tracesis-collector).
       repository: ghcr.io/duosis-developer-team/tracesis-collector
-      digest: ""
+      # Stamped by the release that publishes this chart.
+      digest: ""  # @stamp:collector
     clickhouse:
       repository: clickhouse/clickhouse-server
       # 26.8.36.3, the 26.8 LTS line (same as duosis-prod-1).

@@ -193,6 +193,41 @@ spec:
     - name: ingest
       port: {{ .Values.internalAgentApi.ingestPort }}
       targetPort: ingest
+{{- with .Values.internalAgentApi.external }}
+{{- if .enabled }}
+---
+{{/*
+The same two listeners for agents in other clusters (ADR-0037 §4). A
+separate Service, so the ClusterIP one above stays what in-cluster agents
+and every existing rule name. Nothing about either listener changes: the
+enrolment one still serves only /enroll, the ingest one still refuses a
+handshake without a client certificate this deployment's CA issued.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "drake.name" $ }}-agent-gateway-external
+  namespace: {{ include "drake.namespace" $ }}
+  labels:
+    {{- include "drake.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: agent-gateway
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: {{ include "drake.name" $ }}
+    app.kubernetes.io/component: agent-gateway
+  ports:
+    - name: enroll
+      port: {{ $.Values.internalAgentApi.enrollPort }}
+      targetPort: enroll
+      nodePort: {{ .enrollNodePort }}
+    - name: ingest
+      port: {{ $.Values.internalAgentApi.ingestPort }}
+      targetPort: ingest
+      nodePort: {{ .ingestNodePort }}
+{{- end }}
+{{- end }}
 {{- if .Values.networkPolicy.enabled }}
 ---
 {{/*
@@ -240,6 +275,19 @@ spec:
           port: {{ .Values.internalAgentApi.enrollPort }}
         - protocol: TCP
           port: {{ .Values.internalAgentApi.ingestPort }}
+    {{- if .Values.internalAgentApi.external.enabled }}
+    # Agents in other clusters arrive through the NodePorts from anywhere.
+    # This is the network boundary saying so plainly; mutual TLS and the
+    # proof of possession are what authenticate them (ADR-0026, ADR-0037).
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: {{ .Values.internalAgentApi.enrollPort }}
+        - protocol: TCP
+          port: {{ .Values.internalAgentApi.ingestPort }}
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
