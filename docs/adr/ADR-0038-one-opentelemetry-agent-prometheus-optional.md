@@ -81,6 +81,35 @@ metrics reader next to the PromQL one, chosen per cluster. This is the
 - **Prometheus:** stays a supported option, for a customer who already runs
   it or wants PromQL.
 
+#### Phase 3, first step (2026-11-23)
+
+- **Where the switch sits.** In the broker, at the one call that asked
+  Prometheus (`adapter.query_range`): for a template and cluster the
+  settings name, the same Prometheus-shaped matrix is computed from
+  ClickHouse (`telemetry/otel_metrics.py`). Normalization, envelopes, caches
+  and the health engine are unchanged.
+- **The switch.** `otel_metrics_clusters` and `otel_metrics_templates` (chart:
+  `telemetry.otelMetrics`), both empty by default; emptying either switches
+  back.
+- **Answers are kept apart.**
+  - The cache identity carries the source, so an OpenTelemetry answer and a
+    Prometheus one never share an entry.
+  - The envelope says which one answered (`source_type`).
+  - A ClickHouse failure serves last-good like a Prometheus failure. It is
+    not recorded against the Prometheus integration's health.
+- **The first templates.**
+  - `workload.replicas-desired.v1` and `workload.replicas-ready.v1`:
+    against Prometheus in prod, 31 of 31 points were equal for a
+    Deployment and a StatefulSet.
+  - `workload.restarts-delta.v1`: needs the workload on each pod's
+    metrics, so the metrics collector now runs `k8sattributes`, as the log
+    agent does. That is the OpenTelemetry form of Prometheus's
+    `drake:pod:workload` rule.
+- **Statements.**
+  - They name their cluster (`{cluster:String}`), so the store routes them
+    to a cluster's own ClickHouse (ADR-0037 §3).
+  - Every value is a typed parameter.
+
 ### Phase 4: Tracesis manages its agents
 
 - **OpAMP** (OpenTelemetry's agent management protocol; the extension is

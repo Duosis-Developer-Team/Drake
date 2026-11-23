@@ -234,6 +234,12 @@ alerting:
   #    displayName: "Duosis production Alertmanager"
 
 telemetry:
+  # ADR-0038 phase 3: which health templates are answered from OpenTelemetry
+  # metrics (ClickHouse) instead of Prometheus, on which clusters. Unset by
+  # default; e.g.
+  #   otelMetrics:
+  #     clusters: [duosis-prod-1]
+  #     templates: [workload.replicas-desired.v1, workload.replicas-ready.v1]
   # Server-owned Prometheus connectors, by the name an integration's
   # `config_ref` points at. Empty by default: a Drake with no metrics
   # backend reports every signal as unavailable, which is the honest answer
