@@ -20,7 +20,7 @@ an edit.
 
 import re
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -51,6 +51,10 @@ class ClusterCreate(BaseModel):
     cluster_ref: str = Field(min_length=2, max_length=63)
     display_name: str = Field(min_length=1, max_length=200)
     site: str = Field(default="", max_length=200)
+    # Where this cluster's logs, traces and metrics live (ADR-0037).
+    # `cluster`: its own stores, installed by the tracesis-agent chart and
+    # read through its agent. `central`: the store Tracesis itself reads.
+    telemetry_location: Literal["central", "cluster"] = "central"
 
 
 @router.post("/clusters", status_code=201)
@@ -88,7 +92,7 @@ async def create_cluster(
         existing = (
             await connection.execute(
                 text(
-                    "SELECT id, display_name, scope_id, lifecycle "
+                    "SELECT id, display_name, scope_id, lifecycle, telemetry_location "
                     "FROM clusters WHERE cluster_ref = :ref"
                 ),
                 {"ref": payload.cluster_ref},
@@ -112,6 +116,7 @@ async def create_cluster(
                 "cluster_ref": payload.cluster_ref,
                 "display_name": str(existing[1]),
                 "lifecycle": str(existing[3]),
+                "telemetry_location": str(existing[4]),
                 "created": False,
             }
 
@@ -119,6 +124,16 @@ async def create_cluster(
         created = await service.create_cluster(
             payload.cluster_ref, payload.display_name, site=payload.site
         )
+        if payload.telemetry_location == "cluster":
+            # Its stores are inside it: logs and traces route there by the
+            # cluster's name, and its Prometheus is reached through its agent.
+            await connection.execute(
+                text("UPDATE clusters SET telemetry_location = 'cluster' WHERE id = :id"),
+                {"id": created.id},
+            )
+            await service.register_integration(
+                "prometheus", created.scope_id, f"agent:{payload.cluster_ref}"
+            )
         # Inside the same transaction as the write. A cluster that appeared
         # with no record of who asked for it is worse than one that never
         # appeared, because nobody can find out afterwards.
@@ -132,7 +147,11 @@ async def create_cluster(
                 target_type="cluster",
                 target_id=str(created.id),
                 correlation_id=correlation_id_var.get(),
-                metadata={"cluster_ref": payload.cluster_ref, "site": payload.site},
+                metadata={
+                    "cluster_ref": payload.cluster_ref,
+                    "site": payload.site,
+                    "telemetry_location": payload.telemetry_location,
+                },
             ),
         )
 
@@ -141,6 +160,7 @@ async def create_cluster(
         "cluster_ref": payload.cluster_ref,
         "display_name": payload.display_name,
         "lifecycle": "active",
+        "telemetry_location": payload.telemetry_location,
         "created": True,
     }
 

@@ -881,7 +881,7 @@ async def get_service(
 _CLUSTER_COLUMNS = """
     c.id, c.cluster_ref, c.display_name, c.site, c.lifecycle,
     c.catalog_source_kind, c.catalog_source_ref, c.source_revision, c.accepted_at,
-    c.version, c.scope_id
+    c.version, c.scope_id, c.telemetry_location
 """
 
 
@@ -900,6 +900,8 @@ def _cluster_payload(row: Any, observation: dict[str, Any] | None = None) -> dic
         "site": row[3],
         "lifecycle": row[4],
         "version": row[9],
+        # Where its logs, traces and metrics live (ADR-0037).
+        "telemetry_location": row[11],
         "scope": {"type": "cluster", "ref": row[1]},
         "source": _provenance(row, 5),
         "operational": {

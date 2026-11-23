@@ -1,0 +1,20 @@
+Tracesis Collector
+Copyright 2026 Duosis
+
+This product is a distribution of the OpenTelemetry Collector, built with
+the OpenTelemetry Collector Builder from unmodified upstream components:
+
+  OpenTelemetry Collector (go.opentelemetry.io/collector)
+  OpenTelemetry Collector Contrib
+    (github.com/open-telemetry/opentelemetry-collector-contrib)
+
+Copyright The OpenTelemetry Authors. Licensed under the Apache License,
+Version 2.0 (see LICENSE-opentelemetry-collector in this directory).
+
+The components included, and their versions, are listed in
+builder-config.yaml in the Tracesis source repository
+(apps/tracesis-collector). Each component's own NOTICE, where it has one,
+applies to it. No component has been modified.
+
+"OpenTelemetry" is a trademark of The Linux Foundation. Tracesis Collector
+is built on OpenTelemetry and is not endorsed by the OpenTelemetry project.

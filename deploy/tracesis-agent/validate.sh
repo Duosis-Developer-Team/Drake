@@ -56,8 +56,38 @@ refuse "without a pinned collector image" --set telemetry.images.collector.diges
 helm template tracesis-agent . --namespace tracesis "${SETS[@]}" \
   --set enrollment.token="" --is-upgrade >/dev/null
 
+echo "[contract] the install file Tracesis generates renders as is"
+GENERATED="$(mktemp)"
+trap 'rm -f "$GENERATED"' EXIT
+(cd ../.. && uv run --quiet python - "$GENERATED" <<'PYEOF'
+import sys
+
+import yaml
+from drake_api.agents.router_install import install_values
+from drake_api.testing import make_settings
+
+settings = make_settings(
+    env="test",
+    agent_public_enrollment_url="https://tracesis.example.test:30844",
+    agent_public_ingest_url="https://tracesis.example.test:30843",
+)
+values = install_values(
+    settings,
+    cluster_id="11111111-2222-3333-4444-555555555555",
+    cluster_ref="generated-check",
+    server_ca="-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+    token="generated-token",
+)
+yaml.safe_dump(values, open(sys.argv[1], "w"))
+PYEOF
+)
+helm template tracesis-agent . --namespace tracesis -f "$GENERATED" \
+  --set clusterAgent.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+  --set telemetry.images.collector.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+  >/dev/null
+
 RENDERED="$(mktemp)"
-trap 'rm -f "$RENDERED"' EXIT
+trap 'rm -f "$RENDERED" "$GENERATED"' EXIT
 helm template tracesis-agent . --namespace tracesis "${SETS[@]}" >"$RENDERED"
 
 echo "[policy] rendered manifest"
