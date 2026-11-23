@@ -7,7 +7,8 @@
  * (world.ts), never from these pixels.
  */
 
-import type { Art, Sprite } from "./art";
+import { sheeted, type Art, type Sprite } from "./art";
+import type { Prop } from "./furnish";
 import type { Rect, Room, World } from "./world";
 
 const WALL = "#1b2133";
@@ -205,6 +206,21 @@ function lobbyRoom(ctx: CanvasRenderingContext2D, room: Room, art: Art, backWall
 }
 
 /** The whole office as one picture: the drawn map when there is one, else composed. */
+/** The sprite a prop is drawn with: its drawing (or placeholder), sheeted if covered. */
+export function propSprite(art: Art, prop: Prop): Sprite {
+  const base = prop.kind === "box" ? art.box : (art.props.get(prop.kind) ?? art.box);
+  return prop.covered ? sheeted(base) : base;
+}
+
+/**
+ * What lies under everyone, painted with the map: rugs, and the things in a
+ * room nobody uses (dimmed with it). Back to front.
+ */
+function stillProps(ctx: CanvasRenderingContext2D, world: World, art: Art) {
+  const still = world.props.filter((p) => p.still).sort((a, b) => Number(b.kind === "rug") - Number(a.kind === "rug") || a.y + a.h - (b.y + b.h));
+  for (const prop of still) ctx.drawImage(propSprite(art, prop), prop.x, prop.y);
+}
+
 export function paintMap(world: World, art: Art): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = world.w;
@@ -214,10 +230,11 @@ export function paintMap(world: World, art: Art): HTMLCanvasElement {
   ctx.imageSmoothingEnabled = false;
   if (art.map) {
     ctx.drawImage(art.map, 0, 0);
+    stillProps(ctx, world, art);
     // The drawn map shows every room open; an unused one is dimmed, its door shut.
     const { backWall } = world.layout;
     for (const room of world.vacant) {
-      ctx.fillStyle = "rgba(6,9,20,0.6)";
+      ctx.fillStyle = "rgba(6,9,20,0.45)";
       ctx.fillRect(room.x, room.y, room.w, room.h);
       for (const d of room.doors)
         if (d.side === "N") door(ctx, d.x, room.y, d.width, backWall);
@@ -230,8 +247,9 @@ export function paintMap(world: World, art: Art): HTMLCanvasElement {
   for (const room of [...world.rooms, ...world.vacant]) productRoom(ctx, room, art, backWall);
   clusterRoom(ctx, world.cluster, art, backWall);
   lobbyRoom(ctx, world.lobby, art, backWall, world);
+  stillProps(ctx, world, art);
   for (const room of world.vacant) {
-    ctx.fillStyle = "rgba(6,9,20,0.6)";
+    ctx.fillStyle = "rgba(6,9,20,0.45)";
     ctx.fillRect(room.x, room.y, room.w, room.h - 6);
   }
   return c;
