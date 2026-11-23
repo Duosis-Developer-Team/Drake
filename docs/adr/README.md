@@ -41,3 +41,5 @@ or operational details.
 | [ADR-0033](ADR-0033-custom-dashboards.md) | Custom dashboards, built from fixed reads; the environment overview read |
 | [ADR-0034](ADR-0034-alert-rules-on-logs-and-traces-and-deploy-markers.md) | Alert rules on logs and traces; deploy markers on the dashboard charts |
 | [ADR-0035](ADR-0035-filtered-rules-and-rules-against-normal.md) | Rules that filter by text or endpoint; rules against a signal's normal |
+| [ADR-0037](ADR-0037-tracesis-agent-data-stays-in-the-cluster.md) | Tracesis Agent: one install, the data stays in the customer's cluster |
+| [ADR-0038](ADR-0038-one-opentelemetry-agent-prometheus-optional.md) | One OpenTelemetry agent for logs, traces and metrics; Prometheus becomes optional |
