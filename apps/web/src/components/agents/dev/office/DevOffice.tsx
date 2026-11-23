@@ -162,11 +162,13 @@ function Tool({
   icon: Icon,
   onClick,
   testId,
+  disabled = false,
 }: {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   onClick: () => void;
   testId?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -174,8 +176,9 @@ function Tool({
       aria-label={label}
       title={label}
       onClick={onClick}
+      disabled={disabled}
       data-testid={testId}
-      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[0.375rem] text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[0.375rem] text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-brand disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
     >
       <Icon className="h-4 w-4" aria-hidden />
     </button>
@@ -576,7 +579,9 @@ export function DevOffice({
       setLift(1);
       setCamera((prev) => {
         const cam = prev ?? { x: 0, y: 0, z: fit };
-        const nz = Math.min(levels[levels.length - 1], Math.max(levels[0], next));
+        // Never smaller than the whole office at full height (`fit`): zooming
+        // out stops where the building fills the stage top to bottom.
+        const nz = Math.min(levels[levels.length - 1], Math.max(fit, next));
         // Keep the point under the focus (device pixels in the view) where it is.
         const fx = focus?.x ?? deviceW / 2;
         const fy = focus?.y ?? deviceH / 2;
@@ -587,9 +592,11 @@ export function DevOffice({
     },
     [world, bounds, fit, levels, deviceW, deviceH],
   );
+  // The levels a person can step through: the whole office (`fit`) and closer.
+  const steps = useMemo(() => levels.filter((level) => level >= fit), [levels, fit]);
   const zoomBy = (direction: 1 | -1, focus?: { x: number; y: number }) => {
-    const i = levels.indexOf(z);
-    const next = levels[Math.min(levels.length - 1, Math.max(0, (i < 0 ? 0 : i) + direction))];
+    const i = steps.indexOf(z);
+    const next = steps[Math.min(steps.length - 1, Math.max(0, (i < 0 ? 0 : i) + direction))];
     zoomAt(next, focus);
   };
 
@@ -964,7 +971,7 @@ export function DevOffice({
             <Tool label={tDev("connect.open")} icon={Plug} onClick={onConnect} />
             <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
             <div role="group" aria-label={t("zoom.label")} className="inline-flex items-center gap-0.5">
-              <Tool label={t("zoom.out")} icon={Minus} onClick={() => zoomBy(-1)} />
+              <Tool label={t("zoom.out")} icon={Minus} onClick={() => zoomBy(-1)} disabled={z <= fit} />
               <Tool label={t("zoom.fit")} icon={Scan} onClick={wholeOffice} testId="dev-office-fit" />
               <Tool label={t("zoom.in")} icon={Plus} onClick={() => zoomBy(1)} />
             </div>
