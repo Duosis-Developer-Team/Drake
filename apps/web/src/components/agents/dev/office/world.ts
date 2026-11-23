@@ -8,6 +8,7 @@
  * doors, along the corridors and in through another room's doors.
  */
 
+import { chance, furnish, overlaps, type FurnishRoom, type Prop } from "./furnish";
 import { DEFAULT_LAYOUT, SLOT_ORDER, type MapRect, type MapSlot, type OfficeLayout } from "./layout";
 
 export const CELL = 8;
@@ -87,6 +88,8 @@ export interface World {
   entrance: Point;
   /** Repository id → the room it is in. */
   roomOf: Record<string, string>;
+  /** The rooms' furniture (furnish.ts). */
+  props: Prop[];
   layout: OfficeLayout;
 }
 
@@ -101,12 +104,19 @@ export interface RoomInput {
 const DESK_GAP = 12;
 /** Between two rows of desks: the first's legs, a walkway, the second's chair. */
 const ROW_STEP = FOOTPRINT.h + 16;
+/** The floor a corner lounge needs beside the desks: a small sofa, a plant, a gap. */
+const LOUNGE = 72;
+
+/** The side of a room its lounge goes to: the same for a slot, every time. */
+export function loungeSide(slot: string): "left" | "right" {
+  return chance(`lounge:${slot}`) < 0.5 ? "left" : "right";
+}
 
 /**
  * Desks for these owners, spaced and centred on the free floor (as many as
  * fit). The free floor may be borrowed into by a chair's height above it.
  */
-function desksIn(free: Rect | null, owners: string[]): { desks: Desk[]; standing: Point[] } {
+function desksIn(free: Rect | null, owners: string[], lounge: "left" | "right"): { desks: Desk[]; standing: Point[] } {
   if (!free) return { desks: [], standing: [] };
   const floor = { ...free, y: free.y - 16, h: free.h + 16 };
   const perRow = Math.max(1, Math.floor((floor.w + DESK_GAP) / (SIZE.desk.w + DESK_GAP)));
@@ -117,13 +127,17 @@ function desksIn(free: Rect | null, owners: string[]): { desks: Desk[]; standing
   const height = rows === 1 ? FOOTPRINT.h : ROW_STEP + FOOTPRINT.h;
   // Whole cells, so a seat behind a desk is always free to sit in.
   const top = floor.y + Math.floor((floor.h - height) / 2 / CELL) * CELL;
+  // A single row with room to spare keeps to one side: the lounge takes the other.
+  const widest = Math.min(count, perRow) * SIZE.desk.w + (Math.min(count, perRow) - 1) * DESK_GAP;
+  const shift = rows === 1 && floor.w - widest >= LOUNGE ? Math.round((floor.w - widest) / 2) - 8 : 0;
   const desks: Desk[] = [];
   for (let i = 0; i < count; i += 1) {
     const row = Math.floor(i / perRow);
     const inRow = row === rows - 1 ? count - perRow * row : perRow;
     const rowSpan = inRow * SIZE.desk.w + (inRow - 1) * DESK_GAP;
     const col = i - row * perRow;
-    const x = floor.x + Math.round((floor.w - rowSpan) / 2) + col * (SIZE.desk.w + DESK_GAP);
+    const x =
+      floor.x + Math.round((floor.w - rowSpan) / 2) + (lounge === "left" ? shift : -shift) + col * (SIZE.desk.w + DESK_GAP);
     const y = top - FOOTPRINT.top + row * ROW_STEP;
     desks.push({ x, y, seat: { x: x + SEATED.x, y: y + 4 }, owner: owners[i] ?? null });
   }
@@ -161,7 +175,8 @@ export function layoutOffice(input: RoomInput[], layout: OfficeLayout = DEFAULT_
   const roomOf: Record<string, string> = {};
   const build = (slot: MapSlot, id: string, members: string[], owners: string[], vacant: boolean): Room => {
     // Only product rooms have desks; the cluster and the lobby keep their floor clear.
-    const placed = vacant || slot.kind !== "product" ? { desks: [], standing: [] } : desksIn(slot.free, owners);
+    const placed =
+      vacant || slot.kind !== "product" ? { desks: [], standing: [] } : desksIn(slot.free, owners, loungeSide(slot.id));
     return {
       ...slot.rect,
       id,
@@ -220,15 +235,71 @@ export function layoutOffice(input: RoomInput[], layout: OfficeLayout = DEFAULT_
   const entranceDoor = lobbySlot.entrance;
   if (entranceDoor) mark({ x: entranceDoor.x, y: lobby.y + lobby.h - 8, w: entranceDoor.width, h: h - lobby.y - lobby.h + 8 }, 1);
 
-  // Standing room in the lobby: a spaced grid, a character's width and more apart.
-  const lobbySpots: Point[] = [];
+  // Standing room in the lobby: spaced out, the middle of the floor first, and
+  // nobody standing in the reception, the coffee bar or on a sofa (a standing
+  // character, about 44 tall, is kept off the map's furniture).
   const lf = lobbySlot.free ?? { x: lobby.x + 24, y: lobby.y + backWall + 24, w: lobby.w - 48, h: 80 };
-  for (let y = lf.y + 8; y <= lf.y + lf.h; y += SPACING)
-    for (let x = lf.x + SPACING / 2; x <= lf.x + lf.w - SPACING / 2 + 1; x += SPACING) {
+  // The map's furniture, and the way through the lobby's doors.
+  const lobbyBlocked = [
+    ...(lobbySlot.blocked ?? []),
+    ...lobby.doors.map((d) =>
+      d.side === "N"
+        ? { x: d.x - 4, y: lobby.y, w: d.width + 8, h: backWall + 26 }
+        : { x: d.x - 4, y: lobby.y + lobby.h - 30, w: d.width + 8, h: 30 },
+    ),
+  ];
+  const candidates: Point[] = [];
+  for (let y = lf.y + 4; y <= lf.y + lf.h; y += 4)
+    for (let x = lf.x + 12; x <= lf.x + lf.w - 12; x += 4) {
       const p = { x, y };
-      if (walkable({ cols, rows, grid } as World, p)) lobbySpots.push(p);
+      const body = { x: x - 14, y: y - 44, w: 28, h: 46 };
+      if (walkable({ cols, rows, grid } as World, p) && !lobbyBlocked.some((b) => overlaps(b, body))) candidates.push(p);
     }
+  const middle = { x: lobby.x + lobby.w / 2, y: lf.y + lf.h * 0.55 };
+  const far = (p: Point) => Math.hypot(p.x - middle.x, (p.y - middle.y) * 1.5);
+  candidates.sort((a, b) => far(a) - far(b) || a.x - b.x || a.y - b.y);
+  const lobbySpots: Point[] = [];
+  for (const p of candidates) if (lobbySpots.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= SPACING)) lobbySpots.push(p);
+
   const loading = clusterSlot.loading ?? { x: cluster.x + cluster.w / 2, y: cluster.y + cluster.h - 48 };
+  const entrance = entranceDoor
+    ? { x: entranceDoor.x + entranceDoor.width / 2, y: lobby.y + lobby.h - 12 }
+    : { x: lobby.x + lobby.w / 2, y: lobby.y + lobby.h - 12 };
+
+  // Furniture: off every seat, spot, door and the loading square, never
+  // cutting anywhere off from the entrance.
+  const plan: FurnishRoom[] = [...rooms, ...vacant, cluster, lobby].map((room) => {
+    const slot = layout.slots.find((s) => s.id === room.slot) as MapSlot;
+    const doors = room.doors.map((d) =>
+      d.side === "N"
+        ? { x: d.x - 4, y: room.y, w: d.width + 8, h: backWall + 26 }
+        : { x: d.x - 4, y: room.y + room.h - 34, w: d.width + 8, h: 34 },
+    );
+    const avoid: Rect[] = [room.screen, ...(slot.blocked ?? [])];
+    const passage: Rect[] = doors;
+    if (room.kind === "lobby" && entranceDoor)
+      passage.push({ x: entranceDoor.x - 6, y: room.y + room.h - 40, w: entranceDoor.width + 12, h: 40 });
+    if (room.kind === "cluster") {
+      passage.push({ x: loading.x - 36, y: loading.y - 40, w: 72, h: 64 });
+      // The racks drawn along its back wall: nothing in front of them.
+      avoid.push({ x: room.x, y: room.y, w: room.w, h: backWall + 18 });
+    }
+    const keep: Point[] =
+      room.kind === "lobby" ? lobbySpots : room.kind === "cluster" ? [loading] : [...room.desks.map((d) => d.seat), ...room.standing];
+    return {
+      slot: room.slot,
+      kind: room.kind,
+      vacant: room.vacant,
+      rect: { x: room.x, y: room.y, w: room.w, h: room.h },
+      floor: { x: room.x + 8, y: room.y + backWall + 4, w: room.w - 16, h: room.h - backWall - 12 },
+      desks: room.desks,
+      keep,
+      avoid,
+      passage,
+      side: loungeSide(room.slot),
+    };
+  });
+  const props = furnish(plan, { cols, rows, grid }, entrance, reachTargets({ rooms, cluster, lobby, lobbySpots, drop: loading, layout } as World), backWall);
   return {
     w,
     h,
@@ -242,12 +313,45 @@ export function layoutOffice(input: RoomInput[], layout: OfficeLayout = DEFAULT_
     corridors: layout.corridors,
     lobbySpots,
     drop: loading,
-    entrance: entranceDoor
-      ? { x: entranceDoor.x + entranceDoor.width / 2, y: lobby.y + lobby.h - 12 }
-      : { x: lobby.x + lobby.w / 2, y: lobby.y + lobby.h - 12 },
+    entrance,
     roomOf,
+    props,
     layout,
   };
+}
+
+/**
+ * Everywhere that must be reachable from the entrance: every seat and
+ * standing spot, the lobby's spots, the loading square, and just inside every
+ * door of a room in use.
+ */
+export function reachTargets(world: Pick<World, "rooms" | "cluster" | "lobby" | "lobbySpots" | "drop" | "layout">): Point[] {
+  const { backWall } = world.layout;
+  const doorways = [...world.rooms, world.cluster, world.lobby].flatMap((room) =>
+    room.doors.map((d) => ({ x: d.x + d.width / 2, y: d.side === "N" ? room.y + backWall + 6 : room.y + room.h - 14 })),
+  );
+  return [
+    ...world.rooms.flatMap((r) => [...r.desks.map((d) => d.seat), ...r.standing]),
+    ...world.lobbySpots,
+    world.drop,
+    ...doorways,
+  ];
+}
+
+/**
+ * The rooms one steps through with the arrows: everything but empty rooms,
+ * row by row from the top, left to right within a row.
+ */
+export function roomOrder(world: World): Room[] {
+  return [...world.rooms, world.cluster, world.lobby].sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+/** The room before or after `id` in reading order, wrapping around. */
+export function nextRoom(world: World, id: string, step: 1 | -1): Room {
+  const order = roomOrder(world);
+  const i = order.findIndex((r) => r.id === id);
+  const from = i < 0 ? (step > 0 ? -1 : 0) : i;
+  return order[(((from + step) % order.length) + order.length) % order.length];
 }
 
 export function walkable(world: World, p: Point): boolean {

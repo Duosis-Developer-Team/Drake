@@ -10,15 +10,29 @@ import {
   isoWithOffset,
   liveIntents,
   localMidnight,
-  nightAt,
   parseEvents,
   REPLAY_SECONDS,
   replayIntents,
   WORK_AFTER_MS,
   WORK_BEFORE_MS,
 } from "./director";
+import { footing, overlaps, reachable } from "./furnish";
 import { DEFAULT_LAYOUT, DEFAULT_LAYOUT_FILE, parseLayout, SLOT_ORDER } from "./layout";
-import { byActivity, CELL, findPath, layoutOffice, nearestWalkable, OTHER, roomAt, SPACING, walkable, type World } from "./world";
+import {
+  byActivity,
+  CELL,
+  findPath,
+  layoutOffice,
+  nearestWalkable,
+  nextRoom,
+  OTHER,
+  reachTargets,
+  roomAt,
+  roomOrder,
+  SPACING,
+  walkable,
+  type World,
+} from "./world";
 
 const repos = (n: number, desks = ["a", "b"]) =>
   Array.from({ length: n }, (_, i) => ({ id: `gh:${i}`, desks, catalogued: true, commits: 100 - i }));
@@ -121,7 +135,7 @@ describe("rooms for repositories", () => {
 
   it("keeps the lobby's standing spots a character's width and more apart", () => {
     const world = layoutOffice(repos(3));
-    expect(world.lobbySpots.length).toBeGreaterThanOrEqual(8);
+    expect(world.lobbySpots.length).toBeGreaterThanOrEqual(5);
     for (const a of world.lobbySpots) {
       expect(walkable(world, a)).toBe(true);
       for (const b of world.lobbySpots) if (a !== b) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(SPACING);
@@ -245,11 +259,100 @@ describe("the director", () => {
     expect(midnight.getHours()).toBe(0);
     expect(isoWithOffset(midnight)).toMatch(/^2026-11-23T00:00:00[+-]\d\d:\d\d$/);
   });
+});
 
-  it("dims the office at night only", () => {
-    expect(nightAt(12)).toBe(0);
-    expect(nightAt(2)).toBe(0.5);
-    expect(nightAt(19.5)).toBeGreaterThan(0);
-    expect(nightAt(19.5)).toBeLessThan(0.5);
+describe("furniture", () => {
+  const counts = [1, 2, 3, 7, 10];
+
+  it("furnishes the same rooms the same way every time", () => {
+    expect(layoutOffice(repos(3)).props).toEqual(layoutOffice(repos(3)).props);
+  });
+
+  it("gives a room in use a rug under its desks, a lounge or storage, and small things", () => {
+    const world = layoutOffice(repos(7));
+    for (const room of world.rooms) {
+      const mine = world.props.filter((p) => p.slot === room.slot);
+      const kinds = new Set(mine.map((p) => p.kind));
+      expect(kinds.has("rug"), room.slot).toBe(true);
+      expect(mine.filter((p) => p.kind !== "rug").length, room.slot).toBeGreaterThanOrEqual(2);
+    }
+    // At least one large room has its corner lounge.
+    expect(world.props.some((p) => p.kind === "sofa-small" && !p.covered)).toBe(true);
+    // The cluster has its spare racks, the lobby its rug.
+    expect(world.props.filter((p) => p.slot === "cluster" && p.kind === "server-rack")).toHaveLength(2);
+    expect(world.props.some((p) => p.slot === "lobby" && p.kind === "rug")).toBe(true);
+  });
+
+  it("leaves an empty room boxes and sheeted furniture, painted with the map", () => {
+    const world = layoutOffice(repos(2));
+    for (const room of world.vacant) {
+      const mine = world.props.filter((p) => p.slot === room.slot);
+      expect(mine.some((p) => p.kind === "box"), room.slot).toBe(true);
+      expect(mine.every((p) => p.still)).toBe(true);
+    }
+    expect(world.props.some((p) => p.covered)).toBe(true);
+  });
+
+  it("never covers a desk, a chair, a screen, a door or the map's own furniture", () => {
+    for (const n of counts) {
+      const world = layoutOffice(repos(n, ["a", "b", "c"]));
+      const all = [...world.rooms, ...world.vacant, world.cluster, world.lobby];
+      for (const p of world.props.filter((q) => q.kind !== "rug")) {
+        const room = all.find((r) => r.slot === p.slot);
+        if (!room) throw new Error(p.slot);
+        expect(overlaps(p, room.screen), `${p.kind} on ${p.slot}'s screen`).toBe(false);
+        for (const d of room.desks) {
+          expect(overlaps(p, { x: d.x, y: d.y, w: 64, h: 40 }), `${p.kind} on a desk`).toBe(false);
+          expect(overlaps(p, { x: d.x + 16, y: d.y - 14, w: 32, h: 32 }), `${p.kind} on a chair`).toBe(false);
+        }
+        const slot = world.layout.slots.find((s) => s.id === p.slot);
+        for (const b of slot?.blocked ?? []) expect(overlaps(p, b), `${p.kind} on the lobby's furniture`).toBe(false);
+        // Inside its own room.
+        expect(p.x >= room.x && p.x + p.w <= room.x + room.w && p.y >= room.y && p.y + p.h <= room.y + room.h, p.kind).toBe(true);
+      }
+    }
+  });
+
+  it("blocks where furniture stands and keeps every seat, spot, door and the loading square reachable", () => {
+    for (const n of counts) {
+      const world = layoutOffice(repos(n, ["a", "b", "c"]));
+      for (const p of world.props) {
+        const foot = footing(p);
+        if (!foot || p.still) continue;
+        expect(walkable(world, { x: foot.x + foot.w / 2, y: foot.y + foot.h / 2 }), `${p.kind} in ${p.slot}`).toBe(false);
+      }
+      expect(reachable(world, world.entrance, reachTargets(world)), `${n} repositories`).toBe(true);
+      // And walked to, by the same paths people take.
+      for (const room of world.rooms)
+        for (const desk of room.desks) expect(findPath(world, world.entrance, desk.seat).length, room.slot).toBeGreaterThan(0);
+      expect(findPath(world, world.entrance, world.drop).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("the lobby", () => {
+  it("never has anyone standing in the reception, the coffee bar or on a sofa", () => {
+    const world = layoutOffice(repos(3));
+    const blocked = world.layout.slots.find((s) => s.kind === "lobby")?.blocked ?? [];
+    expect(world.lobbySpots.length).toBeGreaterThanOrEqual(5);
+    for (const spot of world.lobbySpots) {
+      const body = { x: spot.x - 14, y: spot.y - 44, w: 28, h: 46 };
+      for (const b of blocked) expect(overlaps(body, b), `${spot.x},${spot.y}`).toBe(false);
+    }
+  });
+});
+
+describe("stepping through the rooms", () => {
+  it("reads row by row, left to right, the cluster and the lobby included, empty rooms skipped", () => {
+    const world = layoutOffice(repos(4));
+    const order = roomOrder(world).map((r) => r.slot);
+    // Four in use: room-2, room-1, room-3, room-6 (by SLOT_ORDER); room-4, 5, 7 stand empty.
+    expect(order).toEqual(["room-1", "room-2", "room-3", "cluster", "room-6", "lobby"]);
+    const id = (slot: string) => roomOrder(world).find((r) => r.slot === slot)?.id ?? "";
+    expect(nextRoom(world, id("room-3"), 1).slot).toBe("cluster");
+    expect(nextRoom(world, id("cluster"), -1).slot).toBe("room-3");
+    // Around the ends.
+    expect(nextRoom(world, "lobby", 1).slot).toBe("room-1");
+    expect(nextRoom(world, id("room-1"), -1).slot).toBe("lobby");
   });
 });

@@ -41,6 +41,24 @@ ENVIRONMENT = {
     "office-map": (768, 480, False),
     "chair": (32, 32, True),
     "desk-front": (64, 40, True),
+    # The scenery around the building (optional): the map is drawn centred in it.
+    "office-exterior": (1280, 800, False),
+}
+# Furniture for the rooms (optional, each its own file in props/): width, height.
+PROPS = {
+    "rug": (96, 48),
+    "plant-tall": (16, 32),
+    "plant-small": (12, 16),
+    "cabinet": (24, 32),
+    "printer": (24, 24),
+    "sofa-small": (48, 28),
+    "coffee-table": (32, 20),
+    "floor-lamp": (12, 32),
+    "water-cooler": (12, 28),
+    "whiteboard-stand": (32, 36),
+    "bin": (8, 10),
+    "bookshelf": (32, 40),
+    "server-rack": (24, 40),
 }
 CLIPS = {
     "body-walk-down": 4,
@@ -231,6 +249,44 @@ def check_environment(kit: Path, report: Report, rescale: bool, staged: dict[str
         ):
             report.fail(path.name, "must be opaque")
         staged[path.name] = (width, height, rows)
+    exterior = staged.get("office-exterior.png")
+    if exterior:
+        mw, mh = map_size(kit)
+        ew, eh = exterior[0], exterior[1]
+        if ew < mw or eh < mh or (ew - mw) % 2 or (eh - mh) % 2:
+            report.fail("office-exterior.png", f"the {mw}x{mh} map cannot sit centred in {ew}x{eh}")
+
+
+def check_props(kit: Path, report: Report, staged: dict[str, tuple]) -> None:
+    """The rooms' furniture: each known prop at its size, binary alpha; all optional."""
+    folder = kit / "props"
+    if not folder.is_dir():
+        report.notes.append("props/ missing: the rooms get placeholder furniture")
+        return
+    for path in sorted(folder.glob("*.png")):
+        name = path.stem
+        where = f"props/{path.name}"
+        if name not in PROPS:
+            report.notes.append(f"{where}: not a known prop, ignored")
+            continue
+        try:
+            width, height, rows = read_png(path)
+        except ValueError as error:
+            report.fail(where, str(error))
+            continue
+        if (width, height) != PROPS[name]:
+            report.fail(where, f"{width}x{height}, expected {PROPS[name][0]}x{PROPS[name][1]}")
+            continue
+        if not binary_alpha(rows, width, height):
+            report.fail(where, "alpha is not binary (only fully clear or fully opaque pixels)")
+            continue
+        if not any(alpha(rows, x, y) for y in range(height) for x in range(width)):
+            report.fail(where, "empty")
+            continue
+        staged[where] = (width, height, rows)
+    missing = sorted(set(PROPS) - {p.stem for p in folder.glob("*.png")})
+    if missing:
+        report.notes.append("props missing (placeholders drawn): " + ", ".join(missing))
 
 
 def check_character(
@@ -313,6 +369,13 @@ def manifest_for(kit: Path, people: dict[str, int]) -> dict:
             environment.setdefault(name, {})["file"] = f"{name}.png"
     if (kit / "office-map.png").exists() and (kit / MAP_LAYOUT).exists():
         environment["office-map"]["layout"] = MAP_LAYOUT
+    props = {
+        name: f"props/{name}.png" for name in PROPS if (kit / "props" / f"{name}.png").exists()
+    }
+    if props:
+        manifest["props"] = props
+    else:
+        manifest.pop("props", None)
     return manifest
 
 
@@ -389,6 +452,7 @@ def main() -> int:
     staged: dict[str, tuple] = {}
     check_environment(kit, report, args.rescale, staged)
     check_map_layout(kit, report)
+    check_props(kit, report, staged)
     people: dict[str, int] = {}
     root = kit / "characters"
     for person_dir in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []:

@@ -95,6 +95,9 @@
       "width": 64,
       "height": 40,
       "alpha": true
+    },
+    "office-exterior": {
+      "file": "office-exterior.png"
     }
   },
   "characters": {
@@ -355,5 +358,20 @@
         ]
       }
     }
+  },
+  "props": {
+    "rug": "props/rug.png",
+    "plant-tall": "props/plant-tall.png",
+    "plant-small": "props/plant-small.png",
+    "cabinet": "props/cabinet.png",
+    "printer": "props/printer.png",
+    "sofa-small": "props/sofa-small.png",
+    "coffee-table": "props/coffee-table.png",
+    "floor-lamp": "props/floor-lamp.png",
+    "water-cooler": "props/water-cooler.png",
+    "whiteboard-stand": "props/whiteboard-stand.png",
+    "bin": "props/bin.png",
+    "bookshelf": "props/bookshelf.png",
+    "server-rack": "props/server-rack.png"
   }
 }

@@ -1,47 +1,139 @@
 import { describe, expect, it } from "vitest";
 
 import { anchorFor, boxReduce, densityOf, safePath } from "./art";
-import { clampCamera, fitZoom, zoomLevels } from "./DevOffice";
-import { layoutOffice } from "./world";
+import { clampCamera, defaultCamera, defaultZoom, fitCamera, fitZoom, frameRoom, tween, zoomLevels, type Camera } from "./camera";
+import { spriteScale } from "./engine";
+import { layoutOffice, roomOrder } from "./world";
+
+const office = { w: 768, h: 480 };
+/** The exterior around the office: 1280 × 800, the office centred in it. */
+const exterior = { x: -256, y: -160, w: 1280, h: 800 };
+/** The stage on a 14-inch MacBook Pro, 1512 × 860 at 2×, sidebar open: 1280 × 761 CSS under the toolbar. */
+const mac = { w: 2560, h: 1522 };
 
 describe("the camera", () => {
   it("only zooms where every pixel of the densest character is whole", () => {
     expect(zoomLevels(1, 2).slice(0, 4)).toEqual([1, 2, 3, 4]);
-    // 4× characters: shrunk 4:1 or 2:1, or drawn 1:1, 2:1, 3:1…
-    expect(zoomLevels(4, 2).slice(0, 6)).toEqual([1, 2, 3, 4, 8, 12]);
+    // 4× characters: shrunk 4:1 or 2:1, one pixel a pixel at 3, then every even level.
+    expect(zoomLevels(4, 2).slice(0, 7)).toEqual([1, 2, 3, 4, 6, 8, 10]);
     expect(zoomLevels(2, 1).slice(0, 3)).toEqual([1, 2, 4]);
     expect(zoomLevels(2, 2)).not.toContain(3);
     // Close enough to see a 4× face pixel for pixel.
     expect(Math.max(...zoomLevels(4, 1))).toBeGreaterThanOrEqual(8);
   });
 
-  it("shows the whole office at Z = 3 on a 14-inch MacBook, the sidebar open", () => {
+  it("draws a 4× character crisp at every level: shrunk by a whole factor, whole pixels", () => {
+    expect(spriteScale(8, 4)).toEqual({ factor: 1, k: 1 });
+    expect(spriteScale(4, 4)).toEqual({ factor: 1, k: 1 });
+    expect(spriteScale(6, 4)).toEqual({ factor: 2, k: 1 });
+    expect(spriteScale(2, 4)).toEqual({ factor: 2, k: 1 });
+    expect(spriteScale(1, 4)).toEqual({ factor: 4, k: 1 });
+    // The one exception: unshrunk at 3, a third larger.
+    expect(spriteScale(3, 4)).toEqual({ factor: 1, k: 4 / 3 });
+    expect(spriteScale(5, 1)).toEqual({ factor: 1, k: 1 });
+  });
+
+  it("fits the whole office at Z = 3 on a 14-inch MacBook, live and playing a day", () => {
     const world = layoutOffice([1, 2, 3, 4, 5].map((i) => ({ id: `gh:${i}`, desks: ["a"] })));
-    // 1512 × 860 CSS at 2×: the stage is 1280 wide (sidebar 232) and 804 tall (header 56).
-    expect(fitZoom(4, 2, 1280, 804, world)).toBe(3);
+    // Under the toolbar (43): 761 tall; with the day's bar too (39): 722.
+    expect(fitZoom(4, 2, 1280, 761, world)).toBe(3);
+    expect(fitZoom(4, 2, 1280, 722, world)).toBe(3);
     // 1440 × 900 too; a 1× screen of the same size at 1.
-    expect(fitZoom(4, 2, 1208, 844, world)).toBe(3);
-    expect(fitZoom(4, 1, 1208, 844, world)).toBe(1);
+    expect(fitZoom(4, 2, 1208, 801, world)).toBe(3);
+    expect(fitZoom(4, 1, 1208, 801, world)).toBe(1);
     // Too short for Z = 3: the height decides.
     expect(fitZoom(4, 2, 1280, 700, world)).toBe(2);
     // A phone gets the smallest whole level, and pans.
-    expect(fitZoom(4, 3, 358, 780, world)).toBe(1);
+    expect(fitZoom(4, 3, 358, 700, world)).toBe(1);
   });
 
-  it("keeps the view inside the office, or centres an office smaller than the view", () => {
+  it("opens a step closer than the whole office, the office spanning the stage edge to edge", () => {
+    const levels = zoomLevels(4, 2);
+    // The MacBook: fit 3, the first look 4 (3072 ≥ 2560 device pixels).
+    expect(defaultZoom(levels, 3, 768, mac.w)).toBe(4);
+    // 1440 × 900: 2416 wide, the same.
+    expect(defaultZoom(levels, 3, 768, 2416)).toBe(4);
+    // One step up not wide enough: another.
+    expect(defaultZoom(levels, 2, 768, 2800)).toBe(4);
+    // A wide 1× screen: fit 2, then 3 already covers 1688.
+    expect(defaultZoom(zoomLevels(4, 1), 2, 768, 1688)).toBe(3);
+  });
+
+  it("shows no space beyond the office's sides in the first look, and the band where people are", () => {
+    const top = { x: 8, y: 8, w: 240, h: 152 };
+    const lobby = { x: 264, y: 352, w: 240, h: 120 };
+    for (const [w, h] of [
+      [2560, 1522],
+      [2416, 1602],
+    ]) {
+      const cam = defaultCamera(office, 4, w, h, [lobby]);
+      expect(cam.x).toBeGreaterThanOrEqual(0);
+      expect(cam.x + w / 4).toBeLessThanOrEqual(768);
+      expect(cam.y).toBeGreaterThanOrEqual(0);
+      expect(cam.y + h / 4).toBeLessThanOrEqual(480);
+      // The lobby, at the bottom, is in view.
+      expect(cam.y + h / 4).toBeGreaterThanOrEqual(lobby.y + lobby.h);
+    }
+    // People at the top: the top in view.
+    expect(defaultCamera(office, 4, mac.w, mac.h, [top]).y).toBe(0);
+    // Nobody: the cluster and the lobby.
+    const cluster = { x: 216, y: 192, w: 336, h: 128 };
+    const cam = defaultCamera(office, 4, mac.w, mac.h, [cluster, lobby]);
+    expect(cam.y).toBeLessThanOrEqual(cluster.y);
+    expect(cam.y + mac.h / 4).toBeGreaterThanOrEqual(lobby.y + lobby.h);
+  });
+
+  it("keeps the view inside the exterior, else the office, or centres what is smaller than the view", () => {
     const world = { w: 1000, h: 800 };
     expect(clampCamera({ x: -50, y: 900, z: 2 }, world, 1000, 600)).toEqual({ x: 0, y: 500, z: 2 });
     expect(clampCamera({ x: 10, y: 10, z: 1 }, world, 1200, 900).x).toBe(-100);
+    // With the exterior, the street and the parking show at the edges, never beyond.
+    expect(clampCamera({ x: -400, y: -300, z: 3 }, exterior, mac.w, mac.h)).toEqual({ x: -256, y: -160, z: 3 });
+    // "Whole office": the office in the middle, the exterior around it.
+    const fit = fitCamera(office, exterior, 3, mac.w, mac.h);
+    expect(fit.x + mac.w / 6).toBeCloseTo(384);
+    expect(fit.y + mac.h / 6).toBeCloseTo(240);
   });
 
-  it("keeps a small office clear of the floating controls, centred in the rest", () => {
-    const small = { w: 100, h: 100 };
-    // 100 spare: 40 kept at the top, 20 at the bottom, the other 40 shared.
-    expect(clampCamera({ x: 0, y: 0, z: 1 }, small, 100, 200, { top: 40, bottom: 20 }).y).toBe(-60);
-    // Not enough spare for both: shared in their proportion.
-    expect(clampCamera({ x: 0, y: 0, z: 1 }, small, 100, 130, { top: 60, bottom: 60 }).y).toBe(-15);
-    // Reserves are device pixels: halved in art pixels at Z = 2.
-    expect(clampCamera({ x: 0, y: 0, z: 2 }, small, 200, 400, { top: 80, bottom: 0 }).y).toBe(-70);
+  it("brings a room into view at the largest whole level that fits it, clear of the caption", () => {
+    const levels = zoomLevels(4, 2);
+    const world = layoutOffice([1, 2, 3, 4].map((i) => ({ id: `gh:${i}`, desks: ["a", "b"] })));
+    const reserve = 2 * (104 + 24);
+    for (const room of roomOrder(world)) {
+      const cam = frameRoom(room, levels, mac.w, mac.h, reserve);
+      const view = { w: mac.w / cam.z, h: (mac.h - reserve) / cam.z };
+      // The room and its margin are inside the view above the caption…
+      expect(room.x - 12).toBeGreaterThanOrEqual(cam.x - 0.001);
+      expect(room.x + room.w + 12).toBeLessThanOrEqual(cam.x + view.w + 0.001);
+      expect(room.y - 12).toBeGreaterThanOrEqual(cam.y - 0.001);
+      expect(room.y + room.h + 12).toBeLessThanOrEqual(cam.y + view.h + 0.001);
+      // …and the next level up would not fit it.
+      const next = levels[levels.indexOf(cam.z) + 1];
+      expect((room.w + 24) * next > mac.w || (room.h + 24) * next > mac.h - reserve, room.slot).toBe(true);
+    }
+    // A large room comes in well closer than the whole office.
+    expect(frameRoom(roomOrder(world)[0], levels, mac.w, mac.h, reserve).z).toBeGreaterThanOrEqual(6);
+  });
+
+  it("moves between two views evenly, at whole levels lifted the rest of the way, crisp at the end", () => {
+    const levels = zoomLevels(4, 2);
+    const from: Camera = { x: 0, y: 0, z: 3 };
+    const to: Camera = { x: 100, y: 50, z: 8 };
+    const start = tween(from, to, 0, mac.w, mac.h, levels);
+    expect(start.camera).toEqual(from);
+    expect(start.lift).toBe(1);
+    const end = tween(from, to, 1, mac.w, mac.h, levels);
+    expect(end.camera.z).toBe(8);
+    expect(end.camera.x).toBeCloseTo(100);
+    expect(end.camera.y).toBeCloseTo(50);
+    expect(end.lift).toBeCloseTo(1);
+    for (const t of [0.2, 0.5, 0.8]) {
+      const step = tween(from, to, t, mac.w, mac.h, levels);
+      expect(levels).toContain(step.camera.z);
+      expect(step.lift).toBeGreaterThanOrEqual(1);
+      // Never lifted past the next level: the scale moves smoothly.
+      expect(step.camera.z * step.lift).toBeLessThan(levels[levels.indexOf(step.camera.z) + 1] + 1e-9);
+    }
   });
 });
 

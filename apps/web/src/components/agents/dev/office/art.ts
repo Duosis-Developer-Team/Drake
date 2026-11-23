@@ -8,6 +8,7 @@
  * asked for that it does not name.
  */
 
+import { PROP_FILES, PROPS, type PropKind } from "./furnish";
 import { parseLayout, type OfficeLayout } from "./layout";
 import { SIZE } from "./world";
 
@@ -67,6 +68,10 @@ export interface Art {
   /** The desk's front, drawn in front of them. */
   deskFront: Sprite;
   box: Sprite;
+  /** The scenery around the building (`office-exterior.png`), the map centred in it; or none. */
+  exterior: Sprite | null;
+  /** The rooms' furniture (`props/<kind>.png`), a placeholder for any not drawn yet. */
+  props: Map<PropKind, Sprite>;
   /** The shared placeholder body, for anyone without a character of their own. */
   body: BodySet;
   /** People's own characters, by person key. */
@@ -178,6 +183,68 @@ function outline(c: HTMLCanvasElement, colour = C.ink) {
       }
     }
   ctx.putImageData(out, 0, 0);
+}
+
+/**
+ * A prop until its drawing exists: a quiet shape at the right size, so the
+ * room's layout reads the same either way.
+ */
+export function drawProp(kind: PropKind): HTMLCanvasElement {
+  const { w, h } = PROPS[kind];
+  const [c, ctx] = canvas(w, h);
+  const rect = (x: number, y: number, rw: number, rh: number, colour: string) => {
+    ctx.fillStyle = colour;
+    ctx.fillRect(x, y, rw, rh);
+  };
+  if (kind === "rug") {
+    rect(0, 0, w, h, "#5b3b46");
+    rect(3, 3, w - 6, h - 6, "#7a4f5a");
+    rect(8, 8, w - 16, h - 16, "#5b3b46");
+    return c;
+  }
+  if (kind === "plant-tall" || kind === "plant-small") {
+    const pot = Math.max(5, Math.round(h * 0.28));
+    rect(Math.round(w * 0.25), h - pot, Math.round(w * 0.5), pot, "#8a5a3a");
+    rect(1, 1, w - 2, h - pot - 1, "#3f7a46");
+    rect(3, 3, w - 6, Math.max(2, h - pot - 6), "#5a9a5c");
+    return c;
+  }
+  if (kind === "floor-lamp") {
+    rect(5, 8, 2, h - 10, "#2a2f3d");
+    rect(1, 0, w - 2, 9, "#e6c779");
+    rect(2, h - 3, w - 4, 3, "#2a2f3d");
+    return c;
+  }
+  // Furniture: a body, a lighter top, a dark base.
+  rect(0, 0, w, h, "#2c3448");
+  rect(1, 1, w - 2, Math.max(2, Math.round(h * 0.3)), "#4a5675");
+  rect(0, h - 3, w, 3, "#171b26");
+  if (kind === "sofa-small") rect(3, Math.round(h * 0.45), w - 6, Math.round(h * 0.3), "#5b70a8");
+  if (kind === "server-rack") for (let y = 6; y < h - 6; y += 5) rect(4, y, w - 8, 2, "#47d2c8");
+  if (kind === "bookshelf") for (let y = 6; y < h - 6; y += 8) rect(3, y, w - 6, 5, "#a0643a");
+  if (kind === "whiteboard-stand") rect(2, 2, w - 4, Math.round(h * 0.6), "#e8ecf4");
+  return c;
+}
+
+const sheets = new WeakMap<Sprite, HTMLCanvasElement>();
+
+/** A piece of furniture under a dust sheet: its outline, pale, a few folds. */
+export function sheeted(sprite: Sprite): Sprite {
+  const cached = sheets.get(sprite);
+  if (cached) return cached;
+  const w = sprite instanceof HTMLImageElement ? sprite.naturalWidth : sprite.width;
+  const h = sprite instanceof HTMLImageElement ? sprite.naturalHeight : sprite.height;
+  const [c, ctx] = canvas(w, h);
+  ctx.drawImage(sprite, 0, 0);
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.fillStyle = "#c9cfdb";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#a9b0c0";
+  for (let x = 3; x < w; x += 7) ctx.fillRect(x, 1, 1, h - 2);
+  ctx.fillStyle = "#8e96a8";
+  ctx.fillRect(0, h - 2, w, 2);
+  sheets.set(sprite, c);
+  return c;
 }
 
 function drawCorridor(): HTMLCanvasElement {
@@ -635,6 +702,7 @@ export interface KitManifest {
     string,
     { file?: string; layout?: string } | undefined
   >;
+  props?: Record<string, string | undefined>;
   characters?: {
     frameSize?: { width?: number; height?: number };
     anchor?: { x?: number; y?: number };
@@ -739,7 +807,18 @@ export async function loadArt(): Promise<Art> {
     if (image) real.add(path);
     return image;
   };
-  const [map, product, backdoor, cluster, lobby, corridor, desk, chair, deskFront, box] = await Promise.all([
+  const props = new Map<PropKind, Sprite>();
+  await Promise.all(
+    PROP_FILES.map(async (kind) => {
+      const path = safePath(manifest.props?.[kind]);
+      const image = path ? await load(`${BASE}${path}`) : null;
+      if (image && image.naturalWidth === PROPS[kind].w && image.naturalHeight === PROPS[kind].h) {
+        real.add(path as string);
+        props.set(kind, image);
+      } else props.set(kind, drawProp(kind));
+    }),
+  );
+  const [map, product, backdoor, cluster, lobby, corridor, desk, chair, deskFront, box, exterior] = await Promise.all([
     get("office-map"),
     get("room-product-open"),
     get("room-product-backdoor"),
@@ -750,6 +829,7 @@ export async function loadArt(): Promise<Art> {
     get("chair"),
     get("desk-front"),
     get("box"),
+    get("office-exterior"),
   ]);
   // The map's own geometry, when it brings one; else the guide's.
   let layout: OfficeLayout | null = null;
@@ -784,6 +864,17 @@ export async function loadArt(): Promise<Art> {
     chair: chair ?? split.chair,
     deskFront: deskFront ?? split.deskFront,
     box: boxSprite,
+    // Only around a map it was drawn for: larger on both sides by an even margin.
+    exterior:
+      exterior &&
+      map &&
+      exterior.naturalWidth >= map.naturalWidth &&
+      exterior.naturalHeight >= map.naturalHeight &&
+      (exterior.naturalWidth - map.naturalWidth) % 2 === 0 &&
+      (exterior.naturalHeight - map.naturalHeight) % 2 === 0
+        ? exterior
+        : null,
+    props,
     body: { frames: body, density: 1, anchor: { x: 16, y: 46 }, baked: false },
     bodies,
     heads: new Map(),

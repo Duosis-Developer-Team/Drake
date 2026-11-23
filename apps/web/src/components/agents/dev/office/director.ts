@@ -111,15 +111,3 @@ export function dayKey(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
-
-/**
- * How dark the office is at a local hour (0 = day, up to ~0.5 at night):
- * a soft dusk from 18:00, night until 06:00, dawn to 08:00.
- */
-export function nightAt(hour: number): number {
-  const h = ((hour % 24) + 24) % 24;
-  if (h >= 8 && h < 18) return 0;
-  if (h >= 18 && h < 21) return ((h - 18) / 3) * 0.5;
-  if (h >= 6 && h < 8) return ((8 - h) / 2) * 0.5;
-  return 0.5;
-}

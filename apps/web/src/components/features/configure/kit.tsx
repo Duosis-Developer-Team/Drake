@@ -333,7 +333,7 @@ export function PillTabs<T extends string>({
             aria-selected={selected}
             onClick={() => onChange(tab.key)}
             className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full font-medium transition-colors ${
-              compact ? "h-7 gap-1.5 px-2.5 text-caption" : "h-9 gap-2 px-4 text-body"
+              compact ? "h-7 gap-1.5 px-2 text-caption" : "h-9 gap-2 px-4 text-body"
             } ${
               selected
                 ? "bg-accent text-ink-inverse"

@@ -9,8 +9,8 @@
 
 import { BODY_ROWS, reduced, type Art, type BodyRow, type Sprite } from "./art";
 import type { Intent } from "./director";
-import { paintMap } from "./placeholder";
-import { CHAIR, findPath, SEATED, SIZE, type Desk, type Point, type Room, type World } from "./world";
+import { paintMap, propSprite } from "./placeholder";
+import { CHAIR, findPath, SEATED, SIZE, type Desk, type Point, type Rect, type Room, type World } from "./world";
 
 type Dir = "down" | "left" | "right" | "up";
 
@@ -61,8 +61,17 @@ interface Bubble {
 }
 
 const SPEED = 74;
+/** Where someone arriving starts: on the plaza by the street, below the main entrance. */
+const STREET = 76;
 const IDLE_MIN = 9;
 const IDLE_SPREAD = 16;
+
+/** How a character of density `d` is drawn at zoom `z` (see OfficeEngine.spriteScale). */
+export function spriteScale(z: number, d: number): { factor: number; k: number } {
+  if (d === 4 && z === 3) return { factor: 1, k: 4 / 3 };
+  for (let f = 1; f <= d; f *= 2) if (d % f === 0 && z % (d / f) === 0) return { factor: f, k: 1 };
+  return { factor: d, k: 1 };
+}
 
 function hashOf(key: string): number {
   let h = 2166136261;
@@ -79,7 +88,9 @@ export class OfficeEngine {
   private bubbles: Bubble[] = [];
   private time = 0;
   private reduced: boolean;
-  night = 0;
+  /** Whether the first people have been placed (later ones walk in from the street). */
+  private populated = false;
+  private ground: CanvasPattern | null = null;
   /** The person under the pointer, and the one picked (their name shows, with an outline). */
   hover: string | null = null;
   focus: string | null = null;
@@ -114,10 +125,15 @@ export class OfficeEngine {
     return this.art.heads.has(key);
   }
 
-  /** Who is in the office (others leave); a newcomer starts at a lobby spot. */
+  /**
+   * Who is in the office (others leave). The first people stand in the lobby
+   * already; anyone who arrives later walks in from the street, across the
+   * plaza and through the main entrance.
+   */
   setPeople(people: ReadonlyArray<{ key: string; name: string; colour: string }>) {
     const keep = new Set(people.map((p) => p.key));
     for (const key of [...this.actors.keys()]) if (!keep.has(key)) this.actors.delete(key);
+    const arriving = this.populated && !this.reduced;
     people.forEach((p, i) => {
       const existing = this.actors.get(p.key);
       if (existing) {
@@ -127,7 +143,7 @@ export class OfficeEngine {
       }
       const spot = this.world.lobbySpots[i % this.world.lobbySpots.length];
       const seed = hashOf(p.key);
-      this.actors.set(p.key, {
+      const actor: Actor = {
         key: p.key,
         name: p.name,
         colour: p.colour,
@@ -144,8 +160,17 @@ export class OfficeEngine {
         carrying: false,
         wander: this.time + IDLE_MIN * seed,
         seed,
-      });
+      };
+      this.actors.set(p.key, actor);
+      if (arriving) {
+        actor.x = this.world.entrance.x;
+        actor.y = this.world.h + STREET;
+        actor.goal = "";
+        const at = this.lobbySpot(actor);
+        this.go(actor, at.goal, at.at, "idle", false);
+      }
     });
+    this.populated = true;
   }
 
   private deskFor(actor: Actor, repository: string): Desk | null {
@@ -180,8 +205,11 @@ export class OfficeEngine {
       actor.dir = "down";
       return;
     }
-    const path = findPath(this.world, { x: actor.x, y: actor.y }, at);
-    actor.path = path.length ? path : [at];
+    // Still outside: up the plaza to just inside the entrance first.
+    const outside = actor.y > this.world.h - 2;
+    const from = outside ? { x: this.world.entrance.x, y: this.world.h - 4 } : { x: actor.x, y: actor.y };
+    const path = findPath(this.world, from, at);
+    actor.path = [...(outside ? [from] : []), ...(path.length ? path : [at])];
   }
 
   private follow(actor: Actor, instant: boolean) {
@@ -408,17 +436,15 @@ export class OfficeEngine {
    * every pixel whole: `factor` shrinks the sprite by exact blocks first
    * (1 = not at all), `k` is its size relative to a 32 × 48 character.
    *
-   * At Z a multiple of d, each sprite pixel is Z / d device pixels (k = 1).
-   * Below d, the sprite is shrunk d / Z : 1 and each pixel is one device
-   * pixel (k = 1). At Z = 3 with 4× art, nothing is shrunk: one device pixel
-   * per sprite pixel, the person a third larger than the room's scale (k = 4/3).
+   * The sprite is shrunk by the smallest whole factor f (1, 2, 4…) that
+   * leaves each of its pixels a whole Z / (d / f) device pixels (k = 1): at
+   * Z = 8, 4× art as drawn, 2 pixels a pixel; at Z = 6, shrunk 2:1, 3 pixels
+   * a pixel; at Z = 2, shrunk 2:1, one pixel a pixel. The one exception is
+   * Z = 3 with 4× art: nothing is shrunk, one device pixel per sprite pixel,
+   * the person a third larger than the room's scale (k = 4/3).
    */
   private spriteScale(d: number): { factor: number; k: number } {
-    const z = this.zoom;
-    if (z >= d && z % d === 0) return { factor: 1, k: 1 };
-    if (z < d && d % z === 0) return { factor: d / z, k: 1 };
-    const perPixel = Math.max(1, Math.floor(z / d));
-    return { factor: 1, k: (d * perPixel) / z };
+    return spriteScale(this.zoom, d);
   }
 
   /** A person's drawn size relative to a 32 × 48 character (larger at Z = 3 with 4× art). */
@@ -444,7 +470,17 @@ export class OfficeEngine {
     this.zoom = z;
     ctx.setTransform(z, 0, 0, z, -Math.round(view.x * z), -Math.round(view.y * z));
     ctx.imageSmoothingEnabled = false;
+    this.drawSurroundings(ctx, {
+      x: Math.floor(view.x) - 1,
+      y: Math.floor(view.y) - 1,
+      w: Math.ceil(ctx.canvas.width / z) + 2,
+      h: Math.ceil(ctx.canvas.height / z) + 2,
+    });
     ctx.drawImage(this.still, 0, 0);
+    // The wall screens are HTML under the canvas: open a window onto each, so
+    // whoever stands in front of one is drawn over it, as in the room.
+    const screens = this.screens();
+    for (const s of screens) ctx.clearRect(s.x, s.y, s.w, s.h);
     type Item = { y: number; paint: () => void };
     const items: Item[] = [];
     // Chair, then whoever sits in it, then the desk in front of them.
@@ -458,6 +494,12 @@ export class OfficeEngine {
       const y = this.seated(actor) && actor.desk ? actor.desk.y + 10 : actor.y;
       items.push({ y, paint: () => this.drawActor(ctx, actor) });
     }
+    // Furniture stands among them: sorted by where it touches the floor.
+    for (const prop of this.world.props) {
+      if (prop.still) continue;
+      const sprite = propSprite(this.art, prop);
+      items.push({ y: prop.y + prop.h - 2, paint: () => ctx.drawImage(sprite, prop.x, prop.y) });
+    }
     const landing = this.flashes.length > 0;
     if (landing) {
       const box = this.art.box;
@@ -466,11 +508,6 @@ export class OfficeEngine {
     items.sort((a, b) => a.y - b.y);
     for (const item of items) item.paint();
 
-    // Night falls over everything; screens and racks stay lit.
-    if (this.night > 0) {
-      ctx.fillStyle = `rgba(6,10,30,${this.night})`;
-      ctx.fillRect(0, 0, this.world.w, this.world.h);
-    }
     ctx.globalCompositeOperation = "lighter";
     for (const actor of this.actors.values()) {
       if (!this.seated(actor) || !actor.desk) continue;
@@ -478,7 +515,7 @@ export class OfficeEngine {
       const cx = actor.desk.x + 33;
       const cy = actor.desk.y + 10;
       const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, 24);
-      g.addColorStop(0, `rgba(90,150,255,${0.16 + this.night * 0.45})`);
+      g.addColorStop(0, "rgba(90,150,255,0.2)");
       g.addColorStop(1, "rgba(90,150,255,0)");
       ctx.fillStyle = g;
       ctx.fillRect(cx - 24, cy - 24, 48, 48);
@@ -499,6 +536,63 @@ export class OfficeEngine {
     }
     ctx.globalCompositeOperation = "source-over";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  /**
+   * Where the camera may look (art pixels, office coordinates): the exterior
+   * when there is one, centred on the building; else the building alone.
+   */
+  bounds(): Rect {
+    return sceneBounds(this.world, this.art.exterior);
+  }
+
+  /**
+   * What lies around the building, under the visible area `v`: the exterior,
+   * its edges carried on beyond it on a very wide screen; or, until it is
+   * drawn, a dark paved ground, the building's shadow and a path to the door.
+   */
+  private drawSurroundings(ctx: CanvasRenderingContext2D, v: Rect) {
+    const ext = this.art.exterior;
+    const { w, h } = this.world;
+    if (ext) {
+      const ew = ext instanceof HTMLImageElement ? ext.naturalWidth : ext.width;
+      const eh = ext instanceof HTMLImageElement ? ext.naturalHeight : ext.height;
+      const e = { x: -(ew - w) / 2, y: -(eh - h) / 2, w: ew, h: eh };
+      const left = Math.max(0, e.x - v.x);
+      const right = Math.max(0, v.x + v.w - (e.x + e.w));
+      const top = Math.max(0, e.y - v.y);
+      const bottom = Math.max(0, v.y + v.h - (e.y + e.h));
+      // Its outermost rows and columns, stretched over whatever lies beyond it.
+      if (left) ctx.drawImage(ext, 0, 0, 1, eh, e.x - left, e.y, left, eh);
+      if (right) ctx.drawImage(ext, ew - 1, 0, 1, eh, e.x + ew, e.y, right, eh);
+      if (top) ctx.drawImage(ext, 0, 0, ew, 1, e.x, e.y - top, ew, top);
+      if (bottom) ctx.drawImage(ext, 0, eh - 1, ew, 1, e.x, e.y + eh, ew, bottom);
+      if (left && top) ctx.drawImage(ext, 0, 0, 1, 1, e.x - left, e.y - top, left, top);
+      if (right && top) ctx.drawImage(ext, ew - 1, 0, 1, 1, e.x + ew, e.y - top, right, top);
+      if (left && bottom) ctx.drawImage(ext, 0, eh - 1, 1, 1, e.x - left, e.y + eh, left, bottom);
+      if (right && bottom) ctx.drawImage(ext, ew - 1, eh - 1, 1, 1, e.x + ew, e.y + eh, right, bottom);
+      ctx.drawImage(ext, e.x, e.y);
+      return;
+    }
+    this.ground ??= ctx.createPattern(pavement(), "repeat");
+    ctx.fillStyle = this.ground ?? "#121725";
+    ctx.fillRect(v.x, v.y, v.w, v.h);
+    // A soft shadow under the building, and a path from the street to its door.
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.fillRect(-6, -4, w + 12, h + 12);
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.fillRect(-3, -2, w + 6, h + 6);
+    const door = this.world.entrance.x;
+    ctx.fillStyle = "#1d2436";
+    ctx.fillRect(door - 26, h, 52, STREET + 24);
+    ctx.fillStyle = "#252d43";
+    for (let y = h + 4; y < h + STREET + 24; y += 8) ctx.fillRect(door - 26, y, 52, 1);
+  }
+
+  /** Every wall screen's rectangle: product rooms, vacant ones, the cluster and the lobby. */
+  screens(): Rect[] {
+    const { rooms, vacant, cluster, lobby } = this.world;
+    return [...rooms, ...vacant, cluster, lobby].map((r) => r.screen);
   }
 
   /**
@@ -623,6 +717,39 @@ export class OfficeEngine {
     const a = this.actors.get(key);
     return a ? { x: a.x, y: a.y } : null;
   }
+}
+
+/** The area the camera may show: the exterior's, centred on the building, or the building's. */
+export function sceneBounds(world: { w: number; h: number }, exterior: Sprite | null): Rect {
+  if (!exterior) return { x: 0, y: 0, w: world.w, h: world.h };
+  const ew = exterior instanceof HTMLImageElement ? exterior.naturalWidth : exterior.width;
+  const eh = exterior instanceof HTMLImageElement ? exterior.naturalHeight : exterior.height;
+  return { x: -(ew - world.w) / 2, y: -(eh - world.h) / 2, w: ew, h: eh };
+}
+
+/** A 16 × 16 tile of dark paving: the ground around the building until the exterior is drawn. */
+function pavement(): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = 16;
+  c.height = 16;
+  const ctx = c.getContext("2d");
+  if (!ctx) return c;
+  ctx.fillStyle = "#131927";
+  ctx.fillRect(0, 0, 16, 16);
+  ctx.fillStyle = "#0f1420";
+  ctx.fillRect(0, 0, 16, 1);
+  ctx.fillRect(0, 8, 16, 1);
+  ctx.fillRect(0, 0, 1, 8);
+  ctx.fillRect(8, 8, 1, 8);
+  ctx.fillStyle = "#171e2e";
+  for (const [x, y] of [
+    [3, 3],
+    [11, 5],
+    [5, 12],
+    [13, 13],
+  ])
+    ctx.fillRect(x, y, 1, 1);
+  return c;
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
