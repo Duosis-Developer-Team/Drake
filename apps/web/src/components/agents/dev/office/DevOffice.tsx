@@ -41,8 +41,8 @@ import {
   defaultZoom,
   ease,
   fitCamera,
-  fitZoom,
   frameRoom,
+  stageZoom,
   tween,
   zoomLevels,
   type Box,
@@ -436,11 +436,21 @@ export function DevOffice({
 
   /* ------------------------------------------------------------ the camera */
 
-  const deviceW = Math.round(size.w * size.dpr);
-  const deviceH = Math.round(size.h * size.dpr);
   const levels = useMemo(() => zoomLevels(density, size.dpr), [density, size.dpr]);
-  // The whole office at the largest zoom that keeps every pixel whole.
-  const fit = world && size.w ? fitZoom(density, size.dpr, size.w, size.h, world) : levels[0];
+  // The whole office as large as it can be: drawn at a whole level, shown a
+  // little smaller (`shrink`) when the stage is a few pixels too short for it.
+  const stage = useMemo(
+    () =>
+      world && size.w
+        ? stageZoom(levels, Math.round(size.w * size.dpr), Math.round(size.h * size.dpr), world)
+        : { z: levels[0], shrink: 1 },
+    [world, levels, size.w, size.h, size.dpr],
+  );
+  // Canvas pixels per CSS pixel; the camera works in canvas pixels.
+  const ratio = size.dpr / stage.shrink;
+  const deviceW = Math.round(size.w * ratio);
+  const deviceH = Math.round(size.h * ratio);
+  const fit = stage.z;
   const bounds = useMemo<Box | null>(() => (world && art ? sceneBounds(world, art.exterior) : null), [world, art]);
   const z = camera && levels.includes(camera.z) ? camera.z : fit;
   const focusRoom = useMemo<Room | null>(
@@ -448,7 +458,7 @@ export function DevOffice({
     [world, focusId],
   );
   // The caption's height (and a gap) is kept clear under a room in view.
-  const reserve = Math.round(((captionH || 104) + 24) * size.dpr);
+  const reserve = Math.round(((captionH || 104) + 24) * ratio);
 
   /** Where the camera goes for a kind of view, at the current size. */
   const target = useCallback(
@@ -456,9 +466,10 @@ export function DevOffice({
       if (!world || !bounds || !deviceW) return null;
       if (view === "room" && room) return frameRoom(room, levels, deviceW, deviceH, reserve);
       if (view === "fit") return fitCamera(world, bounds, fit, deviceW, deviceH);
-      // The first look: closer than the whole office, the office edge to edge,
-      // on the band where people are (else the cluster and the lobby).
-      const zoom = defaultZoom(levels, fit, world.w, deviceW);
+      // The first look: the whole office as large as it can be, the scene
+      // around it edge to edge, on the band where people are (else the cluster
+      // and the lobby) when it is closer than that.
+      const zoom = defaultZoom(levels, fit, bounds.w, deviceW);
       const intents = data ? liveIntents(mode === "live" ? data.live : []) : new Map<string, Intent>();
       const interest = [...intents.values()].map((i) => {
         const id = i.kind === "work" ? (world.roomOf[i.room] ?? i.room) : "lobby";
@@ -715,7 +726,7 @@ export function DevOffice({
       const dy = e.clientY - d.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
       if (d.moved) {
-        const k = size.dpr / d.cam.z;
+        const k = ratio / d.cam.z;
         viewRef.current = "free";
         if (focusId) setFocusId(null);
         setCamera(clampCamera({ x: d.cam.x - dx * k, y: d.cam.y - dy * k, z: d.cam.z }, bounds, deviceW, deviceH));
@@ -777,7 +788,7 @@ export function DevOffice({
   const ready = Boolean(data && art && world && camera);
   const loading = !state || (state.key !== requestKey && !state.failed);
   const roomsById = useMemo(() => new Map((data?.rooms ?? []).map((r) => [r.id, r])), [data]);
-  const scale = z / size.dpr;
+  const scale = z / ratio;
   const camX = camera ? Math.round(camera.x * z) / z : 0;
   const camY = camera ? Math.round(camera.y * z) / z : 0;
   const box = (r: Rect) => ({
@@ -1068,7 +1079,8 @@ export function DevOffice({
               height={deviceH}
               // Above the wall screens (z-0): people walk in front of them.
               className="relative z-[1] block touch-none select-none"
-              style={{ width: size.w, height: size.h, imageRendering: "pixelated", cursor: "grab" }}
+              // Every pixel whole, or (shrunk a little to show the whole office) smoothed.
+              style={{ width: size.w, height: size.h, imageRendering: stage.shrink < 1 ? "auto" : "pixelated", cursor: "grab" }}
               role="img"
               aria-label={t("title")}
               aria-describedby="dev-office-places"

@@ -50,13 +50,36 @@ export function fitZoom(density: Density, dpr: number, cssWidth: number, cssHeig
 }
 
 /**
- * The first look's zoom: at least a step closer than the whole office, and
- * close enough that the office spans the stage's whole width — no empty bands
- * at the sides. `deviceWidth` is the stage's width in device pixels.
+ * The zoom the office opens at, and how much the drawing is shrunk to show it.
+ * The largest whole level at which the whole office fits the stage once the
+ * canvas, drawn at that level with every pixel whole, is shown at most
+ * `1 - minShrink` smaller (a smooth, barely visible shrink): the office as big
+ * as it can be, never cut at the top or the bottom. `deviceW`/`deviceH` are
+ * the stage's device pixels; `shrink` is 1 where a whole level already fits.
  */
-export function defaultZoom(levels: number[], fit: number, worldWidth: number, deviceWidth: number): number {
-  const from = Math.min(levels.length - 1, Math.max(0, levels.indexOf(fit)) + 1);
-  for (let i = from; i < levels.length; i += 1) if (worldWidth * levels[i] >= deviceWidth) return levels[i];
+export function stageZoom(
+  levels: number[],
+  deviceW: number,
+  deviceH: number,
+  world: { w: number; h: number },
+  minShrink = 0.85,
+): { z: number; shrink: number } {
+  for (let i = levels.length - 1; i >= 0; i -= 1) {
+    const z = levels[i];
+    const shrink = Math.min(1, deviceW / (world.w * z), deviceH / (world.h * z));
+    if (shrink >= minShrink) return { z, shrink };
+  }
+  return { z: levels[0], shrink: 1 };
+}
+
+/**
+ * The first look's zoom: the whole office, or closer until the scene around it
+ * (the exterior) spans the stage's whole width — no empty bands at the sides.
+ * `deviceWidth` is the stage's width in canvas pixels.
+ */
+export function defaultZoom(levels: number[], fit: number, sceneWidth: number, deviceWidth: number): number {
+  const from = Math.max(0, levels.indexOf(fit));
+  for (let i = from; i < levels.length; i += 1) if (sceneWidth * levels[i] >= deviceWidth) return levels[i];
   return levels[levels.length - 1];
 }
 
