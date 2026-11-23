@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/Duosis-Developer-Team/Drake/apps/cluster-agent/internal/relay"
 )
 
 // Config is the complete agent configuration.
@@ -53,6 +55,9 @@ type Config struct {
 	// HeartbeatSeconds paces the liveness heartbeat (default 30; E2E uses
 	// small values to observe disconnect transitions quickly).
 	HeartbeatSeconds int
+	// Relay names the observability stores inside this cluster that
+	// Tracesis may read through this agent (ADR-0037). Empty: no relay.
+	Relay relay.Config
 }
 
 var clusterNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
@@ -83,6 +88,18 @@ func FromEnv() Config {
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = "/var/lib/drake-agent"
+	}
+	cfg.Relay = relay.Config{
+		ClickHouseURL:          os.Getenv("DRAKE_AGENT_RELAY_CLICKHOUSE_URL"),
+		ClickHouseUser:         os.Getenv("DRAKE_AGENT_RELAY_CLICKHOUSE_USER"),
+		ClickHousePasswordFile: os.Getenv("DRAKE_AGENT_RELAY_CLICKHOUSE_PASSWORD_FILE"),
+		PrometheusURL:          os.Getenv("DRAKE_AGENT_RELAY_PROMETHEUS_URL"),
+		Workers:                4,
+	}
+	if raw := os.Getenv("DRAKE_AGENT_RELAY_WORKERS"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			cfg.Relay.Workers = parsed
+		}
 	}
 	cfg.HeartbeatSeconds = 30
 	if raw := os.Getenv("DRAKE_AGENT_HEARTBEAT_SECONDS"); raw != "" {
@@ -150,6 +167,9 @@ func (c Config) Validate() error {
 	}
 	if c.HeartbeatSeconds < 1 || c.HeartbeatSeconds > 300 {
 		return fmt.Errorf("heartbeat interval must be within [1, 300] seconds")
+	}
+	if err := c.Relay.Validate(); err != nil {
+		return err
 	}
 	return nil
 }
