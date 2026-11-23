@@ -35,6 +35,7 @@ from drake_api.telemetry.compiler import CompileError, compile_query
 from drake_api.telemetry.metrics import BrokerMetrics
 from drake_api.telemetry.normalize import normalize_matrix
 from drake_api.telemetry.observations import record_provider_observation
+from drake_api.telemetry.otel_metrics import OtelMetricsReader
 from drake_api.telemetry.provider import (
     ConnectorRefusedError,
     PrometheusAdapter,
@@ -72,12 +73,17 @@ class TelemetryBroker:
         redis: aioredis.Redis,
         registry: TelemetryRegistry,
         adapter: PrometheusAdapter,
+        otel_metrics: OtelMetricsReader | None = None,
         metrics: BrokerMetrics,
     ) -> None:
         self._settings = settings
         self._engine = engine
         self._registry = registry
         self._adapter = adapter
+        # ADR-0038 phase 3: templates answered from OpenTelemetry metrics on
+        # the clusters the settings switch over; None or an empty switch
+        # changes nothing.
+        self._otel = otel_metrics
         self._metrics = metrics
         self._cache = TelemetryCache(redis)
         self._leases = ConcurrencyLeases(redis)
@@ -134,6 +140,11 @@ class TelemetryBroker:
             "effective_step_seconds": effective.effective_step_seconds,
             "step_adjusted": effective.step_adjusted,
         }
+        # Answered from OpenTelemetry (ADR-0038) only where the switch names
+        # both this cluster and this template.
+        from_otel = self._otel is not None and self._otel.serves(
+            template.key, resolved.source_values
+        )
         base_envelope = {
             "template_key": template.key,
             "template_version": template.version,
@@ -142,7 +153,7 @@ class TelemetryBroker:
             "unit": template.output_unit,
             "result_type": "timeseries",
             "range": range_payload,
-            "source_type": "prometheus",
+            "source_type": "opentelemetry" if from_otel else "prometheus",
         }
 
         if integration is None or integration[2] != "configured":
@@ -169,8 +180,11 @@ class TelemetryBroker:
         # hashed config_ref) — reconfiguration invalidates cache entries,
         # observation-projection version bumps do not. The ref itself is
         # hashed away and never stored.
+        # The source is part of the identity: an OpenTelemetry answer and a
+        # Prometheus answer never share a cache entry.
+        source_tag = ":otel" if from_otel else ""
         integration_identity = hashlib.sha256(
-            f"{integration[0]}:{integration[1]}".encode()
+            f"{integration[0]}:{integration[1]}{source_tag}".encode()
         ).hexdigest()
         # A query whose end sits within ~2 steps BEHIND now is a moving
         # dashboard window; anything older — or genuinely ending in the
@@ -201,8 +215,8 @@ class TelemetryBroker:
             self._record(template, "ok", "fresh_hit", started, _point_count(fresh))
             return {**fresh, "cache_state": "fresh_hit", "correlation_id": correlation_id}
 
-        connector = self._adapter.resolve_connector(str(integration[1]))
-        if connector is None:
+        connector = None if from_otel else self._adapter.resolve_connector(str(integration[1]))
+        if connector is None and not from_otel:
             # Configured integration whose connector the server cannot
             # resolve: treat as provider unavailability (last-good may serve).
             return await self._serve_stale_or_unavailable(
@@ -231,22 +245,38 @@ class TelemetryBroker:
             raise HTTPException(status_code=503, detail="telemetry_budget_unavailable") from error
 
         try:
-            raw = await self._adapter.query_range(
-                connector,
-                compiled.query,
-                start=aligned_from,
-                end=aligned_to,
-                step_seconds=step,
-                timeout_seconds=min(
-                    template.timeout_seconds, self._settings.telemetry_max_timeout_seconds
-                ),
-                correlation_id=correlation_id,
-            )
+            timeout = min(template.timeout_seconds, self._settings.telemetry_max_timeout_seconds)
+            if from_otel:
+                assert self._otel is not None
+                raw = await self._otel.query_range(
+                    template.key,
+                    resolved.source_values,
+                    start=aligned_from,
+                    end=aligned_to,
+                    step_seconds=step,
+                    window_seconds=compiled.window_seconds,
+                    timeout_seconds=timeout,
+                    correlation_id=correlation_id,
+                )
+            else:
+                assert connector is not None
+                raw = await self._adapter.query_range(
+                    connector,
+                    compiled.query,
+                    start=aligned_from,
+                    end=aligned_to,
+                    step_seconds=step,
+                    timeout_seconds=timeout,
+                    correlation_id=correlation_id,
+                )
             series, partial, warnings = normalize_matrix(template, raw)
         except ProviderUnavailableError as error:
-            await record_provider_observation(
-                self._engine, str(integration[0]), outcome="failure", error_code=error.code
-            )
+            # The Prometheus integration's health is about Prometheus: an
+            # OpenTelemetry read failing says nothing about it.
+            if not from_otel:
+                await record_provider_observation(
+                    self._engine, str(integration[0]), outcome="failure", error_code=error.code
+                )
             self._metrics.record_rejection("provider_unavailable")
             return await self._serve_stale_or_unavailable(
                 template,
@@ -257,9 +287,10 @@ class TelemetryBroker:
                 current_range=range_payload,
             )
         except (ProviderContractError, ConnectorRefusedError) as error:
-            await record_provider_observation(
-                self._engine, str(integration[0]), outcome="failure", error_code=error.code
-            )
+            if not from_otel:
+                await record_provider_observation(
+                    self._engine, str(integration[0]), outcome="failure", error_code=error.code
+                )
             self._metrics.record_rejection("provider_contract")
             return await self._serve_stale_or_unavailable(
                 template,
@@ -273,7 +304,8 @@ class TelemetryBroker:
         finally:
             await self._leases.release(held)
 
-        await record_provider_observation(self._engine, str(integration[0]), outcome="success")
+        if not from_otel:
+            await record_provider_observation(self._engine, str(integration[0]), outcome="success")
         data_state = "empty" if not series else "ok"
         envelope = {
             **base_envelope,

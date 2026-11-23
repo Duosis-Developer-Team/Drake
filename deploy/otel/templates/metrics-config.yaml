@@ -71,6 +71,23 @@ data:
             {{- else }}
             - 'resource.attributes["k8s.namespace.name"] != nil and not IsMatch(resource.attributes["k8s.namespace.name"], "^({{ join "|" .Values.agent.namespaces }})$")'
             {{- end }}
+      # Names the workload a pod belongs to (Deployment, StatefulSet,
+      # DaemonSet, Job), as the log agent does for log lines: what
+      # Prometheus's drake:pod:workload rule does for its series.
+      k8sattributes:
+        auth_type: serviceAccount
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.job.name
+            - k8s.cronjob.name
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
       resource/cluster:
         attributes:
           - key: k8s.cluster.name
@@ -109,6 +126,6 @@ data:
       pipelines:
         metrics:
           receivers: [receiver_creator/kubelet, k8s_cluster]
-          processors: [memory_limiter, filter/scope, resource/cluster, batch]
+          processors: [memory_limiter, filter/scope, k8sattributes, resource/cluster, batch]
           exporters: [clickhouse/metrics]
 {{- end }}

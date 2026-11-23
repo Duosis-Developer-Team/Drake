@@ -147,6 +147,15 @@ spec:
               value: {{ (.Values.slo).evaluatorEnabled | default false | quote }}
             - name: DRAKE_SLO_EVALUATOR_INTERVAL_SECONDS
               value: {{ (.Values.slo).evaluatorIntervalSeconds | default 300 | quote }}
+            {{- with (.Values.telemetry).otelMetrics }}
+            # ADR-0038 phase 3: health templates answered from OpenTelemetry
+            # metrics for these clusters and templates. Rendered only when
+            # set; unset, every template is answered by Prometheus.
+            - name: DRAKE_OTEL_METRICS_CLUSTERS
+              value: {{ .clusters | default list | toJson | quote }}
+            - name: DRAKE_OTEL_METRICS_TEMPLATES
+              value: {{ .templates | default list | toJson | quote }}
+            {{- end }}
             # Stated in both states, like the incident runner.
             - name: DRAKE_NOTIFICATION_PLANNER_ENABLED
               value: {{ (.Values.notifications).plannerEnabled | default false | quote }}

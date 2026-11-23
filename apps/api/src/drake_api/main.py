@@ -78,6 +78,7 @@ from drake_api.service_health.router import router as service_health_router
 from drake_api.settings import Settings, get_settings
 from drake_api.telemetry.broker import TelemetryBroker
 from drake_api.telemetry.metrics import BrokerMetrics
+from drake_api.telemetry.otel_metrics import OtelMetricsReader, OtelMetricsSwitch
 from drake_api.telemetry.provider import PrometheusAdapter
 from drake_api.telemetry.registry import get_registry
 from drake_api.telemetry.router import internal_router as telemetry_internal_router
@@ -243,6 +244,12 @@ def create_app(
     app.state.agent_relay = AgentRelay(
         settings, redis=app.state.telemetry_redis, engine=get_engine(settings)
     )
+    # Logs and traces (ADR-0029). Constructing the adapter opens nothing and
+    # reads no credential; it does so per query, and only when the feature
+    # is on and a store is configured.
+    app.state.observability_store = ClickHouseStore(
+        settings, transport=observability_transport, relay=app.state.agent_relay
+    )
     app.state.telemetry_broker = TelemetryBroker(
         settings=settings,
         engine=get_engine(settings),
@@ -252,12 +259,14 @@ def create_app(
             settings, transport=telemetry_transport, relay=app.state.agent_relay
         ),
         metrics=app.state.telemetry_metrics,
-    )
-    # Logs and traces (ADR-0029). Constructing the adapter opens nothing and
-    # reads no credential; it does so per query, and only when the feature
-    # is on and a store is configured.
-    app.state.observability_store = ClickHouseStore(
-        settings, transport=observability_transport, relay=app.state.agent_relay
+        # ADR-0038 phase 3: answered from OpenTelemetry metrics only where
+        # the settings name the cluster and the template (empty by default).
+        otel_metrics=OtelMetricsReader(
+            app.state.observability_store,
+            OtelMetricsSwitch.from_settings(
+                settings.otel_metrics_clusters, settings.otel_metrics_templates
+            ),
+        ),
     )
     # The evaluator reuses the Sprint 5 read path exactly as the API does —
     # same orchestrator, same broker, same budgets — so a scheduled

@@ -282,6 +282,12 @@ class Settings(BaseSettings):
     # the API.
     telemetry_connectors: dict[str, TelemetryConnector] = {}
     telemetry_max_timeout_seconds: float = 10.0
+    # ADR-0038 phase 3: health templates answered from OpenTelemetry metrics
+    # in ClickHouse instead of Prometheus, for these clusters (cluster_ref)
+    # and these templates only. Both empty by default: nothing changes until
+    # both name something, and emptying either one switches back.
+    otel_metrics_clusters: list[str] = []
+    otel_metrics_templates: list[str] = []
     # Local/test-only override so E2E can exercise stale/last-good flows
     # without waiting out production TTLs. Ignored outside local/test.
     telemetry_fresh_ttl_override_seconds: int | None = None

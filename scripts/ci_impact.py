@@ -140,6 +140,7 @@ INTEGRATION_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "telemetry": (
         "apps/api/tests/test_telemetry_api_integration.py",
+        "apps/api/tests/test_otel_metrics_integration.py",
         "apps/api/tests/test_alerting_integration.py",
         "apps/api/tests/test_slo_traces_integration.py",
         "apps/api/tests/test_agents_integration.py",
