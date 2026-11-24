@@ -1,0 +1,88 @@
+{{- if and .Values.metrics.enabled .Values.metrics.node.enabled }}
+{{- include "drake-otel.require" . -}}
+{{- /*
+Node metrics through OpenTelemetry (ADR-0038, phase 3): what node_exporter
+gives Prometheus (CPU, load, memory, root filesystem), read by the
+`host_metrics` receiver from each node's /proc, /sys and root filesystem.
+
+Its own DaemonSet, not the log agent: a problem here never touches log
+collection. The host's root is mounted read-only, the process runs as a
+non-root user with every capability dropped, and it talks to the
+Kubernetes API not at all (no RBAC, no token).
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drake-otel-node
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: drake-otel-node
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+    app.kubernetes.io/name: drake-otel-node
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: drake-otel-node
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "drake-otel.podLabels" . | nindent 8 }}
+        app.kubernetes.io/name: drake-otel-node
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/node-metrics-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: drake-otel-node
+      automountServiceAccountToken: false
+      {{- with .Values.metrics.node.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: collector
+          image: {{ include "drake-otel.image" (dict "root" . "name" "collector") }}
+          args: ["--config=/etc/otelcol/collector.yaml"]
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+            - name: DRAKE_CH_INGEST_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.clickhouse.existingSecret }}, key: ingest-password}
+          resources:
+            {{- toYaml .Values.metrics.node.resources | nindent 12 }}
+          securityContext:
+            {{- include "drake-otel.securityContext" . | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /, port: 13133}
+          livenessProbe:
+            httpGet: {path: /, port: 13133}
+            initialDelaySeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/otelcol}
+            - {name: hostfs, mountPath: /hostfs, readOnly: true, mountPropagation: HostToContainer}
+      volumes:
+        - name: config
+          configMap: {name: drake-otel-node}
+        - name: hostfs
+          hostPath:
+            path: /
+            type: Directory
+{{- end }}

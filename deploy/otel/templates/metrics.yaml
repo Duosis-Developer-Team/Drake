@@ -35,6 +35,12 @@ rules:
       - replicationcontrollers/status
       - resourcequotas
       - services
+      {{- if .Values.metrics.cadvisor.enabled }}
+      # Each kubelet's /metrics/cadvisor, for the CPU throttling counters
+      # only. `nodes/metrics` is the kubelet's metrics endpoints and nothing
+      # more; it is not `nodes/proxy` (no exec, no logs).
+      - nodes/metrics
+      {{- end }}
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]

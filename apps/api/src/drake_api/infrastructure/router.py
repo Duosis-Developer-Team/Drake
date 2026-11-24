@@ -30,7 +30,13 @@ def _service(request: Request) -> InfrastructureService:
 @router.get("/clusters")
 async def clusters(request: Request, auth: AuthContext = Depends(require_auth)) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
-    return {"clusters": await visible_clusters(get_engine(settings), auth.principal)}
+    # Only clusters whose node and namespace screens are switched over count.
+    otel = (
+        frozenset(settings.otel_metrics_clusters)
+        if any(t.startswith("cluster.node-") for t in settings.otel_metrics_templates)
+        else frozenset()
+    )
+    return {"clusters": await visible_clusters(get_engine(settings), auth.principal, otel)}
 
 
 @router.get("/clusters/{cluster_id}")

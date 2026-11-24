@@ -47,11 +47,37 @@ data:
               # connection is still authenticated with the service account.
               insecure_skip_verify: true
               metric_groups: [node, pod, container]
+          {{- if .Values.metrics.cadvisor.enabled }}
+          # CPU throttling (ADR-0038): kubeletstats has no CFS counters, so
+          # the two are read from each kubelet's cAdvisor endpoint, kept by
+          # name before anything else is parsed further.
+          prometheus/cadvisor:
+            rule: type == "k8s.node"
+            config:
+              config:
+                scrape_configs:
+                  - job_name: cadvisor
+                    scrape_interval: {{ .Values.metrics.interval }}
+                    scheme: https
+                    metrics_path: /metrics/cadvisor
+                    tls_config: {insecure_skip_verify: true}
+                    authorization:
+                      credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+                    static_configs:
+                      - targets: ["`endpoint`:`kubelet_endpoint_port`"]
+                    metric_relabel_configs:
+                      - source_labels: [__name__]
+                        regex: "container_cpu_cfs_(throttled_)?periods_total"
+                        action: keep
+                      - source_labels: [container]
+                        regex: "|POD"
+                        action: drop
+          {{- end }}
       k8s_cluster:
         auth_type: serviceAccount
         collection_interval: {{ .Values.metrics.interval }}
         node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
-        allocatable_types_to_report: [cpu, memory]
+        allocatable_types_to_report: [cpu, memory, pods]
     processors:
       memory_limiter:
         check_interval: 1s
@@ -71,6 +97,24 @@ data:
             {{- else }}
             - 'resource.attributes["k8s.namespace.name"] != nil and not IsMatch(resource.attributes["k8s.namespace.name"], "^({{ join "|" .Values.agent.namespaces }})$")'
             {{- end }}
+      {{- if .Values.metrics.cadvisor.enabled }}
+      # cAdvisor's labels name the container on each point; as resource
+      # attributes they say the same as kubeletstats', so k8s_attributes and
+      # the namespace allowlist above apply to them too.
+      transform/cadvisor:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            conditions:
+              - IsMatch(metric.name, "^container_cpu_cfs_")
+            statements:
+              - set(attributes["k8s.namespace.name"], attributes["namespace"])
+              - set(attributes["k8s.pod.name"], attributes["pod"])
+              - set(attributes["k8s.container.name"], attributes["container"])
+              - keep_keys(attributes, ["k8s.namespace.name", "k8s.pod.name", "k8s.container.name"])
+      groupbyattrs/cadvisor:
+        keys: [k8s.namespace.name, k8s.pod.name, k8s.container.name]
+      {{- end }}
       # Names the workload a pod belongs to (Deployment, StatefulSet,
       # DaemonSet, Job), as the log agent does for log lines: what
       # Prometheus's drake:pod:workload rule does for its series.
@@ -88,6 +132,12 @@ data:
           - sources:
               - from: resource_attribute
                 name: k8s.pod.uid
+          # cAdvisor's points carry the pod's name, not its uid.
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.name
+              - from: resource_attribute
+                name: k8s.namespace.name
       resource/cluster:
         attributes:
           - key: k8s.cluster.name
@@ -126,6 +176,15 @@ data:
       pipelines:
         metrics:
           receivers: [receiver_creator/kubelet, k8s_cluster]
-          processors: [memory_limiter, filter/scope, k8s_attributes, resource/cluster, batch]
+          processors:
+            - memory_limiter
+            {{- if .Values.metrics.cadvisor.enabled }}
+            - transform/cadvisor
+            - groupbyattrs/cadvisor
+            {{- end }}
+            - filter/scope
+            - k8s_attributes
+            - resource/cluster
+            - batch
           exporters: [clickhouse/metrics]
 {{- end }}

@@ -109,6 +109,13 @@ agent:
 # metric names, for the namespaces in agent.namespaces. Off is one flag.
 metrics:
   enabled: true
+  # ADR-0038 phase 3: node metrics (host_metrics, own DaemonSet, host root
+  # read-only, no API token) and CPU throttling from cAdvisor
+  # (nodes/metrics, read-only). Agreed 2026-11-24; off is one flag each.
+  node:
+    enabled: true
+  cadvisor:
+    enabled: true
 
 clickhouse:
   # The worker node. The control-plane node is saturated (load far above
