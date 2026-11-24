@@ -4,6 +4,19 @@ Status: accepted (2026-11-23), phase 1 of 4
 Builds on: ADR-0029 (OpenTelemetry logs and traces), ADR-0037 (Tracesis
 Agent: one install, the data stays in the cluster).
 
+## Status: paused (2026-11-24)
+
+We stopped this work at a clean point. Prometheus stays the metrics source; logs and traces stay on OpenTelemetry, as before.
+
+**Why.** The `tracesis-agent` chart already bundles Prometheus, so a customer installs one thing either way. Moving off Prometheus pays only for a customer who refuses Prometheus in their cluster, and we have none today. What is left is large: application HTTP metrics from OBI, alert rules, 15 days of history on a tight node2 disk.
+
+**Where it stopped.**
+- Phase 1 collector: switched off in duosis-prod-1 (`metrics.enabled: false`). The rows already written expire by the table's TTL; none are deleted by hand.
+- Phase 3 reader (memory, CPU, replicas, restarts): shipped in the API with an empty switch. It is inert.
+- Node metrics, cAdvisor throttling and the infrastructure screens: PR #286, kept as a draft, not merged.
+
+**To resume.** Re-enable `metrics.enabled`, rebase PR #286, and widen the metrics namespaces to the whole cluster. The phases below are unchanged.
+
 ## Context
 
 Tracesis collects logs and traces with OpenTelemetry and metrics with
