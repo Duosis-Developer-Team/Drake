@@ -12,6 +12,7 @@ from drake_api.observability.health_checks import (
     IS_HEALTH_CHECK,
     LONG_LIVED_SECONDS,
     MAX_PROBES_PER_WORKLOAD,
+    NOT_LONG_LIVED,
     health_check_parameter,
     probes_from_summary,
 )
@@ -34,12 +35,37 @@ def test_probes_come_from_the_agents_summary_and_bad_entries_are_dropped() -> No
     summary = {
         "http_probes": [
             {"container": "web", "kind": "readiness", "path": "/", "port": "80"},
-            {"container": "web", "kind": "liveness", "path": "/", "port": "80"},  # same pair
+            {
+                "container": "web",
+                "kind": "liveness",
+                "path": "/",
+                "port": "80",
+            },  # same pair
             {"container": "api", "kind": "liveness", "path": "/health", "port": "8000"},
-            {"container": "x", "kind": "liveness", "path": "health", "port": "80"},  # relative
-            {"container": "x", "kind": "liveness", "path": "/h", "port": "99999"},  # no port
-            {"container": "x", "kind": "liveness", "path": "/h\n", "port": "80"},  # control char
-            {"container": "x", "kind": "liveness", "path": "/h", "port": 80},  # not a string
+            {
+                "container": "x",
+                "kind": "liveness",
+                "path": "health",
+                "port": "80",
+            },  # relative
+            {
+                "container": "x",
+                "kind": "liveness",
+                "path": "/h",
+                "port": "99999",
+            },  # no port
+            {
+                "container": "x",
+                "kind": "liveness",
+                "path": "/h\n",
+                "port": "80",
+            },  # control char
+            {
+                "container": "x",
+                "kind": "liveness",
+                "path": "/h",
+                "port": 80,
+            },  # not a string
             "not a map",
         ]
     }
@@ -136,7 +162,7 @@ def test_the_timeline_the_board_and_golden_signals_leave_them_out_too() -> None:
 def test_long_lived_connections_stay_out_of_every_latency_percentile() -> None:
     """A server span longer than five minutes is a stream, not a slow
     request: every percentile leaves it out, every count keeps it."""
-    long_lived = f"Duration < {LONG_LIVED_SECONDS * 1_000_000_000}"
+    long_lived = NOT_LONG_LIVED
     query = _trace_list()
     assert query.routes.sql.count(long_lived) == 2, "p50 and p95 of each route"
     assert long_lived in query.totals.sql
@@ -161,3 +187,10 @@ def test_long_lived_connections_stay_out_of_every_latency_percentile() -> None:
         )
         assert "count() AS" in statement or "countIf(" in statement
         assert "__" not in statement
+
+
+def test_the_relay_long_poll_is_not_a_slow_request() -> None:
+    """An agent's relay poll waits up to 25 s for work by design: idle time,
+    not latency. It stays out of the percentiles like a stream does."""
+    assert "SpanName != 'POST /internal/v1/agent/relay/next'" in NOT_LONG_LIVED
+    assert f"Duration < {LONG_LIVED_SECONDS * 1_000_000_000}" in NOT_LONG_LIVED
