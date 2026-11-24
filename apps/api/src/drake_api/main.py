@@ -1,5 +1,6 @@
 """Application factory for the Drake control plane API."""
 
+import functools
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -63,6 +64,7 @@ from drake_api.notifications.worker import NotificationWorker
 from drake_api.observability.application import TraceGoldenReader
 from drake_api.observability.overview_router import router as observability_overview_router
 from drake_api.observability.router import router as observability_router
+from drake_api.observability.router import warm_signals
 from drake_api.observability.store import ClickHouseStore
 from drake_api.onboarding.github_provider import GitHubPullRequestProvider
 from drake_api.onboarding.gitops import GitOpsWorker, RecordingProvider
@@ -289,6 +291,14 @@ def create_app(
             app.state.infrastructure,
             app.state.telemetry_redis,
             settings.infrastructure_warm_seconds,
+            extras=[
+                functools.partial(
+                    warm_signals,
+                    settings,
+                    app.state.observability_store,
+                    app.state.telemetry_redis,
+                )
+            ],
         )
         if settings.infrastructure_warm_seconds > 0
         else None
