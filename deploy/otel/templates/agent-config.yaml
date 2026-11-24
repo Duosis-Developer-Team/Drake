@@ -144,7 +144,7 @@ data:
         check_interval: 1s
         limit_mib: {{ .Values.agent.memoryLimitMiB }}
         spike_limit_mib: {{ div .Values.agent.memoryLimitMiB 4 }}
-      k8sattributes:
+      k8s_attributes:
         auth_type: serviceAccount
         passthrough: false
         filter:
@@ -197,5 +197,5 @@ data:
       pipelines:
         logs:
           receivers: [filelog]
-          processors: [memory_limiter, k8sattributes, resource/cluster, batch]
+          processors: [memory_limiter, k8s_attributes, resource/cluster, batch]
           exporters: [otlp]

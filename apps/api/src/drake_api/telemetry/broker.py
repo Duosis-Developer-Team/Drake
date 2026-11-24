@@ -156,7 +156,9 @@ class TelemetryBroker:
             "source_type": "opentelemetry" if from_otel else "prometheus",
         }
 
-        if integration is None or integration[2] != "configured":
+        # A template answered from OpenTelemetry needs no Prometheus at all:
+        # a cluster can run the Tracesis agent without one (ADR-0038).
+        if not from_otel and (integration is None or integration[2] != "configured"):
             envelope = {
                 **base_envelope,
                 "series": [],
@@ -182,10 +184,14 @@ class TelemetryBroker:
         # hashed away and never stored.
         # The source is part of the identity: an OpenTelemetry answer and a
         # Prometheus answer never share a cache entry.
-        source_tag = ":otel" if from_otel else ""
-        integration_identity = hashlib.sha256(
-            f"{integration[0]}:{integration[1]}{source_tag}".encode()
-        ).hexdigest()
+        # An OpenTelemetry answer depends on the cluster, not on whether a
+        # Prometheus integration exists or how it is configured.
+        source_identity = (
+            f"otel-metrics:{resolved.source_values.get('cluster_ref', '')}"
+            if from_otel
+            else f"{integration[0]}:{integration[1]}"
+        )
+        integration_identity = hashlib.sha256(source_identity.encode()).hexdigest()
         # A query whose end sits within ~2 steps BEHIND now is a moving
         # dashboard window; anything older — or genuinely ending in the
         # future — is a historical absolute window. The check is two-sided:

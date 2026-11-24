@@ -91,3 +91,57 @@ def test_restarts_report_only_the_steps_that_were_computed() -> None:
 
 def test_nothing_current_is_an_empty_matrix() -> None:
     assert to_matrix("workload.replicas-desired.v1", [], start=0, step=60, steps=5).result == []
+
+
+@pytest.mark.parametrize(
+    ("key", "metric"),
+    [
+        ("workload.memory-usage.v1", "container.memory.working_set"),
+        ("workload.memory-limit.v1", "k8s.container.memory_limit"),
+        ("workload.cpu-limit.v1", "k8s.container.cpu_limit"),
+    ],
+)
+def test_resource_sums_take_each_container_once(key: str, metric: str) -> None:
+    sql, params, _ = build(
+        key, WORKLOAD, database="otel", start=1000, end=1600, step=60, window_seconds=300
+    )
+    assert params["metric"] == metric and metric not in sql
+    assert "otel_metrics_gauge" in sql and "sum(v)" in sql
+    # A container is its pod and name: a restart's new container id is not
+    # a second container.
+    assert "ResourceAttributes['k8s.pod.uid']" in sql and "container.id" not in sql
+    assert "{lookback:UInt32}" in sql
+
+
+def test_cpu_usage_is_a_rate_over_the_cpu_seconds_counter() -> None:
+    sql, params, _ = build(
+        "workload.cpu-usage.v1",
+        WORKLOAD,
+        database="otel",
+        start=1000,
+        end=1600,
+        step=60,
+        window_seconds=300,
+    )
+    assert "otel_metrics_sum" in sql and "'container.cpu.time'" in sql
+    assert params["window"] == "300"
+    # A decrease is a counter reset, and one sample is not a rate.
+    assert "if(d < 0, x, d)" in sql and "count() >= 2" in sql
+
+
+def test_resource_answers_are_not_carried_forward() -> None:
+    matrix = to_matrix(
+        "workload.memory-usage.v1", [{"k": 0, "v": 5}, {"k": 3, "v": 6}], start=0, step=60, steps=5
+    )
+    assert matrix.result[0]["values"] == [[0, "5.0"], [180, "6.0"]]
+
+
+def test_every_resource_template_can_be_switched_on() -> None:
+    keys = [
+        "workload.memory-usage.v1",
+        "workload.memory-limit.v1",
+        "workload.cpu-limit.v1",
+        "workload.cpu-usage.v1",
+    ]
+    on = OtelMetricsSwitch.from_settings(["duosis-prod-1"], keys)
+    assert on.templates == frozenset(keys)

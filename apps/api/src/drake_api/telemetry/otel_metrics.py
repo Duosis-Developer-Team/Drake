@@ -4,7 +4,8 @@ The broker runs every health signal as a registry template and expects a
 Prometheus range-query matrix back. For the templates listed here, and only
 on the clusters and templates the settings switch over, the same matrix is
 computed from the OpenTelemetry metrics the `drake-otel-metrics` collector
-writes to ClickHouse (`otel_metrics_gauge`). Everything after the matrix is
+writes to ClickHouse (`otel_metrics_gauge`, and `otel_metrics_sum` for the
+CPU-seconds counter). Everything after the matrix is
 unchanged: normalization, envelopes, caching, the health engine.
 
 Each answer reproduces its Prometheus template's semantics:
@@ -19,6 +20,15 @@ Each answer reproduces its Prometheus template's semantics:
   count over the window ending at each step, summed. Restart counts never
   decrease, so the increase within a window is its maximum minus its
   minimum.
+- `workload.memory-usage.v1` / `workload.memory-limit.v1` /
+  `workload.cpu-limit.v1`: the sum over the workload's containers of each
+  container's latest value at each step, looking back five minutes. A
+  container is its pod and name, so a restarted container (new id) is not
+  counted twice while its old samples are still within the lookback.
+- `workload.cpu-usage.v1`: per container, the CPU-seconds counter's
+  increase over the window ending at each step divided by the time between
+  its first and last sample there (Prometheus's `rate`, counter resets
+  included); summed over the containers. At least two samples are needed.
 
 Every statement names its cluster as `{cluster:String}`, so the store routes
 it to the cluster's own ClickHouse when the cluster keeps its telemetry
@@ -63,11 +73,28 @@ _KIND: dict[str, tuple[str, str, str]] = {
     ),
 }
 
+# Template -> (table, metric) for the per-container sums.
+_CONTAINER_SUM: dict[str, str] = {
+    "workload.memory-usage.v1": "container.memory.working_set",
+    "workload.memory-limit.v1": "k8s.container.memory_limit",
+    "workload.cpu-limit.v1": "k8s.container.cpu_limit",
+}
+
 SUPPORTED_TEMPLATES = (
     "workload.replicas-desired.v1",
     "workload.replicas-ready.v1",
     "workload.restarts-delta.v1",
+    "workload.memory-usage.v1",
+    "workload.memory-limit.v1",
+    "workload.cpu-limit.v1",
+    "workload.cpu-usage.v1",
 )
+
+# Templates whose SQL already answers every step exactly (no carry-forward).
+_EXACT_STEPS = frozenset(SUPPORTED_TEMPLATES) - {
+    "workload.replicas-desired.v1",
+    "workload.replicas-ready.v1",
+}
 
 # The latest value per series per step slot, then the maximum across series.
 _LATEST = """
@@ -128,6 +155,80 @@ ORDER BY k
 LIMIT {max_rows:UInt16}
 """
 
+# Each sample is current at every step t with s <= t < s + lookback; per
+# container and step the latest sample counts; summed per step.
+_CONTAINER_LATEST = """
+SELECT k, sum(v) AS v FROM (
+    SELECT k, series, argMax(Value, s) AS v FROM (
+        SELECT
+            Value,
+            concat(
+                ResourceAttributes['k8s.pod.uid'], '/', ResourceAttributes['k8s.container.name']
+            ) AS series,
+            toInt64(toUnixTimestamp(TimeUnix)) AS s,
+            arrayJoin(range(
+                toUInt32(greatest(0, ceil((s - {start:UInt32}) / {step:UInt32}))),
+                toUInt32(greatest(0, ceil(
+                    (s + {lookback:UInt32} - {start:UInt32}) / {step:UInt32}
+                )))
+            )) AS k
+        FROM __DATABASE__.otel_metrics_gauge
+        WHERE MetricName = {metric:String}
+          AND ResourceAttributes['tracesis.source'] = 'otel-metrics'
+          AND ResourceAttributes['k8s.cluster.name'] = {cluster:String}
+          AND ResourceAttributes['k8s.namespace.name'] = {namespace:String}
+          AND ResourceAttributes['__NAME_ATTR__'] = {workload:String}
+          AND TimeUnix > toDateTime({start:UInt32} - {lookback:UInt32})
+          AND TimeUnix <= toDateTime({end:UInt32})
+    )
+    WHERE k <= {steps:UInt32}
+    GROUP BY k, series
+)
+GROUP BY k
+ORDER BY k
+LIMIT {max_rows:UInt16}
+"""
+
+# Per container and step, the counter's increase over the window ending at
+# the step (a decrease is a reset: the new value is the increase since it),
+# over the seconds between the first and last sample. Summed per step.
+_CPU_RATE = """
+SELECT k, sum(r) AS v FROM (
+    SELECT k, series,
+        arraySort(groupArray((s, Value))) AS points,
+        arrayMap(p -> p.2, points) AS vs,
+        arraySum(arrayMap((d, x) -> if(d < 0, x, d), arrayDifference(vs), vs)) AS increase,
+        tupleElement(points[-1], 1) - tupleElement(points[1], 1) AS seconds,
+        increase / seconds AS r
+    FROM (
+        SELECT
+            Value,
+            concat(
+                ResourceAttributes['k8s.pod.uid'], '/', ResourceAttributes['k8s.container.name']
+            ) AS series,
+            toInt64(toUnixTimestamp(TimeUnix)) AS s,
+            arrayJoin(range(
+                toUInt32(greatest(0, ceil((s - {start:UInt32}) / {step:UInt32}))),
+                toUInt32(greatest(0, ceil((s + {window:UInt32} - {start:UInt32}) / {step:UInt32})))
+            )) AS k
+        FROM __DATABASE__.otel_metrics_sum
+        WHERE MetricName = 'container.cpu.time'
+          AND ResourceAttributes['tracesis.source'] = 'otel-metrics'
+          AND ResourceAttributes['k8s.cluster.name'] = {cluster:String}
+          AND ResourceAttributes['k8s.namespace.name'] = {namespace:String}
+          AND ResourceAttributes['__NAME_ATTR__'] = {workload:String}
+          AND TimeUnix > toDateTime({start:UInt32} - {window:UInt32})
+          AND TimeUnix <= toDateTime({end:UInt32})
+    )
+    WHERE k <= {steps:UInt32}
+    GROUP BY k, series
+    HAVING count() >= 2 AND seconds > 0
+)
+GROUP BY k
+ORDER BY k
+LIMIT {max_rows:UInt16}
+"""
+
 
 @dataclass(frozen=True)
 class OtelMetricsSwitch:
@@ -177,6 +278,11 @@ def build(
     }
     if template_key == "workload.restarts-delta.v1":
         template = _RESTARTS
+    elif template_key == "workload.cpu-usage.v1":
+        template = _CPU_RATE
+    elif template_key in _CONTAINER_SUM:
+        template = _CONTAINER_LATEST
+        parameters["metric"] = _CONTAINER_SUM[template_key]
     elif template_key in ("workload.replicas-desired.v1", "workload.replicas-ready.v1"):
         template = _LATEST
         parameters["metric"] = desired if template_key.endswith("desired.v1") else ready
@@ -207,8 +313,9 @@ def to_matrix(
     steps: int,
 ) -> RangeQueryResult:
     """Step slots -> one Prometheus matrix entry. A replica count carries
-    forward for up to the staleness window; a step with nothing current has
-    no point, exactly as a Prometheus range query leaves it out."""
+    forward for up to the staleness window (the other statements answer each
+    step themselves); a step with nothing current has no point, exactly as a
+    Prometheus range query leaves it out."""
     slots: dict[int, float] = {}
     for row in rows:
         if not isinstance(row, dict):
@@ -219,7 +326,7 @@ def to_matrix(
             continue
         slots[slot] = value
     values: list[list[Any]] = []
-    if template_key == "workload.restarts-delta.v1":
+    if template_key in _EXACT_STEPS:
         for k in range(steps + 1):
             if k in slots:
                 values.append([start + k * step, str(slots[k])])

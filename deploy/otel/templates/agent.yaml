@@ -12,7 +12,7 @@ metadata:
   labels:
     {{- include "drake-otel.labels" . | nindent 4 }}
 ---
-# Exactly what the k8sattributes processor reads to name a pod's owner:
+# Exactly what the k8s_attributes processor reads to name a pod's owner:
 # get/list/watch on pods, namespaces, replicasets and jobs. No Secrets, no
 # ConfigMaps, no write verb, no wildcard.
 apiVersion: rbac.authorization.k8s.io/v1

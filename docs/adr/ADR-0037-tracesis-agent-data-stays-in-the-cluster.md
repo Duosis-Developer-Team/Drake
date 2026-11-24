@@ -50,7 +50,7 @@ duosis-prod-1 pins:
 
 - **cluster agent** (Deployment, one replica): read-only inventory as before,
   plus the query relay (§3).
-- **collector agent** (DaemonSet): container logs, `k8sattributes`,
+- **collector agent** (DaemonSet): container logs, `k8s_attributes`,
   checkpointed offsets. Every namespace except the system ones and Tracesis's
   own, unless the values narrow it.
 - **collector gateway** (Deployment) and **ClickHouse** (StatefulSet) in the
