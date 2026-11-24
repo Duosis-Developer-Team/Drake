@@ -362,6 +362,27 @@ internalAgentApi:
   enabled: true
   tlsSecret: drake-agent-tls
   caSecret: drake-agent-ca
+  # Connect a cluster (ADR-0037 §4, docs/runbooks/CONNECT_A_CLUSTER.md),
+  # 2026-11-24: agents in other clusters reach the listener on NodePorts
+  # 30844 (enrol, server TLS) and 30843 (ingest, mutual TLS) of the edge
+  # host. The client certificate and the proof of possession authenticate
+  # an agent; the network does not. drake-agent-tls names this host as well
+  # as the in-cluster names, and drake-agent-server-ca holds only ca.crt.
+  external:
+    enabled: true
+    host: tracesis-84-247-180-173.sslip.io
+    serverCASecret: drake-agent-server-ca
+    chartVersion: "0.1.0"
+  # The host above is node2's address, and the door's traffic policy is
+  # Local, so the listener prefers node2. A preference: in-cluster agents
+  # use the ClusterIP and keep working wherever it runs.
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - {key: kubernetes.io/hostname, operator: In, values: [node2]}
 
 # Email and password, verified by Drake. The Entra app registration is
 # kept but not used at runtime; switching back is a one-value change.

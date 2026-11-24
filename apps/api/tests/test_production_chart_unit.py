@@ -581,8 +581,16 @@ def refuses_prod(*overrides: str) -> bool:
 
 
 def test_internal_mode_publishes_no_public_route() -> None:
-    """The mode that proves the app runs before a name is attached to it."""
-    docs = render_prod("--set", "edge.mode=internal", "--set", "ingress.enabled=false")
+    """The mode that proves the app runs before a name is attached to it.
+    The agent door is its own switch, and is closed here too."""
+    docs = render_prod(
+        "--set",
+        "edge.mode=internal",
+        "--set",
+        "ingress.enabled=false",
+        "--set",
+        "internalAgentApi.external.enabled=false",
+    )
     kinds = {d["kind"] for d in docs}
     assert "Ingress" not in kinds
     for service in by_kind(docs, "Service"):
@@ -625,6 +633,7 @@ def test_the_expected_production_workloads_and_nothing_else() -> None:
     assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
         "drake-agent-gateway",
+        "drake-agent-gateway-external",
         "drake-api",
         "drake-edge",
         "drake-otlp-external",
@@ -1329,6 +1338,7 @@ def test_the_render_owns_exactly_the_application_resources() -> None:
     assert [d["metadata"]["name"] for d in by_kind(docs, "Job")] == ["drake-migrate"]
     assert sorted(d["metadata"]["name"] for d in by_kind(docs, "Service")) == [
         "drake-agent-gateway",
+        "drake-agent-gateway-external",
         "drake-api",
         "drake-edge",
         "drake-otlp-external",
@@ -1337,7 +1347,8 @@ def test_the_render_owns_exactly_the_application_resources() -> None:
     assert {
         s["spec"]["type"]
         for s in by_kind(docs, "Service")
-        if s["metadata"]["name"] not in ("drake-edge", "drake-otlp-external")
+        if s["metadata"]["name"]
+        not in ("drake-edge", "drake-otlp-external", "drake-agent-gateway-external")
     } == {"ClusterIP"}
     # The agents' OTLP door is only a DNS alias for the in-cluster gateway.
     (door,) = [
@@ -1514,6 +1525,7 @@ def test_the_setting_that_collided_is_still_named_api_port() -> None:
         "drake-web",
         "drake-edge",
         "drake-agent-gateway",
+        "drake-agent-gateway-external",
         "drake-otlp-external",
     }
 
@@ -1531,7 +1543,8 @@ def test_the_fix_did_not_disturb_ownership_or_images() -> None:
     assert {
         s["spec"]["type"]
         for s in by_kind(docs, "Service")
-        if s["metadata"]["name"] not in ("drake-edge", "drake-otlp-external")
+        if s["metadata"]["name"]
+        not in ("drake-edge", "drake-otlp-external", "drake-agent-gateway-external")
     } == {"ClusterIP"}
     # The agents' OTLP door is only a DNS alias for the in-cluster gateway.
     (door,) = [
@@ -1554,8 +1567,18 @@ def test_the_fix_did_not_disturb_ownership_or_images() -> None:
 # --- the public edge: one entrance, Drake's own controller ---------------
 
 
+# The agent listener's door for agents in other clusters (ADR-0037 §4):
+# enrol (server TLS) and ingest (mutual TLS), on fixed node ports.
+AGENT_DOOR = {
+    ("drake-agent-gateway-external", 30843),
+    ("drake-agent-gateway-external", 30844),
+}
+
+
 def test_exactly_one_public_entrance() -> None:
-    """Only the edge is published; the application Services stay internal."""
+    """The edge is the one entrance for people and webhooks; the agent door
+    is the one for agents in other clusters, and nothing else is published.
+    The application Services stay internal."""
     docs = render_prod()
     published = {
         (s["metadata"]["name"], port["nodePort"])
@@ -1563,7 +1586,7 @@ def test_exactly_one_public_entrance() -> None:
         for port in s["spec"]["ports"]
         if port.get("nodePort")
     }
-    assert published == {("drake-edge", 30773)}
+    assert published == {("drake-edge", 30773)} | AGENT_DOOR
     for service in by_kind(docs, "Service"):
         if service["metadata"]["name"] in ("drake-api", "drake-web"):
             assert service["spec"]["type"] == "ClusterIP"
@@ -1879,14 +1902,16 @@ def test_the_listener_is_reachable_only_inside_the_cluster() -> None:
 
 
 def test_the_public_edge_is_untouched_by_the_listener() -> None:
-    """Turning the agent surface on must not move the front door."""
+    """Turning the agent surface on must not move the front door: the edge
+    keeps 30773, and the only other ports are the agent door's."""
     published = {
         (s["metadata"]["name"], port["nodePort"])
         for s in by_kind(render_listener(), "Service")
         for port in s["spec"]["ports"]
         if port.get("nodePort")
     }
-    assert published == {("drake-edge", 30773)}
+    assert ("drake-edge", 30773) in published
+    assert published - {("drake-edge", 30773)} <= AGENT_DOOR
 
 
 def test_the_ca_private_key_is_mounted_only_on_the_listener() -> None:
