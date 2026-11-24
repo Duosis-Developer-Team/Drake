@@ -122,6 +122,10 @@ spec:
               value: {{ (.Values.incidents).runnerEnabled | default false | quote }}
             - name: DRAKE_INCIDENT_RUNNER_INTERVAL_SECONDS
               value: {{ (.Values.incidents).runnerIntervalSeconds | default 120 | quote }}
+            # Keeps the Clusters and Resource usage snapshots fresh, so their
+            # first open is as quick as the second. 0 turns it off.
+            - name: DRAKE_INFRASTRUCTURE_WARM_SECONDS
+              value: {{ (.Values.infrastructure).warmSeconds | default 0 | quote }}
             # Stated in both states. With traces on, it also keeps the
             # five-minute request counts objectives are judged on.
             # Agent Visibility: the discovery loop (both states) and where an

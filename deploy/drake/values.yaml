@@ -278,6 +278,10 @@ deployments:
   ingestEnabled: false
   ingestIntervalSeconds: 120
 
+# The Clusters / Resource usage warmer (seconds between rounds); 0 = off.
+infrastructure:
+  warmSeconds: 0
+
 incidents:
   # The incident runner: a bounded loop that evaluates every active binding
   # on a timer and opens an incident only after consecutive, reliable,

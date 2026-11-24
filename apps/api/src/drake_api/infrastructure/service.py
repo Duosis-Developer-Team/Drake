@@ -44,18 +44,27 @@ from drake_api.infrastructure.model import (
     step_for,
 )
 from drake_api.rbac.service import Principal
+from drake_api.service_health.orchestrator import query_with_lease_retry
 from drake_api.telemetry.broker import QueryInput, TelemetryBroker
 
 logger = logging.getLogger("drake_api.infrastructure")
 
 FRESH_SECONDS = 60
+# The warmer rebuilds a snapshot this long before it would stop being
+# fresh, so a reader never meets a stale one in normal operation.
+WARM_HEADROOM_SECONDS = 15
 # A cold build holds the shared refresh lock for at most this long; another
 # replica waits up to COLD_WAIT_SECONDS for its result before building itself.
 COLD_LOCK_SECONDS = 120
 COLD_WAIT_SECONDS = 90.0
 COLD_POLL_SECONDS = 1.0
-KEEP_SECONDS = 15 * 60
-QUERY_CONCURRENCY = 4
+# A snapshot is kept long after it stops being fresh: a reader is always
+# answered at once from the last one while a new one is built behind it
+# (and the warmer keeps it fresh whether or not anyone is looking).
+KEEP_SECONDS = 6 * 60 * 60
+# One lease below the broker's per-caller four, so the page's other reads
+# (the cluster list, the bell) still find one free.
+QUERY_CONCURRENCY = 3
 # A namespace's pods are what a person waits for after a click: three at a
 # time still leaves a lease free under the broker's per-principal four.
 POD_QUERY_CONCURRENCY = 3
@@ -194,7 +203,11 @@ async def _query(
     """One broker query. A failure is a missing piece, never a failed screen."""
     async with gate:
         try:
-            return await broker.query(
+            # A concurrency refusal (429) is retried: the leases are held for
+            # milliseconds, and a refused query used to leave a hole (CPU,
+            # memory) that stayed on screen until the next refresh.
+            return await query_with_lease_retry(
+                broker,
                 principal,
                 QueryInput(
                     template_key=template,
@@ -451,10 +464,16 @@ class InfrastructureService:
         return value if isinstance(value, dict) else None
 
     async def _write(self, cluster_id: uuid.UUID, snapshot: dict[str, Any]) -> None:
+        # A partial snapshot is stored as already stale: it is shown (better
+        # than nothing), and the next read rebuilds it at once instead of
+        # holding the gaps for a whole fresh window.
+        stored_at = time.time()
+        if snapshot.get("state") == "partial":
+            stored_at -= FRESH_SECONDS
         with contextlib.suppress(Exception):
             await self._redis.set(
                 self._key(cluster_id),
-                json.dumps({"stored_at": time.time(), "snapshot": snapshot}),
+                json.dumps({"stored_at": stored_at, "snapshot": snapshot}),
                 ex=KEEP_SECONDS,
             )
 
@@ -463,6 +482,47 @@ class InfrastructureService:
         if snapshot["state"] in ("ok", "partial"):
             await self._write(cluster[0], snapshot)
         return snapshot
+
+    async def warm(self, principal: Principal) -> int:
+        """Rebuild every active cluster's snapshot that is no longer fresh,
+        so no reader waits for a cold build. Returns how many were rebuilt.
+
+        Runs as the system evaluator: the stored snapshot's usage numbers
+        are cluster-level, and `_for_caller` already strips what a reader
+        may not see before anything leaves the service.
+        """
+        async with self._engine.connect() as connection:
+            clusters = (
+                await connection.execute(
+                    text(
+                        "SELECT id, cluster_ref, display_name, scope_id FROM clusters "
+                        "WHERE lifecycle = 'active' ORDER BY cluster_ref"
+                    )
+                )
+            ).all()
+        rebuilt = 0
+        for cluster in clusters:
+            cached = await self._read(cluster[0])
+            if cached is not None:
+                age = time.time() - float(cached.get("stored_at", 0))
+                if age < FRESH_SECONDS - WARM_HEADROOM_SECONDS:
+                    continue
+            lock = f"infrastructure:refresh:v1:{cluster[0]}"
+            try:
+                acquired = bool(await self._redis.set(lock, "1", nx=True, ex=COLD_LOCK_SECONDS))
+            except Exception:
+                acquired = False
+            if not acquired:
+                continue  # a reader or another replica is building it
+            try:
+                await self._refresh(principal, cluster)
+                rebuilt += 1
+            except Exception:
+                logger.warning("infrastructure: warming a snapshot failed")
+            finally:
+                with contextlib.suppress(Exception):
+                    await self._redis.delete(lock)
+        return rebuilt
 
     async def _refresh_in_background(self, principal: Principal, cluster: Any) -> None:
         lock = f"infrastructure:refresh:v1:{cluster[0]}"

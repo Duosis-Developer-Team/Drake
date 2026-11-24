@@ -49,6 +49,7 @@ from drake_api.alerting.slo import (
 )
 from drake_api.incidents.system_actor import ensure_system_evaluator
 from drake_api.rbac.service import Principal
+from drake_api.service_health.orchestrator import query_with_lease_retry
 from drake_api.telemetry.broker import QueryInput, TelemetryBroker
 
 logger = logging.getLogger("drake_api.alerting.slo")
@@ -172,7 +173,7 @@ async def _read(
         parameters={},
     )
     try:
-        envelope = await broker.query(principal, request)
+        envelope = await query_with_lease_retry(broker, principal, request)
     except asyncio.CancelledError:
         raise
     except HTTPException:

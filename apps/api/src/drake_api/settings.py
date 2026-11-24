@@ -399,6 +399,8 @@ class Settings(BaseSettings):
     # that queries a datasource on a timer must be turned on deliberately,
     # not inherited from a default. Nothing below runs until it is.
     incident_runner_enabled: bool = False
+    # Seconds between rounds of the infrastructure warmer; 0 = off.
+    infrastructure_warm_seconds: int = 0
     # Server-controlled and bounded. There is no per-service schedule and
     # no user-supplied interval: the clamp below is the whole contract.
     incident_runner_interval_seconds: float = 60.0
