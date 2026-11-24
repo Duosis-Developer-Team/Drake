@@ -53,6 +53,12 @@ spec:
       # Same reason as the API: a Service named `drake-api` would arrive as
       # the setting `api_port` and kill the process on startup.
       enableServiceLinks: false
+      {{- with .Values.internalAgentApi.affinity }}
+      # Where the edge host's node port lands (`external.host`): with
+      # externalTrafficPolicy Local, only that node answers.
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

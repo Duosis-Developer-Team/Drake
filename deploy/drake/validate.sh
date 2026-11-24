@@ -296,16 +296,23 @@ def die(message: str) -> None:
     print(f"  {message}", file=sys.stderr)
     raise SystemExit(1)
 
-# Exactly one public entrance, and it is the dedicated controller's HTTPS
-# node port. The application Services stay internal.
+# Exactly these public entrances: the dedicated controller's HTTPS node
+# port, and the agent listener's two (ADR-0037 §4, enrol 30844 and mutual-TLS
+# ingest 30843) for agents in other clusters. The application Services stay
+# internal; nothing else is published.
 node_ports = {
     (svc["metadata"]["name"], p["nodePort"])
     for svc in kinds.get("Service", [])
     for p in svc["spec"]["ports"]
     if p.get("nodePort")
 }
-if node_ports != {("drake-edge", 30773)}:
-    die(f"expected exactly one public node port (drake-edge:30773), found {sorted(node_ports)}")
+expected_ports = {
+    ("drake-edge", 30773),
+    ("drake-agent-gateway-external", 30843),
+    ("drake-agent-gateway-external", 30844),
+}
+if node_ports != expected_ports:
+    die(f"expected exactly the public node ports {sorted(expected_ports)}, found {sorted(node_ports)}")
 for svc in kinds.get("Service", []):
     if svc["metadata"]["name"] in ("drake-api", "drake-web") and svc["spec"]["type"] != "ClusterIP":
         die(f"{svc['metadata']['name']} must stay ClusterIP")
@@ -387,6 +394,15 @@ if "Secret" in kinds:
 # that is asserted precisely above.
 for svc in kinds.get("Service", []):
     if svc["metadata"]["name"] == "drake-edge":
+        continue
+    # The agent door (ADR-0037 §4): a NodePort Service for the listener's
+    # two ports only, selecting the listener and nothing else.
+    if svc["metadata"]["name"] == "drake-agent-gateway-external":
+        ports = sorted((p["port"], p.get("nodePort")) for p in svc["spec"]["ports"])
+        if svc["spec"]["type"] != "NodePort" or [n for _, n in ports] != [30843, 30844]:
+            die(f"drake-agent-gateway-external must publish exactly 30843 and 30844, found {ports}")
+        if svc["spec"].get("selector", {}).get("app.kubernetes.io/component") != "agent-gateway":
+            die("drake-agent-gateway-external must select the agent listener only")
         continue
     # The OTLP door is a cluster-internal DNS alias for the telemetry
     # gateway: it publishes nothing and must point inside the cluster.

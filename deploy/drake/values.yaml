@@ -476,3 +476,6 @@ internalAgentApi:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 256Mi}
+  # Optional pod affinity for the listener. With `external` on, keep it on
+  # the node `external.host` resolves to (externalTrafficPolicy is Local).
+  affinity: {}
