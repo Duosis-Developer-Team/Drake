@@ -102,13 +102,44 @@ metrics reader next to the PromQL one, chosen per cluster. This is the
     against Prometheus in prod, 31 of 31 points were equal for a
     Deployment and a StatefulSet.
   - `workload.restarts-delta.v1`: needs the workload on each pod's
-    metrics, so the metrics collector now runs `k8sattributes`, as the log
+    metrics, so the metrics collector now runs `k8s_attributes`, as the log
     agent does. That is the OpenTelemetry form of Prometheus's
     `drake:pod:workload` rule.
 - **Statements.**
   - They name their cluster (`{cluster:String}`), so the store routes them
     to a cluster's own ClickHouse (ADR-0037 §3).
   - Every value is a typed parameter.
+
+#### Phase 3, second step (2026-11-24)
+
+- **Resource templates.**
+  - `workload.memory-usage.v1`, `workload.memory-limit.v1` and
+    `workload.cpu-limit.v1`: the sum over the workload's containers of each
+    one's latest value, looking back five minutes. A container is its pod
+    and name, so a restarted container is not counted twice.
+  - `workload.cpu-usage.v1`: a rate over the `container.cpu.time` counter,
+    resets included.
+- **Compared in prod, over two hours** (`drake-api`, `drake-web`,
+  `auth-service`, `core-db`):
+  - Memory and both limits: equal within 2% at almost every point.
+  - CPU: equal to `rate()` over Prometheus's **raw**
+    `container_cpu_usage_seconds_total` (ratio 1.000 for every workload and
+    window).
+  - CPU is up to 12% off the current template. The cause is its recorded
+    series `drake:workload_pod:cpu_usage_seconds_total`: a recording rule
+    re-samples the counter at rule evaluation, which skews a five-minute
+    rate. The skew shrinks as the window grows (1.017 at 30 minutes).
+  - So the OpenTelemetry answer is the more exact one, and CPU will step
+    slightly when a cluster is switched.
+- **Prometheus is no longer required.**
+  - A template answered from OpenTelemetry no longer needs a configured
+    Prometheus integration. Its cache identity is the cluster.
+  - A cluster with only the Tracesis agent gets these signals. The ones
+    still on Prometheus are reported `not_configured`, never guessed.
+- **`k8s_attributes`.** The processor is now called by its current name,
+  `k8s_attributes`, in both the metrics collector and the log agent.
+  `k8sattributes` was a deprecated alias in 0.162.0. The configuration is
+  otherwise unchanged.
 
 ### Phase 4: Tracesis manages its agents
 

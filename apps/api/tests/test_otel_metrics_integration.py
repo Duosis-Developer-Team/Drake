@@ -98,10 +98,12 @@ async def _query(
     return result
 
 
-async def _world(engine: AsyncEngine, harness: Any) -> tuple[dict[str, Any], str]:
+async def _world(
+    engine: AsyncEngine, harness: Any, *, prometheus: bool = True
+) -> tuple[dict[str, Any], str | None]:
     world = await seed_catalog_world(engine)
     await seed_workload(engine, world["cluster_a"].id)
-    integration_id = await configure_alpha_prometheus(engine, world)
+    integration_id = await configure_alpha_prometheus(engine, world) if prometheus else None
     async with owner(harness, engine) as client:
         binding = await create_binding(client, world)
     return binding, integration_id
@@ -161,3 +163,20 @@ async def test_a_store_outage_is_not_a_prometheus_outage(
         ).scalar_one()
     # The Prometheus integration's health was not touched by the store.
     assert error_code is None
+
+
+async def test_without_prometheus_a_switched_template_still_answers(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """A cluster with only the Tracesis agent: no Prometheus integration."""
+    harness, provider, _store = _harness(tmp_path, ["workload.replicas-ready.v1"])
+    binding, _ = await _world(engine, harness, prometheus=False)
+
+    answered = await _query(engine, harness, "workload.replicas-ready.v1", binding["id"])
+    other = await _query(engine, harness, "workload.replicas-desired.v1", binding["id"])
+
+    assert answered["source_type"] == "opentelemetry"
+    assert answered["data_state"] == "ok"
+    # What OpenTelemetry does not answer is reported honestly, not guessed.
+    assert other["data_state"] == "not_configured"
+    assert provider.calls == 0
