@@ -108,7 +108,9 @@ agent:
 # are unchanged, and Tracesis keeps reading Prometheus. Only the allowlisted
 # metric names, for the namespaces in agent.namespaces. Off is one flag.
 metrics:
-  enabled: true
+  # Paused 2026-11-24 (ADR-0038): Prometheus stays the metrics source. The
+  # rows already written expire by the table's TTL; nothing is deleted.
+  enabled: false
 
 clickhouse:
   # The worker node. The control-plane node is saturated (load far above
