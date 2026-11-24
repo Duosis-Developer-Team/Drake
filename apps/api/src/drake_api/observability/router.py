@@ -26,6 +26,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import text
 
 from drake_api.auth.dependencies import AuthContext, require_auth
 from drake_api.correlation import correlation_id_var
@@ -47,6 +48,7 @@ from drake_api.observability.signals import (
     summarize_logs,
     summarize_traces,
 )
+from drake_api.observability.signals_cache import cached_section
 from drake_api.observability.store import ClickHouseStore, StoreContractError, StoreUnavailableError
 from drake_api.observability.timeline import (
     TimelineQueryError,
@@ -393,39 +395,14 @@ async def service_signals(
     ids = list(dict.fromkeys(binding_id))
     if len(ids) > MAX_BINDINGS:
         raise HTTPException(status_code=422, detail="too many bindings")
-    async with get_engine(settings).connect() as connection:
-        log_bindings = await binding_repo.get_bindings(
-            connection, auth.principal, ids, permission=LOGS_PERMISSION
-        )
-        trace_bindings = await binding_repo.get_bindings(
-            connection, auth.principal, ids, permission=TRACES_PERMISSION
-        )
-        trace_bindings = await with_http_probes(connection, trace_bindings)
-
-    # Kinds the store cannot name are left out rather than matched on a
-    # guess (the schema allows only these today; this keeps it explicit).
-    log_bindings = [b for b in log_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE]
-    trace_bindings = [b for b in trace_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE]
-    now = datetime.now(UTC)
-
-    store = _store(request)
-    (logs_section, logs), (traces_section, traces) = await asyncio.gather(
-        _signal_section(
-            store,
-            enabled=settings.observability_logs_enabled,
-            kind="logs",
-            bindings=log_bindings,
-            range_key=range_key,
-            now=now,
-        ),
-        _signal_section(
-            store,
-            enabled=settings.observability_traces_enabled,
-            kind="traces",
-            bindings=trace_bindings,
-            range_key=range_key,
-            now=now,
-        ),
+    log_bindings, trace_bindings = await _signal_bindings(settings, auth.principal, ids)
+    (logs_section, logs), (traces_section, traces), now = await _signal_sections(
+        settings,
+        _store(request),
+        request.app.state.telemetry_redis,
+        log_bindings,
+        trace_bindings,
+        range_key,
     )
 
     visible = {b["id"] for b in log_bindings} | {b["id"] for b in trace_bindings}
@@ -449,6 +426,103 @@ async def service_signals(
         "traces": traces_section,
         "items": items,
     }
+
+
+async def _signal_bindings(
+    settings: Settings, principal: Any, ids: list[uuid.UUID]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The bindings of *ids* the caller may read logs and traces for."""
+    async with get_engine(settings).connect() as connection:
+        log_bindings = await binding_repo.get_bindings(
+            connection, principal, ids, permission=LOGS_PERMISSION
+        )
+        trace_bindings = await binding_repo.get_bindings(
+            connection, principal, ids, permission=TRACES_PERMISSION
+        )
+        trace_bindings = await with_http_probes(connection, trace_bindings)
+    # Kinds the store cannot name are left out rather than matched on a
+    # guess (the schema allows only these today; this keeps it explicit).
+    return (
+        [b for b in log_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE],
+        [b for b in trace_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE],
+    )
+
+
+async def _signal_sections(
+    settings: Settings,
+    store: ClickHouseStore,
+    redis: Any,
+    log_bindings: list[dict[str, Any]],
+    trace_bindings: list[dict[str, Any]],
+    range_key: str,
+    *,
+    refresh: bool = False,
+) -> tuple[
+    tuple[dict[str, Any], dict[str, dict[str, Any]]],
+    tuple[dict[str, Any], dict[str, dict[str, Any]]],
+    datetime,
+]:
+    """Both signals, each from its short cache (signals_cache) or the
+    store. The answer is as of the older of the two reads."""
+
+    def compute(kind: str, enabled: bool, bindings: list[dict[str, Any]]) -> Any:
+        return lambda: _signal_section(
+            store,
+            enabled=enabled,
+            kind=kind,
+            bindings=bindings,
+            range_key=range_key,
+            now=datetime.now(UTC),
+        )
+
+    (logs_section, logs, logs_at), (traces_section, traces, traces_at) = await asyncio.gather(
+        cached_section(
+            redis,
+            compute("logs", settings.observability_logs_enabled, log_bindings),
+            kind="logs",
+            range_key=range_key,
+            bindings=log_bindings,
+            refresh=refresh,
+        ),
+        cached_section(
+            redis,
+            compute("traces", settings.observability_traces_enabled, trace_bindings),
+            kind="traces",
+            range_key=range_key,
+            bindings=trace_bindings,
+            refresh=refresh,
+        ),
+    )
+    as_of = datetime.fromtimestamp(min(logs_at, traces_at), tz=UTC)
+    return (logs_section, logs), (traces_section, traces), as_of
+
+
+async def warm_signals(
+    settings: Settings, store: ClickHouseStore, redis: Any, principal: Any
+) -> int:
+    """Rebuild the default-range signals for every active binding, so the
+    first overview, log or trace screen of the day is answered from cache.
+    Returns 1 when it ran."""
+    async with get_engine(settings).connect() as connection:
+        ids = [
+            row[0]
+            for row in (
+                await connection.execute(
+                    text(
+                        "SELECT id FROM service_workload_bindings "
+                        "WHERE lifecycle = 'active' ORDER BY id LIMIT :n"
+                    ),
+                    {"n": MAX_BINDINGS},
+                )
+            ).all()
+        ]
+    if not ids:
+        return 0
+    log_bindings, trace_bindings = await _signal_bindings(settings, principal, ids)
+    await _signal_sections(
+        settings, store, redis, log_bindings, trace_bindings, DEFAULT_RANGE, refresh=True
+    )
+    return 1
 
 
 async def _timeline_lane(

@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -31,11 +33,15 @@ class InfrastructureWarmer:
         service: InfrastructureService,
         redis: aioredis.Redis,
         interval_seconds: int,
+        extras: Sequence[Callable[[Any], Awaitable[int]]] = (),
     ) -> None:
         self._engine = engine
         self._service = service
         self._redis = redis
         self._interval = interval_seconds
+        # Other reads warmed in the same round, as the same principal (the
+        # error signals every overview, log and trace screen opens with).
+        self._extras = tuple(extras)
         self._task: asyncio.Task[None] | None = None
 
     async def run_once(self) -> int:
@@ -50,7 +56,13 @@ class InfrastructureWarmer:
         if not leader:
             return 0
         principal = await ensure_system_evaluator(self._engine)
-        return await self._service.warm(principal)
+        rebuilt = await self._service.warm(principal)
+        for extra in self._extras:
+            try:
+                rebuilt += await extra(principal)
+            except Exception:
+                logger.warning("infrastructure warmer: an extra read failed")
+        return rebuilt
 
     async def _loop(self) -> None:
         while True:
