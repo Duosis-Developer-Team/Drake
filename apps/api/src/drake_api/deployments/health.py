@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from drake_api.deployments.model import ComparisonVerdict
 from drake_api.rbac.service import Principal
-from drake_api.service_health.orchestrator import _latest_value
+from drake_api.service_health.orchestrator import _latest_value, query_with_lease_retry
 from drake_api.telemetry.broker import QueryInput, TelemetryBroker
 
 logger = logging.getLogger("drake_api.deployments.health")
@@ -132,7 +132,8 @@ async def _read(
 ) -> float | None:
     """One curated query over one window. Failures read as "not measured"."""
     try:
-        envelope = await broker.query(
+        envelope = await query_with_lease_retry(
+            broker,
             principal,
             QueryInput(
                 template_key=template_key,

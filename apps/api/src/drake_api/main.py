@@ -55,6 +55,7 @@ from drake_api.incidents.router import router as incidents_router
 from drake_api.incidents.runner import EvaluationRunner
 from drake_api.infrastructure.router import router as infrastructure_router
 from drake_api.infrastructure.service import InfrastructureService
+from drake_api.infrastructure.warmer import InfrastructureWarmer
 from drake_api.integrations.router import router as integrations_router
 from drake_api.logging import configure_logging
 from drake_api.notifications.router import router as notifications_router
@@ -132,9 +133,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     gitops_worker = getattr(app.state, "gitops_worker", None)
     if gitops_worker is not None:
         await gitops_worker.start()
+    infrastructure_warmer = getattr(app.state, "infrastructure_warmer", None)
+    if infrastructure_warmer is not None:
+        await infrastructure_warmer.start()
     try:
         yield
     finally:
+        if infrastructure_warmer is not None:
+            await infrastructure_warmer.stop()
         if gitops_worker is not None:
             await gitops_worker.stop()
         if silence_worker is not None:
@@ -276,6 +282,16 @@ def create_app(
     )
     app.state.infrastructure = InfrastructureService(
         get_engine(settings), app.state.telemetry_broker, app.state.telemetry_redis
+    )
+    app.state.infrastructure_warmer = (
+        InfrastructureWarmer(
+            get_engine(settings),
+            app.state.infrastructure,
+            app.state.telemetry_redis,
+            settings.infrastructure_warm_seconds,
+        )
+        if settings.infrastructure_warm_seconds > 0
+        else None
     )
     app.state.health_orchestrator = HealthOrchestrator(
         get_engine(settings),

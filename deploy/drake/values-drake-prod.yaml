@@ -455,6 +455,11 @@ telemetry:
 # incident only after consecutive reliable critical readings. It now sees
 # golden signals derived from traces (#116) for the traced services. It
 # sends nothing outside Drake (see notifications below).
+# Keep the Clusters and Resource usage snapshots fresh, so their first
+# open is as quick as the second (2026-11-24).
+infrastructure:
+  warmSeconds: 45
+
 incidents:
   runnerEnabled: true
   runnerIntervalSeconds: 120
