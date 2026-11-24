@@ -119,7 +119,9 @@ class AgentRelay:
 
     def _client(self) -> aioredis.Redis:
         if self._redis is None:
-            self._redis = aioredis.from_url(self._settings.redis_url)
+            # BLPOP waits for the agent's reply; redis-py 8's default read
+            # timeout is shorter than a relay read may take.
+            self._redis = aioredis.from_url(self._settings.redis_url, socket_timeout=60)
         return self._redis
 
     async def clusters(self) -> dict[str, RelayedCluster]:

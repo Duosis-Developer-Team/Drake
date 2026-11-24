@@ -68,7 +68,10 @@ class RelayResult(BaseModel):
 
 def _redis(request: Request) -> aioredis.Redis:
     settings: Settings = request.app.state.settings
-    return aioredis.from_url(settings.redis_url)
+    # The long poll blocks in BLPOP for up to MAX_WAIT_SECONDS. redis-py 8
+    # applies a default read timeout shorter than that, which turned every
+    # empty poll into a 500; the socket must outlast the poll.
+    return aioredis.from_url(settings.redis_url, socket_timeout=MAX_WAIT_SECONDS + 10)
 
 
 @router.post("/next")
