@@ -1525,6 +1525,7 @@ def test_the_setting_that_collided_is_still_named_api_port() -> None:
         "drake-web",
         "drake-edge",
         "drake-agent-gateway",
+        "drake-agent-gateway-external",
         "drake-otlp-external",
     }
 
