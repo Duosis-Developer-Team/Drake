@@ -107,7 +107,12 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=404, detail="not found")
 
 
-async def visible_clusters(engine: AsyncEngine, principal: Principal) -> list[dict[str, Any]]:
+async def visible_clusters(
+    engine: AsyncEngine, principal: Principal, otel_clusters: frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
+    """The clusters the viewer may see. A cluster has metrics when it has a
+    configured Prometheus or its screens are answered from OpenTelemetry
+    (ADR-0038: the Tracesis agent alone is enough)."""
     async with engine.connect() as connection:
         scopes = await visible_scope_ids(connection, principal, "cluster.view")
         rows = (
@@ -136,7 +141,7 @@ async def visible_clusters(engine: AsyncEngine, principal: Principal) -> list[di
             "id": str(r[0]),
             "ref": r[1],
             "name": r[2],
-            "metrics_configured": bool(r[3]),
+            "metrics_configured": bool(r[3]) or r[1] in otel_clusters,
             "nodes": int(r[4]),
         }
         for r in rows

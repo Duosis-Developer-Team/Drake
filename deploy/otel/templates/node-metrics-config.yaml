@@ -1,0 +1,91 @@
+{{- if and .Values.metrics.enabled .Values.metrics.node.enabled }}
+{{- include "drake-otel.require" . -}}
+{{- /* The node-metrics collector's configuration (node-metrics.yaml). */ -}}
+{{- $quoted := list -}}
+{{- range .Values.metrics.node.names -}}
+{{- $quoted = append $quoted (regexQuoteMeta . | replace "\\" "\\\\") -}}
+{{- end -}}
+{{- if not $quoted -}}
+{{- fail "metrics.node.names is required: node metrics are an allowlist" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drake-otel-node
+  labels:
+    {{- include "drake-otel.labels" . | nindent 4 }}
+data:
+  collector.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      host_metrics:
+        # The node's own /proc, /sys and filesystems, mounted read-only.
+        root_path: /hostfs
+        collection_interval: {{ .Values.metrics.interval }}
+        scrapers:
+          cpu: {}
+          load: {}
+          memory:
+            metrics:
+              # MemTotal and MemAvailable: node_exporter's memory view.
+              system.memory.limit: {enabled: true}
+              system.linux.memory.available: {enabled: true}
+          filesystem:
+            include_mount_points:
+              mount_points: ["/"]
+              match_type: strict
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.metrics.node.memoryLimitMiB }}
+        spike_limit_mib: {{ div .Values.metrics.node.memoryLimitMiB 4 }}
+      filter/scope:
+        error_mode: ignore
+        metrics:
+          metric:
+            - 'not IsMatch(name, "^({{ join "|" $quoted }})$")'
+      resource/node:
+        attributes:
+          - key: k8s.node.name
+            value: ${env:K8S_NODE_NAME}
+            action: upsert
+          - key: k8s.cluster.name
+            value: {{ .Values.clusterName | quote }}
+            action: upsert
+          - key: tracesis.source
+            value: otel-metrics
+            action: upsert
+      batch:
+        send_batch_size: 2000
+        timeout: 10s
+    exporters:
+      clickhouse/metrics:
+        endpoint: tcp://drake-otel-clickhouse:9000
+        database: otel
+        username: drake_ingest
+        password: ${env:DRAKE_CH_INGEST_PASSWORD}
+        create_schema: true
+        ttl: {{ .Values.clickhouse.retention.metrics }}
+        timeout: 10s
+        # Bounded, as the metrics collector's queue (ADR-0038).
+        sending_queue:
+          enabled: true
+          queue_size: {{ .Values.metrics.queueSize }}
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+    service:
+      extensions: [health_check]
+      telemetry:
+        logs:
+          level: warn
+        metrics:
+          level: none
+      pipelines:
+        metrics:
+          receivers: [host_metrics]
+          processors: [memory_limiter, filter/scope, resource/node, batch]
+          exporters: [clickhouse/metrics]
+{{- end }}

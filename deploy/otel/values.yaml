@@ -138,6 +138,30 @@ metrics:
     - k8s.node.condition_pid_pressure
     - k8s.node.allocatable_cpu
     - k8s.node.allocatable_memory
+    - k8s.node.allocatable_pods
+    # CPU throttling counters (cAdvisor), read only when `cadvisor.enabled`.
+    - container_cpu_cfs_periods_total
+    - container_cpu_cfs_throttled_periods_total
+  # CPU throttling: each kubelet's cAdvisor endpoint, read for the two CFS
+  # counters only (needs `nodes/metrics`, read-only; never `nodes/proxy`).
+  cadvisor:
+    enabled: false
+  # Node metrics (CPU, load, memory, root filesystem), as node_exporter
+  # gives Prometheus: a DaemonSet of its own, the host's root mounted
+  # read-only, no Kubernetes API access. Requires `metrics.enabled`.
+  node:
+    enabled: false
+    tolerations: []
+    memoryLimitMiB: 64
+    resources:
+      requests: {cpu: 10m, memory: 40Mi}
+      limits: {cpu: 100m, memory: 96Mi}
+    names:
+      - system.cpu.time
+      - system.cpu.load_average.5m
+      - system.memory.limit
+      - system.linux.memory.available
+      - system.filesystem.usage
 
 # --- OBI: eBPF traces (DaemonSet) ----------------------------------------
 # OpenTelemetry eBPF Instrumentation observes HTTP/gRPC/SQL at the kernel

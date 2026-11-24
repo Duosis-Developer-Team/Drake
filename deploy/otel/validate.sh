@@ -8,7 +8,9 @@
 #   - every pod opts out of Datadog injection, on Drake's own pods only
 #   - every container has requests AND limits
 #   - the agent mounts the node's pod logs read-only and nothing else from
-#     the host; RBAC anywhere in the chart is read-only (get/list/watch)
+#     the host; the node-metrics DaemonSet mounts the host root read-only,
+#     runs as non-root and has no API token; RBAC anywhere in the chart is
+#     read-only (get/list/watch), and never nodes/proxy
 #   - nothing is scheduled by the chart onto a node it did not select
 #   - OBI (eBPF traces), when enabled: only its own pod gets hostPID, its
 #     capabilities are a fixed allowlist without SYS_ADMIN/NET_ADMIN, and
@@ -63,11 +65,20 @@ trap 'rm -f "$OUT" "$OUT_OBI" "$OUT_METRICS"' EXIT
 render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=false >"$OUT"
 render -f values-drake-prod.yaml "${OBI_SETS[@]}" --set metrics.enabled=false >"$OUT_OBI"
 # ADR-0038: the OpenTelemetry metrics collector, forced on.
-render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=true >"$OUT_METRICS"
+render -f values-drake-prod.yaml --set obi.enabled=false --set metrics.enabled=true   --set metrics.node.enabled=true --set metrics.cadvisor.enabled=true >"$OUT_METRICS"
 
 echo "[policy] metrics fail-closed renders"
 if render -f values-drake-prod.yaml --set metrics.enabled=true --set-json 'metrics.names=[]' >/dev/null 2>&1; then
   echo "POLICY VIOLATION: metrics rendered without a metric allowlist" >&2
+  exit 1
+fi
+if render -f values-drake-prod.yaml --set metrics.enabled=true --set metrics.node.enabled=true   --set-json 'metrics.node.names=[]' >/dev/null 2>&1; then
+  echo "POLICY VIOLATION: node metrics rendered without a metric allowlist" >&2
+  exit 1
+fi
+# Node metrics and cAdvisor need the metrics collector; alone they render nothing.
+if render -f values-drake-prod.yaml --set metrics.enabled=false --set metrics.node.enabled=true   --set metrics.cadvisor.enabled=true | grep -qE "drake-otel-node|nodes/metrics"; then
+  echo "POLICY VIOLATION: node metrics or cAdvisor rendered with metrics off" >&2
   exit 1
 fi
 
@@ -105,7 +116,10 @@ METRICS_RESOURCES = {
     "pods", "pods/status", "replicationcontrollers", "replicationcontrollers/status",
     "resourcequotas", "services", "daemonsets", "deployments", "replicasets",
     "statefulsets", "jobs", "cronjobs", "horizontalpodautoscalers",
+    # The kubelet's metrics endpoints (cAdvisor), for CPU throttling only.
+    "nodes/metrics",
 }
+NODE_NAME = "drake-otel-node"
 
 
 def check(docs, by_kind, label, expect_obi, expect_metrics=False):
@@ -190,6 +204,8 @@ def check(docs, by_kind, label, expect_obi, expect_metrics=False):
         fail(f"{label}: OBI must render exactly when obi.enabled")
     if (METRICS_NAME in names) != expect_metrics:
         fail(f"{label}: the metrics collector must render exactly when metrics.enabled")
+    if (NODE_NAME in names) != expect_metrics:
+        fail(f"{label}: node metrics must render exactly when metrics.node.enabled is forced on")
     for w in by_kind["Deployment"]:
         if w["metadata"]["name"] == METRICS_NAME:
             # Two would report every cluster-level value twice.
@@ -243,6 +259,14 @@ def check(docs, by_kind, label, expect_obi, expect_metrics=False):
             writable = {"checkpoints"}
         elif name == OBI_NAME:
             permitted = OBI_HOST_PATHS
+        elif name == NODE_NAME:
+            # The host root, read-only (checked below), for /proc, /sys and
+            # the root filesystem; as a non-root user, with no API token.
+            permitted = {"/"}
+            if spec.get("automountServiceAccountToken") is not False:
+                fail(f"{label}: {name}: must not mount an API token")
+            if spec.get("securityContext", {}).get("runAsNonRoot") is not True:
+                fail(f"{label}: {name}: must run as non-root")
         else:
             permitted = set()
         if not set(host_paths.values()) <= permitted:

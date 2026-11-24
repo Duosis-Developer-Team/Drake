@@ -3,6 +3,7 @@ the switch, the statements, and the Prometheus-shaped answer."""
 
 import pytest
 from drake_api.telemetry.otel_metrics import (
+    _SPECS,
     STALENESS_SECONDS,
     SUPPORTED_TEMPLATES,
     OtelMetricsSwitch,
@@ -50,7 +51,10 @@ def test_statements_name_the_cluster_and_take_values_as_parameters(
     kind: str, attribute: str, ready_metric: str
 ) -> None:
     values = {**WORKLOAD, "workload_kind": kind}
-    for key in SUPPORTED_TEMPLATES:
+    workload_keys = [
+        k for k in SUPPORTED_TEMPLATES if k not in _SPECS or _SPECS[k].scope == "workload"
+    ]
+    for key in workload_keys:
         sql, params, steps = build(
             key, values, database="otel", start=1000, end=1600, step=60, window_seconds=300
         )
@@ -145,3 +149,84 @@ def test_every_resource_template_can_be_switched_on() -> None:
     ]
     on = OtelMetricsSwitch.from_settings(["duosis-prod-1"], keys)
     assert on.templates == frozenset(keys)
+
+
+# --- the screens' statement builder ------------------------------------
+
+
+SCOPE_VALUES = {
+    "cluster": {"cluster_ref": "duosis-prod-1"},
+    "namespace": {"cluster_ref": "duosis-prod-1", "namespace": "hermes-test"},
+    "workload": WORKLOAD,
+}
+
+
+@pytest.mark.parametrize("key", sorted(_SPECS))
+def test_every_screen_statement_is_routed_and_parameterised(key: str) -> None:
+    spec = _SPECS[key]
+    sql, params, steps = build(
+        key,
+        SCOPE_VALUES[spec.scope],
+        database="otel",
+        start=1000,
+        end=1600,
+        step=60,
+        window_seconds=300,
+    )
+    assert steps == 10
+    assert "{cluster:String}" in sql and params["cluster"] == "duosis-prod-1"
+    # Metric names and scope values are parameters, never SQL text.
+    for i, metric in enumerate(spec.metrics):
+        assert params[f"m{i}"] == metric
+    assert "hermes-test" not in sql and "auth-service" not in sql and "__" not in sql
+    # One row per series: the reader's row ceiling holds for 24-hour screens.
+    assert "groupArray((k, v)) AS pts" in sql
+    for label, _ in spec.labels:
+        assert f"{label}, " in sql.split("groupArray", 1)[0]
+    if spec.scope == "namespace":
+        assert "{namespace:String}" in sql
+    # Every step's slots stop at the last step.
+    assert "least(toUInt32({steps:UInt32} + 1)" in sql
+
+
+def test_requests_and_limits_count_only_running_pods() -> None:
+    sql, _, _ = build(
+        "cluster.namespace-cpu-requested.v1",
+        SCOPE_VALUES["cluster"],
+        database="otel",
+        start=0,
+        end=600,
+        step=60,
+        window_seconds=300,
+    )
+    assert "MetricName = 'k8s.pod.phase'" in sql and "WHERE v = 2" in sql
+
+
+def test_restarts_count_only_pods_that_still_exist() -> None:
+    sql, params, _ = build(
+        "cluster.namespace-restarts-24h.v1",
+        SCOPE_VALUES["cluster"],
+        database="otel",
+        start=0,
+        end=600,
+        step=60,
+        window_seconds=300,
+    )
+    assert params["day"] == "86400"
+    assert "MetricName = 'k8s.pod.phase'" in sql and "WHERE v = 2" not in sql
+
+
+def test_a_screen_switch_needs_no_workload() -> None:
+    on = OtelMetricsSwitch.from_settings(["duosis-prod-1"], ["cluster.node-load5.v1"])
+    assert on.serves("cluster.node-load5.v1", SCOPE_VALUES["cluster"])
+    assert not on.serves("cluster.node-load5.v1", {"cluster_ref": "other"})
+
+
+def test_screen_rows_become_labelled_series() -> None:
+    rows = [
+        {"node": "node1", "pts": [[2, 0.5], [0, 0.25], [11, 9.0]]},
+        {"node": "node2", "pts": []},
+    ]
+    matrix = to_matrix("cluster.node-load5.v1", rows, start=0, step=60, steps=10)
+    # Out-of-range slots and empty series are dropped; points are in order.
+    assert matrix.result == [{"metric": {"node": "node1"}, "values": [[0, "0.25"], [120, "0.5"]]}]

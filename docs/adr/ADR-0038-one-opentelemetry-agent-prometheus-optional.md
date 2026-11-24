@@ -141,6 +141,29 @@ metrics reader next to the PromQL one, chosen per cluster. This is the
   `k8sattributes` was a deprecated alias in 0.162.0. The configuration is
   otherwise unchanged.
 
+#### Phase 3, third step (2026-11-24)
+
+- **New collection, both read-only and agreed for duosis-prod-1:**
+  - **Node metrics** (`metrics.node`): the `host_metrics` receiver, node_exporter's view (CPU, load, memory, root filesystem).
+    - It runs in its own DaemonSet (`drake-otel-node`), never in the log agent.
+    - The host root is mounted read-only. The process runs as a non-root user with every capability dropped, and gets no API token.
+  - **CPU throttling** (`metrics.cadvisor`): the two CFS counters from each kubelet's `/metrics/cadvisor`.
+    - Needs `nodes/metrics` (read-only). Never `nodes/proxy`.
+  - Both are off by default and need `metrics.enabled`. `validate.sh` enforces all of it.
+- **The screens.**
+  - A statement builder (`_SPECS`) answers the cluster, namespace and node screens' 23 templates, plus throttling and freshness.
+  - Each statement returns one row per series, its points as an array, so a 24-hour screen stays under the reader's 1,000-row ceiling.
+- **Two semantics that differ from Prometheus, and how they are matched:**
+  - **Series end.** Prometheus ends a series as soon as its pod goes (a staleness marker); OpenTelemetry sends none. The screens therefore treat a sample as current for 150 s (2.5 intervals), not five minutes.
+  - **Deleted pods.** The 24-hour restart count keeps only pods that still exist, as the PromQL's join with `kube_pod_info` does.
+- **Compared in prod** (hermes-test and the whole cluster, one hour):
+  - Pod requests and limits: equal at every point.
+  - Memory: sums equal (ratio 1.000).
+  - CPU: sums equal (ratio 0.999 to 1.003). Single points differ with sampling time, as CPU is bursty.
+  - Restarts over 24 hours: equal at every point.
+  - Node allocatable CPU and memory: equal.
+- **Scope gap, a decision still open.** The OpenTelemetry metrics follow the log agent's namespace allowlist, so the cluster screen would list fewer namespaces than Prometheus does today.
+
 ### Phase 4: Tracesis manages its agents
 
 - **OpAMP** (OpenTelemetry's agent management protocol; the extension is
