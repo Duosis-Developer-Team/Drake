@@ -81,10 +81,7 @@ def test_a_workload_never_contributes_more_than_its_bound() -> None:
 
 def test_the_parameter_is_a_typed_tuple_array_with_quotes_escaped() -> None:
     binding = {**BINDING, "http_probes": [("/a'b", "80")]}
-    assert (
-        health_check_parameter([binding])
-        == "[('hermes-test','frontend','/a\\'b','80')]"
-    )
+    assert health_check_parameter([binding]) == "[('hermes-test','frontend','/a\\'b','80')]"
     assert health_check_parameter([{**BINDING, "http_probes": []}]) == "[]"
 
 
@@ -136,13 +133,9 @@ def test_totals_count_them_aside_instead_of_hiding_them() -> None:
 
 
 def test_the_timeline_the_board_and_golden_signals_leave_them_out_too() -> None:
-    timeline = build_timeline_query(
-        database="otel", binding=BINDING, range_key="1h", now=NOW
-    )
+    timeline = build_timeline_query(database="otel", binding=BINDING, range_key="1h", now=NOW)
     assert "AND NOT (" in timeline.traces
-    board = build_signal_query(
-        database="otel", bindings=[BINDING], range_key="1h", now=NOW
-    )
+    board = build_signal_query(database="otel", bindings=[BINDING], range_key="1h", now=NOW)
     assert "AND NOT (" in board.traces
     assert "health_checks" in board.parameters
     golden = build_application_query(
@@ -174,12 +167,8 @@ def test_long_lived_connections_stay_out_of_every_latency_percentile() -> None:
     assert query.routes.sql.count(long_lived) == 2, "p50 and p95 of each route"
     assert long_lived in query.totals.sql
     assert "count" in query.totals.sql.split(long_lived)[0]
-    timeline = build_timeline_query(
-        database="otel", binding=BINDING, range_key="1h", now=NOW
-    )
-    board = build_signal_query(
-        database="otel", bindings=[BINDING], range_key="1h", now=NOW
-    )
+    timeline = build_timeline_query(database="otel", binding=BINDING, range_key="1h", now=NOW)
+    board = build_signal_query(database="otel", bindings=[BINDING], range_key="1h", now=NOW)
     golden = build_application_query(
         database="otel",
         context={

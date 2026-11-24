@@ -102,7 +102,9 @@ LONG_LIVED_SECONDS = 300
 # a slow answer. Counted as requests and errors; kept out of latency, or the
 # listener reads as a 20-second p95 and opens a false incident (2026-11-24).
 LONG_POLL_SPAN = "POST /internal/v1/agent/relay/next"
-NOT_LONG_LIVED = f"(Duration < {LONG_LIVED_SECONDS * 1_000_000_000} AND SpanName != '{LONG_POLL_SPAN}')"
+NOT_LONG_LIVED = (
+    f"(Duration < {LONG_LIVED_SECONDS * 1_000_000_000} AND SpanName != '{LONG_POLL_SPAN}')"
+)
 
 
 def probes_from_summary(spec_summary: Any) -> list[tuple[str, str]]:
@@ -176,9 +178,7 @@ async def with_http_probes(
                 {"clusters": [p[0] for p in pairs], "uids": [p[1] for p in pairs]},
             )
         ).all()
-        found = {
-            (str(row[0]), str(row[1])): probes_from_summary(row[2]) for row in rows
-        }
+        found = {(str(row[0]), str(row[1])): probes_from_summary(row[2]) for row in rows}
     out = []
     for binding in bindings:
         uid = (binding.get("resolution") or {}).get("resource_uid")
