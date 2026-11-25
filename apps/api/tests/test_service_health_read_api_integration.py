@@ -588,3 +588,41 @@ async def test_every_read_endpoint_is_uniformly_not_found_out_of_scope(
             missing_error = missing.json()["error"]
             del hidden_error["correlation_id"], missing_error["correlation_id"]
             assert hidden_error == missing_error, path
+
+
+# --- the signals warmer's cache-only resolution ---------------------------
+
+
+async def test_the_warmer_resolves_a_list_to_the_key_a_full_reader_lands_on(
+    engine: AsyncEngine,
+) -> None:
+    """The signals warmer resolves a list without RBAC, for cache entries
+    only. Its key must equal the key of a caller who may read the whole
+    list, and differ from a caller who may read less, so the entry is
+    reachable by the first and never by the second."""
+    from drake_api.observability.signals_cache import cache_key
+    from drake_api.rbac.service import Principal
+    from drake_api.service_health import bindings as binding_repo
+
+    world = await seed_catalog_world(engine)
+    harness, _ = health_harness()
+    async with owner(harness, engine) as client:
+        binding = await create_binding(client, world)
+    ids = [uuidlib.UUID(binding["id"])]
+    async with engine.connect() as connection:
+        owner_id = (
+            await connection.execute(
+                text("SELECT id FROM identities WHERE issuer = :i AND subject = 'user-owner'"),
+                {"i": harness.provider.issuer},
+            )
+        ).scalar_one()
+        full = Principal(identity_id=uuidlib.UUID(str(owner_id)), issuer=harness.provider.issuer)
+        nobody = Principal(identity_id=uuidlib.uuid4(), issuer=harness.provider.issuer)
+        as_owner = await binding_repo.get_bindings(connection, full, ids, permission="logs.view")
+        as_nobody = await binding_repo.get_bindings(connection, nobody, ids, permission="logs.view")
+        warmed = await binding_repo.get_bindings_for_cache(connection, ids)
+
+    assert as_owner and warmed
+    assert cache_key("logs", "1h", warmed) == cache_key("logs", "1h", as_owner)
+    assert as_nobody == []
+    assert cache_key("logs", "1h", warmed) != cache_key("logs", "1h", as_nobody)

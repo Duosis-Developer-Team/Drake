@@ -515,29 +515,50 @@ async def get_bindings(
     visible = await visible_scope_ids(connection, principal, permission)
     rows = (
         await connection.execute(
-            text(
-                """
-                SELECT b.id, b.namespace, b.workload_kind, b.workload_name,
-                       b.resolved_resource_uid, b.resolved_at, b.preset_key,
-                       b.health_policy_key, b.lifecycle, b.revision,
-                       b.created_at, b.updated_at,
-                       c.cluster_ref, c.id,
-                       p.project_key, e.environment_key, sd.service_key,
-                       b.environment_service_id, b.integration_id
-                FROM service_workload_bindings b
-                JOIN environment_services es ON es.id = b.environment_service_id
-                JOIN clusters c ON c.id = b.cluster_id
-                JOIN projects p ON p.id = b.project_id
-                JOIN environments e ON e.id = b.environment_id
-                JOIN service_definitions sd ON sd.id = b.service_id
-                WHERE b.id = ANY(:ids) AND es.scope_id = ANY(:visible)
-                ORDER BY b.id
-                """
-            ),
+            text(_BINDINGS_SELECT + " AND es.scope_id = ANY(:visible) ORDER BY b.id"),
             {"ids": list(binding_ids), "visible": _sentinel(visible)},
         )
     ).all()
     return [_binding_payload(row) for row in rows]
+
+
+async def get_bindings_for_cache(
+    connection: AsyncConnection, binding_ids: list[uuid.UUID]
+) -> list[dict[str, Any]]:
+    """Every binding of *binding_ids*, whoever may read it — for filling a
+    cache only, never for answering a caller.
+
+    The signals warmer (observability.router.warm_signals) uses it to
+    rebuild entries for the lists screens asked for. What it builds goes
+    to Redis under a key derived from exactly these bindings; a caller
+    reaches that entry only when *their own* get_bindings returns the same
+    set, so nobody is served a binding they may not read. Same statement
+    and payload as get_bindings, so the keys line up."""
+    if not binding_ids:
+        return []
+    rows = (
+        await connection.execute(
+            text(_BINDINGS_SELECT + " ORDER BY b.id"), {"ids": list(binding_ids)}
+        )
+    ).all()
+    return [_binding_payload(row) for row in rows]
+
+
+_BINDINGS_SELECT = """
+    SELECT b.id, b.namespace, b.workload_kind, b.workload_name,
+           b.resolved_resource_uid, b.resolved_at, b.preset_key,
+           b.health_policy_key, b.lifecycle, b.revision,
+           b.created_at, b.updated_at,
+           c.cluster_ref, c.id,
+           p.project_key, e.environment_key, sd.service_key,
+           b.environment_service_id, b.integration_id
+    FROM service_workload_bindings b
+    JOIN environment_services es ON es.id = b.environment_service_id
+    JOIN clusters c ON c.id = b.cluster_id
+    JOIN projects p ON p.id = b.project_id
+    JOIN environments e ON e.id = b.environment_id
+    JOIN service_definitions sd ON sd.id = b.service_id
+    WHERE b.id = ANY(:ids)"""
 
 
 def _binding_payload(row: Any) -> dict[str, Any]:

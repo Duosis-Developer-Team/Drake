@@ -453,6 +453,20 @@ async def _signal_bindings(
     )
 
 
+async def _cache_bindings(
+    settings: Settings, ids: list[uuid.UUID]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """*ids* resolved whole, shaped exactly as _signal_bindings shapes a
+    caller's, for building cache entries only (see warm_signals)."""
+    async with get_engine(settings).connect() as connection:
+        bindings = await binding_repo.get_bindings_for_cache(connection, ids)
+        trace_bindings = await with_http_probes(connection, list(bindings))
+    return (
+        [b for b in bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE],
+        [b for b in trace_bindings if b["workload_kind"] in WORKLOAD_ATTRIBUTE],
+    )
+
+
 async def _signal_sections(
     settings: Settings,
     store: ClickHouseStore,
@@ -509,9 +523,11 @@ async def warm_signals(
     each list of services a screen asked for lately, so the first open of a
     screen is answered from cache. Returns how many lists it rebuilt.
 
-    A list is resolved as the system evaluator, so its key is the one a
-    caller who may read all of it lands on; a caller who may read fewer
-    has another key and is never served this entry."""
+    A list is resolved whole (bindings.get_bindings_for_cache), so its
+    key is the one a caller who may read all of it lands on; a caller who
+    may read fewer has another key and is never served this entry. The
+    system evaluator holds only `telemetry.query`, so resolving as it
+    would see nothing; it is not widened for this."""
     async with get_engine(settings).connect() as connection:
         ids = [
             row[0]
@@ -540,7 +556,7 @@ async def warm_signals(
     rebuilt = 0
     for wanted, range_key in lists:
         try:
-            log_bindings, trace_bindings = await _signal_bindings(settings, principal, wanted)
+            log_bindings, trace_bindings = await _cache_bindings(settings, wanted)
             await _signal_sections(
                 settings, store, redis, log_bindings, trace_bindings, range_key, refresh=True
             )
