@@ -117,3 +117,34 @@ def test_metrics_rebuilt_from_a_stored_verdict_read_the_same() -> None:
     rebuilt = signals_from_payload(payload)
     assert {n: r.to_payload() for n, r in rebuilt.items()} == payload["signals"]
     assert rebuilt["ok"].value == 3.0
+
+
+async def test_a_list_reads_every_stored_verdict_in_one_round_trip() -> None:
+    import json as _json
+
+    from drake_api.service_health.cache import HealthCache
+    from fakeredis import aioredis as fake_aioredis
+
+    redis = fake_aioredis.FakeRedis()
+    o = HealthOrchestrator(None, None, SimpleNamespace(content_hash="r1"), HealthCache(redis))  # type: ignore[arg-type]
+    fresh_only = {**CONTEXT, "id": "b-fresh"}
+    recent_only = {**CONTEXT, "id": "b-recent"}
+    none = {**CONTEXT, "id": "b-none"}
+    await redis.set(o.cache_keys(fresh_only).fresh, _json.dumps(_verdict(5, "fresh")))
+    await redis.set(o.cache_keys(fresh_only).recent, _json.dumps(_verdict(90, "older")))
+    await redis.set(o.cache_keys(recent_only).recent, _json.dumps(_verdict(90, "recent")))
+
+    calls = 0
+    original = redis.mget
+
+    async def counted(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return await original(*args, **kwargs)
+
+    redis.mget = counted  # type: ignore[method-assign]
+    found = await o.listed_verdicts([fresh_only, recent_only, none])
+    assert calls == 1
+    assert found["b-fresh"]["status"] == "fresh"  # fresh wins over recent
+    assert found["b-recent"]["status"] == "recent"
+    assert "b-none" not in found

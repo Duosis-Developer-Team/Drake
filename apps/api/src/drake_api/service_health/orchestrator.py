@@ -711,6 +711,21 @@ class HealthOrchestrator:
             task.add_done_callback(done)
         return task
 
+    async def listed_verdicts(self, contexts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """What listed_health would read from cache, for many bindings in one
+        round trip: binding id -> its fresh verdict, else its recent one.
+        A binding with neither is absent; the caller falls back to
+        listed_health for it."""
+        keys = [self.cache_keys(context) for context in contexts]
+        values = await self._cache.get_many([k for pair in keys for k in (pair.fresh, pair.recent)])
+        found: dict[str, dict[str, Any]] = {}
+        for index, context in enumerate(contexts):
+            fresh, recent = values[2 * index], values[2 * index + 1]
+            chosen = fresh if fresh is not None else recent
+            if chosen is not None:
+                found[str(context["id"])] = {**chosen, "cached": True}
+        return found
+
     async def listed_health(
         self, principal: Principal, context: dict[str, Any] | None
     ) -> dict[str, Any]:

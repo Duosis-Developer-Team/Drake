@@ -145,6 +145,24 @@ class HealthCache:
             return None
         return value if isinstance(value, dict) else None
 
+    async def get_many(self, keys: list[str]) -> list[dict[str, Any] | None]:
+        """get() for many keys in one round trip, in order. Any failure
+        reads as all misses, exactly as get() reads one."""
+        if not keys:
+            return []
+        try:
+            raws = await self._redis.mget(keys)
+        except Exception:
+            return [None] * len(keys)
+        values: list[dict[str, Any] | None] = []
+        for raw in raws:
+            try:
+                value = json.loads(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                value = None
+            values.append(value if isinstance(value, dict) else None)
+        return values
+
     async def put(
         self, keys: HealthCacheKeys, payload: dict[str, Any], *, last_good: bool = True
     ) -> None:

@@ -484,11 +484,19 @@ async def service_health_list(
         [uuid.UUID(item["binding"]["id"]) for item in page["items"] if item.get("binding")]
     )
 
+    # And every stored verdict in one round trip; only a row without one
+    # goes through listed_health on its own.
+    verdicts = await orchestrator.listed_verdicts(list(contexts.values()))
+
     async def health_for(item: dict[str, Any]) -> dict[str, Any]:
         binding = item.get("binding")
-        async with semaphore:
-            context = None if binding is None else contexts.get(str(binding["id"]))
-            health = await orchestrator.listed_health(auth.principal, context)
+        stored = None if binding is None else verdicts.get(str(binding["id"]))
+        if stored is not None:
+            health = stored
+        else:
+            async with semaphore:
+                context = None if binding is None else contexts.get(str(binding["id"]))
+                health = await orchestrator.listed_health(auth.principal, context)
         # The row keeps only what a list needs to be read at a glance. The
         # full section breakdown lives on the detail screen.
         return {
