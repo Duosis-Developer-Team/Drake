@@ -76,3 +76,24 @@ def test_callers_who_may_read_different_bindings_never_share_an_entry() -> None:
     assert cache_key("logs", "1h", BINDINGS) != cache_key("logs", "6h", BINDINGS)
     # The order a caller asks in does not matter.
     assert cache_key("logs", "1h", wider) == cache_key("logs", "1h", list(reversed(wider)))
+
+
+async def test_the_lists_screens_ask_for_are_remembered_newest_first() -> None:
+    redis = fake_aioredis.FakeRedis()
+    await signals_cache.remember_request(redis, ["b2", "b1"], "1h")
+    await signals_cache.remember_request(redis, ["b3"], "6h")
+    found = await signals_cache.recent_requests(redis)
+    assert found == [(["b3"], "6h"), (["b1", "b2"], "1h")]
+    # Asking again in another order is the same list, not a second one.
+    await signals_cache.remember_request(redis, ["b1", "b2"], "1h")
+    assert len(await signals_cache.recent_requests(redis)) == 2
+
+
+async def test_only_the_newest_few_lists_are_kept() -> None:
+    redis = fake_aioredis.FakeRedis()
+    for n in range(signals_cache.REQUESTED_KEEP + 5):
+        await signals_cache.remember_request(redis, [f"b{n}"], "1h")
+    found = await signals_cache.recent_requests(redis)
+    assert len(found) == signals_cache.REQUESTED_KEEP
+    assert found[0] == ([f"b{signals_cache.REQUESTED_KEEP + 4}"], "1h")
+    assert await redis.zcard(signals_cache.REQUESTED_KEY) == signals_cache.REQUESTED_KEEP

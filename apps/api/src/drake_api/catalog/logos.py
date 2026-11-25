@@ -18,9 +18,12 @@ Read-only and bounded, like every other repository read:
 - only fixed, derived paths (at most four), never a listing or a search;
 - only raster images (PNG, JPEG, WebP — recognised by their magic bytes, not
   the file name), at most `MAX_BYTES`. SVG is refused: it can carry script.
-- cached in Redis: an answer for `CACHE_SECONDS`, an absence for
+- cached in Redis: an answer is fresh for `CACHE_SECONDS`, an absence for
   `MISS_SECONDS`, so a page of thirty services costs GitHub nothing after
-  the first view.
+  the first view. Past that the entry is still served at once and read
+  again from GitHub behind it (one reader at a time); it is kept for
+  `KEEP_SECONDS`, so a logo never costs a screen a GitHub round trip
+  just because nobody looked at it for a few hours.
 
 A repository behind a security gate, without granted access, or without the
 files simply has no logo; the caller draws a monogram instead.
@@ -28,12 +31,14 @@ files simply has no logo; the caller draws a monogram instead.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import contextlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -64,6 +69,8 @@ def candidate_paths(theme: str, repo_name: str) -> tuple[str, ...]:
 MAX_BYTES = 512 * 1024
 CACHE_SECONDS = 6 * 60 * 60
 MISS_SECONDS = 60 * 60
+KEEP_SECONDS = 7 * 24 * 60 * 60
+REFRESH_LOCK_SECONDS = 60
 PERMISSIONS: dict[str, str] = {"metadata": "read", "contents": "read"}
 
 
@@ -101,7 +108,9 @@ class _Client(Protocol):
 class _Cache(Protocol):
     async def get(self, key: str) -> Any: ...
 
-    async def set(self, key: str, value: str, ex: int | None = ...) -> Any: ...
+    async def set(self, key: str, value: str, ex: int | None = ..., nx: bool = ...) -> Any: ...
+
+    async def delete(self, key: str) -> Any: ...
 
 
 def sniff(content: bytes) -> str | None:
@@ -120,27 +129,35 @@ def cache_key(project_id: str, theme: str) -> str:
     return f"catalog:logo:v2:{project_id}:{theme}"
 
 
-async def _cached(cache: _Cache, key: str) -> tuple[bool, Logo | None]:
+_REFRESHING: set[asyncio.Task[None]] = set()
+
+
+async def _cached(cache: _Cache, key: str) -> tuple[bool, Logo | None, bool]:
+    """(hit, logo, stale). An entry written before `stored_at` existed counts
+    as fresh: it still carries its old, short expiry."""
     with contextlib.suppress(Exception):
         raw = await cache.get(key)
         if raw:
             value = json.loads(raw)
+            fresh_for = MISS_SECONDS if value.get("none") else CACHE_SECONDS
+            stored_at = value.get("stored_at")
+            stale = stored_at is not None and time.time() - float(stored_at) >= fresh_for
             if value.get("none"):
-                return True, None
-            return True, Logo(base64.b64decode(value["b64"]), str(value["media_type"]))
-    return False, None
+                return True, None, stale
+            logo = Logo(base64.b64decode(value["b64"]), str(value["media_type"]))
+            return True, logo, stale
+    return False, None, False
 
 
 async def _remember(cache: _Cache, key: str, logo: Logo | None) -> None:
     with contextlib.suppress(Exception):
+        payload: dict[str, Any] = {"stored_at": time.time()}
         if logo is None:
-            await cache.set(key, json.dumps({"none": True}), ex=MISS_SECONDS)
+            payload["none"] = True
         else:
-            payload = {
-                "media_type": logo.media_type,
-                "b64": base64.b64encode(logo.content).decode(),
-            }
-            await cache.set(key, json.dumps(payload), ex=CACHE_SECONDS)
+            payload["media_type"] = logo.media_type
+            payload["b64"] = base64.b64encode(logo.content).decode()
+        await cache.set(key, json.dumps(payload), ex=KEEP_SECONDS)
 
 
 async def read_logo(client: _Client, repository: LogoRepository, theme: str) -> Logo | None:
@@ -184,17 +201,57 @@ async def project_logo(
 ) -> Logo | None:
     """Cached logo for a project. Provider failures are logged and read as absent."""
     key = cache_key(project_id, theme)
-    hit, logo = await _cached(cache, key)
+    hit, logo, stale = await _cached(cache, key)
     if hit:
+        if stale:
+            await _refresh_behind(client, cache, key, repository, theme)
         return logo
+    return await _read_and_remember(client, cache, key, repository, theme)
+
+
+async def _read_and_remember(
+    client: _Client,
+    cache: _Cache,
+    key: str,
+    repository: LogoRepository | None,
+    theme: str,
+) -> Logo | None:
     if repository is None:
         await _remember(cache, key, None)
         return None
     try:
         logo = await read_logo(client, repository, theme)
     except Exception as error:  # a logo is decoration, never an outage
-        # Not cached: a transient GitHub failure must not hide the logo for an hour.
+        # Not cached: a transient GitHub failure must not hide the logo for an
+        # hour (and a stale entry keeps being served until a read succeeds).
         logger.warning("catalog: project logo unavailable (%s)", type(error).__name__)
         return None
     await _remember(cache, key, logo)
     return logo
+
+
+async def _refresh_behind(
+    client: _Client,
+    cache: _Cache,
+    key: str,
+    repository: LogoRepository | None,
+    theme: str,
+) -> None:
+    """Read the logo again behind the answer already served, one reader at a time."""
+    try:
+        acquired = bool(await cache.set(f"{key}:refresh", "1", ex=REFRESH_LOCK_SECONDS, nx=True))
+    except Exception:
+        return
+    if not acquired:
+        return
+
+    async def run() -> None:
+        try:
+            await _read_and_remember(client, cache, key, repository, theme)
+        finally:
+            with contextlib.suppress(Exception):
+                await cache.delete(f"{key}:refresh")
+
+    task = asyncio.create_task(run(), name="logo-refresh")
+    _REFRESHING.add(task)
+    task.add_done_callback(_REFRESHING.discard)

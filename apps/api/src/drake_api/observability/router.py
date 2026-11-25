@@ -48,7 +48,11 @@ from drake_api.observability.signals import (
     summarize_logs,
     summarize_traces,
 )
-from drake_api.observability.signals_cache import cached_section
+from drake_api.observability.signals_cache import (
+    cached_section,
+    recent_requests,
+    remember_request,
+)
 from drake_api.observability.store import ClickHouseStore, StoreContractError, StoreUnavailableError
 from drake_api.observability.timeline import (
     TimelineQueryError,
@@ -396,6 +400,7 @@ async def service_signals(
     if len(ids) > MAX_BINDINGS:
         raise HTTPException(status_code=422, detail="too many bindings")
     log_bindings, trace_bindings = await _signal_bindings(settings, auth.principal, ids)
+    await remember_request(request.app.state.telemetry_redis, [str(i) for i in ids], range_key)
     (logs_section, logs), (traces_section, traces), now = await _signal_sections(
         settings,
         _store(request),
@@ -500,9 +505,13 @@ async def _signal_sections(
 async def warm_signals(
     settings: Settings, store: ClickHouseStore, redis: Any, principal: Any
 ) -> int:
-    """Rebuild the default-range signals for every active binding, so the
-    first overview, log or trace screen of the day is answered from cache.
-    Returns 1 when it ran."""
+    """Rebuild the default-range signals for every active binding, and for
+    each list of services a screen asked for lately, so the first open of a
+    screen is answered from cache. Returns how many lists it rebuilt.
+
+    A list is resolved as the system evaluator, so its key is the one a
+    caller who may read all of it lands on; a caller who may read fewer
+    has another key and is never served this entry."""
     async with get_engine(settings).connect() as connection:
         ids = [
             row[0]
@@ -516,13 +525,29 @@ async def warm_signals(
                 )
             ).all()
         ]
-    if not ids:
-        return 0
-    log_bindings, trace_bindings = await _signal_bindings(settings, principal, ids)
-    await _signal_sections(
-        settings, store, redis, log_bindings, trace_bindings, DEFAULT_RANGE, refresh=True
-    )
-    return 1
+    lists: list[tuple[list[uuid.UUID], str]] = []
+    if ids:
+        lists.append((list(ids), DEFAULT_RANGE))
+    for requested, range_key in await recent_requests(redis):
+        if range_key not in RANGES:
+            continue
+        try:
+            wanted = [uuid.UUID(i) for i in requested][:MAX_BINDINGS]
+        except ValueError:
+            continue
+        if wanted and (sorted(wanted), range_key) not in [(sorted(a), r) for a, r in lists]:
+            lists.append((wanted, range_key))
+    rebuilt = 0
+    for wanted, range_key in lists:
+        try:
+            log_bindings, trace_bindings = await _signal_bindings(settings, principal, wanted)
+            await _signal_sections(
+                settings, store, redis, log_bindings, trace_bindings, range_key, refresh=True
+            )
+            rebuilt += 1
+        except Exception:
+            logger.warning("signals: warming a requested list failed")
+    return rebuilt
 
 
 async def _timeline_lane(
