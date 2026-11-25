@@ -24,6 +24,7 @@ from drake_api.service_health.orchestrator import (
     HealthOrchestrator,
     preset_of,
     readable_signals,
+    signals_from_payload,
     summarize_signals,
 )
 from drake_api.service_health.policy import get_policy, policy_keys
@@ -379,7 +380,11 @@ async def binding_health(
     disagreeing about the same service.
     """
     context = await _visible_context(request, auth, binding_id)
-    health = await _orchestrator(request).current_health(auth.principal, context, refresh=refresh)
+    orchestrator = _orchestrator(request)
+    if refresh:
+        health = await orchestrator.current_health(auth.principal, context, refresh=True)
+    else:
+        health = await orchestrator.detail_health(auth.principal, context)
     return {**health, "binding": _binding_summary(context)}
 
 
@@ -395,6 +400,19 @@ async def binding_metrics(
     """
     context = await _visible_context(request, auth, binding_id)
     orchestrator = _orchestrator(request)
+    # The same verdict the page's health card shows, and the reads it was
+    # built from: one computation for both, not two side by side.
+    health = await orchestrator.detail_health(auth.principal, context)
+    if isinstance(health.get("signals"), dict) and "computed_at" in health:
+        return {
+            "binding": _binding_summary(context),
+            "status": str(health["status"]),
+            "computed_at": str(health["computed_at"]),
+            "partial": bool(health.get("partial", False)),
+            "missing_signals": list(health.get("missing_signals") or []),
+            "metrics": summarize_signals(signals_from_payload(health), preset_of(context)),
+            "readable_signals": readable_signals(context),
+        }
     result, signals = await orchestrator.compute(auth.principal, context)
     return {
         "binding": _binding_summary(context),
@@ -461,15 +479,15 @@ async def service_health_list(
 
     orchestrator = _orchestrator(request)
     semaphore = asyncio.Semaphore(_LIST_CONCURRENCY)
+    # Every row's context in one read, not one round trip per row.
+    contexts = await orchestrator.load_contexts(
+        [uuid.UUID(item["binding"]["id"]) for item in page["items"] if item.get("binding")]
+    )
 
     async def health_for(item: dict[str, Any]) -> dict[str, Any]:
         binding = item.get("binding")
         async with semaphore:
-            context = (
-                None
-                if binding is None
-                else await orchestrator.load_context(uuid.UUID(binding["id"]))
-            )
+            context = None if binding is None else contexts.get(str(binding["id"]))
             health = await orchestrator.listed_health(auth.principal, context)
         # The row keeps only what a list needs to be read at a glance. The
         # full section breakdown lives on the detail screen.
