@@ -227,6 +227,49 @@ async def _visible_project_ids(
     return full, breadcrumb
 
 
+async def _project_counts(
+    connection: AsyncConnection, auth: AuthContext, project_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[int, int]]:
+    """(active environments, active services) the caller may see, for each
+    project, in two reads however many projects there are. The list used
+    to read the caller's scopes and both counts once per project."""
+    if not project_ids:
+        return {}
+    env_scopes = await visible_scope_ids(connection, auth.principal, "environment.view")
+    params = {"pids": project_ids, "scopes": list(env_scopes) or [uuid.UUID(int=0)]}
+    envs = {
+        row[0]: int(row[1])
+        for row in (
+            await connection.execute(
+                text(
+                    "SELECT project_id, count(*) FROM environments "
+                    "WHERE project_id = ANY(:pids) AND lifecycle = 'active' "
+                    "AND scope_id = ANY(:scopes) GROUP BY project_id"
+                ),
+                params,
+            )
+        ).all()
+    }
+    services = {
+        row[0]: int(row[1])
+        for row in (
+            await connection.execute(
+                text(
+                    """
+                    SELECT e.project_id, count(*) FROM environment_services b
+                    JOIN environments e ON e.id = b.environment_id
+                    WHERE e.project_id = ANY(:pids) AND b.lifecycle = 'active'
+                      AND e.scope_id = ANY(:scopes)
+                    GROUP BY e.project_id
+                    """
+                ),
+                params,
+            )
+        ).all()
+    }
+    return {pid: (envs.get(pid, 0), services.get(pid, 0)) for pid in project_ids}
+
+
 async def _project_payload(
     connection: AsyncConnection,
     auth: AuthContext,
@@ -234,32 +277,14 @@ async def _project_payload(
     *,
     include_details: bool,
     settings: Settings | None = None,
+    counts: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
+    """*counts* (environments, services) when the caller already read them
+    for a whole page (_project_counts); otherwise they are read here."""
     project_id = row[0]
-    env_scopes = await visible_scope_ids(connection, auth.principal, "environment.view")
-    env_count = (
-        await connection.execute(
-            text(
-                "SELECT count(*) FROM environments "
-                "WHERE project_id = :pid AND lifecycle = 'active' "
-                "AND scope_id = ANY(:scopes)"
-            ),
-            {"pid": project_id, "scopes": list(env_scopes) or [uuid.UUID(int=0)]},
-        )
-    ).scalar_one()
-    binding_count = (
-        await connection.execute(
-            text(
-                """
-                SELECT count(*) FROM environment_services b
-                JOIN environments e ON e.id = b.environment_id
-                WHERE e.project_id = :pid AND b.lifecycle = 'active'
-                  AND e.scope_id = ANY(:scopes)
-                """
-            ),
-            {"pid": project_id, "scopes": list(env_scopes) or [uuid.UUID(int=0)]},
-        )
-    ).scalar_one()
+    if counts is None:
+        counts = (await _project_counts(connection, auth, [project_id])).get(project_id, (0, 0))
+    env_count, binding_count = counts
 
     payload: dict[str, Any] = {
         "id": str(project_id),
@@ -403,8 +428,12 @@ async def list_projects(
         ).all()
 
         page = rows[:limit]
+        counts = await _project_counts(connection, auth, [row[0] for row in page])
         projects = [
-            await _project_payload(connection, auth, row, include_details=False) for row in page
+            await _project_payload(
+                connection, auth, row, include_details=False, counts=counts.get(row[0], (0, 0))
+            )
+            for row in page
         ]
     next_cursor = (
         _encode_cursor(page[-1][1], str(page[-1][0])) if len(rows) > limit and page else None

@@ -197,6 +197,110 @@ def step_for(window_seconds: int) -> int:
     return max(30, window_seconds // 10)
 
 
+_CONTEXT_SELECT = """
+    SELECT b.id, b.lifecycle, b.resolved_resource_uid, b.resolved_at,
+           b.preset_key, b.health_policy_key, b.revision,
+           b.namespace, b.workload_kind, b.workload_name,
+           c.cluster_ref, c.id,
+           p.project_key, e.environment_key, sd.service_key,
+           b.environment_service_id,
+           i.id, i.config_ref, i.configuration_state,
+           ir.payload -> 'spec_summary'
+    FROM service_workload_bindings b
+    JOIN clusters c ON c.id = b.cluster_id
+    JOIN projects p ON p.id = b.project_id
+    JOIN environments e ON e.id = b.environment_id
+    JOIN service_definitions sd ON sd.id = b.service_id
+    LEFT JOIN integrations i
+           ON i.scope_id = p.scope_id
+          AND i.integration_type = 'prometheus'
+          AND i.lifecycle = 'active'
+    LEFT JOIN inventory_resources ir
+           ON ir.cluster_id = b.cluster_id
+          AND ir.uid = b.resolved_resource_uid
+          AND ir.lifecycle = 'active'
+"""
+
+
+def _context_from_row(row: Any) -> dict[str, Any]:
+    return {
+        "id": str(row[0]),
+        "lifecycle": row[1],
+        "resolved_resource_uid": row[2],
+        "resolved": row[2] is not None,
+        "resolved_at": row[3].isoformat() if row[3] else None,
+        "preset_key": row[4],
+        "health_policy_key": row[5],
+        "revision": row[6],
+        "namespace": row[7],
+        "workload_kind": row[8],
+        "workload_name": row[9],
+        "cluster_ref": row[10],
+        "cluster_id": str(row[11]),
+        "project_key": row[12],
+        "environment_key": row[13],
+        "service_key": row[14],
+        "environment_service_id": str(row[15]),
+        "datasource_configured": row[18] == "configured",
+        # Hashed on the way in; the ref itself stops here.
+        "datasource_identity": datasource_identity(
+            str(row[16]) if row[16] else None, row[17], str(row[18] or "")
+        ),
+        # The workload's HTTP probes, so golden signals from traces do
+        # not count the kubelet as traffic (observability.health_checks).
+        "http_probes": probes_from_summary(row[19]),
+    }
+
+
+# A service's own page shows the verdict the incident runner stored on its
+# last cycle (every 60 s) when it is at most this old, and recomputes it
+# behind the answer. Older than this, the page computes inline, as before.
+DETAIL_RECENT_SECONDS = 180
+
+# One computation per verdict key in this process: the page asks for the
+# verdict and for the metrics behind it at the same moment, and both used
+# to run the same Prometheus reads side by side, fighting for the
+# caller's four broker leases.
+_IN_FLIGHT: dict[str, asyncio.Task[dict[str, Any]]] = {}
+
+
+def _age_seconds(payload: dict[str, Any], now: datetime) -> float | None:
+    try:
+        computed = datetime.fromisoformat(str(payload["computed_at"]))
+    except (KeyError, ValueError):
+        return None
+    if computed.tzinfo is None:
+        computed = computed.replace(tzinfo=UTC)
+    return (now - computed).total_seconds()
+
+
+def signals_from_payload(payload: dict[str, Any]) -> dict[str, SignalRead]:
+    """The per-signal reads a stored verdict carries, back as SignalReads.
+
+    Exactly the inverse of SignalRead.to_payload for what that payload
+    keeps (value, state, newest sample, whether it came from cache), so a
+    summary built from a stored verdict reads the same as one built from
+    the reads themselves."""
+    reads: dict[str, SignalRead] = {}
+    for name, entry in (payload.get("signals") or {}).items():
+        state = str(entry.get("state", "empty"))
+        newest = entry.get("newest_sample_at")
+        reads[name] = SignalRead(
+            template_key=name,
+            value=entry.get("value"),
+            newest_sample_at=datetime.fromisoformat(newest) if newest else None,
+            data_state="ok",
+            cache_state=(
+                "stale"
+                if state == "stale"
+                else ("fresh_hit" if entry.get("from_cache") else "none")
+            ),
+            failed=state == "failed",
+            not_configured=state == "not_configured",
+        )
+    return reads
+
+
 class HealthOrchestrator:
     def __init__(
         self,
@@ -230,64 +334,34 @@ class HealthOrchestrator:
         async with self._engine.connect() as connection:
             row = (
                 await connection.execute(
-                    text(
-                        """
-                        SELECT b.id, b.lifecycle, b.resolved_resource_uid, b.resolved_at,
-                               b.preset_key, b.health_policy_key, b.revision,
-                               b.namespace, b.workload_kind, b.workload_name,
-                               c.cluster_ref, c.id,
-                               p.project_key, e.environment_key, sd.service_key,
-                               b.environment_service_id,
-                               i.id, i.config_ref, i.configuration_state,
-                               ir.payload -> 'spec_summary'
-                        FROM service_workload_bindings b
-                        JOIN clusters c ON c.id = b.cluster_id
-                        JOIN projects p ON p.id = b.project_id
-                        JOIN environments e ON e.id = b.environment_id
-                        JOIN service_definitions sd ON sd.id = b.service_id
-                        LEFT JOIN integrations i
-                               ON i.scope_id = p.scope_id
-                              AND i.integration_type = 'prometheus'
-                              AND i.lifecycle = 'active'
-                        LEFT JOIN inventory_resources ir
-                               ON ir.cluster_id = b.cluster_id
-                              AND ir.uid = b.resolved_resource_uid
-                              AND ir.lifecycle = 'active'
-                        WHERE b.id = :id
-                        """
-                    ),
-                    {"id": binding_id},
+                    text(_CONTEXT_SELECT + " WHERE b.id = :id"), {"id": binding_id}
                 )
             ).first()
         if row is None:
             return None
-        return {
-            "id": str(row[0]),
-            "lifecycle": row[1],
-            "resolved_resource_uid": row[2],
-            "resolved": row[2] is not None,
-            "resolved_at": row[3].isoformat() if row[3] else None,
-            "preset_key": row[4],
-            "health_policy_key": row[5],
-            "revision": row[6],
-            "namespace": row[7],
-            "workload_kind": row[8],
-            "workload_name": row[9],
-            "cluster_ref": row[10],
-            "cluster_id": str(row[11]),
-            "project_key": row[12],
-            "environment_key": row[13],
-            "service_key": row[14],
-            "environment_service_id": str(row[15]),
-            "datasource_configured": row[18] == "configured",
-            # Hashed on the way in; the ref itself stops here.
-            "datasource_identity": datasource_identity(
-                str(row[16]) if row[16] else None, row[17], str(row[18] or "")
-            ),
-            # The workload's HTTP probes, so golden signals from traces do
-            # not count the kubelet as traffic (observability.health_checks).
-            "http_probes": probes_from_summary(row[19]),
-        }
+        return _context_from_row(row)
+
+    async def load_contexts(self, binding_ids: list[uuid.UUID]) -> dict[str, dict[str, Any]]:
+        """load_context for many bindings in one read, keyed by binding id.
+
+        The services list used to load each row's context on its own round
+        trip (about 20 ms each, half a second for a page). Same statement and
+        shape; where a binding matches more than one row, the first returned
+        is kept, as load_context's `.first()` does. Visibility is not checked
+        here either."""
+        if not binding_ids:
+            return {}
+        async with self._engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    text(_CONTEXT_SELECT + " WHERE b.id = ANY(:ids)"),
+                    {"ids": list(binding_ids)},
+                )
+            ).all()
+        contexts: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            contexts.setdefault(str(row[0]), _context_from_row(row))
+        return contexts
 
     # ------------------------------------------------------------------
     # one curated query
@@ -590,6 +664,52 @@ class HealthOrchestrator:
         # previous one's staleness while looking freshly computed.
         await self._cache.put(keys, payload, last_good="telemetry_stale" not in payload["reasons"])
         return payload
+
+    async def detail_health(
+        self, principal: Principal, context: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """A verdict for one service's own page, never a cold wait when one
+        was computed in the last few minutes.
+
+        Fresh: served. The incident runner's verdict from its last cycle
+        (`recent`), at most DETAIL_RECENT_SECONDS old: served at once with
+        its own `computed_at`, and recomputed behind it. Otherwise computed
+        here, once per process however many requests ask together."""
+        if context is None:
+            return await self.current_health(principal, None)
+        keys = self.cache_keys(context)
+        cached = await self._cache.get(keys.fresh)
+        if cached is not None:
+            return {**cached, "cached": True}
+        recent = await self._cache.get(keys.recent)
+        if recent is not None:
+            age = _age_seconds(recent, datetime.now(UTC))
+            if age is not None and age <= DETAIL_RECENT_SECONDS:
+                self._computation(principal, context, keys.fresh)
+                return {**recent, "cached": True}
+        return dict(await asyncio.shield(self._computation(principal, context, keys.fresh)))
+
+    def _computation(
+        self, principal: Principal, context: dict[str, Any], key: str
+    ) -> asyncio.Task[dict[str, Any]]:
+        """The one computation of this verdict running in this process."""
+        task = _IN_FLIGHT.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                self.current_health(principal, context, refresh=True), name="health-compute"
+            )
+            _IN_FLIGHT[key] = task
+
+            def done(finished: asyncio.Task[dict[str, Any]]) -> None:
+                _IN_FLIGHT.pop(key, None)
+                # Read, so a failed refresh behind an answer is not reported
+                # as "exception never retrieved"; a waiting caller still
+                # receives it through its own await.
+                if not finished.cancelled():
+                    finished.exception()
+
+            task.add_done_callback(done)
+        return task
 
     async def listed_health(
         self, principal: Principal, context: dict[str, Any] | None
